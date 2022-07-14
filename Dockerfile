@@ -1,4 +1,4 @@
-FROM erlang:24.3-alpine
+FROM erlang:24.3-alpine AS builder
 
 RUN apk add --no-cache --update \
     autoconf automake bison build-base bzip2 cmake curl \
@@ -27,5 +27,14 @@ RUN make compile
 # Build release
 COPY config/ config/
 RUN make release
+
+# Build stage 1
+FROM erlang:24.3-alpine
+WORKDIR /opt/hpr
+
+# Copy the built release
+COPY --from=builder /opt/hpr .
+# Bring over exe like make
+COPY --from=builder /usr/bin /usr/bin
 
 CMD ["make", "run"]
