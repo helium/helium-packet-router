@@ -1,4 +1,4 @@
-.PHONY: compile clean test rel run docker-build
+.PHONY: compile clean test rel run docker-build docker-test docker-run
 
 REBAR=./rebar3
 
