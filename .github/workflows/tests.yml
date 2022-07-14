@@ -1,0 +1,128 @@
+name: Tests
+
+on:
+  push:
+    branches: '*'
+  pull_request:
+    branches: main
+  # Run every day at midnight PST (0800 UTC)
+  # https://crontab.guru/#0_8_*_*_*
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency: 
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: deps
+        run: apk add --no-cache --update \
+              autoconf automake bison build-base bzip2 cmake curl \
+              dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 \
+              openssl-dev pkgconfig protoc sed tar wget vim
+      - name: rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: build
+        run: ./rebar3 compile
+      - name: build test
+        run: ./rebar3 as test compile
+      - name: tar
+        run: tar -cvzf build.tar.gz -C _build/ .
+      - name: upload-artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: build
+          path: build.tar.gz
+  xref:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency: 
+      group: ${{ github.workflow }}-${{ github.ref }}-xref
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: download-artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: build
+      - name: untar
+        run: |
+          mkdir _build
+          tar -xvf build.tar.gz -C _build
+      - name: xref
+        run: ./rebar3 xref
+  eunit:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency: 
+      group: ${{ github.workflow }}-${{ github.ref }}-eunit
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: download-artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: build
+      - name: untar
+        run: |
+          mkdir _build
+          tar -xvf build.tar.gz -C _build
+      - name: eunit
+        run: ./rebar3 eunit -v
+  dialyzer:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency: 
+      group: ${{ github.workflow }}-${{ github.ref }}-dialyzer
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: download-artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: build
+      - name: untar
+        run: |
+          mkdir _build
+          tar -xvf build.tar.gz -C _build
+      - name: dialyzer
+        run: ./rebar3 dialyzer
+  ct:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency: 
+      group: ${{ github.workflow }}-${{ github.ref }}-ct
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: download-artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: build
+      - name: untar
+        run: |
+          mkdir _build
+          tar -xvf build.tar.gz -C _build
+      - name: ct
+        run: ./rebar3 ct --readable=true
