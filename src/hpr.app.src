@@ -1,11 +1,15 @@
 {application, hpr, [
-    {description, "An OTP application"},
+    {description, "Helium Packet-Router"},
     {vsn, "0.1.0"},
     {registered, []},
     {mod, {hpr_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        lager,
+        helium_proto,
+        grpcbox,
+        grpc_client
     ]},
     {env, []},
     {modules, []},
