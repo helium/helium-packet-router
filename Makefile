@@ -1,4 +1,4 @@
-.PHONY: compile clean test rel run grpc
+.PHONY: compile clean test rel run grpc docker-build docker-test docker-run
 
 grpc_services_directory=src/grpc/autogen
 
@@ -25,6 +25,15 @@ rel: | $(grpc_services_directory)
 
 run: | $(grpc_services_directory)
 	_build/default/rel/hpr/bin/hpr foreground
+
+docker-build:
+	docker build -f Dockerfile --force-rm -t quay.io/team-helium/hpr:local .
+
+docker-test:
+	docker run --rm -it --init --name=helium_router_test quay.io/team-helium/hpr:local make test
+
+docker-run:
+	docker run --rm -it --init --network=host --name=helium_packet_router quay.io/team-helium/hpr:local
 
 grpc:
 	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen
