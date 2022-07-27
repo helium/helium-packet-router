@@ -6,7 +6,7 @@
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 
 -ifdef(TEST).
--define(TIMEOUT, 3000).
+-define(TIMEOUT, 5000).
 -else.
 -define(TIMEOUT, 8000).
 -endif.
@@ -21,11 +21,11 @@
 %% protobuf, but we're keeping with the state-channel version just in
 %% case there's some bit of information that we may need from gateways.
 
-route(Ctx, #blockchain_state_channel_message_v1_pb{msg = {packet, Packet}} = _Message) ->
+route(Ctx, #blockchain_state_channel_message_v1_pb{msg = {packet, SCPacket}} = _Message) ->
     lager:info("executing RPC route with msg ~p", [_Message]),
     %% Handle the packet and then await response.
     %% If no response within given time, then give up and return error.
-    _ = packet_routing:handle_packet(Packet, erlang:system_time(millisecond), self()),
+    _ = packet_routing:handle_packet(SCPacket, erlang:system_time(millisecond), self()),
     wait_for_response(Ctx).
 
 %% ------------------------------------------------------------------
