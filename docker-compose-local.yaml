@@ -1,0 +1,12 @@
+version: '3'
+services:
+  helium_packet_router:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: quay.io/team-helium/hpr:local
+    container_name: helium_packet_router
+    restart: always
+    network_mode: host
+    volumes:
+      - "/var/data:/var/data"
