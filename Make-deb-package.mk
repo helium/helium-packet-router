@@ -1,5 +1,5 @@
 # Excerpt for Makefile to build .deb file https://wiki.debian.org/Packaging
-.PHONY: all package orig-tar prerelease release package-bin clean
+.PHONY: all deb package orig-tar prerelease release package-bin clean
 
 NAME ?= helium-packet-router
 SHORT_NAME ?= hpr
@@ -27,6 +27,8 @@ REBAR_VERSIONED_SCRIPT=${REBAR_RELEASE_DIR}/bin/${NAME}-${RELEASE}
 DEB_ARCH=$(shell dpkg --print-architecture)
 
 all: package
+
+deb: package
 
 package: orig-tar prerelease release package-bin
 
@@ -77,8 +79,9 @@ package-bin:
 	  >> release/DEBIAN/postinst
 	echo "ln -s ${DEST}/bin/${NAME}.sh /etc/rc1.d/K40${NAME}" \
 	  >> release/DEBIAN/postinst
-	echo "echo To manually start, use:" >> release/DEBIAN/postinst
-	echo "echo su - ${RUNTIME_USER} ${DEST}/bin/${NAME}.sh start" \
+	echo "echo To manually start, use:" \
+	  >> release/DEBIAN/postinst
+	echo "echo sudo -u ${RUNTIME_USER} ${DEST}/bin/${NAME}.sh foreground" \
 	  >> release/DEBIAN/postinst
 
 	echo "#! /bin/sh" > release/DEBIAN/prerm
@@ -88,6 +91,8 @@ package-bin:
 	echo "rm -f ${DEST}/var/log/${NAME}.log*" >> release/DEBIAN/prerm
 	echo "rm -f /etc/init.d/${NAME}.sh" >> release/DEBIAN/prerm
 	echo "rm -f /etc/rc?.d/*${NAME}" >> release/DEBIAN/prerm
+	echo 'userdel -r ${RUNTIME_USER}' >> release/DEBIAN/prerm
+
 	chmod 755 release/DEBIAN/p*
 
 	rsync -a --link-dest=$(shell pwd)/${REBAR_BUILD_DIR} \

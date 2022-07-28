@@ -5,10 +5,10 @@ Priority: extra
 Architecture: all
 Depends: 
 Suggests: esl-erlang
-Installed-Size: 168820736
+Installed-Size: 47185920
 Maintainer: Nova Labs Inc <support@nova-labs.com>
 Conflicts: helium-packet-router
 Provides: helium-packet-router
-Description: LoRaWAN Network Server (LNS)
+Description: Intermediary to LoRaWAN Network Server (LNS)
  conforming to LoRaWAN 1.0.x specification.
  See https://github.com/helium/helium-packet-router
