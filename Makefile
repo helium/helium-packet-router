@@ -1,9 +1,9 @@
-.PHONY: compile clean test rel run docker-build docker-test docker-run
+.PHONY: compile clean test rel deb run docker-build docker-test docker-run
 
 REBAR=./rebar3
 
 compile: |
-	$(REBAR) compile 
+	$(REBAR) compile
 	$(REBAR) format
 
 clean:
@@ -20,6 +20,9 @@ test: |
 
 rel: $(REBAR) release
 
+deb:
+	make -f Make-deb-package.mk
+
 run: |
 	_build/default/rel/hpr/bin/hpr foreground
 
@@ -29,7 +32,7 @@ docker-build:
 docker-test:
 	docker run --rm -it --init --name=helium_router_test quay.io/team-helium/hpr:local make test
 
-docker-run: 
+docker-run:
 	docker run --rm -it --init --network=host --name=helium_packet_router quay.io/team-helium/hpr:local
 
 # Pass all unknown targets straight to rebar3 (e.g. `make dialyzer`)
