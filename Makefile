@@ -21,7 +21,7 @@ test: |
 rel: $(REBAR) release
 
 deb:
-	make -f Make-deb-package.mk
+	$(MAKE) -f Make-deb-package.mk
 
 run: |
 	_build/default/rel/hpr/bin/hpr foreground

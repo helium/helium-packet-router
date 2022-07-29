@@ -5,24 +5,25 @@ NAME ?= helium-packet-router
 SHORT_NAME ?= hpr
 SNAKE_NAME=$(shell echo ${NAME} | sed 's/-/_/g')
 
+# For late Decemeber git tag queried in early January, set $RELEASE in env.
 CURRENT_YEAR ?= $(shell date +"%Y")
-RELEASE ?= $(shell git tag -l ${CURRENT_YEAR}'*' | sort | tail -1)
+RELEASE_TAG ?= $(shell git tag -l ${CURRENT_YEAR}'*' | sort | tail -1)
 
 # ${DEST} filepath will be created beneath ./release subdirectory.
 DEST ?= /opt/${SHORT_NAME}
 RUNTIME_USER ?= helium
 
 # Before upload to Debian repo, manually change date to next sequence number:
-PACKAGE_BUILD=`date +%Y%m%d.%H%M%S`
-REVISION=${RELEASE}-${PACKAGE_BUILD}
+PACKAGE_BUILD=$(shell date +%Y%m%d.%H%M%S)
+REVISION=${RELEASE_TAG}-${PACKAGE_BUILD}
 DEBIAN_PACKAGE_NAME=${NAME}
-ORIG_SRC_TAR="${NAME}_${RELEASE}.orig.tar.gz"
+ORIG_SRC_TAR="${NAME}_${RELEASE_TAG}.orig.tar.gz"
 
 # `rebar` is Erlang's build system.
 REBAR_BUILD_DIR=_build/default/rel
 REBAR_RELEASE_DIR=${REBAR_BUILD_DIR}/${SNAKE_NAME}
 REBAR_LAUNCH_SCRIPT=${REBAR_RELEASE_DIR}/bin/${NAME}
-REBAR_VERSIONED_SCRIPT=${REBAR_RELEASE_DIR}/bin/${NAME}-${RELEASE}
+REBAR_VERSIONED_SCRIPT=${REBAR_RELEASE_DIR}/bin/${NAME}-${RELEASE_TAG}
 
 DEB_ARCH=$(shell dpkg --print-architecture)
 
@@ -30,7 +31,7 @@ all: package
 
 deb: package
 
-package: orig-tar prerelease release package-bin
+package: prerelease orig-tar release package-bin
 
 # Preliminary to the packaging workflow
 orig-tar: ${ORIG_SRC_TAR}
@@ -43,8 +44,11 @@ ${ORIG_SRC_TAR}:
 prerelease:
 	@[ -f /etc/debian_version ] || \
 	  (echo "This requires a Debian-based Linux distro."; false)
+	@[ "${RELEASE_TAG}" ] || \
+	  (echo "\n Please set RELEASE_TAG env var manually. \n"; false)
+	@which rsync || echo "rsync not installed or missing from PATH"
 	sed -i_ORIG \
-	  's%.release, .${SHORT_NAME}, ".*"., .${SHORT_NAME}..,%{release, {${SHORT_NAME}, "${RELEASE}"}, [${SHORT_NAME}]},%' \
+	  's%.release, .${SHORT_NAME}, ".*"., .${SHORT_NAME}..,%{release, {${SHORT_NAME}, "${RELEASE_TAG}"}, [${SHORT_NAME}]},%' \
 	  rebar.config
 
 # TODO accommodate: `./rebar3 as ${BUILD_NET} release`
@@ -53,7 +57,7 @@ prerelease:
 # See router's Dockerfile
 # However, this affects value of ${REBAR_BUILD_DIR}
 ${REBAR_VERSIONED_SCRIPT}:
-	make rel
+	$(MAKE) rel
 
 release: | ${REBAR_VERSIONED_SCRIPT}
 	@[ -f ${REBAR_VERSIONED_SCRIPT} ] || (echo "Please run: make rel"; false)
@@ -98,8 +102,7 @@ package-bin:
 	rsync -a --link-dest=$(shell pwd)/${REBAR_BUILD_DIR} \
 	  ${REBAR_BUILD_DIR}/ release${DEST}/
 
-	dpkg-deb --build release
-	mv release.deb ${DEBIAN_PACKAGE_NAME}_${REVISION}_${DEB_ARCH}.deb
+	dpkg-deb --build release ${DEBIAN_PACKAGE_NAME}_${REVISION}_${DEB_ARCH}.deb
 	ls -lh ${NAME}_*.deb
 
 clean:
