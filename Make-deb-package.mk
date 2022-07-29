@@ -43,10 +43,11 @@ ${ORIG_SRC_TAR}:
 # Replace relx -> 'release' version string in rebar.config before build.
 prerelease:
 	@[ -f /etc/debian_version ] || \
-	  (echo "This requires a Debian-based Linux distro."; false)
+	  (echo "\n This requires a Debian-based Linux distro. \n"; false)
 	@[ "${RELEASE_TAG}" ] || \
 	  (echo "\n Please set RELEASE_TAG env var manually. \n"; false)
-	@which rsync || echo "rsync not installed or missing from PATH"
+	@which rsync || \
+	  (echo "\n rsync not installed or missing from PATH \n"; false)
 	sed -i_ORIG \
 	  's%.release, .${SHORT_NAME}, ".*"., .${SHORT_NAME}..,%{release, {${SHORT_NAME}, "${RELEASE_TAG}"}, [${SHORT_NAME}]},%' \
 	  rebar.config
