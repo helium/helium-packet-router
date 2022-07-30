@@ -1,0 +1,10 @@
+# Helium Packet-Router Upstart and SysVinit configuration file
+
+#
+# THIS FILE DOES NOT APPLY TO SYSTEMD
+#
+#   See https://github.com/helium/helium-packet-router
+#
+
+# Customize location of hpr binary (especially for development testing).
+#DAEMON="/opt/hpr/bin/hpr"
