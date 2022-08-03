@@ -7,7 +7,8 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    lookup_eui/2
+    lookup_eui/2,
+    lookup_devaddr/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -25,7 +26,8 @@
 
 -define(SERVER, ?MODULE).
 -define(INIT_ASYNC, init_async).
--define(EUI_ETS, hpr_routing_config_eui_ets).
+-define(EUIS_ETS, hpr_routing_config_euis_ets).
+-define(DEVADDRS_ETS, hpr_routing_config_devaddrs_ets).
 -define(DETS, hpr_routing_config_dets).
 
 -record(state, {}).
@@ -40,16 +42,62 @@ start_link(Args) ->
 -spec lookup_eui(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
     [hpr_routing_config_route:route()].
 lookup_eui(AppEUI, DevEUI) ->
-    Routes0 = ets:lookup(?EUI_ETS, {AppEUI, DevEUI}),
-    Routes1 = ets:lookup(?EUI_ETS, {AppEUI, 0}),
+    Routes0 = ets:lookup(?EUIS_ETS, {AppEUI, DevEUI}),
+    Routes1 = ets:lookup(?EUIS_ETS, {AppEUI, 0}),
     [Route || {_, Route} <- Routes1 ++ Routes0].
+
+-spec lookup_devaddr(DevAddr :: non_neg_integer()) ->
+    [hpr_routing_config_route:route()].
+lookup_devaddr(DevAddr) ->
+    case lora_subnet:parse_netid(DevAddr, big) of
+        {ok, NetID} ->
+            %% MS = ets:fun2ms(
+            %%     fun
+            %%         ({{NetID0, Start, End}, Route}) when
+            %%             NetID0 == NetID andalso Start == 0 andalso End == 0
+            %%         ->
+            %%             Route;
+            %%         ({{NetID0, Start, End}, Route}) when
+            %%             NetID0 == NetID andalso Start =< DevAddr andalso DevAddr =< End
+            %%         ->
+            %%             Route
+            %%     end
+            %% ),
+            MS = [
+                {
+                    {{'$1', '$2', '$3'}, '$4'},
+                    [
+                        {'andalso', {'==', '$1', NetID},
+                            {'andalso', {'==', '$2', 0}, {'==', '$3', 0}}}
+                    ],
+                    ['$4']
+                },
+                {
+                    {{'$1', '$2', '$3'}, '$4'},
+                    [
+                        {'andalso', {'==', '$1', NetID},
+                            {'andalso', {'=<', '$2', DevAddr}, {'=<', DevAddr, '$3'}}}
+                    ],
+                    ['$4']
+                }
+            ],
+            ets:select(?DEVADDRS_ETS, MS);
+        _Err ->
+            []
+    end.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(#{base_dir := BaseDir} = _Args) ->
-    {ok, ?DETS} = dets:open_file(?DETS, [{file, BaseDir ++ erlang:atom_to_list(?DETS)}]),
-    _ = ets:new(?EUI_ETS, [
+    {ok, ?DETS} = dets:open_file(?DETS, [{file, filename:join(BaseDir, erlang:atom_to_list(?DETS))}]),
+    _ = ets:new(?EUIS_ETS, [
+        public,
+        named_table,
+        bag,
+        {read_concurrency, true}
+    ]),
+    _ = ets:new(?DEVADDRS_ETS, [
         public,
         named_table,
         bag,
@@ -78,7 +126,8 @@ code_change(_OldVsn, State, _Extra) ->
 
 terminate(_Reason, _State) ->
     _ = dets:close(?DETS),
-    _ = ets:delete(?EUI_ETS),
+    _ = ets:delete(?EUIS_ETS),
+    _ = ets:delete(?DEVADDRS_ETS),
     ok.
 
 %% ------------------------------------------------------------------
@@ -87,15 +136,25 @@ terminate(_Reason, _State) ->
 
 -spec init_ets() -> ok.
 init_ets() ->
-    EUIRoutes = dets:foldl(
-        fun({_OUI, Route}, Acc0) ->
+    {EUIRoutes, DevAddrRoutes} = dets:foldl(
+        fun({_OUI, Route}, {EUIRoutesAcc, DevAddrRoutesAcc}) ->
             EUIs = hpr_routing_config_route:euis(Route),
-            [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs] ++ Acc0
+            EUIRoutes = [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs],
+            NetID = hpr_routing_config_route:net_id(Route),
+            DevAddrRangeRoutes =
+                case hpr_routing_config_route:devaddr_ranges(Route) of
+                    [] ->
+                        [{{NetID, 0, 0}, Route}];
+                    DevAddrRanges ->
+                        [{{NetID, Start, End}, Route} || {Start, End} <- DevAddrRanges]
+                end,
+            {EUIRoutes ++ EUIRoutesAcc, DevAddrRangeRoutes ++ DevAddrRoutesAcc}
         end,
-        [],
+        {[], []},
         ?DETS
     ),
-    true = ets:insert(?EUI_ETS, EUIRoutes),
+    true = ets:insert(?EUIS_ETS, EUIRoutes),
+    true = ets:insert(?DEVADDRS_ETS, DevAddrRoutes),
     ok.
 
 %% ------------------------------------------------------------------
@@ -110,22 +169,69 @@ init_ets() ->
 
 init_test() ->
     BaseDir = tmp_dir("init_test"),
+    _ = init_dets(BaseDir),
+    {ok, Pid} = ?MODULE:start_link(#{base_dir => BaseDir}),
+
+    ?assertEqual(4, ets:info(?EUIS_ETS, size)),
+    ?assertEqual(3, ets:info(?DEVADDRS_ETS, size)),
+
+    ok = gen_server:stop(Pid),
+    ok.
+
+lookup_eui_test() ->
+    BaseDir = tmp_dir("lookup_eui_test"),
     [Route1, Route2] = init_dets(BaseDir),
     {ok, Pid} = ?MODULE:start_link(#{base_dir => BaseDir}),
 
-    ?assertEqual([Route1], ?MODULE:lookup_eui(1, 1)),
+    ?assertEqual(
+        [Route1], ?MODULE:lookup_eui(1, 1)
+    ),
     ?assertEqual([Route1, Route2], ?MODULE:lookup_eui(2, 1)),
 
     ok = gen_server:stop(Pid),
     ok.
 
+lookup_devaddr_test() ->
+    BaseDir = tmp_dir("lookup_devaddr_test"),
+    [Route1, Route2] = init_dets(BaseDir),
+    {ok, Pid} = ?MODULE:start_link(#{base_dir => BaseDir}),
+
+    ?assertEqual(
+        [Route1, Route2], ?MODULE:lookup_devaddr(16#00000000)
+    ),
+    ?assertEqual(
+        [Route1, Route2], ?MODULE:lookup_devaddr(16#0000000A)
+    ),
+    ?assertEqual(
+        [Route2, Route1], ?MODULE:lookup_devaddr(16#0000000C)
+    ),
+    ?assertEqual(
+        [Route2, Route1], ?MODULE:lookup_devaddr(16#00000010)
+    ),
+    ?assertEqual(
+        [Route2], ?MODULE:lookup_devaddr(16#0000000B)
+    ),
+    ?assertEqual(
+        [Route2], ?MODULE:lookup_devaddr(16#00000100)
+    ),
+
+    ok = gen_server:stop(Pid),
+    ok.
+
 init_dets(BaseDir) ->
-    {ok, ?DETS} = dets:open_file(?DETS, [{file, BaseDir ++ erlang:atom_to_list(?DETS)}]),
+    {ok, NetID} = lora_subnet:parse_netid(16#00000000, big),
+
+    {ok, ?DETS} = dets:open_file(?DETS, [{file, filename:join(BaseDir, erlang:atom_to_list(?DETS))}]),
     Route1 = hpr_routing_config_route:new(
-        1, [{1, 10}, {11, 20}], [{1, 1}, {2, 0}], <<"lsn.lora.com>">>, gwmp, 10
+        NetID,
+        [{16#00000000, 16#0000000A}, {16#0000000C, 16#00000010}],
+        [{1, 1}, {2, 0}],
+        <<"lsn.lora.com>">>,
+        gwmp,
+        1
     ),
     Route2 = hpr_routing_config_route:new(
-        1, [{1, 10}, {11, 20}], [{2, 1}, {3, 0}], <<"lsn.lora.com>">>, gwmp, 10
+        NetID, [], [{2, 1}, {3, 0}], <<"lsn.lora.com>">>, http, 2
     ),
     ok = dets:insert(?DETS, [{1, Route1}, {2, Route2}]),
     ok = dets:close(?DETS),

@@ -18,18 +18,18 @@
 
 -spec new(
     NetID :: non_neg_integer(),
-    DevAddrRandes :: [{non_neg_integer(), non_neg_integer()}],
+    DevAddrRanges :: [{non_neg_integer(), non_neg_integer()}],
     EUIs :: [{non_neg_integer(), non_neg_integer()}],
     LNS :: binary(),
     Protocol :: gwmp | http,
     OUI :: non_neg_integer()
 ) -> route().
-new(NetID, DevAddrRandes, EUIs, LNS, Protocol, OUI) ->
+new(NetID, DevAddrRanges, EUIs, LNS, Protocol, OUI) ->
     #config_service_route_v1_pb{
         net_id = NetID,
         devaddr_ranges = [
             #config_service_route_v1_devaddr_range_pb{start = Start, 'end' = End}
-         || {Start, End} <- DevAddrRandes
+         || {Start, End} <- DevAddrRanges
         ],
         euis = [
             #config_service_route_v1_eui_pb{app_eui = AppEUI, dev_eui = DevEUI}

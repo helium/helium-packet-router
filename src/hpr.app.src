@@ -8,7 +8,8 @@
         stdlib,
         lager,
         helium_proto,
-        grpcbox
+        grpcbox,
+        erlang_lorawan
     ]},
     {env, []},
     {modules, []},
