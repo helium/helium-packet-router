@@ -21,7 +21,6 @@ export PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 BASE=helium-packet-router
 
 # Modify these in /etc/default/$BASE (/etc/default/helium-packet-router)
-# FIXME: $DAEMON conflates launcher script with executable of the running process.
 DAEMON=/opt/hpr/hpr/bin/hpr
 PIDFILE=/var/run/$BASE.pid
 LOGFILE=/var/log/$BASE.log
@@ -60,10 +59,15 @@ case "$1" in
         ;;
     stop)
         log_begin_msg "Stopping $DESC: $BASE"
-        killproc -p $PIDFILE $DAEMON
+        $DAEMON stop
         log_end_msg $?
         ;;
     kill)
+        log_begin_msg "Sending kill to $DESC: $BASE"
+        killproc -p $PIDFILE $DAEMON
+        log_end_msg $?
+        ;;
+    kill9)
         log_begin_msg "Sending SIGKILL to $DESC: $BASE"
         kill -SIGKILL $(cat $PIDFILE)
         log_end_msg $?

@@ -6,5 +6,9 @@
 #   See https://github.com/helium/helium-packet-router
 #
 
-# Customize location of hpr binary (especially for development testing).
-#DAEMON="/opt/hpr/bin/hpr"
+# Customize location of helium-packet-router binary (especially for development testing).
+#SHORT_NAME=hpr
+#DAEMON=/opt/$SHORT_NAME/$SHORT_NAME/bin/$SHORT_NAME
+#PIDFILE=/var/run/$SHORT_NAME.pid
+#LOGFILE=/var/log/$SHORT_NAME.log
+#OPTS=
