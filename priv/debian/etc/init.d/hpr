@@ -22,7 +22,7 @@ BASE=helium-packet-router
 
 # Modify these in /etc/default/$BASE (/etc/default/helium-packet-router)
 # FIXME: $DAEMON conflates launcher script with executable of the running process.
-DAEMON=/opt/hpr/bin/hpr.sh
+DAEMON=/opt/hpr/hpr/bin/hpr
 PIDFILE=/var/run/$BASE.pid
 LOGFILE=/var/log/$BASE.log
 OPTS=

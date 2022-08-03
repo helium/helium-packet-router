@@ -77,7 +77,7 @@ package-bin:
 	   find _release/bin -type f | xargs chmod 0755)
 
 	cp priv/debian/etc/default/${NAME} _release/etc/default/
-	cp priv/debian/init.d/${SHORT_NAME} _release/etc/init.d/
+	cp priv/debian/etc/init.d/${SHORT_NAME} _release/etc/init.d/
 	find _release/etc/init.d -type f | xargs chmod 0755
 
 	sed 's%^ExecStart\s*=\s*%ExecStart=${WORKDIR}%; s%^WorkingDirectory\s*=\s*.*$$%WorkingDirectory=${WORKDIR}%' \
