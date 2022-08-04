@@ -5,14 +5,15 @@ After=network-online.target remote-fs.target nss-lookup.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=forking
 PIDFile=/var/run/hpr.pid
 
-ExecStart=/bin/hpr daemon
-WorkingDirectory=/var/tmp
+ExecStart=/opt/hpr/hpr/bin/hpr background
+RemainAfterExit=yes
 
-ExecReload=/bin/kill -s HUP $MAINPID
-ExecStop=/bin/kill -s TERM $MAINPID
+WorkingDirectory=/opt/hpr/hpr
+ExecReload=/opt/hpr/hpr/bin/hpr restart
+ExecStop=/opt/hpr/hpr/bin/hpr stop
 
 [Install]
 WantedBy=multi-user.target
