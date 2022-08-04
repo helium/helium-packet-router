@@ -90,7 +90,8 @@ lookup_devaddr(DevAddr) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(#{base_dir := BaseDir} = _Args) ->
-    {ok, ?DETS} = dets:open_file(?DETS, [{file, filename:join(BaseDir, erlang:atom_to_list(?DETS))}]),
+    {ok, ?DETS} =
+        dets:open_file(?DETS, [{file, filename:join(BaseDir, erlang:atom_to_list(?DETS))}]),
     _ = ets:new(?EUIS_ETS, [
         public,
         named_table,
@@ -219,9 +220,9 @@ lookup_devaddr_test() ->
     ok.
 
 init_dets(BaseDir) ->
+    {ok, ?DETS} =
+        dets:open_file(?DETS, [{file, filename:join(BaseDir, erlang:atom_to_list(?DETS))}]),
     {ok, NetID} = lora_subnet:parse_netid(16#00000000, big),
-
-    {ok, ?DETS} = dets:open_file(?DETS, [{file, filename:join(BaseDir, erlang:atom_to_list(?DETS))}]),
     Route1 = hpr_routing_config_route:new(
         NetID,
         [{16#00000000, 16#0000000A}, {16#0000000C, 16#00000010}],
