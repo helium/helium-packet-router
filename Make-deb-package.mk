@@ -104,6 +104,8 @@ package-bin:
 	  > _release/DEBIAN/control
 
 	echo '#! /bin/sh' > _release/DEBIAN/postinst
+	echo 'set -e' >> _release/DEBIAN/postinst
+	echo 'set -x' >> _release/DEBIAN/postinst
 	echo 'useradd --system --user-group --shell /sbin/nologin ${RUNTIME_USER}' \
 	  >> _release/DEBIAN/postinst
 
@@ -131,6 +133,8 @@ package-bin:
 	  >> _release/DEBIAN/postinst
 
 	echo '#! /bin/sh' > _release/DEBIAN/prerm
+	echo 'set -e' >> _release/DEBIAN/prerm
+	echo 'set -x' >> _release/DEBIAN/prerm
 	echo 'if [ "$$(ps --no-headers -o comm 1)" = "systemd" ]; then' \
 	   >> _release/DEBIAN/prerm
 	echo '  systemctl stop ${SHORT_NAME}.service' >> _release/DEBIAN/prerm
@@ -201,10 +205,12 @@ vm-ssh:
 vm-sanity-check:
 	@[ -d ${REBAR_BUILD_DIR} ] || \
 	  (echo "\n Please run: make rel \n"; false)
-	sed 's/^\s*apt[- ].*$$//' \
+	sed 's%^\s*apt[- ].*$$%%' \
 	  < priv/debian/Vagrantfile \
 	  > ${REBAR_BUILD_DIR}/Vagrantfile
 	(cd ${REBAR_BUILD_DIR} && vagrant up)
+	(cd ${REBAR_BUILD_DIR} && vagrant ssh -c \
+	  'ln -sf /vagrant/${SHORT_NAME} /home/vagrant/${SHORT_NAME}')
 
 	@echo "\n See subdirectories under /vagrant \n"
 	(cd ${REBAR_BUILD_DIR} && vagrant ssh)
