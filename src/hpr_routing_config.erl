@@ -90,8 +90,11 @@ lookup_devaddr(DevAddr) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(#{base_dir := BaseDir} = _Args) ->
+    File = filename:join(BaseDir, erlang:atom_to_list(?DETS)),
+    ok = filelib:ensure_dir(File),
+    lager:info("init with dets=~s", [File]),
     {ok, ?DETS} =
-        dets:open_file(?DETS, [{file, filename:join(BaseDir, erlang:atom_to_list(?DETS))}]),
+        dets:open_file(?DETS, [{file, File}]),
     _ = ets:new(?EUIS_ETS, [
         public,
         named_table,
