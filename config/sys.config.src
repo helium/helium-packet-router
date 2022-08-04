@@ -4,6 +4,23 @@
         {log_root, "/var/log/hpr"},
         {crash_log, "crash.log"},
         {handlers, [
+            {lager_console_backend, [
+                {level, info},
+                {formatter_config, [
+                    "time=",
+                    date,
+                    "T",
+                    time,
+                    " lvl=",
+                    severity_upper,
+                    " ",
+                    metadata,
+                    " msg=\"",
+                    message,
+                    "\"",
+                    "\n"
+                ]}
+            ]},
             {lager_file_backend, [
                 {file, "info.log"},
                 {level, info},
@@ -16,16 +33,9 @@
                     "T",
                     time,
                     " lvl=",
-                    severity,
-                    " mod=",
-                    module,
-                    " fun=",
-                    function,
-                    " line=",
-                    line,
-                    " pid=",
-                    pid,
-                    {app, [" app=", application], ""},
+                    severity_upper,
+                    " ",
+                    metadata,
                     " msg=\"",
                     message,
                     "\"",
