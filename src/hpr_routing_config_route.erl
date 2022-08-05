@@ -1,6 +1,6 @@
 -module(hpr_routing_config_route).
 
--include_lib("helium_proto/include/config_service_route_v1_pb.hrl").
+-include_lib("helium_proto/include/packet_router_pb.hrl").
 
 -export([
     new/6,
@@ -12,7 +12,7 @@
     oui/1
 ]).
 
--type route() :: #config_service_route_v1_pb{}.
+-type route() :: #packet_router_route_v1_pb{}.
 
 -export_type([route/0]).
 
@@ -25,14 +25,14 @@
     OUI :: non_neg_integer()
 ) -> route().
 new(NetID, DevAddrRanges, EUIs, LNS, Protocol, OUI) ->
-    #config_service_route_v1_pb{
+    #packet_router_route_v1_pb{
         net_id = NetID,
         devaddr_ranges = [
-            #config_service_route_v1_devaddr_range_pb{start = Start, 'end' = End}
+            #packet_router_route_devaddr_range_v1_pb{start = Start, 'end' = End}
          || {Start, End} <- DevAddrRanges
         ],
         euis = [
-            #config_service_route_v1_eui_pb{app_eui = AppEUI, dev_eui = DevEUI}
+            #packet_router_route_eui_v1_pb{app_eui = AppEUI, dev_eui = DevEUI}
          || {AppEUI, DevEUI} <- EUIs
         ],
         lns = LNS,
@@ -42,35 +42,35 @@ new(NetID, DevAddrRanges, EUIs, LNS, Protocol, OUI) ->
 
 -spec net_id(Route :: route()) -> non_neg_integer().
 net_id(Route) ->
-    Route#config_service_route_v1_pb.net_id.
+    Route#packet_router_route_v1_pb.net_id.
 
 -spec devaddr_ranges(Route :: route()) -> [{non_neg_integer(), non_neg_integer()}].
 devaddr_ranges(Route) ->
     [
         {Start, End}
-     || #config_service_route_v1_devaddr_range_pb{start = Start, 'end' = End} <-
-            Route#config_service_route_v1_pb.devaddr_ranges
+     || #packet_router_route_devaddr_range_v1_pb{start = Start, 'end' = End} <-
+            Route#packet_router_route_v1_pb.devaddr_ranges
     ].
 
 -spec euis(Route :: route()) -> [{non_neg_integer(), non_neg_integer()}].
 euis(Route) ->
     [
         {AppEUI, DevEUI}
-     || #config_service_route_v1_eui_pb{app_eui = AppEUI, dev_eui = DevEUI} <-
-            Route#config_service_route_v1_pb.euis
+     || #packet_router_route_eui_v1_pb{app_eui = AppEUI, dev_eui = DevEUI} <-
+            Route#packet_router_route_v1_pb.euis
     ].
 
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->
-    Route#config_service_route_v1_pb.lns.
+    Route#packet_router_route_v1_pb.lns.
 
 -spec protocol(Route :: route()) -> gwmp | http.
 protocol(Route) ->
-    Route#config_service_route_v1_pb.protocol.
+    Route#packet_router_route_v1_pb.protocol.
 
 -spec oui(Route :: route()) -> non_neg_integer().
 oui(Route) ->
-    Route#config_service_route_v1_pb.oui.
+    Route#packet_router_route_v1_pb.oui.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -80,15 +80,15 @@ oui(Route) ->
 -include_lib("eunit/include/eunit.hrl").
 
 new_test() ->
-    Route = #config_service_route_v1_pb{
+    Route = #packet_router_route_v1_pb{
         net_id = 1,
         devaddr_ranges = [
-            #config_service_route_v1_devaddr_range_pb{start = 1, 'end' = 10},
-            #config_service_route_v1_devaddr_range_pb{start = 11, 'end' = 20}
+            #packet_router_route_devaddr_range_v1_pb{start = 1, 'end' = 10},
+            #packet_router_route_devaddr_range_v1_pb{start = 11, 'end' = 20}
         ],
         euis = [
-            #config_service_route_v1_eui_pb{app_eui = 1, dev_eui = 1},
-            #config_service_route_v1_eui_pb{app_eui = 2, dev_eui = 0}
+            #packet_router_route_eui_v1_pb{app_eui = 1, dev_eui = 1},
+            #packet_router_route_eui_v1_pb{app_eui = 2, dev_eui = 0}
         ],
         lns = <<"lsn.lora.com>">>,
         protocol = gwmp,
