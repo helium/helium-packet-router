@@ -8,11 +8,11 @@ Vagrant.configure("2") do |config|
   # Ubuntu 20.04 code-name is Focal Fossa, 22.04 is Jammy Jellyfish.
   config.vm.box = "ubuntu/focal64"
 
-  config.vm.define "hpr_deb"
+  #config.vm.define "hpr_deb"
 
   config.vm.provider "virtualbox" do |vb|
     vb.check_guest_additions = false
-    vb.name = "hpr_deb"
+    #vb.name = "hpr_deb"
     #vb.memory = "7168"
   end
 

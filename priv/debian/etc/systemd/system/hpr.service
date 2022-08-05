@@ -6,14 +6,15 @@ Wants=network-online.target
 
 [Service]
 Type=forking
-PIDFile=/var/run/hpr.pid
+User=helium
+Group=helium
 
-ExecStart=/opt/hpr/hpr/bin/hpr background
+ExecStart=/bin/hpr background
 RemainAfterExit=yes
 
 WorkingDirectory=/opt/hpr/hpr
-ExecReload=/opt/hpr/hpr/bin/hpr restart
-ExecStop=/opt/hpr/hpr/bin/hpr stop
+ExecReload=/bin/hpr restart
+ExecStop=/bin/hpr stop
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
