@@ -64,12 +64,19 @@ signature(Packet) ->
 
 -spec verify(Packet :: packet()) -> boolean().
 verify(Packet) ->
-    BasePacket = Packet#packet_router_packet_up_v1_pb{signature = <<>>},
-    EncodedPacket = ?MODULE:encode(BasePacket),
-    Signature = ?MODULE:signature(Packet),
-    PubKeyBin = ?MODULE:hotspot(Packet),
-    PubKey = libp2p_crypto:bin_to_pubkey(PubKeyBin),
-    libp2p_crypto:verify(EncodedPacket, Signature, PubKey).
+    try
+        BasePacket = Packet#packet_router_packet_up_v1_pb{signature = <<>>},
+        EncodedPacket = ?MODULE:encode(BasePacket),
+        Signature = ?MODULE:signature(Packet),
+        PubKeyBin = ?MODULE:hotspot(Packet),
+        PubKey = libp2p_crypto:bin_to_pubkey(PubKeyBin),
+        libp2p_crypto:verify(EncodedPacket, Signature, PubKey)
+    of
+        Bool -> Bool
+    catch
+        _E:_R ->
+            false
+    end.
 
 -spec encode(Packet :: packet()) -> binary().
 encode(#packet_router_packet_up_v1_pb{} = Packet) ->
