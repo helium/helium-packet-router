@@ -7,9 +7,15 @@
         kernel,
         stdlib,
         lager,
+        throttle,
         helium_proto,
+<<<<<<< HEAD
         grpcbox,
         erlang_lorawan
+=======
+        erlang_lorawan,
+        libp2p_crypto
+>>>>>>> 8934623 (Add basic support for packet_up)
     ]},
     {env, []},
     {modules, []},

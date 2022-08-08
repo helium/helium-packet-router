@@ -1,13 +1,15 @@
 {"1.2.0",
-[{<<"acceptor_pool">>,
-  {git,"https://github.com/novalabsxyz/acceptor_pool",
-       {ref,"56d676e00c11fd071a6bcc4059e3454960900af7"}},
+[{<<"base32">>,{pkg,<<"base32">>,<<"0.1.0">>},2},
+ {<<"ecc_compact">>,{pkg,<<"ecc_compact">>,<<"1.1.1">>},1},
+ {<<"enacl">>,
+  {git,"https://github.com/helium/enacl",
+       {ref,"efb74b1af1df7f46f6ade488f16ec365af3ce47f"}},
   1},
- {<<"chatterbox">>,
-  {git,"https://github.com/novalabsxyz/chatterbox",
-       {ref,"cbfe6e46b273f1552b57685c9f6daf710473c609"}},
-  1},
- {<<"ctx">>,{pkg,<<"ctx">>,<<"0.6.0">>},1},
+ {<<"erl_base58">>,{pkg,<<"erl_base58">>,<<"0.0.1">>},1},
+ {<<"erlang_lorawan">>,
+  {git,"https://github.com/helium/erlang-lorawan.git",
+       {ref,"29704ae1b29386993bfcf69d1ae4fc04d8502f0e"}},
+  0},
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.9">>},1},
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.8.0">>},1},
  {<<"grpcbox">>,
@@ -16,8 +18,9 @@
   0},
  {<<"helium_proto">>,
   {git,"https://github.com/helium/proto.git",
-       {ref,"ed5532c241598be3798adecd22fe28034628f2e4"}},
+       {ref,"20a5dd2bf0cbb20521c726b34dbdf6e905383589"}},
   0},
+<<<<<<< HEAD
  {<<"hpack">>,{pkg,<<"hpack_erl">>,<<"0.2.3">>},2},
  {<<"lager">>,{pkg,<<"lager">>,<<"3.9.2">>},0}]}.
 [
@@ -33,4 +36,36 @@
  {<<"gproc">>, <<"580ADAFA56463B75263EF5A5DF4C86AF321F68694E7786CB057FD805D1E2A7DE">>},
  {<<"hpack">>, <<"06F580167C4B8B8A6429040DF36CC93BBA6D571FAEAEC1B28816523379CBB23A">>},
  {<<"lager">>, <<"7F904D9E87A8CB7E66156ED31768D1C8E26EBA1D54F4BC85B1AA4AC1F6340C28">>}]}
+=======
+ {<<"lager">>,{pkg,<<"lager">>,<<"3.9.2">>},0},
+ {<<"libp2p_crypto">>,
+  {git,"https://github.com/helium/libp2p_crypto.git",
+       {ref,"a969bb7affc7d3fa1472aef80d736c467d3f6d45"}},
+  0},
+ {<<"multiaddr">>,{pkg,<<"multiaddr">>,<<"1.1.3">>},1},
+ {<<"multihash">>,{pkg,<<"multihash">>,<<"2.1.0">>},1},
+ {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},2},
+ {<<"throttle">>,{pkg,<<"lambda_throttle">>,<<"0.3.0">>},0}]}.
+[
+{pkg_hash,[
+ {<<"base32">>, <<"044F6DC95709727CA2176F3E97A41DDAA76B5BC690D3536908618C0CB32616A2">>},
+ {<<"ecc_compact">>, <<"D45197DB76EEBD22B144552795C1950DD07B013D591EA2C3A8DE22F8EE6C132B">>},
+ {<<"erl_base58">>, <<"37710854461D71DF338E73C65776302DB41C4BAB4674D2EC134ED7BCFC7B5552">>},
+ {<<"goldrush">>, <<"F06E5D5F1277DA5C413E84D5A2924174182FB108DABB39D5EC548B27424CD106">>},
+ {<<"lager">>, <<"4CAB289120EB24964E3886BD22323CB5FEFE4510C076992A23AD18CF85413D8C">>},
+ {<<"multiaddr">>, <<"978E58E28F6FACAF428C87AF933612B1E2F3F2775F1794EDA5E831A4EACD2984">>},
+ {<<"multihash">>, <<"F084F7C6BEC062F0C0E82AE18CFDC8DAEC8F4FAA4C8E1ACE0B9C676A9323162F">>},
+ {<<"small_ints">>, <<"82A824C8794A2DDC73CB5CD00EAD11331DB296521AD16A619C13D668572B868A">>},
+ {<<"throttle">>, <<"5F50AC593092B71D85DD1061B9673895532D34C8B4836A5C04A9F8395E183E27">>}]},
+{pkg_hash_ext,[
+ {<<"base32">>, <<"10A73951D857D8CB1ECEEA8EB96C6941F6A76E105947AD09C2B73977DEE07638">>},
+ {<<"ecc_compact">>, <<"86F8A8A33141C5390D72BDC2CE4D79B8CC74463A80D263A44FC988D353269504">>},
+ {<<"erl_base58">>, <<"41E8EC356C5C5558A45682F61F80725789AE9A11BD1CC7D5C73CDE1E3B546DD2">>},
+ {<<"goldrush">>, <<"99CB4128CFFCB3227581E5D4D803D5413FA643F4EB96523F77D9E6937D994CEB">>},
+ {<<"lager">>, <<"7F904D9E87A8CB7E66156ED31768D1C8E26EBA1D54F4BC85B1AA4AC1F6340C28">>},
+ {<<"multiaddr">>, <<"980D3EA5EB0EB2EFC51E3D10953F17447D417C49BD2FCD7FC6A2A42D1F66D5EE">>},
+ {<<"multihash">>, <<"E73AD5D0099DBFFB4EE429A78436B605AFE2530ED684AB36BB86733AB65707C8">>},
+ {<<"small_ints">>, <<"00B3BFF6C446711F8EA4EA942056F375E0F13C7983CC3950C6EA1DE014C7C416">>},
+ {<<"throttle">>, <<"EE7009525FADC5179D1214D1EB1FC26779A3BBEF1FDE28A772D04B41EADF5FBA">>}]}
+>>>>>>> 8934623 (Add basic support for packet_up)
 ].

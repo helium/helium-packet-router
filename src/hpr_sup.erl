@@ -32,7 +32,7 @@ init([]) ->
     BaseDir = application:get_env(?APP, base_dir, "/var/data/hpr"),
     ok = filelib:ensure_dir(BaseDir),
     ChildSpecs = [
-        ?WORKER(hpr_routing_config, [#{base_dir => BaseDir}])
+        ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}])
     ],
     {ok, {
         #{

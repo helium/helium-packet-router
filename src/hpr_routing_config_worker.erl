@@ -1,4 +1,4 @@
--module(hpr_routing_config).
+-module(hpr_routing_config_worker).
 
 -behavior(gen_server).
 
@@ -26,9 +26,9 @@
 
 -define(SERVER, ?MODULE).
 -define(INIT_ASYNC, init_async).
--define(EUIS_ETS, hpr_routing_config_euis_ets).
--define(DEVADDRS_ETS, hpr_routing_config_devaddrs_ets).
--define(DETS, hpr_routing_config_dets).
+-define(EUIS_ETS, hpr_routing_config_worker_euis_ets).
+-define(DEVADDRS_ETS, hpr_routing_config_worker_devaddrs_ets).
+-define(DETS, hpr_routing_config_worker_dets).
 
 -record(state, {}).
 
@@ -40,14 +40,13 @@ start_link(Args) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
 
 -spec lookup_eui(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
-    [hpr_routing_config_route:route()].
+    [hpr_route:route()].
 lookup_eui(AppEUI, DevEUI) ->
     Routes0 = ets:lookup(?EUIS_ETS, {AppEUI, DevEUI}),
     Routes1 = ets:lookup(?EUIS_ETS, {AppEUI, 0}),
     [Route || {_, Route} <- Routes1 ++ Routes0].
 
--spec lookup_devaddr(DevAddr :: non_neg_integer()) ->
-    [hpr_routing_config_route:route()].
+-spec lookup_devaddr(DevAddr :: non_neg_integer()) -> [hpr_route:route()].
 lookup_devaddr(DevAddr) ->
     case lora_subnet:parse_netid(DevAddr, big) of
         {ok, NetID} ->
@@ -142,11 +141,11 @@ terminate(_Reason, _State) ->
 init_ets() ->
     {EUIRoutes, DevAddrRoutes} = dets:foldl(
         fun({_OUI, Route}, {EUIRoutesAcc, DevAddrRoutesAcc}) ->
-            EUIs = hpr_routing_config_route:euis(Route),
+            EUIs = hpr_route:euis(Route),
             EUIRoutes = [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs],
-            NetID = hpr_routing_config_route:net_id(Route),
+            NetID = hpr_route:net_id(Route),
             DevAddrRangeRoutes =
-                case hpr_routing_config_route:devaddr_ranges(Route) of
+                case hpr_route:devaddr_ranges(Route) of
                     [] ->
                         [{{NetID, 0, 0}, Route}];
                     DevAddrRanges ->
@@ -226,7 +225,7 @@ init_dets(BaseDir) ->
     {ok, ?DETS} =
         dets:open_file(?DETS, [{file, filename:join(BaseDir, erlang:atom_to_list(?DETS))}]),
     {ok, NetID} = lora_subnet:parse_netid(16#00000000, big),
-    Route1 = hpr_routing_config_route:new(
+    Route1 = hpr_route:new(
         NetID,
         [{16#00000000, 16#0000000A}, {16#0000000C, 16#00000010}],
         [{1, 1}, {2, 0}],
@@ -234,7 +233,7 @@ init_dets(BaseDir) ->
         gwmp,
         1
     ),
-    Route2 = hpr_routing_config_route:new(
+    Route2 = hpr_route:new(
         NetID, [], [{2, 1}, {3, 0}], <<"lsn.lora.com>">>, http, 2
     ),
     ok = dets:insert(?DETS, [{1, Route1}, {2, Route2}]),

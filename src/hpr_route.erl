@@ -1,4 +1,4 @@
--module(hpr_routing_config_route).
+-module(hpr_route).
 
 -include_lib("helium_proto/include/packet_router_pb.hrl").
 
@@ -64,7 +64,7 @@ euis(Route) ->
 lns(Route) ->
     Route#packet_router_route_v1_pb.lns.
 
--spec protocol(Route :: route()) -> gwmp | http.
+-spec protocol(Route :: route()) -> atom().
 protocol(Route) ->
     Route#packet_router_route_v1_pb.protocol.
 
