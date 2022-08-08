@@ -18,28 +18,28 @@ init() ->
     ok = throttle:setup(?HOTSPOT_THROTTLE, HotspotRateLimit, per_second),
     ok.
 
--spec handle_packet(Packet :: hpr_packet_up:packet(), Pid :: pid()) -> ok | {error, any()}.
-handle_packet(Packet, Pid) ->
+-spec handle_packet(Packet :: hpr_packet_up:packet(), HandlerPid :: pid()) -> ok | {error, any()}.
+handle_packet(Packet, HandlerPid) ->
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
         {fun throttle_check/1, hotspot_limit_exceeded}
     ],
     case execute_checks(Packet, Checks) of
         {error, _} = Error ->
-            Pid ! Error,
+            HandlerPid ! Error,
             Error;
         ok ->
             case packet_type(Packet) of
                 undefined ->
                     Error = {error, invalid_packet_type},
-                    Pid ! Error,
+                    HandlerPid ! Error,
                     Error;
                 {join_req, AppEUI, DevEUI} ->
                     Routes = hpr_routing_config_worker:lookup_eui(AppEUI, DevEUI),
-                    ok = deliver_packet(Packet, Pid, Routes);
+                    ok = deliver_packet(Packet, HandlerPid, Routes);
                 {uplink, DevAddr} ->
                     Routes = hpr_routing_config_worker:lookup_devaddr(DevAddr),
-                    ok = deliver_packet(Packet, Pid, Routes)
+                    ok = deliver_packet(Packet, HandlerPid, Routes)
             end
     end.
 
@@ -48,20 +48,19 @@ handle_packet(Packet, Pid) ->
 %% ------------------------------------------------------------------
 -spec deliver_packet(
     Packet :: hpr_packet_up:packet(),
-    Pid :: pid(),
+    HandlerPid :: pid(),
     Routes :: [hpr_route:route()]
 ) -> ok.
-deliver_packet(_Packet, _Pid, []) ->
+deliver_packet(_Packet, _HandlerPid, []) ->
     ok;
-deliver_packet(Packet, Pid, [Route | Routes]) ->
+deliver_packet(Packet, HandlerPid, [Route | Routes]) ->
     case hpr_route:protocol(Route) of
         router ->
-            %% TODO: send here
-            ok;
+            hpr_protocol_router:send(Packet, HandlerPid, Route);
         Protocol ->
             lager:warning("protocol ~p unsuported", [Protocol])
     end,
-    deliver_packet(Packet, Pid, Routes).
+    deliver_packet(Packet, HandlerPid, Routes).
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
 throttle_check(Packet) ->

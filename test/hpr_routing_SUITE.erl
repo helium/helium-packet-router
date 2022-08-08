@@ -38,9 +38,30 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(_TestCase, Config) ->
-    ok = application:set_env(?APP, base_dir, "data/hpr"),
+    BaseDir = "data/hpr",
+    ok = application:set_env(?APP, base_dir, BaseDir),
+
+    DETS = hpr_routing_config_worker_dets,
+    File = filename:join(BaseDir, erlang:atom_to_list(DETS)),
+    ok = filelib:ensure_dir(File),
+    {ok, DETS} = dets:open_file(DETS, [{file, File}]),
+    {ok, NetID} = lora_subnet:parse_netid(16#00000000, big),
+    Route1 = hpr_route:new(
+        NetID,
+        [{16#00000000, 16#0000000A}],
+        [{1, 1}, {1, 2}],
+        <<"1127.0.0.1">>,
+        router,
+        1
+    ),
+    ok = dets:insert(DETS, [{1, Route1}]),
+    ok = dets:close(DETS),
+
     application:ensure_all_started(?APP),
-    Config.
+    [
+        {route, Route1}
+        | Config
+    ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
@@ -53,7 +74,7 @@ end_per_testcase(_TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-join_req_test(_Config) ->
+join_req_test(Config) ->
     Self = self(),
 
     PacketBadSig = #packet_router_packet_up_v1_pb{
@@ -109,6 +130,9 @@ join_req_test(_Config) ->
         ct:fail("invalid_packet_type, timeout")
     end,
 
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+
     DevNonce = crypto:strong_rand_bytes(2),
     AppKey = crypto:strong_rand_bytes(16),
     MType = ?JOIN_REQUEST,
@@ -142,5 +166,21 @@ join_req_test(_Config) ->
         signature = SigFun(PacketUpValidEncoded)
     },
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUpValidSigned, Self)),
+
+    ?assertEqual(
+        [
+            {Self,
+                {hpr_protocol_router, send, [
+                    PacketUpValidSigned,
+                    Self,
+                    proplists:get_value(route, Config, undefined)
+                ]},
+                ok}
+        ],
+        meck:history(hpr_protocol_router)
+    ),
+
+    ?assert(meck:validate(hpr_protocol_router)),
+    meck:unload(hpr_protocol_router),
 
     ok.
