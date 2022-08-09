@@ -17,30 +17,10 @@ init_per_testcase(TestCase, Config) ->
     BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
     ok = application:set_env(?APP, base_dir, BaseDir),
 
-    %% Setup ROUTES
-    DETS = hpr_routing_config_worker_dets,
-    File = filename:join(BaseDir, erlang:atom_to_list(DETS)),
-    ok = filelib:ensure_dir(File),
-    {ok, DETS} = dets:open_file(DETS, [{file, File}]),
-    {ok, NetID} = lora_subnet:parse_netid(16#00000000, big),
-    Route1 = hpr_route:new(
-        NetID,
-        [{16#00000000, 16#0000000A}],
-        [{1, 1}, {1, 2}],
-        <<"1127.0.0.1">>,
-        router,
-        1
-    ),
-    ok = dets:insert(DETS, [{1, Route1}]),
-    ok = dets:close(DETS),
-
     %% Start HPR
     application:ensure_all_started(?APP),
 
-    [
-        {route, Route1}
-        | Config
-    ].
+    Config.
 
 end_per_testcase(_TestCase, Config) ->
     application:stop(?APP),

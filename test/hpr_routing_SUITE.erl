@@ -44,7 +44,7 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-join_req_test(Config) ->
+join_req_test(_Config) ->
     Self = self(),
 
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
@@ -78,6 +78,17 @@ join_req_test(Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
+    {ok, NetID} = lora_subnet:parse_netid(16#00000000, big),
+    Route = hpr_route:new(
+        NetID,
+        [{16#00000000, 16#0000000A}],
+        [{1, 1}, {1, 2}],
+        <<"127.0.0.1">>,
+        router,
+        1
+    ),
+    ok = hpr_routing_config_worker:insert(Route),
+
     PacketUpValid = test_utils:join_packet_up(#{
         hotspot => Hotspot, sig_fun => SigFun
     }),
@@ -89,7 +100,7 @@ join_req_test(Config) ->
                 {hpr_protocol_router, send, [
                     PacketUpValid,
                     Self,
-                    proplists:get_value(route, Config, undefined)
+                    Route
                 ]},
                 ok}
         ],

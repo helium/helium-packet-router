@@ -105,7 +105,7 @@ new(Opts) ->
     #packet_router_packet_up_v1_pb{
         payload = maps:get(payload, Opts, <<"payload">>),
         timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond)),
-        signal_strength = maps:get(signal_strength, Opts, -35),
+        signal_strength = maps:get(signal_strength, Opts, -35.0),
         frequency = maps:get(frequency, Opts, 904.30),
         datarate = maps:get(datarate, Opts, "SF7BW125"),
         snr = maps:get(snr, Opts, 7.0),
@@ -146,7 +146,7 @@ timestamp_test() ->
 
 signal_strength_test() ->
     PacketUp = ?MODULE:new(#{}),
-    ?assertEqual(-35, signal_strength(PacketUp)),
+    ?assertEqual(-35.0, signal_strength(PacketUp)),
     ok.
 
 frequency_test() ->
@@ -194,8 +194,8 @@ verify_test() ->
     ?assert(verify(SignedPacketUp)),
     ok.
 
-encode_devoce_test() ->
-    PacketUp = ?MODULE:new(#{}),
+encode_decode_test() ->
+    PacketUp = ?MODULE:new(#{frequency => 904.0}),
     ?assertEqual(PacketUp, decode(encode(PacketUp))),
     ok.
 

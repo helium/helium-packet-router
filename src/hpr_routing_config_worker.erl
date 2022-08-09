@@ -24,6 +24,12 @@
     code_change/3
 ]).
 
+-ifdef(TEST).
+
+-export([insert/1]).
+
+-endif.
+
 -define(SERVER, ?MODULE).
 -define(INIT_ASYNC, init_async).
 -define(EUIS_ETS, hpr_routing_config_worker_euis_ets).
@@ -144,14 +150,14 @@ init_ets() ->
             EUIs = hpr_route:euis(Route),
             EUIRoutes = [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs],
             NetID = hpr_route:net_id(Route),
-            DevAddrRangeRoutes =
+            DevAddrRangesRoutes =
                 case hpr_route:devaddr_ranges(Route) of
                     [] ->
                         [{{NetID, 0, 0}, Route}];
                     DevAddrRanges ->
                         [{{NetID, Start, End}, Route} || {Start, End} <- DevAddrRanges]
                 end,
-            {EUIRoutes ++ EUIRoutesAcc, DevAddrRangeRoutes ++ DevAddrRoutesAcc}
+            {EUIRoutes ++ EUIRoutesAcc, DevAddrRangesRoutes ++ DevAddrRoutesAcc}
         end,
         {[], []},
         ?DETS
@@ -159,6 +165,29 @@ init_ets() ->
     true = ets:insert(?EUIS_ETS, EUIRoutes),
     true = ets:insert(?DEVADDRS_ETS, DevAddrRoutes),
     ok.
+
+%% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec insert(Route :: hpr_route:route()) -> hpr_route:route().
+insert(Route) ->
+    EUIs = hpr_route:euis(Route),
+    EUIRoutes = [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs],
+    NetID = hpr_route:net_id(Route),
+    DevAddrRangesRoutes =
+        case hpr_route:devaddr_ranges(Route) of
+            [] ->
+                [{{NetID, 0, 0}, Route}];
+            DevAddrRanges ->
+                [{{NetID, Start, End}, Route} || {Start, End} <- DevAddrRanges]
+        end,
+    true = ets:insert(?EUIS_ETS, EUIRoutes),
+    true = ets:insert(?DEVADDRS_ETS, DevAddrRangesRoutes),
+    ok.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
