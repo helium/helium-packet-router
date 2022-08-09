@@ -3,7 +3,8 @@
 -export([
     init_per_testcase/2,
     end_per_testcase/2,
-    join_packet_up/1
+    join_packet_up/1,
+    uplink_packet_up/1
 ]).
 
 -include("hpr.hrl").
@@ -43,6 +44,32 @@ join_packet_up(Opts0) ->
     MIC = crypto:macN(cmac, aes_128_cbc, AppKey, JoinPayload0, 4),
     JoinPayload1 = <<JoinPayload0/binary, MIC:4/binary>>,
     Opts1 = maps:put(payload, maps:get(payload, Opts0, JoinPayload1), Opts0),
+    PacketUp = hpr_packet_up:new(Opts1),
+    SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
+    hpr_packet_up:sign(PacketUp, SigFun).
+
+-spec uplink_packet_up(
+    Opts :: map()
+) -> hpr_packet_up:packet().
+uplink_packet_up(Opts0) ->
+    MType = ?UNCONFIRMED_UP,
+    MHDRRFU = 0,
+    Major = 0,
+    DevAddr = maps:get(devaddr, Opts0, 16#00000000),
+    ADR = 0,
+    ADRACKReq = 0,
+    ACK = 0,
+    RFU = 0,
+    FCntLow = 1,
+    FOptsBin = <<>>,
+    FOptsLen = erlang:byte_size(FOptsBin),
+    Port = 0,
+    Data = <<"dataandmic">>,
+    Payload =
+        <<MType:3, MHDRRFU:3, Major:2, DevAddr:32/integer-unsigned-little, ADR:1, ADRACKReq:1,
+            ACK:1, RFU:1, FOptsLen:4, FCntLow:16/little-unsigned-integer, FOptsBin:FOptsLen/binary,
+            Port:8/integer, Data/binary>>,
+    Opts1 = maps:put(payload, maps:get(payload, Opts0, Payload), Opts0),
     PacketUp = hpr_packet_up:new(Opts1),
     SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
     hpr_packet_up:sign(PacketUp, SigFun).

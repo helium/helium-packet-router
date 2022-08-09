@@ -51,10 +51,10 @@ join_req_test(_Config) ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Hotspot = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    PacketBadSig = test_utils:join_packet_up(#{
+    JoinPacketBadSig = test_utils:join_packet_up(#{
         hotspot => Hotspot, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(PacketBadSig, Self)),
+    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, Self)),
     receive
         {error, bad_signature} -> ok;
         Other0 -> ct:fail(Other0)
@@ -62,11 +62,11 @@ join_req_test(_Config) ->
         ct:fail("bad_signature, timeout")
     end,
 
-    PacketUpInvalid = test_utils:join_packet_up(#{
+    JoinPacketUpInvalid = test_utils:join_packet_up(#{
         hotspot => Hotspot, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(PacketUpInvalid, Self)
+        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid, Self)
     ),
     receive
         {error, invalid_packet_type} -> ok;
@@ -78,7 +78,8 @@ join_req_test(_Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
-    {ok, NetID} = lora_subnet:parse_netid(16#00000000, big),
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
     Route = hpr_route:new(
         NetID,
         [{16#00000000, 16#0000000A}],
@@ -89,23 +90,36 @@ join_req_test(_Config) ->
     ),
     ok = hpr_routing_config_worker:insert(Route),
 
-    PacketUpValid = test_utils:join_packet_up(#{
+    JoinPacketUpValid = test_utils:join_packet_up(#{
         hotspot => Hotspot, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUpValid, Self)),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, Self)),
 
-    ?assertEqual(
-        [
-            {Self,
-                {hpr_protocol_router, send, [
-                    PacketUpValid,
-                    Self,
-                    Route
-                ]},
-                ok}
-        ],
-        meck:history(hpr_protocol_router)
-    ),
+    Received1 =
+        {Self,
+            {hpr_protocol_router, send, [
+                JoinPacketUpValid,
+                Self,
+                Route
+            ]},
+            ok},
+    ?assertEqual([Received1], meck:history(hpr_protocol_router)),
+
+    UplinkPacketUp = test_utils:uplink_packet_up(#{
+        hotspot => Hotspot, sig_fun => SigFun, devadrr => DevAddr
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, Self)),
+
+    Received2 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp,
+                Self,
+                Route
+            ]},
+            ok},
+
+    ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
