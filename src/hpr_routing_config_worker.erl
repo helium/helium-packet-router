@@ -57,26 +57,13 @@ lookup_devaddr(DevAddr) ->
     case lora_subnet:parse_netid(DevAddr, big) of
         {ok, NetID} ->
             %% MS = ets:fun2ms(
-            %%     fun
-            %%         ({{NetID0, Start, End}, Route}) when
-            %%             NetID0 == NetID andalso Start == 0 andalso End == 0
-            %%         ->
-            %%             Route;
-            %%         ({{NetID0, Start, End}, Route}) when
+            %%     fun({{NetID0, Start, End}, Route}) when
             %%             NetID0 == NetID andalso Start =< DevAddr andalso DevAddr =< End
-            %%         ->
+            %%     ->
             %%             Route
             %%     end
             %% ),
             MS = [
-                {
-                    {{'$1', '$2', '$3'}, '$4'},
-                    [
-                        {'andalso', {'==', '$1', NetID},
-                            {'andalso', {'==', '$2', 0}, {'==', '$3', 0}}}
-                    ],
-                    ['$4']
-                },
                 {
                     {{'$1', '$2', '$3'}, '$4'},
                     [
@@ -153,7 +140,7 @@ init_ets() ->
             DevAddrRangesRoutes =
                 case hpr_route:devaddr_ranges(Route) of
                     [] ->
-                        [{{NetID, 0, 0}, Route}];
+                        [{{NetID, 16#00000000, 16#FFFFFFFF}, Route}];
                     DevAddrRanges ->
                         [{{NetID, Start, End}, Route} || {Start, End} <- DevAddrRanges]
                 end,
@@ -229,16 +216,16 @@ lookup_devaddr_test() ->
     {ok, Pid} = ?MODULE:start_link(#{base_dir => BaseDir}),
 
     ?assertEqual(
-        [Route1, Route2], ?MODULE:lookup_devaddr(16#00000000)
+        lists:sort([Route1, Route2]), lists:sort(?MODULE:lookup_devaddr(16#00000000))
     ),
     ?assertEqual(
-        [Route1, Route2], ?MODULE:lookup_devaddr(16#0000000A)
+        lists:sort([Route1, Route2]), lists:sort(?MODULE:lookup_devaddr(16#0000000A))
     ),
     ?assertEqual(
-        [Route2, Route1], ?MODULE:lookup_devaddr(16#0000000C)
+        lists:sort([Route1, Route2]), lists:sort(?MODULE:lookup_devaddr(16#0000000C))
     ),
     ?assertEqual(
-        [Route2, Route1], ?MODULE:lookup_devaddr(16#00000010)
+        lists:sort([Route1, Route2]), lists:sort(?MODULE:lookup_devaddr(16#00000010))
     ),
     ?assertEqual(
         [Route2], ?MODULE:lookup_devaddr(16#0000000B)
