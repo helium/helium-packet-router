@@ -32,6 +32,8 @@ jobs:
         run: |
           make grpc
           ./rebar3 compile
+        env:
+          CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
       - name: build test
         run: ./rebar3 as test compile
       - name: tar
