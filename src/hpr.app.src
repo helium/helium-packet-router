@@ -9,7 +9,7 @@
         lager,
         helium_proto,
         grpcbox,
-        grpc_client
+        lorawan
     ]},
     {env, []},
     {modules, []},

@@ -1,5 +1,8 @@
 -module(helium_packet_router_service).
 
+%% TODO use https://github.com/helium/proto/pull/157 but maybe wait
+%% for https://github.com/helium/helium-packet-router/pull/22
+
 %% See proto_files subsection in ../config/grpc_server_gen.config
 -behaviour(helium_router_bhvr).
 

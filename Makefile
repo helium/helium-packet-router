@@ -4,6 +4,10 @@ grpc_services_directory=src/grpc/autogen
 
 REBAR=./rebar3
 
+# Use `make compile` initially for ensuring grpc auto-gen,
+# but then use `rebar3 compile` directly for rapid iterations.
+# Therefore, this target depends on $(grpc_services_directory),
+# but rebar.config omits `grpc` in `pre_hooks`.
 compile: | $(grpc_services_directory)
 	BUILD_WITHOUT_QUIC=1 $(REBAR) compile
 	$(REBAR) format
@@ -37,9 +41,8 @@ docker-run:
 
 grpc:
 	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen
-	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 
-$(grpc_services_directory):
+$(grpc_services_directory): config/grpc_server_gen.config
 	@echo "grpc service directory $(directory) does not exist, generating services"
 	$(REBAR) get-deps
 	$(MAKE) grpc
