@@ -1,0 +1,19 @@
+# my global config
+global:
+  scrape_interval: 10s
+  external_labels:
+    server: helium_packet_router-local
+
+scrape_configs:
+  - job_name: helium_packet_router
+    static_configs:
+      - targets: ["127.0.0.1:3000"]
+  - job_name: node
+    static_configs:
+      - targets: ["127.0.0.1:9100"]
+
+# remote_write:
+#   - url: https://XXX
+#     basic_auth:
+#       username: XXX
+#       password: XXX
