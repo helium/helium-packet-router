@@ -36,6 +36,8 @@ jobs:
           CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
       - name: build test
         run: ./rebar3 as test compile
+        env:
+          CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
       - name: tar
         run: tar -cvzf build.tar.gz -C _build/ .
       - name: upload-artifact
