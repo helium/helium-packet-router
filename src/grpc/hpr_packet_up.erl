@@ -18,6 +18,15 @@
     decode/1
 ]).
 
+-ifdef(TEST).
+
+-export([
+    new/1,
+    sign/2
+]).
+
+-endif.
+
 -type packet() :: #packet_router_packet_up_v1_pb{}.
 
 -export_type([packet/0]).
@@ -87,6 +96,37 @@ decode(BinaryPacket) ->
     packet_router_pb:decode_msg(BinaryPacket, packet_router_packet_up_v1_pb).
 
 %% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec new(Opts :: map()) -> packet().
+new(Opts) ->
+    #packet_router_packet_up_v1_pb{
+        payload = maps:get(payload, Opts, <<"payload">>),
+        timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond)),
+        signal_strength = maps:get(signal_strength, Opts, -35),
+        frequency = maps:get(frequency, Opts, 904.30),
+        datarate = maps:get(datarate, Opts, "SF7BW125"),
+        snr = maps:get(snr, Opts, 7.0),
+        region = maps:get(region, Opts, 'US915'),
+        hold_time = maps:get(hold_time, Opts, 0),
+        hotspot = maps:get(hotspot, Opts, <<"hotspot">>),
+        signature = maps:get(hotspot, Opts, <<"signature">>)
+    }.
+
+-spec sign(Packet :: packet(), SigFun :: fun()) -> packet().
+sign(Packet, SigFun) ->
+    PacketEncoded = ?MODULE:encode(Packet#packet_router_packet_up_v1_pb{
+        signature = <<>>
+    }),
+    Packet#packet_router_packet_up_v1_pb{
+        signature = SigFun(PacketEncoded)
+    }.
+
+-endif.
+
+%% ------------------------------------------------------------------
 %% EUNIT Tests
 %% ------------------------------------------------------------------
 -ifdef(TEST).
@@ -94,52 +134,53 @@ decode(BinaryPacket) ->
 -include_lib("eunit/include/eunit.hrl").
 
 payload_test() ->
-    PacketUp = new(),
+    PacketUp = ?MODULE:new(#{}),
     ?assertEqual(<<"payload">>, payload(PacketUp)),
     ok.
 
 timestamp_test() ->
-    PacketUp = new(),
-    ?assertEqual(0, timestamp(PacketUp)),
+    Now = erlang:system_time(millisecond),
+    PacketUp = ?MODULE:new(#{timestamp => Now}),
+    ?assertEqual(Now, timestamp(PacketUp)),
     ok.
 
 signal_strength_test() ->
-    PacketUp = new(),
-    ?assertEqual(1.0, signal_strength(PacketUp)),
+    PacketUp = ?MODULE:new(#{}),
+    ?assertEqual(-35, signal_strength(PacketUp)),
     ok.
 
 frequency_test() ->
-    PacketUp = new(),
-    ?assertEqual(2.0, frequency(PacketUp)),
+    PacketUp = ?MODULE:new(#{}),
+    ?assertEqual(904.30, frequency(PacketUp)),
     ok.
 
 datarate_test() ->
-    PacketUp = new(),
-    ?assertEqual([], datarate(PacketUp)),
+    PacketUp = ?MODULE:new(#{}),
+    ?assertEqual("SF7BW125", datarate(PacketUp)),
     ok.
 
 snr_test() ->
-    PacketUp = new(),
-    ?assertEqual(3.0, snr(PacketUp)),
+    PacketUp = ?MODULE:new(#{}),
+    ?assertEqual(7.0, snr(PacketUp)),
     ok.
 
 region_test() ->
-    PacketUp = new(),
+    PacketUp = ?MODULE:new(#{}),
     ?assertEqual('US915', region(PacketUp)),
     ok.
 
 hold_time_test() ->
-    PacketUp = new(),
-    ?assertEqual(4, hold_time(PacketUp)),
+    PacketUp = ?MODULE:new(#{}),
+    ?assertEqual(0, hold_time(PacketUp)),
     ok.
 
 hotspot_test() ->
-    PacketUp = new(),
+    PacketUp = ?MODULE:new(#{}),
     ?assertEqual(<<"hotspot">>, hotspot(PacketUp)),
     ok.
 
 signature_test() ->
-    PacketUp = new(),
+    PacketUp = ?MODULE:new(#{}),
     ?assertEqual(<<"signature">>, signature(PacketUp)),
     ok.
 
@@ -147,31 +188,15 @@ verify_test() ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Hotspot = libp2p_crypto:pubkey_to_bin(PubKey),
-    PacketUp0 = new(),
-    PacketUp1 = PacketUp0#packet_router_packet_up_v1_pb{hotspot = Hotspot},
-    PacketUpEncoded = encode(PacketUp1#packet_router_packet_up_v1_pb{signature = <<>>}),
-    PacketSigned = PacketUp1#packet_router_packet_up_v1_pb{signature = SigFun(PacketUpEncoded)},
+    PacketUp = ?MODULE:new(#{hotspot => Hotspot}),
+    SignedPacketUp = ?MODULE:sign(PacketUp, SigFun),
 
-    ?assert(verify(PacketSigned)),
+    ?assert(verify(SignedPacketUp)),
     ok.
 
 encode_devoce_test() ->
-    PacketUp = new(),
+    PacketUp = ?MODULE:new(#{}),
     ?assertEqual(PacketUp, decode(encode(PacketUp))),
     ok.
-
-new() ->
-    #packet_router_packet_up_v1_pb{
-        payload = <<"payload">>,
-        timestamp = 0,
-        signal_strength = 1.0,
-        frequency = 2.0,
-        datarate = [],
-        snr = 3.0,
-        region = 'US915',
-        hold_time = 4,
-        hotspot = <<"hotspot">>,
-        signature = <<"signature">>
-    }.
 
 -endif.

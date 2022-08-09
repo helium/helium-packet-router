@@ -12,12 +12,6 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("helium_proto/include/packet_router_pb.hrl").
--include("hpr.hrl").
-
--define(JOIN_REQUEST, 2#000).
--define(UNCONFIRMED_UP, 2#010).
--define(CONFIRMED_UP, 2#100).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -37,38 +31,14 @@ all() ->
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
-init_per_testcase(_TestCase, Config) ->
-    BaseDir = "data/hpr",
-    ok = application:set_env(?APP, base_dir, BaseDir),
-
-    DETS = hpr_routing_config_worker_dets,
-    File = filename:join(BaseDir, erlang:atom_to_list(DETS)),
-    ok = filelib:ensure_dir(File),
-    {ok, DETS} = dets:open_file(DETS, [{file, File}]),
-    {ok, NetID} = lora_subnet:parse_netid(16#00000000, big),
-    Route1 = hpr_route:new(
-        NetID,
-        [{16#00000000, 16#0000000A}],
-        [{1, 1}, {1, 2}],
-        <<"1127.0.0.1">>,
-        router,
-        1
-    ),
-    ok = dets:insert(DETS, [{1, Route1}]),
-    ok = dets:close(DETS),
-
-    application:ensure_all_started(?APP),
-    [
-        {route, Route1}
-        | Config
-    ].
+init_per_testcase(TestCase, Config) ->
+    test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
-end_per_testcase(_TestCase, Config) ->
-    application:stop(?APP),
-    Config.
+end_per_testcase(TestCase, Config) ->
+    test_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASES
@@ -77,18 +47,13 @@ end_per_testcase(_TestCase, Config) ->
 join_req_test(Config) ->
     Self = self(),
 
-    PacketBadSig = #packet_router_packet_up_v1_pb{
-        payload = <<"payload">>,
-        timestamp = 0,
-        signal_strength = 1.0,
-        frequency = 2.0,
-        datarate = [],
-        snr = 3.0,
-        region = 'US915',
-        hold_time = 4,
-        hotspot = <<"hotspot">>,
-        signature = <<"signature">>
-    },
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    Hotspot = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    PacketBadSig = test_utils:join_packet_up(#{
+        hotspot => Hotspot, sig_fun => fun(_) -> <<"bad_sig">> end
+    }),
     ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(PacketBadSig, Self)),
     receive
         {error, bad_signature} -> ok;
@@ -97,31 +62,11 @@ join_req_test(Config) ->
         ct:fail("bad_signature, timeout")
     end,
 
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
-    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    Hotspot = libp2p_crypto:pubkey_to_bin(PubKey),
-
-    PacketUpInvalid0 = #packet_router_packet_up_v1_pb{
-        payload = <<"payload">>,
-        timestamp = 0,
-        signal_strength = 1.0,
-        frequency = 2.0,
-        datarate = [],
-        snr = 3.0,
-        region = 'US915',
-        hold_time = 4,
-        hotspot = <<"hotspot">>,
-        signature = <<"signature">>
-    },
-    PacketUpInvalid1 = PacketUpInvalid0#packet_router_packet_up_v1_pb{hotspot = Hotspot},
-    PacketUpInvalidEncoded = hpr_packet_up:encode(PacketUpInvalid1#packet_router_packet_up_v1_pb{
-        signature = <<>>
+    PacketUpInvalid = test_utils:join_packet_up(#{
+        hotspot => Hotspot, sig_fun => SigFun, payload => <<>>
     }),
-    PacketUpInvalidSigned = PacketUpInvalid1#packet_router_packet_up_v1_pb{
-        signature = SigFun(PacketUpInvalidEncoded)
-    },
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(PacketUpInvalidSigned, Self)
+        {error, invalid_packet_type}, hpr_routing:handle_packet(PacketUpInvalid, Self)
     ),
     receive
         {error, invalid_packet_type} -> ok;
@@ -133,45 +78,16 @@ join_req_test(Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
-    DevNonce = crypto:strong_rand_bytes(2),
-    AppKey = crypto:strong_rand_bytes(16),
-    MType = ?JOIN_REQUEST,
-    MHDRRFU = 0,
-    Major = 0,
-    AppEUI = 1,
-    DevEUI = 2,
-    JoinPayload0 =
-        <<MType:3, MHDRRFU:3, Major:2, AppEUI:64/integer-unsigned-little,
-            DevEUI:64/integer-unsigned-little, DevNonce:2/binary>>,
-    MIC = crypto:macN(cmac, aes_128_cbc, AppKey, JoinPayload0, 4),
-    JoinPayload1 = <<JoinPayload0/binary, MIC:4/binary>>,
-
-    PacketUpValid0 = #packet_router_packet_up_v1_pb{
-        payload = JoinPayload1,
-        timestamp = 0,
-        signal_strength = 1.0,
-        frequency = 2.0,
-        datarate = [],
-        snr = 3.0,
-        region = 'US915',
-        hold_time = 4,
-        hotspot = <<"hotspot">>,
-        signature = <<"signature">>
-    },
-    PacketUpValid1 = PacketUpValid0#packet_router_packet_up_v1_pb{hotspot = Hotspot},
-    PacketUpValidEncoded = hpr_packet_up:encode(PacketUpValid1#packet_router_packet_up_v1_pb{
-        signature = <<>>
+    PacketUpValid = test_utils:join_packet_up(#{
+        hotspot => Hotspot, sig_fun => SigFun
     }),
-    PacketUpValidSigned = PacketUpValid1#packet_router_packet_up_v1_pb{
-        signature = SigFun(PacketUpValidEncoded)
-    },
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUpValidSigned, Self)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUpValid, Self)),
 
     ?assertEqual(
         [
             {Self,
                 {hpr_protocol_router, send, [
-                    PacketUpValidSigned,
+                    PacketUpValid,
                     Self,
                     proplists:get_value(route, Config, undefined)
                 ]},
