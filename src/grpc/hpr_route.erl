@@ -1,6 +1,6 @@
 -module(hpr_route).
 
--include_lib("helium_proto/include/packet_router_pb.hrl").
+-include("../grpc/autogen/server/packet_router_pb.hrl").
 
 -export([
     new/6,
