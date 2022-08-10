@@ -29,7 +29,9 @@ jobs:
         with:
           toolchain: stable
       - name: build
-        run: ./rebar3 compile
+        run: |
+          make grpc
+          ./rebar3 compile
       - name: build test
         run: ./rebar3 as test compile
       - name: tar
