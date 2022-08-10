@@ -68,6 +68,8 @@ jobs:
         run: |
           mkdir _build
           tar -xvf build.tar.gz -C _build
+      - name: build
+        run: make
       - name: xref
         run: ./rebar3 xref
   eunit:
@@ -95,6 +97,8 @@ jobs:
         run: |
           mkdir _build
           tar -xvf build.tar.gz -C _build
+      - name: build
+        run: make
       - name: eunit
         run: ./rebar3 eunit -v
   dialyzer:
@@ -122,6 +126,8 @@ jobs:
         run: |
           mkdir _build
           tar -xvf build.tar.gz -C _build
+      - name: build
+        run: make
       - name: dialyzer
         run: ./rebar3 dialyzer
   ct:
@@ -149,5 +155,7 @@ jobs:
         run: |
           mkdir _build
           tar -xvf build.tar.gz -C _build
+      - name: build
+        run: make
       - name: ct
         run: ./rebar3 ct --readable=true
