@@ -25,6 +25,7 @@ COPY Makefile Makefile
 COPY rebar3 rebar3
 COPY rebar.config rebar.config
 COPY rebar.lock rebar.lock
+COPY config/ config/
 RUN ./rebar3 get-deps
 RUN make compile
 
@@ -34,7 +35,6 @@ COPY src/ src/
 RUN make compile
 
 # Build release
-COPY config/ config/
 RUN make release
 
 CMD ["make", "run"]

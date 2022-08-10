@@ -29,9 +29,7 @@ jobs:
         with:
           toolchain: stable
       - name: build
-        run: |
-          make grpc
-          ./rebar3 compile
+        run: make
         env:
           CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
       - name: build test
