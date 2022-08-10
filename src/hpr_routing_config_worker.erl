@@ -103,7 +103,7 @@ init(#{base_dir := BaseDir} = _Args) ->
     {ok, #state{}, {continue, ?INIT_ASYNC}}.
 
 handle_continue(?INIT_ASYNC, State) ->
-    %% Connect to Config Service to get updates
+    %% TODO: Connect to Config Service to get updates
     {noreply, State};
 handle_continue(_Msg, State) ->
     {noreply, State}.

@@ -3,9 +3,9 @@
         {servers, [
             #{
                 grpc_opts => #{
-                    service_protos => [router_pb, state_channel_pb],
+                    service_protos => [packet_router_pb],
                     services => #{
-                        'helium.packet_router' => hpr_service
+                        'helium.packet_router.hotspot' => hpr_hotspot_service
                     }
                 },
                 transport_opts => #{ssl => false},
