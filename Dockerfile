@@ -37,8 +37,21 @@ RUN make compile
 COPY config/ config/
 RUN make release
 
-# Build stage 1
-FROM erlang:24.3-alpine
+CMD ["make", "run"]
+
+FROM builder AS tester
+
+COPY --from=builder /opt/hpr .
+# Bring over exe like make
+COPY --from=builder /usr/bin /usr/bin
+
+# Add tests
+COPY test/ test/
+RUN ./rebar3 compile as test
+
+CMD ["make", "run"]
+
+FROM builder AS runner
 WORKDIR /opt/hpr
 
 # Copy the built release
