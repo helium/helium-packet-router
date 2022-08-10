@@ -19,11 +19,7 @@
        {ref,"a0a58da6420b3cfb47778d549af4b0cd256e7ece"}},
   0},
  {<<"hpack">>,{pkg,<<"hpack_erl">>,<<"0.2.3">>},2},
- {<<"lager">>,{pkg,<<"lager">>,<<"3.9.2">>},0},
- {<<"lorawan">>,
-  {git,"https://github.com/helium/erlang-lorawan.git",
-       {ref,"29704ae1b29386993bfcf69d1ae4fc04d8502f0e"}},
-  0}]}.
+ {<<"lager">>,{pkg,<<"lager">>,<<"3.9.2">>},0}]}.
 [
 {pkg_hash,[
  {<<"ctx">>, <<"8FF88B70E6400C4DF90142E7F130625B82086077A45364A78D208ED3ED53C7FE">>},
