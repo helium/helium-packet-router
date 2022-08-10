@@ -29,11 +29,13 @@ jobs:
         with:
           toolchain: stable
       - name: build
-        run: |
-          make grpc
-          ./rebar3 compile
+        run: make
+        env:
+          CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
       - name: build test
         run: ./rebar3 as test compile
+        env:
+          CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
       - name: tar
         run: tar -cvzf build.tar.gz -C _build/ .
       - name: upload-artifact
@@ -52,6 +54,12 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v2
+      - name: deps
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
+      - name: rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
       - name: download-artifact
         uses: actions/download-artifact@v2
         with:
@@ -60,6 +68,8 @@ jobs:
         run: |
           mkdir _build
           tar -xvf build.tar.gz -C _build
+      - name: build
+        run: make
       - name: xref
         run: ./rebar3 xref
   eunit:
@@ -73,6 +83,12 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v2
+      - name: deps
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
+      - name: rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
       - name: download-artifact
         uses: actions/download-artifact@v2
         with:
@@ -81,6 +97,8 @@ jobs:
         run: |
           mkdir _build
           tar -xvf build.tar.gz -C _build
+      - name: build
+        run: make
       - name: eunit
         run: ./rebar3 eunit -v
   dialyzer:
@@ -94,6 +112,12 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v2
+      - name: deps
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
+      - name: rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
       - name: download-artifact
         uses: actions/download-artifact@v2
         with:
@@ -102,6 +126,8 @@ jobs:
         run: |
           mkdir _build
           tar -xvf build.tar.gz -C _build
+      - name: build
+        run: make
       - name: dialyzer
         run: ./rebar3 dialyzer
   ct:
@@ -115,6 +141,12 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v2
+      - name: deps
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
+      - name: rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
       - name: download-artifact
         uses: actions/download-artifact@v2
         with:
@@ -123,5 +155,7 @@ jobs:
         run: |
           mkdir _build
           tar -xvf build.tar.gz -C _build
+      - name: build
+        run: make
       - name: ct
         run: ./rebar3 ct --readable=true

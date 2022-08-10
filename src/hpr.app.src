@@ -7,12 +7,14 @@
         kernel,
         stdlib,
         lager,
+        throttle,
         helium_proto,
-        grpcbox
+        grpcbox,
+        erlang_lorawan,
+        libp2p_crypto
     ]},
     {env, []},
     {modules, []},
-
     {licenses, ["Apache 2.0"]},
     {links, []}
 ]}.
