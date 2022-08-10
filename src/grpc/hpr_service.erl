@@ -1,4 +1,4 @@
--module(helium_packet_router_service).
+-module(hpr_service).
 
 -behaviour(helium_packet_router_packet_router_bhvr).
 
