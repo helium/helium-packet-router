@@ -18,7 +18,7 @@ clean:
 test: | $(grpc_services_directory)
 	$(REBAR) fmt --verbose --check rebar.config
 	$(REBAR) fmt --verbose --check "{src,include,test}/**/*.{hrl,erl,app.src}" --exclude-files "src/grpc/autogen/**/*"
-	$(REBAR) fmt --verbose --check "config/{test,sys}.{config,config.src}"
+	$(REBAR) fmt --verbose --check "config/{ct,sys,grpc_server_gen}.{config,config.src}"
 	$(REBAR) xref
 	$(REBAR) eunit -v
 	$(REBAR) ct --readable=true
