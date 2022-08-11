@@ -18,9 +18,9 @@ clean:
 test: | $(grpc_services_directory)
 	$(REBAR) fmt --verbose --check rebar.config
 	$(REBAR) fmt --verbose --check "{src,include,test}/**/*.{hrl,erl,app.src}" --exclude-files "src/grpc/autogen/**/*"
-	$(REBAR) fmt --verbose --check "config/{test,sys}.{config,config.src}"
+	$(REBAR) fmt --verbose --check "config/{ct,sys,grpc_server_gen}.{config,config.src}"
 	$(REBAR) xref
-	$(REBAR) eunit
+	$(REBAR) eunit -v
 	$(REBAR) ct --readable=true
 	$(REBAR) dialyzer
 
@@ -31,7 +31,7 @@ run: | $(grpc_services_directory)
 	_build/default/rel/hpr/bin/hpr foreground
 
 docker-build:
-	docker build -f Dockerfile --force-rm -t quay.io/team-helium/hpr:local .
+	docker build --force-rm --target tester -t quay.io/team-helium/hpr:local .
 
 docker-test:
 	docker run --rm -it --init --name=helium_packet_router_test quay.io/team-helium/hpr:local make test

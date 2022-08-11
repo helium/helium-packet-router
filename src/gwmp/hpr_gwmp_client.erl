@@ -100,7 +100,6 @@ push_data(WorkerPid, HPRPacketUp, PacketTime, Protocol) ->
     ok = udp_worker_utils:update_address(WorkerPid, Protocol),
     gen_server:call(WorkerPid, {push_data, HPRPacketUp, PacketTime}).
 
-
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -124,7 +123,8 @@ init(Args) ->
 
     lager:md([
         {gateway_mac, udp_worker_utils:pubkeybin_to_mac(PubKeyBin)},
-        {address, Address}]),
+        {address, Address}
+    ]),
 
     Port = maps:get(port, Args),
     {ok, Socket} = pp_udp_socket:open({Address, Port}, undefined),
@@ -173,20 +173,23 @@ handle_call(
         location = Loc,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
         socket = Socket,
-        pubkeybin = PubKeyBin} =
+        pubkeybin = PubKeyBin
+    } =
         State
 ) ->
     _ = erlang:cancel_timer(ShutdownRef),
     {Token, Data} = handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Loc, PubKeyBin),
 
     {Reply, TimerRef} = udp_worker_utils:send_push_data(Token, Data, Socket),
-    {NewPushData, NewShutdownTimer} = udp_worker_utils:new_push_and_shutdown(Token, Data, TimerRef, PushData, ShutdownTimeout),
+    {NewPushData, NewShutdownTimer} = udp_worker_utils:new_push_and_shutdown(
+        Token, Data, TimerRef, PushData, ShutdownTimeout
+    ),
 
     {reply, Reply, State#hpr_gwmp_client_state{
         push_data = NewPushData,
         shutdown_timer = NewShutdownTimer
     }};
-handle_call(Request, From, State)->
+handle_call(Request, From, State) ->
     lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
     {reply, ok, State}.
 
@@ -245,15 +248,19 @@ handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Location, PubKeyBin) ->
     PushDataMap = values_for_push_from(HPRPacketUp, PubKeyBin),
     udp_worker_utils:handle_push_data(PushDataMap, Location, PacketTime).
 
-values_for_push_from(#packet_router_packet_up_v1_pb{
-    payload = Payload,
-    hotspot = MAC,
-    region = Region,
-    timestamp = Tmst,
-    frequency = Frequency,
-    datarate = Datarate,
-    signal_strength = SignalStrength,
-    snr = Snr} = _HPRPacketUp, PubKeyBin) ->
+values_for_push_from(
+    #packet_router_packet_up_v1_pb{
+        payload = Payload,
+        hotspot = MAC,
+        region = Region,
+        timestamp = Tmst,
+        frequency = Frequency,
+        datarate = Datarate,
+        signal_strength = SignalStrength,
+        snr = Snr
+    } = _HPRPacketUp,
+    PubKeyBin
+) ->
     #{
         region => Region,
         tmst => Tmst,
@@ -263,5 +270,5 @@ values_for_push_from(#packet_router_packet_up_v1_pb{
         signal_strength => SignalStrength,
         snr => Snr,
         mac => MAC,
-        pub_key_bin => PubKeyBin}.
-
+        pub_key_bin => PubKeyBin
+    }.
