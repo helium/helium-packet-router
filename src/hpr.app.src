@@ -5,7 +5,9 @@
     {mod, {hpr_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        ssl,
+        httpc_aws
     ]},
     {env, []},
     {modules, []},

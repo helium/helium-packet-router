@@ -7,11 +7,13 @@ services:
     image: quay.io/team-helium/hpr:local
     container_name: helium_packet_router
     restart: always
+    env_file: .env
     network_mode: host
     volumes:
       - "/var/data:/var/data"
   localstack:
     image: localstack/localstack:latest
+    restart: always
     environment:
       - AWS_DEFAULT_REGION=us-east-1
       - EDGE_PORT=4566

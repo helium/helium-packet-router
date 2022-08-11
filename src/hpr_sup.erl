@@ -11,6 +11,39 @@
 
 -export([init/1]).
 
+-define(SUP(I, Args), #{
+    id => I,
+    start => {I, start_link, Args},
+    restart => permanent,
+    shutdown => 5000,
+    type => supervisor,
+    modules => [I]
+}).
+
+-define(WORKER(I, Args), #{
+    id => I,
+    start => {I, start_link, Args},
+    restart => permanent,
+    shutdown => 5000,
+    type => worker,
+    modules => [I]
+}).
+
+-define(WORKER(I, Mod, Args), #{
+    id => I,
+    start => {Mod, start_link, Args},
+    restart => permanent,
+    shutdown => 5000,
+    type => worker,
+    modules => [I]
+}).
+
+-define(FLAGS, #{
+    strategy => rest_for_one,
+    intensity => 1,
+    period => 5
+}).
+
 -define(SERVER, ?MODULE).
 
 start_link() ->
@@ -26,12 +59,9 @@ start_link() ->
 %%                  type => worker(),       % optional
 %%                  modules => modules()}   % optional
 init([]) ->
-    SupFlags = #{
-        strategy => one_for_all,
-        intensity => 0,
-        period => 1
-    },
-    ChildSpecs = [],
-    {ok, {SupFlags, ChildSpecs}}.
+    {ok,
+        {?FLAGS, [
+            ?WORKER(hpr_packet_reporter, [#{}])
+        ]}}.
 
 %% internal functions
