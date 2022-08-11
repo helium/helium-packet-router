@@ -11,8 +11,10 @@
 
 -behaviour(gen_server).
 
+-include_lib("router_utils/include/semtech_udp.hrl").
+
 %% API
--export([start_link/0]).
+-export([start_link/0, push_data/4]).
 
 %% gen_server callbacks
 -export([
@@ -70,7 +72,6 @@
 -record(hpr_gwmp_client_state, {
     location :: no_location | {pos_integer(), float(), float()} | undefined,
     pubkeybin :: libp2p_crypto:pubkey_bin(),
-    net_id :: non_neg_integer(),
     socket :: pp_udp_socket:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
     pull_data :: {reference(), binary()} | undefined,
@@ -88,6 +89,18 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+-spec push_data(
+    WorkerPid :: pid(),
+    HPRPacketUp :: #packet_router_packet_up_v1_pb{},
+    PacketTime :: pos_integer(),
+    Protocol :: {udp, string(), integer()}
+) -> ok | {error, any()}.
+
+push_data(WorkerPid, HPRPacketUp, PacketTime, Protocol) ->
+    ok = udp_worker_utils:update_address(WorkerPid, Protocol),
+    gen_server:call(WorkerPid, {push_data, HPRPacketUp, PacketTime}).
+
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -99,9 +112,38 @@ start_link() ->
     | {ok, State :: #hpr_gwmp_client_state{}, timeout() | hibernate}
     | {stop, Reason :: term()}
     | ignore.
-init([]) ->
+init(Args) ->
     _Packet = #packet_router_packet_up_v1_pb{},
-    {ok, #hpr_gwmp_client_state{}}.
+
+    process_flag(trap_exit, true),
+    lager:info("~p init with ~p", [?SERVER, Args]),
+
+    PubKeyBin = maps:get(pubkeybin, Args),
+    Address = maps:get(address, Args),
+    PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
+
+    lager:md([
+        {gateway_mac, udp_worker_utils:pubkeybin_to_mac(PubKeyBin)},
+        {address, Address}]),
+
+    Port = maps:get(port, Args),
+    {ok, Socket} = pp_udp_socket:open({Address, Port}, undefined),
+
+    %% Pull data immediately so we can establish a connection for the first
+    %% pull_response.
+    self() ! ?PULL_DATA_TICK,
+    udp_worker_utils:schedule_pull_data(PullDataTimer),
+
+    ShutdownTimeout = maps:get(shutdown_timer, Args, ?SHUTDOWN_TIMER),
+    ShutdownRef = udp_worker_utils:schedule_shutdown(ShutdownTimeout),
+
+    {ok, #hpr_gwmp_client_state{
+        pubkeybin = PubKeyBin,
+        socket = Socket,
+        pull_data_timer = PullDataTimer,
+        shutdown_timer = {ShutdownTimeout, ShutdownRef},
+        location = no_location
+    }}.
 
 %% @private
 %% @doc Handling call messages
@@ -116,7 +158,36 @@ init([]) ->
     | {noreply, NewState :: #hpr_gwmp_client_state{}, timeout() | hibernate}
     | {stop, Reason :: term(), Reply :: term(), NewState :: #hpr_gwmp_client_state{}}
     | {stop, Reason :: term(), NewState :: #hpr_gwmp_client_state{}}.
-handle_call(_Request, _From, State = #hpr_gwmp_client_state{}) ->
+handle_call(
+    {update_address, Address, Port},
+    _From,
+    #hpr_gwmp_client_state{socket = Socket0} = State
+) ->
+    Socket1 = udp_worker_utils:update_address(Socket0, Address, Port),
+    {reply, ok, State#hpr_gwmp_client_state{socket = Socket1}};
+handle_call(
+    {push_data, HPRPacketUp, PacketTime},
+    _From,
+    #hpr_gwmp_client_state{
+        push_data = PushData,
+        location = Loc,
+        shutdown_timer = {ShutdownTimeout, ShutdownRef},
+        socket = Socket,
+        pubkeybin = PubKeyBin} =
+        State
+) ->
+    _ = erlang:cancel_timer(ShutdownRef),
+    {Token, Data} = handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Loc, PubKeyBin),
+
+    {Reply, TimerRef} = udp_worker_utils:send_push_data(Token, Data, Socket),
+    {NewPushData, NewShutdownTimer} = udp_worker_utils:new_push_and_shutdown(Token, Data, TimerRef, PushData, ShutdownTimeout),
+
+    {reply, Reply, State#hpr_gwmp_client_state{
+        push_data = NewPushData,
+        shutdown_timer = NewShutdownTimer
+    }};
+handle_call(Request, From, State)->
+    lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
     {reply, ok, State}.
 
 %% @private
@@ -125,7 +196,8 @@ handle_call(_Request, _From, State = #hpr_gwmp_client_state{}) ->
     {noreply, NewState :: #hpr_gwmp_client_state{}}
     | {noreply, NewState :: #hpr_gwmp_client_state{}, timeout() | hibernate}
     | {stop, Reason :: term(), NewState :: #hpr_gwmp_client_state{}}.
-handle_cast(_Request, State = #hpr_gwmp_client_state{}) ->
+handle_cast(Request, State) ->
+    lager:warning("rcvd unknown cast msg: ~p", [Request]),
     {noreply, State}.
 
 %% @private
@@ -163,3 +235,33 @@ code_change(_OldVsn, State = #hpr_gwmp_client_state{}, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec handle_hpr_packet_up_data(
+    HPRPacketUp :: #packet_router_packet_up_v1_pb{},
+    PacketTime :: pos_integer(),
+    Location :: {pos_integer(), float(), float()} | no_location | undefined,
+    PubKeyBin :: libp2p_crypto:pubkey_bin()
+) -> {binary(), binary()}.
+handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Location, PubKeyBin) ->
+    PushDataMap = values_for_push_from(HPRPacketUp, PubKeyBin),
+    udp_worker_utils:handle_push_data(PushDataMap, Location, PacketTime).
+
+values_for_push_from(#packet_router_packet_up_v1_pb{
+    payload = Payload,
+    hotspot = MAC,
+    region = Region,
+    timestamp = Tmst,
+    frequency = Frequency,
+    datarate = Datarate,
+    signal_strength = SignalStrength,
+    snr = Snr} = _HPRPacketUp, PubKeyBin) ->
+    #{
+        region => Region,
+        tmst => Tmst,
+        payload => Payload,
+        frequency => Frequency,
+        datarate => Datarate,
+        signal_strength => SignalStrength,
+        snr => Snr,
+        mac => MAC,
+        pub_key_bin => PubKeyBin}.
+
