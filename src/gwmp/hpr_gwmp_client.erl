@@ -30,6 +30,8 @@
 
 -define(SERVER, ?MODULE).
 
+-define(METRICS_PREFIX, "helium_packet_router_").
+
 -record(hpr_gwmp_client_state, {
     location :: no_location | {pos_integer(), float(), float()} | undefined,
     pubkeybin :: libp2p_crypto:pubkey_bin(),
@@ -173,7 +175,54 @@ handle_cast(Request, State) ->
     {noreply, NewState :: #hpr_gwmp_client_state{}}
     | {noreply, NewState :: #hpr_gwmp_client_state{}, timeout() | hibernate}
     | {stop, Reason :: term(), NewState :: #hpr_gwmp_client_state{}}.
-handle_info(_Info, State = #hpr_gwmp_client_state{}) ->
+handle_info(
+    {udp, Socket, _Address, Port, Data},
+    #hpr_gwmp_client_state{
+        socket = {socket, Socket, _}
+    } = State
+) ->
+    lager:debug("got udp packet ~p from ~p:~p", [Data, _Address, Port]),
+    try handle_udp(Data, State) of
+        {noreply, _} = NoReply -> NoReply
+    catch
+        _E:_R ->
+            lager:error("failed to handle UDP packet ~p: ~p/~p", [Data, _E, _R]),
+            {noreply, State}
+    end;
+handle_info(
+    {?PUSH_DATA_TICK, Token},
+    #hpr_gwmp_client_state{push_data = PushData} = State
+) ->
+    case maps:get(Token, PushData, undefined) of
+        undefined ->
+            {noreply, State};
+        {_Data, _} ->
+            lager:debug("got push data timeout ~p, ignoring lack of ack", [Token]),
+            ok = gwmp_metrics:push_ack_missed(?METRICS_PREFIX, todo),
+            {noreply, State#hpr_gwmp_client_state{push_data = maps:remove(Token, PushData)}}
+    end;
+handle_info(
+    ?PULL_DATA_TICK,
+    #hpr_gwmp_client_state{pubkeybin = PubKeyBin, socket = Socket, pull_data_timer = PullDataTimer} =
+        State
+) ->
+    {ok, RefAndToken} = udp_worker_utils:send_pull_data(#{
+        pubkeybin => PubKeyBin,
+        socket => Socket,
+        pull_data_timer => PullDataTimer
+    }),
+    {noreply, State#hpr_gwmp_client_state{pull_data = RefAndToken}};
+handle_info(
+    ?PULL_DATA_TIMEOUT_TICK,
+    #hpr_gwmp_client_state{pull_data_timer = PullDataTimer} = State
+) ->
+    udp_worker_utils:handle_pull_data_timeout(PullDataTimer, todo, ?METRICS_PREFIX),
+    {noreply, State};
+handle_info(?SHUTDOWN_TICK, #hpr_gwmp_client_state{shutdown_timer = {ShutdownTimeout, _}} = State) ->
+    lager:info("shutting down, haven't sent data in ~p", [ShutdownTimeout]),
+    {stop, normal, State};
+handle_info(_Msg, State) ->
+    lager:warning("rcvd unknown info msg: ~p, ~p", [_Msg, State]),
     {noreply, State}.
 
 %% @private
@@ -185,8 +234,8 @@ handle_info(_Info, State = #hpr_gwmp_client_state{}) ->
     Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #hpr_gwmp_client_state{}
 ) -> term().
-terminate(_Reason, _State = #hpr_gwmp_client_state{}) ->
-    ok.
+terminate(_Reason, _State = #hpr_gwmp_client_state{socket = Socket}) ->
+    ok = pp_udp_socket:close(Socket).
 
 %% @private
 %% @doc Convert process state when code is changed
@@ -240,3 +289,40 @@ hpr_gwmp_send_response_function(HandlerPid) ->
     fun(Data) ->
         lager:info("hpr_gwmp_send_response: Data: ~p, HandlerPid: ~p", [Data, HandlerPid])
     end.
+
+update_state(StateUpdates, InitialState) ->
+    Fun = fun(Key, Value, State) ->
+        case Key of
+            push_data -> State#hpr_gwmp_client_state{push_data = Value};
+            pull_data -> State#hpr_gwmp_client_state{pull_data = Value};
+            _ -> State
+        end
+    end,
+    maps:fold(Fun, InitialState, StateUpdates).
+
+-spec handle_udp(binary(), #hpr_gwmp_client_state{}) -> {noreply, #hpr_gwmp_client_state{}}.
+handle_udp(
+    Data,
+    #hpr_gwmp_client_state{
+        push_data = PushData,
+        pull_data_timer = PullDataTimer,
+        pull_data = PullData,
+        socket = Socket,
+        pull_resp_fun = PullRespFunction,
+        pubkeybin = PubKeyBin
+    } = State
+) ->
+    ID = todo,
+    StateUpdates =
+        udp_worker_utils:handle_udp(
+            Data,
+            PushData,
+            ID,
+            PullData,
+            PullDataTimer,
+            PubKeyBin,
+            Socket,
+            PullRespFunction,
+            ?METRICS_PREFIX
+        ),
+    {noreply, update_state(StateUpdates, State)}.
