@@ -11,10 +11,12 @@
 
 -behaviour(gen_server).
 
+-include("../grpc/autogen/server/packet_router_pb.hrl").
+
 -include_lib("router_utils/include/semtech_udp.hrl").
 
 %% API
--export([start_link/0, push_data/4]).
+-export([start_link/0, push_data/5]).
 
 %% gen_server callbacks
 -export([
@@ -28,52 +30,13 @@
 
 -define(SERVER, ?MODULE).
 
--record(packet_router_packet_up_v1_pb,
-    % = 1, optional
-    {
-        payload = <<>> :: iodata() | undefined,
-        % = 2, optional, 64 bits
-        timestamp = 0 :: non_neg_integer() | undefined,
-        % = 3, optional
-        signal_strength = 0.0 :: float() | integer() | infinity | '-infinity' | nan | undefined,
-        % = 4, optional
-        frequency = 0.0 :: float() | integer() | infinity | '-infinity' | nan | undefined,
-        % = 5, optional
-        datarate = [] :: unicode:chardata() | undefined,
-        % = 6, optional
-        snr = 0.0 :: float() | integer() | infinity | '-infinity' | nan | undefined,
-        % = 7, optional, enum region
-        region = 'US915' ::
-            'US915'
-            | 'EU868'
-            | 'EU433'
-            | 'CN470'
-            | 'CN779'
-            | 'AU915'
-            | 'AS923_1'
-            | 'KR920'
-            | 'IN865'
-            | 'AS923_2'
-            | 'AS923_3'
-            | 'AS923_4'
-            | 'AS923_1B'
-            | 'CD900_1A'
-            | integer()
-            | undefined,
-        % = 8, optional, 64 bits
-        hold_time = 0 :: non_neg_integer() | undefined,
-        % = 9, optional
-        hotspot = <<>> :: iodata() | undefined,
-        % = 10, optional
-        signature = <<>> :: iodata() | undefined
-    }
-).
-
 -record(hpr_gwmp_client_state, {
     location :: no_location | {pos_integer(), float(), float()} | undefined,
     pubkeybin :: libp2p_crypto:pubkey_bin(),
     socket :: pp_udp_socket:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
+    response_handler_pid :: undefined | pid(),
+    pull_resp_fun :: undefined | function(),
     pull_data :: {reference(), binary()} | undefined,
     pull_data_timer :: non_neg_integer(),
     shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()}
@@ -91,14 +54,15 @@ start_link() ->
 
 -spec push_data(
     WorkerPid :: pid(),
-    HPRPacketUp :: #packet_router_packet_up_v1_pb{},
+    HPRPacketUp :: hpr_packet_up:packet(),
     PacketTime :: pos_integer(),
+    HandlerPid :: pid(),
     Protocol :: {udp, string(), integer()}
 ) -> ok | {error, any()}.
 
-push_data(WorkerPid, HPRPacketUp, PacketTime, Protocol) ->
+push_data(WorkerPid, HPRPacketUp, PacketTime, HandlerPid, Protocol) ->
     ok = udp_worker_utils:update_address(WorkerPid, Protocol),
-    gen_server:call(WorkerPid, {push_data, HPRPacketUp, PacketTime}).
+    gen_server:call(WorkerPid, {push_data, HPRPacketUp, PacketTime, HandlerPid}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -112,8 +76,6 @@ push_data(WorkerPid, HPRPacketUp, PacketTime, Protocol) ->
     | {stop, Reason :: term()}
     | ignore.
 init(Args) ->
-    _Packet = #packet_router_packet_up_v1_pb{},
-
     process_flag(trap_exit, true),
     lager:info("~p init with ~p", [?SERVER, Args]),
 
@@ -166,7 +128,7 @@ handle_call(
     Socket1 = udp_worker_utils:update_address(Socket0, Address, Port),
     {reply, ok, State#hpr_gwmp_client_state{socket = Socket1}};
 handle_call(
-    {push_data, HPRPacketUp, PacketTime},
+    {push_data, HPRPacketUp, PacketTime, HandlerPid},
     _From,
     #hpr_gwmp_client_state{
         push_data = PushData,
@@ -187,6 +149,8 @@ handle_call(
 
     {reply, Reply, State#hpr_gwmp_client_state{
         push_data = NewPushData,
+        response_handler_pid = HandlerPid,
+        pull_resp_fun = hpr_gwmp_send_response_function(HandlerPid),
         shutdown_timer = NewShutdownTimer
     }};
 handle_call(Request, From, State) ->
@@ -239,7 +203,7 @@ code_change(_OldVsn, State = #hpr_gwmp_client_state{}, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 -spec handle_hpr_packet_up_data(
-    HPRPacketUp :: #packet_router_packet_up_v1_pb{},
+    HPRPacketUp :: hpr_packet_up:packet(),
     PacketTime :: pos_integer(),
     Location :: {pos_integer(), float(), float()} | no_location | undefined,
     PubKeyBin :: libp2p_crypto:pubkey_bin()
@@ -249,18 +213,17 @@ handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Location, PubKeyBin) ->
     udp_worker_utils:handle_push_data(PushDataMap, Location, PacketTime).
 
 values_for_push_from(
-    #packet_router_packet_up_v1_pb{
-        payload = Payload,
-        hotspot = MAC,
-        region = Region,
-        timestamp = Tmst,
-        frequency = Frequency,
-        datarate = Datarate,
-        signal_strength = SignalStrength,
-        snr = Snr
-    } = _HPRPacketUp,
+    #packet_router_packet_up_v1_pb{} = HPRPacketUp,
     PubKeyBin
 ) ->
+    Payload = hpr_packet_up:payload(HPRPacketUp),
+    MAC = hpr_packet_up:hotspot(HPRPacketUp),
+    Region = hpr_packet_up:region(HPRPacketUp),
+    Tmst = hpr_packet_up:timestamp(HPRPacketUp),
+    Frequency = hpr_packet_up:frequency(HPRPacketUp),
+    Datarate = hpr_packet_up:datarate(HPRPacketUp),
+    SignalStrength = hpr_packet_up:signal_strength(HPRPacketUp),
+    Snr = hpr_packet_up:snr(HPRPacketUp),
     #{
         region => Region,
         tmst => Tmst,
@@ -272,3 +235,8 @@ values_for_push_from(
         mac => MAC,
         pub_key_bin => PubKeyBin
     }.
+
+hpr_gwmp_send_response_function(HandlerPid) ->
+    fun(Data) ->
+        lager:info("hpr_gwmp_send_response: Data: ~p, HandlerPid: ~p", [Data, HandlerPid])
+    end.
