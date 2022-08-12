@@ -7,31 +7,42 @@
 
 -behaviour(supervisor).
 
+-include("hpr.hrl").
+
 -export([start_link/0]).
 
 -export([init/1]).
 
 -define(SERVER, ?MODULE).
 
+-define(WORKER(I, Args), #{
+    id => I,
+    start => {I, start_link, Args},
+    restart => permanent,
+    shutdown => 5000,
+    type => worker,
+    modules => [I]
+}).
+
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-%% sup_flags() = #{strategy => strategy(),         % optional
-%%                 intensity => non_neg_integer(), % optional
-%%                 period => pos_integer()}        % optional
-%% child_spec() = #{id => child_id(),       % mandatory
-%%                  start => mfargs(),      % mandatory
-%%                  restart => restart(),   % optional
-%%                  shutdown => shutdown(), % optional
-%%                  type => worker(),       % optional
-%%                  modules => modules()}   % optional
 init([]) ->
-    SupFlags = #{
-        strategy => one_for_all,
-        intensity => 0,
-        period => 1
-    },
-    ChildSpecs = [],
-    {ok, {SupFlags, ChildSpecs}}.
+    lager:info("sup init"),
 
-%% internal functions
+    BaseDir = application:get_env(?APP, base_dir, "/var/data/hpr"),
+    ok = filelib:ensure_dir(BaseDir),
+
+    ok = hpr_routing:init(),
+
+    ChildSpecs = [
+        ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}])
+    ],
+    {ok, {
+        #{
+            strategy => rest_for_one,
+            intensity => 1,
+            period => 5
+        },
+        ChildSpecs
+    }}.

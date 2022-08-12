@@ -1,15 +1,20 @@
 {application, hpr, [
-    {description, "An OTP application"},
+    {description, "Helium Packet-Router"},
     {vsn, "0.1.0"},
     {registered, []},
     {mod, {hpr_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        lager,
+        throttle,
+        helium_proto,
+        grpcbox,
+        erlang_lorawan,
+        libp2p_crypto
     ]},
     {env, []},
     {modules, []},
-
     {licenses, ["Apache 2.0"]},
     {links, []}
 ]}.
