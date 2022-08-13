@@ -1,0 +1,455 @@
+%%%-------------------------------------------------------------------
+%% @doc
+%% == Semtech basic communication protocol between Lora gateway and server ==
+%% See https://github.com/Lora-net/packet_forwarder/blob/master/PROTOCOL.TXT
+%% @end
+%%%-------------------------------------------------------------------
+-module(semtech_udp).
+
+-define(PROTOCOL_2, 2).
+-define(PUSH_DATA, 0).
+-define(PUSH_ACK, 1).
+-define(PULL_DATA, 2).
+-define(PULL_RESP, 3).
+-define(PULL_ACK, 4).
+-define(TX_ACK, 5).
+
+%% Value              | Definition
+%% :-----------------:|---------------------------------------------------------------------
+%%  NONE              | Packet has been programmed for downlink
+%%  TOO_LATE          | Rejected because it was already too late to program this packet for downlink
+%%  TOO_EARLY         | Rejected because downlink packet timestamp is too much in advance
+%%  COLLISION_PACKET  | Rejected because there was already a packet programmed in req timeframe
+%%  COLLISION_BEACON  | Rejected because there was already a beacon planned in requested timeframe
+%%  TX_FREQ           | Rejected because requested frequency is not supported by TX RF chain
+%%  TX_POWER          | Rejected because requested power is not supported by gateway
+%%  GPS_UNLOCKED      | Rejected because GPS is unlocked, so GPS timestamp cannot be used
+
+-define(TX_ACK_ERROR_NONE, <<"NONE">>).
+-define(TX_ACK_ERROR_TOO_LATE, <<"TOO_LATE">>).
+-define(TX_ACK_ERROR_COLLISION_PACKET, <<"COLLISION_PACKET">>).
+-define(TX_ACK_ERROR_COLLISION_BEACON, <<"COLLISION_BEACON">>).
+-define(TX_ACK_ERROR_TX_FREQ, <<"TX_FREQ">>).
+-define(TX_ACK_ERROR_TX_POWER, <<"TX_POWER">>).
+-define(TX_ACK_ERROR_GPS_UNLOCKED, <<"GPS_UNLOCKED">>).
+
+
+-export([
+    push_data/3, push_data/4,
+    push_ack/1,
+    pull_data/2,
+    pull_ack/1,
+    pull_resp/2,
+    tx_ack/2, tx_ack/3,
+    token/0,
+    token/1,
+    identifier/1,
+    identifier_to_atom/1,
+    json_data/1
+]).
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% That packet type is used by the gateway mainly to forward the RF packets
+%% received, and associated metadata, to the server.
+%% @end
+%%%-------------------------------------------------------------------
+-spec push_data(
+    binary(),
+    binary(),
+    map()
+) -> binary().
+push_data(Token, MAC, RXPK) ->
+    BinJSX = jsx:encode(#{rxpk => [RXPK]}),
+    <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_DATA:8/integer-unsigned, MAC:8/binary,
+        BinJSX/binary>>.
+
+-spec push_data(
+    binary(),
+    binary(),
+    map(),
+    map()
+) -> binary().
+push_data(Token, MAC, RXPK, Stat) ->
+    BinJSX = jsx:encode(#{rxpk => [RXPK], stat => Stat}),
+    <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_DATA:8/integer-unsigned, MAC:8/binary,
+        BinJSX/binary>>.
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% That packet type is used by the server to acknowledge immediately all the
+%% PUSH_DATA packets received.
+%% @end
+%%%-------------------------------------------------------------------
+-spec push_ack(binary()) -> binary().
+push_ack(Token) ->
+    <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>.
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% That packet type is used by the gateway to poll data from the server.
+%% @end
+%%%-------------------------------------------------------------------
+-spec pull_data(binary(), binary()) -> binary().
+pull_data(Token, MAC) ->
+    <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned, MAC:8/binary>>.
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% That packet type is used by the server to confirm that the network route is
+%% open and that the server can send PULL_RESP packets at any time.
+%% @end
+%%%-------------------------------------------------------------------
+-spec pull_ack(binary()) -> binary().
+pull_ack(Token) ->
+    <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_ACK:8/integer-unsigned>>.
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% This is a function for custom float encoding to JSON
+%% It prevents float mangling by rounding to the 4th decimal
+%% which makes things easier for the LNS
+%% @end
+%%%-------------------------------------------------------------------
+round_to_fourth_decimal(Float) ->
+    io_lib:format("~.4f", [Float]).
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% That packet type is used by the server to send RF packets and associated
+%% metadata that will have to be emitted by the gateway.
+%% @end
+%%%-------------------------------------------------------------------
+-spec pull_resp(
+    binary(),
+    map()
+) -> binary().
+pull_resp(Token, Map) ->
+    BinJSX = jsx:encode(#{txpk => Map}, [{float_formatter, fun round_to_fourth_decimal/1}]),
+    <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>.
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% That packet type is used by the gateway to send a feedback to the server
+%% to inform if a downlink request has been accepted or rejected by the gateway.
+%% The datagram may optionnaly contain a JSON string to give more details on
+%% acknoledge. If no JSON is present (empty string), this means than no error
+%% occured.
+%% @end
+%%%-------------------------------------------------------------------
+-spec tx_ack(
+    binary(),
+    binary()
+) -> binary().
+tx_ack(Token, MAC) ->
+    tx_ack(Token, MAC, ?TX_ACK_ERROR_NONE).
+
+-spec tx_ack(
+    binary(),
+    binary(),
+    binary()
+) -> binary().
+tx_ack(Token, MAC, Error) ->
+    Map = #{error => Error},
+    BinJSX = jsx:encode(#{txpk_ack => Map}),
+    <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?TX_ACK:8/integer-unsigned, MAC:8/binary,
+        BinJSX/binary>>.
+
+-spec token() -> binary().
+token() ->
+    crypto:strong_rand_bytes(2).
+
+-spec token(binary()) -> binary().
+token(<<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, _/binary>>) ->
+    Token.
+
+-spec identifier(binary()) -> integer().
+identifier(
+    <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, Identifier:8/integer-unsigned, _/binary>>
+) ->
+    Identifier.
+
+-spec identifier_to_atom(non_neg_integer()) -> atom().
+identifier_to_atom(?PUSH_DATA) ->
+    push_data;
+identifier_to_atom(?PUSH_ACK) ->
+    push_ack;
+identifier_to_atom(?PULL_DATA) ->
+    pull_data;
+identifier_to_atom(?PULL_RESP) ->
+    pull_resp;
+identifier_to_atom(?PULL_ACK) ->
+    pull_ack;
+identifier_to_atom(?TX_ACK) ->
+    tx_ack.
+
+-spec json_data(
+    binary()
+) -> map().
+json_data(
+    <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PUSH_DATA:8/integer-unsigned, _MAC:8/binary,
+        BinJSX/binary>>
+) ->
+    jsx:decode(BinJSX, [return_maps]);
+json_data(
+    <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PULL_RESP:8/integer-unsigned,
+        BinJSX/binary>>
+) ->
+    jsx:decode(BinJSX, [return_maps]);
+json_data(
+    <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?TX_ACK:8/integer-unsigned, _MAC:8/binary,
+        BinJSX/binary>>
+) ->
+    jsx:decode(BinJSX, [return_maps]).
+
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+push_data_test() ->
+    Token0 = token(),
+    MAC0 = crypto:strong_rand_bytes(8),
+    Tmst = erlang:system_time(millisecond),
+    Payload = <<"payload">>,
+    RXPK = #{
+        time => iso8601:format(
+            calendar:system_time_to_universal_time(Tmst, millisecond)
+        ),
+        tmst => Tmst,
+        freq => 915.2,
+        rfch => 0,
+        modu => <<"LORA">>,
+        datr => <<"datr">>,
+        rssi => -80.0,
+        lsnr => -10,
+        size => erlang:byte_size(Payload),
+        data => base64:encode(Payload)
+    },
+    PushData0 = push_data(Token0, MAC0, RXPK),
+    <<?PROTOCOL_2:8/integer-unsigned, Token1:2/binary, Id:8/integer-unsigned, MAC1:8/binary,
+        BinJSX0/binary>> = PushData0,
+    ?assertEqual(Token1, Token0),
+    ?assertEqual(?PUSH_DATA, Id),
+    ?assertEqual(MAC0, MAC1),
+    ?assertEqual(
+        #{
+            <<"rxpk">> => [
+                #{
+                    <<"time">> => iso8601:format(
+                        calendar:system_time_to_universal_time(Tmst, millisecond)
+                    ),
+                    <<"tmst">> => Tmst,
+                    <<"freq">> => 915.2,
+                    <<"rfch">> => 0,
+                    <<"modu">> => <<"LORA">>,
+                    <<"datr">> => <<"datr">>,
+                    <<"rssi">> => -80.0,
+                    <<"lsnr">> => -10,
+                    <<"size">> => erlang:byte_size(Payload),
+                    <<"data">> => base64:encode(Payload)
+                }
+            ]
+        },
+        jsx:decode(BinJSX0)
+    ),
+    STAT = #{
+        regi => 'US_915',
+        inde => 123456,
+        lati => -121,
+        long => 37,
+        pubk => "pubkey_b58"
+    },
+    PushData1 = push_data(Token0, MAC0, RXPK, STAT),
+    <<?PROTOCOL_2:8/integer-unsigned, Token1:2/binary, Id:8/integer-unsigned, MAC1:8/binary,
+        BinJSX1/binary>> = PushData1,
+    ?assertEqual(Token1, Token0),
+    ?assertEqual(?PUSH_DATA, Id),
+    ?assertEqual(MAC0, MAC1),
+    ?assertEqual(
+        #{
+            <<"rxpk">> => [
+                #{
+                    <<"time">> => iso8601:format(
+                        calendar:system_time_to_universal_time(Tmst, millisecond)
+                    ),
+                    <<"tmst">> => Tmst,
+                    <<"freq">> => 915.2,
+                    <<"rfch">> => 0,
+                    <<"modu">> => <<"LORA">>,
+                    <<"datr">> => <<"datr">>,
+                    <<"rssi">> => -80.0,
+                    <<"lsnr">> => -10,
+                    <<"size">> => erlang:byte_size(Payload),
+                    <<"data">> => base64:encode(Payload)
+                }
+            ],
+            <<"stat">> => #{
+                <<"regi">> => <<"US_915">>,
+                <<"inde">> => 123456,
+                <<"lati">> => -121,
+                <<"long">> => 37,
+                <<"pubk">> => "pubkey_b58"
+            }
+        },
+        jsx:decode(BinJSX1)
+    ),
+    ok.
+
+push_ack_test() ->
+    Token = token(),
+    PushAck = push_ack(Token),
+    ?assertEqual(
+        <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>,
+        PushAck
+    ),
+    ok.
+
+pull_data_test() ->
+    Token = token(),
+    MAC = crypto:strong_rand_bytes(8),
+    PullData = pull_data(Token, MAC),
+    ?assertEqual(
+        <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned,
+            MAC:8/binary>>,
+        PullData
+    ),
+    ok.
+
+pull_ack_test() ->
+    Token = token(),
+    PushAck = pull_ack(Token),
+    ?assertEqual(
+        <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_ACK:8/integer-unsigned>>,
+        PushAck
+    ),
+    ok.
+
+pull_resp_test() ->
+    Token0 = token(),
+    Map0 = #{
+        imme => true,
+        freq => 864.123456,
+        rfch => 0,
+        powe => 14,
+        modu => <<"LORA">>,
+        datr => <<"SF11BW125">>,
+        codr => <<"4/6">>,
+        ipol => false,
+        size => 32,
+        data => <<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>
+    },
+    PullResp = pull_resp(Token0, Map0),
+    <<?PROTOCOL_2:8/integer-unsigned, Token1:2/binary, Id:8/integer-unsigned, BinJSX/binary>> =
+        PullResp,
+    ?assertEqual(Token1, Token0),
+    ?assertEqual(?PULL_RESP, Id),
+    ?assertEqual(
+        #{
+            <<"txpk">> => #{
+                <<"imme">> => true,
+                <<"freq">> => 864.1235,
+                <<"rfch">> => 0,
+                <<"powe">> => 14,
+                <<"modu">> => <<"LORA">>,
+                <<"datr">> => <<"SF11BW125">>,
+                <<"codr">> => <<"4/6">>,
+                <<"ipol">> => false,
+                <<"size">> => 32,
+                <<"data">> => <<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>
+            }
+        },
+        jsx:decode(BinJSX)
+    ),
+    ok.
+
+tx_ack_test() ->
+    Token0 = token(),
+    MAC0 = crypto:strong_rand_bytes(8),
+    TxnAck = tx_ack(Token0, MAC0),
+    <<?PROTOCOL_2:8/integer-unsigned, Token1:2/binary, Id:8/integer-unsigned, MAC1:8/binary,
+        BinJSX/binary>> =
+        TxnAck,
+    ?assertEqual(Token0, Token1),
+    ?assertEqual(?TX_ACK, Id),
+    ?assertEqual(MAC0, MAC1),
+    ?assertEqual(
+        #{
+            <<"txpk_ack">> => #{
+                <<"error">> => ?TX_ACK_ERROR_NONE
+            }
+        },
+        jsx:decode(BinJSX)
+    ),
+    ok.
+
+token_test() ->
+    Token = token(),
+    ?assertEqual(2, erlang:byte_size(Token)),
+    ?assertEqual(Token, token(push_data(Token, crypto:strong_rand_bytes(8), #{}))),
+    ?assertEqual(Token, token(push_ack(Token))),
+    ?assertEqual(Token, token(pull_data(Token, crypto:strong_rand_bytes(8)))),
+    ?assertEqual(Token, token(pull_ack(Token))),
+    ?assertEqual(Token, token(pull_resp(Token, #{}))),
+    ?assertEqual(Token, token(tx_ack(Token, crypto:strong_rand_bytes(8)))),
+    ?assertException(error, function_clause, token(<<"some unknown stuff">>)),
+    ok.
+
+identifier_test() ->
+    Token = token(),
+    ?assertEqual(?PUSH_DATA, identifier(push_data(Token, crypto:strong_rand_bytes(8), #{}))),
+    ?assertEqual(?PUSH_ACK, identifier(push_ack(Token))),
+    ?assertEqual(?PULL_DATA, identifier(pull_data(Token, crypto:strong_rand_bytes(8)))),
+    ?assertEqual(?PULL_ACK, identifier(pull_ack(Token))),
+    ?assertEqual(?PULL_RESP, identifier(pull_resp(Token, #{}))),
+    ?assertEqual(?TX_ACK, identifier(tx_ack(Token, crypto:strong_rand_bytes(8)))),
+    ?assertException(error, function_clause, token(<<"some unknown stuff">>)),
+    ok.
+
+identifier_to_atom_test() ->
+    ?assertEqual(push_data, identifier_to_atom(?PUSH_DATA)),
+    ?assertEqual(push_ack, identifier_to_atom(?PUSH_ACK)),
+    ?assertEqual(pull_data, identifier_to_atom(?PULL_DATA)),
+    ?assertEqual(pull_resp, identifier_to_atom(?PULL_RESP)),
+    ?assertEqual(pull_ack, identifier_to_atom(?PULL_ACK)),
+    ?assertEqual(tx_ack, identifier_to_atom(?TX_ACK)),
+    ok.
+
+json_data_test() ->
+    Token = token(),
+    ?assertEqual(
+        #{<<"rxpk">> => [#{}]},
+        json_data(push_data(Token, crypto:strong_rand_bytes(8), #{}))
+    ),
+    ?assertEqual(#{<<"txpk">> => #{}}, json_data(pull_resp(Token, #{}))),
+    ?assertEqual(
+        #{<<"txpk_ack">> => #{<<"error">> => <<"NONE">>}},
+        json_data(tx_ack(Token, crypto:strong_rand_bytes(8)))
+    ),
+    ok.
+
+encode_with_float_formatter_test() ->
+    ?assertEqual(
+        jsx:encode([#{<<"pi">> => 3.000967890987654321}], [
+            {float_formatter, fun round_to_fourth_decimal/1}
+        ]),
+        <<"[{\"pi\":3.0010}]">>
+    ),
+    ?assertEqual(
+        jsx:encode([#{<<"pi">> => 3.000467890987654321}], [
+            {float_formatter, fun round_to_fourth_decimal/1}
+        ]),
+        <<"[{\"pi\":3.0005}]">>
+    ),
+    ?assertEqual(
+        jsx:encode([#{<<"pi">> => 905.299987}], [{float_formatter, fun round_to_fourth_decimal/1}]),
+        <<"[{\"pi\":905.3000}]">>
+    ),
+    ok.
+-endif.

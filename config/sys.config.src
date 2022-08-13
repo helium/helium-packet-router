@@ -1,4 +1,7 @@
 [
+    {hpr, [
+        {base_dir, "./data"}
+    ]},
     {grpcbox, [
         {servers, [
             #{
@@ -10,8 +13,8 @@
                 },
                 transport_opts => #{ssl => false},
                 listen_opts => #{
-                    port => 8080,
-                    ip => {0, 0, 0, 0}
+                    port => 8088,
+                    ip => {127, 0, 0, 1}
                 },
                 pool_opts => #{size => 500},
                 server_opts => #{

@@ -12,6 +12,7 @@
 
 -spec init(Stream :: grpcbox_stream:t()) -> grpcbox_stream:t().
 init(Stream) ->
+    io:format("we received a stream: ~p~n", [Stream]),
     Stream.
 
 -spec send_packet(hpr_packet_up:packet(), grpcbox_stream:t()) ->
@@ -21,7 +22,9 @@ init(Stream) ->
     | {stop, grpcbox_stream:t()}
     | {stop, packet_router_pb:packet_router_packet_down_v1_pb(), grpcbox_stream:t()}
     | grpcbox_stream:grpc_error_response().
-send_packet(_PacketUp, Stream) ->
+send_packet(PacketUp, Stream) ->
+    io:format("we received a packet from a stream: ~n~p~n", [PacketUp]),
+    hpr_udp_worker:push_data(PacketUp, erlang:system_time(millisecond), Stream),
     {ok, Stream}.
 
 -spec handle_info(Msg :: any(), Stream :: grpcbox_stream:t()) -> grpcbox_stream:t().
