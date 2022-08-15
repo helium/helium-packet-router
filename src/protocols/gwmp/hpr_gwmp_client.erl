@@ -13,7 +13,7 @@
 
 -include("../../grpc/autogen/server/packet_router_pb.hrl").
 
--include_lib("router_utils/include/semtech_udp.hrl").
+-include("semtech_udp.hrl").
 
 %% API
 -export([start_link/0, push_data/5]).
@@ -35,7 +35,7 @@
 -record(hpr_gwmp_client_state, {
     location :: no_location | {pos_integer(), float(), float()} | undefined,
     pubkeybin :: libp2p_crypto:pubkey_bin(),
-    socket :: pp_udp_socket:socket(),
+    socket :: gwmp_udp_socket:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
     response_handler_pid :: undefined | pid(),
     pull_resp_fun :: undefined | function(),
@@ -91,7 +91,7 @@ init(Args) ->
     ]),
 
     Port = maps:get(port, Args),
-    {ok, Socket} = pp_udp_socket:open({Address, Port}, undefined),
+    {ok, Socket} = gwmp_udp_socket:open({Address, Port}, undefined),
 
     %% Pull data immediately so we can establish a connection for the first
     %% pull_response.
@@ -235,7 +235,7 @@ handle_info(_Msg, State) ->
     State :: #hpr_gwmp_client_state{}
 ) -> term().
 terminate(_Reason, _State = #hpr_gwmp_client_state{socket = Socket}) ->
-    ok = pp_udp_socket:close(Socket).
+    ok = gwmp_udp_socket:close(Socket).
 
 %% @private
 %% @doc Convert process state when code is changed
