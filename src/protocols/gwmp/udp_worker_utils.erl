@@ -262,7 +262,7 @@ send_push_data(
 -spec update_address(
     WorkerPid :: pid(),
     Protocol ::
-        {udp, Address :: gwmp_udp_socket:socket_address(), Port :: pp_udp_socket:socket_port()}
+        {Address :: gwmp_udp_socket:socket_address(), Port :: gwmp_udp_socket:socket_port()}
 ) -> ok.
-update_address(WorkerPid, {udp, Address, Port}) ->
+update_address(WorkerPid, {Address, Port}) ->
     gen_server:call(WorkerPid, {update_address, Address, Port}).

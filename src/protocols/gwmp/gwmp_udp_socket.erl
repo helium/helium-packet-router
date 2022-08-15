@@ -21,7 +21,7 @@
 
 -export_type([socket/0, socket_address/0, socket_port/0]).
 
--spec open(socket_info(), socket_info()) -> {ok, socket()}.
+-spec open(socket_info(), undefined) -> {ok, socket()}.
 open(Primary, _Tee) ->
     {ok, Socket} = gen_udp:open(0, [binary, {active, true}]),
     {ok, #socket{socket = Socket, primary = Primary}}.

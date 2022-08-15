@@ -16,7 +16,7 @@
 -include("semtech_udp.hrl").
 
 %% API
--export([start_link/0, push_data/5]).
+-export([start_link/0, push_data/4, handle_hpr_packet_up_data/4]).
 
 %% gen_server callbacks
 -export([
@@ -56,15 +56,14 @@ start_link() ->
 
 -spec push_data(
     WorkerPid :: pid(),
-    HPRPacketUp :: hpr_packet_up:packet(),
-    PacketTime :: pos_integer(),
+    HPRPacketUp :: binary(),
     HandlerPid :: pid(),
-    Protocol :: {udp, string(), integer()}
+    Protocol :: {string(), integer()}
 ) -> ok | {error, any()}.
 
-push_data(WorkerPid, HPRPacketUp, PacketTime, HandlerPid, Protocol) ->
+push_data(WorkerPid, HPRPacketUp, HandlerPid, Protocol) ->
     ok = udp_worker_utils:update_address(WorkerPid, Protocol),
-    gen_server:call(WorkerPid, {push_data, HPRPacketUp, PacketTime, HandlerPid}).
+    gen_server:call(WorkerPid, {push_data, HPRPacketUp, HandlerPid}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -130,23 +129,21 @@ handle_call(
     Socket1 = udp_worker_utils:update_address(Socket0, Address, Port),
     {reply, ok, State#hpr_gwmp_client_state{socket = Socket1}};
 handle_call(
-    {push_data, HPRPacketUp, PacketTime, HandlerPid},
+    {push_data, HPRPacketUp, HandlerPid},
     _From,
     #hpr_gwmp_client_state{
         push_data = PushData,
-        location = Loc,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
-        socket = Socket,
-        pubkeybin = PubKeyBin
+        socket = Socket
     } =
         State
 ) ->
     _ = erlang:cancel_timer(ShutdownRef),
-    {Token, Data} = handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Loc, PubKeyBin),
+    Token = semtech_udp:token(),
 
-    {Reply, TimerRef} = udp_worker_utils:send_push_data(Token, Data, Socket),
+    {Reply, TimerRef} = udp_worker_utils:send_push_data(Token, HPRPacketUp, Socket),
     {NewPushData, NewShutdownTimer} = udp_worker_utils:new_push_and_shutdown(
-        Token, Data, TimerRef, PushData, ShutdownTimeout
+        Token, HPRPacketUp, TimerRef, PushData, ShutdownTimeout
     ),
 
     {reply, Reply, State#hpr_gwmp_client_state{
@@ -198,7 +195,7 @@ handle_info(
             {noreply, State};
         {_Data, _} ->
             lager:debug("got push data timeout ~p, ignoring lack of ack", [Token]),
-            ok = gwmp_metrics:push_ack_missed(?METRICS_PREFIX, todo),
+            ok = gwmp_metrics:push_ack_missed(?METRICS_PREFIX, <<"todo">>),
             {noreply, State#hpr_gwmp_client_state{push_data = maps:remove(Token, PushData)}}
     end;
 handle_info(
@@ -216,7 +213,7 @@ handle_info(
     ?PULL_DATA_TIMEOUT_TICK,
     #hpr_gwmp_client_state{pull_data_timer = PullDataTimer} = State
 ) ->
-    udp_worker_utils:handle_pull_data_timeout(PullDataTimer, todo, ?METRICS_PREFIX),
+    udp_worker_utils:handle_pull_data_timeout(PullDataTimer, <<"todo">>, ?METRICS_PREFIX),
     {noreply, State};
 handle_info(?SHUTDOWN_TICK, #hpr_gwmp_client_state{shutdown_timer = {ShutdownTimeout, _}} = State) ->
     lager:info("shutting down, haven't sent data in ~p", [ShutdownTimeout]),
@@ -257,6 +254,7 @@ code_change(_OldVsn, State = #hpr_gwmp_client_state{}, _Extra) ->
     Location :: {pos_integer(), float(), float()} | no_location | undefined,
     PubKeyBin :: libp2p_crypto:pubkey_bin()
 ) -> {binary(), binary()}.
+
 handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Location, PubKeyBin) ->
     PushDataMap = values_for_push_from(HPRPacketUp, PubKeyBin),
     udp_worker_utils:handle_push_data(PushDataMap, Location, PacketTime).
