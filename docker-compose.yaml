@@ -11,3 +11,4 @@ services:
       - "8081:8080"
     volumes:
       - "/var/data/hpr:/var/data"
+      - "/var/log/hpr:/var/log/hpr"
