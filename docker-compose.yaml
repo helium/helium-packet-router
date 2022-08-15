@@ -1,0 +1,11 @@
+version: '3'
+services:
+  hpr:
+    image: quay.io/team-helium/hpr:local
+    container_name: helium_packet_router
+    restart: always
+    env_file: .env
+    ports:
+      - "8081:8080"
+    volumes:
+      - "/var/data/hpr:/var/data"

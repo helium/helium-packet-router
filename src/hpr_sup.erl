@@ -30,7 +30,7 @@ start_link() ->
 init([]) ->
     lager:info("sup init"),
 
-    BaseDir = application:get_env(?APP, base_dir, "/var/data/hpr"),
+    BaseDir = application:get_env(?APP, base_dir, "/var/data"),
     ok = filelib:ensure_dir(BaseDir),
 
     ok = hpr_routing:init(),
