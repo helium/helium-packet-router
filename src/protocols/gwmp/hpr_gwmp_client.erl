@@ -11,7 +11,7 @@
 
 -behaviour(gen_server).
 
--include("../grpc/autogen/server/packet_router_pb.hrl").
+-include("../../grpc/autogen/server/packet_router_pb.hrl").
 
 -include_lib("router_utils/include/semtech_udp.hrl").
 
