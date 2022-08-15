@@ -61,10 +61,10 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 terminate(_Reason, _State) ->
-    lager:warning("going down ~p", [_Reason]),
+    lager:warning("going down ~s", [_Reason]),
     lists:foreach(
         fun({Metric, Module, _Meta, _Description}) ->
-            lager:info("removing metric ~p as ~p", [Metric, Module]),
+            lager:info("removing metric ~s as ~s", [Metric, Module]),
             Module:deregister(Metric)
         end,
         ?METRICS
@@ -78,7 +78,7 @@ terminate(_Reason, _State) ->
 declare_metrics() ->
     lists:foreach(
         fun({Metric, Module, Meta, Description}) ->
-            lager:info("declaring metric ~p as ~p meta=~p", [Metric, Module, Meta]),
+            lager:info("declaring metric ~s as ~s", [Metric, Module]),
             case Module of
                 prometheus_histogram ->
                     _ = Module:declare([
