@@ -1,6 +1,8 @@
 version: '3'
 services:
   hpr:
+    build:
+      context: .
     image: quay.io/team-helium/hpr:local
     container_name: helium_packet_router
     restart: always
