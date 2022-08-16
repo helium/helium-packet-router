@@ -15,6 +15,15 @@
 
 -define(SERVER, ?MODULE).
 
+-define(SUP(I, Args), #{
+    id => I,
+    start => {I, start_link, Args},
+    restart => permanent,
+    shutdown => 5000,
+    type => supervisor,
+    modules => [I]
+}).
+
 -define(WORKER(I, Args), #{
     id => I,
     start => {I, start_link, Args},
@@ -36,7 +45,8 @@ init([]) ->
     ok = hpr_routing:init(),
 
     ChildSpecs = [
-        ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}])
+        ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}]),
+        ?SUP(hpr_gwmp_udp_sup, [])
     ],
     {ok, {
         #{

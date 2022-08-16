@@ -16,7 +16,7 @@
 -include("semtech_udp.hrl").
 
 %% API
--export([start_link/0, push_data/4, handle_hpr_packet_up_data/4]).
+-export([start_link/1, push_data/4, handle_hpr_packet_up_data/4]).
 
 %% gen_server callbacks
 -export([
@@ -32,7 +32,7 @@
 
 -define(METRICS_PREFIX, "helium_packet_router_").
 
--record(hpr_gwmp_client_state, {
+-record(hpr_gwmp_worker_state, {
     location :: no_location | {pos_integer(), float(), float()} | undefined,
     pubkeybin :: libp2p_crypto:pubkey_bin(),
     socket :: gwmp_udp_socket:socket(),
@@ -49,21 +49,20 @@
 %%%===================================================================
 
 %% @doc Spawns the server and registers the local name (unique)
--spec start_link() ->
+-spec start_link(Args :: map()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Args) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, Args, []).
 
 -spec push_data(
     WorkerPid :: pid(),
-    HPRPacketUp :: binary(),
+    Data :: {Token :: binary(), Payload :: binary()},
     HandlerPid :: pid(),
     Protocol :: {string(), integer()}
 ) -> ok | {error, any()}.
-
-push_data(WorkerPid, HPRPacketUp, HandlerPid, Protocol) ->
-    ok = udp_worker_utils:update_address(WorkerPid, Protocol),
-    gen_server:call(WorkerPid, {push_data, HPRPacketUp, HandlerPid}).
+push_data(WorkerPid, Data, HandlerPid, Protocol) ->
+    %% ok = udp_worker_utils:update_address(WorkerPid, Protocol),
+    gen_server:call(WorkerPid, {push_data, Data, HandlerPid, Protocol}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -72,25 +71,24 @@ push_data(WorkerPid, HPRPacketUp, HandlerPid, Protocol) ->
 %% @private
 %% @doc Initializes the server
 -spec init(Args :: term()) ->
-    {ok, State :: #hpr_gwmp_client_state{}}
-    | {ok, State :: #hpr_gwmp_client_state{}, timeout() | hibernate}
+    {ok, State :: #hpr_gwmp_worker_state{}}
+    | {ok, State :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
     | {stop, Reason :: term()}
     | ignore.
 init(Args) ->
     process_flag(trap_exit, true),
     lager:info("~p init with ~p", [?SERVER, Args]),
 
-    PubKeyBin = maps:get(pubkeybin, Args),
-    Address = maps:get(address, Args),
+    #{pubkeybin := PubKeyBin, protocol := Protocol} = Args,
+
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
     lager:md([
         {gateway_mac, udp_worker_utils:pubkeybin_to_mac(PubKeyBin)},
-        {address, Address}
+        {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
 
-    Port = maps:get(port, Args),
-    {ok, Socket} = gwmp_udp_socket:open({Address, Port}, undefined),
+    {ok, Socket} = gwmp_udp_socket:open(Protocol, undefined),
 
     %% Pull data immediately so we can establish a connection for the first
     %% pull_response.
@@ -100,7 +98,7 @@ init(Args) ->
     ShutdownTimeout = maps:get(shutdown_timer, Args, ?SHUTDOWN_TIMER),
     ShutdownRef = udp_worker_utils:schedule_shutdown(ShutdownTimeout),
 
-    {ok, #hpr_gwmp_client_state{
+    {ok, #hpr_gwmp_worker_state{
         pubkeybin = PubKeyBin,
         socket = Socket,
         pull_data_timer = PullDataTimer,
@@ -113,43 +111,44 @@ init(Args) ->
 -spec handle_call(
     Request :: term(),
     From :: {pid(), Tag :: term()},
-    State :: #hpr_gwmp_client_state{}
+    State :: #hpr_gwmp_worker_state{}
 ) ->
-    {reply, Reply :: term(), NewState :: #hpr_gwmp_client_state{}}
-    | {reply, Reply :: term(), NewState :: #hpr_gwmp_client_state{}, timeout() | hibernate}
-    | {noreply, NewState :: #hpr_gwmp_client_state{}}
-    | {noreply, NewState :: #hpr_gwmp_client_state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), Reply :: term(), NewState :: #hpr_gwmp_client_state{}}
-    | {stop, Reason :: term(), NewState :: #hpr_gwmp_client_state{}}.
+    {reply, Reply :: term(), NewState :: #hpr_gwmp_worker_state{}}
+    | {reply, Reply :: term(), NewState :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
+    | {noreply, NewState :: #hpr_gwmp_worker_state{}}
+    | {noreply, NewState :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
+    | {stop, Reason :: term(), Reply :: term(), NewState :: #hpr_gwmp_worker_state{}}
+    | {stop, Reason :: term(), NewState :: #hpr_gwmp_worker_state{}}.
 handle_call(
     {update_address, Address, Port},
     _From,
-    #hpr_gwmp_client_state{socket = Socket0} = State
+    #hpr_gwmp_worker_state{socket = Socket0} = State
 ) ->
     Socket1 = udp_worker_utils:update_address(Socket0, Address, Port),
-    {reply, ok, State#hpr_gwmp_client_state{socket = Socket1}};
+    {reply, ok, State#hpr_gwmp_worker_state{socket = Socket1}};
 handle_call(
-    {push_data, HPRPacketUp, HandlerPid},
+    {push_data, _Data = {Token, Payload}, StreamHandler, Protocol},
     _From,
-    #hpr_gwmp_client_state{
+    #hpr_gwmp_worker_state{
         push_data = PushData,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
-        socket = Socket
+        socket = Socket0
     } =
         State
 ) ->
     _ = erlang:cancel_timer(ShutdownRef),
-    Token = semtech_udp:token(),
 
-    {Reply, TimerRef} = udp_worker_utils:send_push_data(Token, HPRPacketUp, Socket),
+    {ok, Socket1} = gwmp_udp_socket:update_address(Socket0, Protocol),
+    {Reply, TimerRef} = udp_worker_utils:send_push_data(Token, Payload, Socket1),
     {NewPushData, NewShutdownTimer} = udp_worker_utils:new_push_and_shutdown(
-        Token, HPRPacketUp, TimerRef, PushData, ShutdownTimeout
+        Token, Payload, TimerRef, PushData, ShutdownTimeout
     ),
 
-    {reply, Reply, State#hpr_gwmp_client_state{
+    {reply, Reply, State#hpr_gwmp_worker_state{
+        socket = Socket1,
         push_data = NewPushData,
-        response_handler_pid = HandlerPid,
-        pull_resp_fun = hpr_gwmp_send_response_function(HandlerPid),
+        response_handler_pid = StreamHandler,
+        pull_resp_fun = hpr_gwmp_send_response_function(StreamHandler),
         shutdown_timer = NewShutdownTimer
     }};
 handle_call(Request, From, State) ->
@@ -158,27 +157,26 @@ handle_call(Request, From, State) ->
 
 %% @private
 %% @doc Handling cast messages
--spec handle_cast(Request :: term(), State :: #hpr_gwmp_client_state{}) ->
-    {noreply, NewState :: #hpr_gwmp_client_state{}}
-    | {noreply, NewState :: #hpr_gwmp_client_state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), NewState :: #hpr_gwmp_client_state{}}.
+-spec handle_cast(Request :: term(), State :: #hpr_gwmp_worker_state{}) ->
+    {noreply, NewState :: #hpr_gwmp_worker_state{}}
+    | {noreply, NewState :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
+    | {stop, Reason :: term(), NewState :: #hpr_gwmp_worker_state{}}.
 handle_cast(Request, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [Request]),
     {noreply, State}.
 
 %% @private
 %% @doc Handling all non call/cast messages
--spec handle_info(Info :: timeout() | term(), State :: #hpr_gwmp_client_state{}) ->
-    {noreply, NewState :: #hpr_gwmp_client_state{}}
-    | {noreply, NewState :: #hpr_gwmp_client_state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), NewState :: #hpr_gwmp_client_state{}}.
+-spec handle_info(Info :: timeout() | term(), State :: #hpr_gwmp_worker_state{}) ->
+    {noreply, NewState :: #hpr_gwmp_worker_state{}}
+    | {noreply, NewState :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
+    | {stop, Reason :: term(), NewState :: #hpr_gwmp_worker_state{}}.
 handle_info(
-    {udp, Socket, _Address, Port, Data},
-    #hpr_gwmp_client_state{
+    {udp, Socket, _Address, _Port, Data},
+    #hpr_gwmp_worker_state{
         socket = {socket, Socket, _}
     } = State
 ) ->
-    lager:debug("got udp packet ~p from ~p:~p", [Data, _Address, Port]),
     try handle_udp(Data, State) of
         {noreply, _} = NoReply -> NoReply
     catch
@@ -188,7 +186,7 @@ handle_info(
     end;
 handle_info(
     {?PUSH_DATA_TICK, Token},
-    #hpr_gwmp_client_state{push_data = PushData} = State
+    #hpr_gwmp_worker_state{push_data = PushData} = State
 ) ->
     case maps:get(Token, PushData, undefined) of
         undefined ->
@@ -196,11 +194,15 @@ handle_info(
         {_Data, _} ->
             lager:debug("got push data timeout ~p, ignoring lack of ack", [Token]),
             ok = gwmp_metrics:push_ack_missed(?METRICS_PREFIX, <<"todo">>),
-            {noreply, State#hpr_gwmp_client_state{push_data = maps:remove(Token, PushData)}}
+            {noreply, State#hpr_gwmp_worker_state{push_data = maps:remove(Token, PushData)}}
     end;
 handle_info(
     ?PULL_DATA_TICK,
-    #hpr_gwmp_client_state{pubkeybin = PubKeyBin, socket = Socket, pull_data_timer = PullDataTimer} =
+    #hpr_gwmp_worker_state{
+        pubkeybin = PubKeyBin,
+        socket = Socket,
+        pull_data_timer = PullDataTimer
+    } =
         State
 ) ->
     {ok, RefAndToken} = udp_worker_utils:send_pull_data(#{
@@ -208,14 +210,15 @@ handle_info(
         socket => Socket,
         pull_data_timer => PullDataTimer
     }),
-    {noreply, State#hpr_gwmp_client_state{pull_data = RefAndToken}};
+
+    {noreply, State#hpr_gwmp_worker_state{pull_data = RefAndToken}};
 handle_info(
     ?PULL_DATA_TIMEOUT_TICK,
-    #hpr_gwmp_client_state{pull_data_timer = PullDataTimer} = State
+    #hpr_gwmp_worker_state{pull_data_timer = PullDataTimer} = State
 ) ->
     udp_worker_utils:handle_pull_data_timeout(PullDataTimer, <<"todo">>, ?METRICS_PREFIX),
     {noreply, State};
-handle_info(?SHUTDOWN_TICK, #hpr_gwmp_client_state{shutdown_timer = {ShutdownTimeout, _}} = State) ->
+handle_info(?SHUTDOWN_TICK, #hpr_gwmp_worker_state{shutdown_timer = {ShutdownTimeout, _}} = State) ->
     lager:info("shutting down, haven't sent data in ~p", [ShutdownTimeout]),
     {stop, normal, State};
 handle_info(_Msg, State) ->
@@ -229,20 +232,20 @@ handle_info(_Msg, State) ->
 %% with Reason. The return value is ignored.
 -spec terminate(
     Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #hpr_gwmp_client_state{}
+    State :: #hpr_gwmp_worker_state{}
 ) -> term().
-terminate(_Reason, _State = #hpr_gwmp_client_state{socket = Socket}) ->
+terminate(_Reason, _State = #hpr_gwmp_worker_state{socket = Socket}) ->
     ok = gwmp_udp_socket:close(Socket).
 
 %% @private
 %% @doc Convert process state when code is changed
 -spec code_change(
     OldVsn :: term() | {down, term()},
-    State :: #hpr_gwmp_client_state{},
+    State :: #hpr_gwmp_worker_state{},
     Extra :: term()
 ) ->
-    {ok, NewState :: #hpr_gwmp_client_state{}} | {error, Reason :: term()}.
-code_change(_OldVsn, State = #hpr_gwmp_client_state{}, _Extra) ->
+    {ok, NewState :: #hpr_gwmp_worker_state{}} | {error, Reason :: term()}.
+code_change(_OldVsn, State = #hpr_gwmp_worker_state{}, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
@@ -283,28 +286,30 @@ values_for_push_from(
         pub_key_bin => PubKeyBin
     }.
 
-hpr_gwmp_send_response_function(HandlerPid) ->
+hpr_gwmp_send_response_function(Handler) ->
     fun(Data) ->
-        lager:info("hpr_gwmp_send_response: Data: ~p, HandlerPid: ~p", [Data, HandlerPid])
+        PacketDown = hpr_hotspot_service:txpk_to_packet_down(Data),
+        grpcbox_stream:send(false, PacketDown, Handler),
+        lager:info("hpr_gwmp_send_response: Data: ~p, Handler: ~p", [Data, Handler])
     end.
 
 update_state(StateUpdates, InitialState) ->
     Fun = fun(Key, Value, State) ->
         case Key of
-            push_data -> State#hpr_gwmp_client_state{push_data = Value};
-            pull_data -> State#hpr_gwmp_client_state{pull_data = Value};
+            push_data -> State#hpr_gwmp_worker_state{push_data = Value};
+            pull_data -> State#hpr_gwmp_worker_state{pull_data = Value};
             _ -> State
         end
     end,
     maps:fold(Fun, InitialState, StateUpdates).
 
--spec handle_udp(binary(), #hpr_gwmp_client_state{}) -> {noreply, #hpr_gwmp_client_state{}}.
+-spec handle_udp(binary(), #hpr_gwmp_worker_state{}) -> {noreply, #hpr_gwmp_worker_state{}}.
 handle_udp(
     Data,
-    #hpr_gwmp_client_state{
+    #hpr_gwmp_worker_state{
         push_data = PushData,
         pull_data_timer = PullDataTimer,
-        pull_data = PullData,
+        pull_data = PullDataMap,
         socket = Socket,
         pull_resp_fun = PullRespFunction,
         pubkeybin = PubKeyBin

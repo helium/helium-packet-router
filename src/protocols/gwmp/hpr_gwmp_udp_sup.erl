@@ -11,7 +11,7 @@
 -export([start_link/0, init/1, maybe_start_worker/2, lookup_worker/1]).
 
 -define(APP, helium_packet_router).
--define(UDP_WORKER, hpr_gwmp_client).
+-define(UDP_WORKER, hpr_gwmp_worker).
 
 -define(ETS, hpr_gwmp_udp_sup_ets).
 

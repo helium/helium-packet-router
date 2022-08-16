@@ -195,17 +195,17 @@ json_data(
     <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PUSH_DATA:8/integer-unsigned, _MAC:8/binary,
         BinJSX/binary>>
 ) ->
-    jsx:decode(BinJSX);
+    jsx:decode(BinJSX, [return_maps]);
 json_data(
     <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PULL_RESP:8/integer-unsigned,
         BinJSX/binary>>
 ) ->
-    jsx:decode(BinJSX);
+    jsx:decode(BinJSX, [return_maps]);
 json_data(
     <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?TX_ACK:8/integer-unsigned, _MAC:8/binary,
         BinJSX/binary>>
 ) ->
-    jsx:decode(BinJSX).
+    jsx:decode(BinJSX, [return_maps]).
 
 %%====================================================================
 %% Internal functions
