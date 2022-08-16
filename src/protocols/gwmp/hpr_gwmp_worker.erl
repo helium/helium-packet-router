@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. Aug 2022 3:24 PM
 %%%-------------------------------------------------------------------
--module(hpr_gwmp_client).
+-module(hpr_gwmp_worker).
 -author("jonathanruttenberg").
 
 -behaviour(gen_server).

@@ -50,7 +50,7 @@ send_packet(PacketUp, Stream) ->
         {ok, Pid} ->
             PushData = ?MODULE:packet_up_to_push_data(PacketUp, erlang:system_time(millisecond)),
             Dest = ?MODULE:route_to_dest(Route),
-            try hpr_gwmp_client:push_data(Pid, PushData, Stream, Dest) of
+            try hpr_gwmp_worker:push_data(Pid, PushData, Stream, Dest) of
                 _ -> ok
             catch
                 Type:Err:Stack ->
@@ -91,7 +91,7 @@ txpk_to_packet_down(Data) ->
 packet_up_to_push_data(Up, GatewayTime) ->
     Token = semtech_udp:token(),
     PubKeyBin = hpr_packet_up:hotspot(Up),
-    MAC = hpr_gwmp_client:pubkeybin_to_mac(PubKeyBin),
+    MAC = hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin),
 
     %% TODO: Add back potential geo stuff
     %% CP breaks if {lati, long} are not parseable number
