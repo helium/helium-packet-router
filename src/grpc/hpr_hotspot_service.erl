@@ -33,8 +33,8 @@ send_packet(PacketUp, Stream) ->
         [{0, 16#FFFF_FFFF}],
         [
             {
-                erlang:list_to_integer("TODO", 16),
-                erlang:list_to_integer("TODO", 16)
+                erlang:list_to_integer("1000", 16),
+                erlang:list_to_integer("9999", 16)
             }
         ],
         <<"127.0.0.1:1700">>,
@@ -50,7 +50,7 @@ send_packet(PacketUp, Stream) ->
         {ok, Pid} ->
             PushData = ?MODULE:packet_up_to_push_data(PacketUp, erlang:system_time(millisecond)),
             Dest = ?MODULE:route_to_dest(Route),
-            try hpr_gwmp_worker:push_data(Pid, PushData, Stream, Dest) of
+            try hpr_gwmp_client:push_data(Pid, PushData, Stream, Dest) of
                 _ -> ok
             catch
                 Type:Err:Stack ->
@@ -91,7 +91,7 @@ txpk_to_packet_down(Data) ->
 packet_up_to_push_data(Up, GatewayTime) ->
     Token = semtech_udp:token(),
     PubKeyBin = hpr_packet_up:hotspot(Up),
-    MAC = udp_worker_utils:pubkeybin_to_mac(PubKeyBin),
+    MAC = hpr_gwmp_client:pubkeybin_to_mac(PubKeyBin),
 
     %% TODO: Add back potential geo stuff
     %% CP breaks if {lati, long} are not parseable number

@@ -16,7 +16,7 @@
 -include("semtech_udp.hrl").
 
 %% API
--export([start_link/1, push_data/4, handle_hpr_packet_up_data/4]).
+-export([start_link/1, push_data/4, handle_hpr_packet_up_data/4, pubkeybin_to_mac/1]).
 
 %% gen_server callbacks
 -export([
@@ -61,7 +61,6 @@ start_link(Args) ->
     Protocol :: {string(), integer()}
 ) -> ok | {error, any()}.
 push_data(WorkerPid, Data, HandlerPid, Protocol) ->
-    %% ok = udp_worker_utils:update_address(WorkerPid, Protocol),
     gen_server:call(WorkerPid, {push_data, Data, HandlerPid, Protocol}).
 
 %%%===================================================================
@@ -84,7 +83,7 @@ init(Args) ->
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
     lager:md([
-        {gateway_mac, udp_worker_utils:pubkeybin_to_mac(PubKeyBin)},
+        {gateway_mac, pubkeybin_to_mac(PubKeyBin)},
         {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
 
@@ -93,10 +92,10 @@ init(Args) ->
     %% Pull data immediately so we can establish a connection for the first
     %% pull_response.
     self() ! ?PULL_DATA_TICK,
-    udp_worker_utils:schedule_pull_data(PullDataTimer),
+    schedule_pull_data(PullDataTimer),
 
     ShutdownTimeout = maps:get(shutdown_timer, Args, ?SHUTDOWN_TIMER),
-    ShutdownRef = udp_worker_utils:schedule_shutdown(ShutdownTimeout),
+    ShutdownRef = schedule_shutdown(ShutdownTimeout),
 
     {ok, #hpr_gwmp_worker_state{
         pubkeybin = PubKeyBin,
@@ -124,7 +123,7 @@ handle_call(
     _From,
     #hpr_gwmp_worker_state{socket = Socket0} = State
 ) ->
-    Socket1 = udp_worker_utils:update_address(Socket0, Address, Port),
+    Socket1 = update_address(Socket0, Address, Port),
     {reply, ok, State#hpr_gwmp_worker_state{socket = Socket1}};
 handle_call(
     {push_data, _Data = {Token, Payload}, StreamHandler, Protocol},
@@ -139,8 +138,8 @@ handle_call(
     _ = erlang:cancel_timer(ShutdownRef),
 
     {ok, Socket1} = gwmp_udp_socket:update_address(Socket0, Protocol),
-    {Reply, TimerRef} = udp_worker_utils:send_push_data(Token, Payload, Socket1),
-    {NewPushData, NewShutdownTimer} = udp_worker_utils:new_push_and_shutdown(
+    {Reply, TimerRef} = send_push_data(Token, Payload, Socket1),
+    {NewPushData, NewShutdownTimer} = new_push_and_shutdown(
         Token, Payload, TimerRef, PushData, ShutdownTimeout
     ),
 
@@ -205,7 +204,7 @@ handle_info(
     } =
         State
 ) ->
-    {ok, RefAndToken} = udp_worker_utils:send_pull_data(#{
+    {ok, RefAndToken} = send_pull_data(#{
         pubkeybin => PubKeyBin,
         socket => Socket,
         pull_data_timer => PullDataTimer
@@ -216,7 +215,7 @@ handle_info(
     ?PULL_DATA_TIMEOUT_TICK,
     #hpr_gwmp_worker_state{pull_data_timer = PullDataTimer} = State
 ) ->
-    udp_worker_utils:handle_pull_data_timeout(PullDataTimer, <<"todo">>, ?METRICS_PREFIX),
+    handle_pull_data_timeout(PullDataTimer, <<"todo">>, ?METRICS_PREFIX),
     {noreply, State};
 handle_info(?SHUTDOWN_TICK, #hpr_gwmp_worker_state{shutdown_timer = {ShutdownTimeout, _}} = State) ->
     lager:info("shutting down, haven't sent data in ~p", [ShutdownTimeout]),
@@ -260,7 +259,7 @@ code_change(_OldVsn, State = #hpr_gwmp_worker_state{}, _Extra) ->
 
 handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Location, PubKeyBin) ->
     PushDataMap = values_for_push_from(HPRPacketUp, PubKeyBin),
-    udp_worker_utils:handle_push_data(PushDataMap, Location, PacketTime).
+    handle_push_data(PushDataMap, Location, PacketTime).
 
 values_for_push_from(
     #packet_router_packet_up_v1_pb{} = HPRPacketUp,
@@ -309,7 +308,7 @@ handle_udp(
     #hpr_gwmp_worker_state{
         push_data = PushData,
         pull_data_timer = PullDataTimer,
-        pull_data = PullDataMap,
+        pull_data = PullData,
         socket = Socket,
         pull_resp_fun = PullRespFunction,
         pubkeybin = PubKeyBin
@@ -317,7 +316,7 @@ handle_udp(
 ) ->
     ID = todo,
     StateUpdates =
-        udp_worker_utils:handle_udp(
+        handle_udp(
             Data,
             PushData,
             ID,
@@ -329,3 +328,230 @@ handle_udp(
             ?METRICS_PREFIX
         ),
     {noreply, update_state(StateUpdates, State)}.
+
+-spec pubkeybin_to_mac(binary()) -> binary().
+pubkeybin_to_mac(PubKeyBin) ->
+    <<(xxhash:hash64(PubKeyBin)):64/unsigned-integer>>.
+
+-spec schedule_pull_data(non_neg_integer()) -> reference().
+schedule_pull_data(PullDataTimer) ->
+    _ = erlang:send_after(PullDataTimer, self(), ?PULL_DATA_TICK).
+
+-spec schedule_shutdown(non_neg_integer()) -> reference().
+schedule_shutdown(ShutdownTimer) ->
+    _ = erlang:send_after(ShutdownTimer, self(), ?SHUTDOWN_TICK).
+
+update_address(Socket0, Address, Port) ->
+    lager:debug("Updating address and port [old: ~p] [new: ~p]", [
+        gwmp_udp_socket:get_address(Socket0),
+        {Address, Port}
+    ]),
+    {ok, Socket1} = gwmp_udp_socket:update_address(Socket0, {Address, Port}),
+    Socket1.
+
+-spec send_push_data(binary(), binary(), gwmp_udp_socket:socket()) ->
+    {ok | {error, any()}, reference()}.
+send_push_data(
+    Token,
+    Data,
+    Socket
+) ->
+    Reply = gwmp_udp_socket:send(Socket, Data),
+    TimerRef = erlang:send_after(?PUSH_DATA_TIMER, self(), {?PUSH_DATA_TICK, Token}),
+    lager:debug("sent ~p/~p to ~p replied: ~p", [
+        Token,
+        Data,
+        gwmp_udp_socket:get_address(Socket),
+        Reply
+    ]),
+    {Reply, TimerRef}.
+
+new_push_and_shutdown(Token, Data, TimerRef, PushData, ShutdownTimeout) ->
+    NewPushData = maps:put(Token, {Data, TimerRef}, PushData),
+    NewShutdownTimer = {ShutdownTimeout, schedule_shutdown(ShutdownTimeout)},
+    {NewPushData, NewShutdownTimer}.
+
+-spec send_pull_data(#{
+    pubkeybin := libp2p_crypto:pubkey_bin(),
+    socket := gwmp_udp_socket:socket(),
+    pull_data_timer := non_neg_integer()
+}) -> {ok, {reference(), binary()}} | {error, any()}.
+send_pull_data(
+    #{
+        pubkeybin := PubKeyBin,
+        socket := Socket,
+        pull_data_timer := PullDataTimer
+    }
+) ->
+    Token = semtech_udp:token(),
+    Data = semtech_udp:pull_data(Token, pubkeybin_to_mac(PubKeyBin)),
+    case gwmp_udp_socket:send(Socket, Data) of
+        ok ->
+            lager:debug("sent pull data keepalive ~p", [Token]),
+            TimerRef = erlang:send_after(PullDataTimer, self(), ?PULL_DATA_TIMEOUT_TICK),
+            {ok, {TimerRef, Token}};
+        Error ->
+            lager:warning("failed to send pull data keepalive ~p: ~p", [Token, Error]),
+            Error
+    end.
+
+handle_pull_data_timeout(PullDataTimer, NetID, MetricsPrefix) ->
+    lager:debug("got a pull data timeout, ignoring missed pull_ack [retry: ~p]", [PullDataTimer]),
+    ok = gwmp_metrics:pull_ack_missed(MetricsPrefix, NetID),
+    _ = schedule_pull_data(PullDataTimer).
+
+handle_push_data(PushDataMap, Location, PacketTime) ->
+    #{
+        pub_key_bin := PubKeyBin,
+        mac := MAC,
+        region := Region,
+        tmst := Tmst,
+        payload := Payload,
+        frequency := Frequency,
+        datarate := Datarate,
+        signal_strength := SignalStrength,
+        snr := Snr
+    } = PushDataMap,
+
+    Token = semtech_udp:token(),
+    {Index, Lat, Long} =
+        case Location of
+            undefined -> {undefined, undefined, undefined};
+            no_location -> {undefined, undefined, undefined};
+            {_, _, _} = L -> L
+        end,
+
+    Data = semtech_udp:push_data(
+        Token,
+        MAC,
+        #{
+            time => iso8601:format(
+                calendar:system_time_to_universal_time(PacketTime, millisecond)
+            ),
+            tmst => Tmst band 16#FFFFFFFF,
+            freq => Frequency,
+            rfch => 0,
+            modu => <<"LORA">>,
+            codr => <<"4/5">>,
+            stat => 1,
+            chan => 0,
+            datr => erlang:list_to_binary(Datarate),
+            rssi => erlang:trunc(SignalStrength),
+            lsnr => Snr,
+            size => erlang:byte_size(Payload),
+            data => base64:encode(Payload)
+        },
+        #{
+            regi => Region,
+            inde => Index,
+            lati => Lat,
+            long => Long,
+            pubk => libp2p_crypto:bin_to_b58(PubKeyBin)
+        }
+    ),
+    {Token, Data}.
+
+handle_udp(
+    Data,
+    PushData,
+    ID,
+    PullData,
+    PullDataTimer,
+    PubKeyBin,
+    Socket,
+    PullRespFunction,
+    MetricsPrefix
+) ->
+    Identifier = semtech_udp:identifier(Data),
+    lager:debug("got udp ~p / ~p", [semtech_udp:identifier_to_atom(Identifier), Data]),
+    StateUpdates =
+        case semtech_udp:identifier(Data) of
+            ?PUSH_ACK ->
+                handle_push_ack(Data, PushData, ID, MetricsPrefix);
+            ?PULL_ACK ->
+                handle_pull_ack(Data, PullData, PullDataTimer, ID, MetricsPrefix);
+            ?PULL_RESP ->
+                handle_pull_resp(Data, PubKeyBin, Socket, PullRespFunction);
+            _Id ->
+                lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
+                #{}
+        end,
+    StateUpdates.
+
+handle_push_ack(Data, PushData, NetID, MetricsPrefix) ->
+    Token = semtech_udp:token(Data),
+    case maps:get(Token, PushData, undefined) of
+        undefined ->
+            lager:debug("got unknown push ack ~p", [Token]),
+            #{push_data => PushData};
+        {_, TimerRef} ->
+            lager:debug("got push ack ~p", [Token]),
+            _ = erlang:cancel_timer(TimerRef),
+            ok = gwmp_metrics:push_ack(MetricsPrefix, NetID),
+            NewPushData = maps:remove(Token, PushData),
+            #{push_data => NewPushData}
+    end.
+
+-spec handle_pull_ack(
+    binary(),
+    {reference(), binary()} | undefined,
+    non_neg_integer(),
+    non_neg_integer(),
+    string()
+) -> map().
+handle_pull_ack(Data, undefined, _PullDataTimer, _NetID, _MetricsPrefix) ->
+    lager:warning("got unknown pull ack for ~p", [Data]),
+    #{};
+handle_pull_ack(Data, {PullDataRef, PullDataToken}, PullDataTimer, NetID, MetricsPrefix) ->
+    NewPullData =
+        handle_pull_ack(Data, PullDataToken, PullDataRef, PullDataTimer, NetID, MetricsPrefix),
+    case NewPullData of
+        undefined -> #{pull_data => NewPullData};
+        _ -> #{pull_data => {PullDataRef, PullDataToken}}
+    end.
+
+handle_pull_ack(Data, PullDataToken, PullDataRef, PullDataTimer, NetID, MetricsPrefix) ->
+    case semtech_udp:token(Data) of
+        PullDataToken ->
+            erlang:cancel_timer(PullDataRef),
+            lager:debug("got pull ack for ~p", [PullDataToken]),
+            _ = schedule_pull_data(PullDataTimer),
+            ok = gwmp_metrics:pull_ack(MetricsPrefix, NetID),
+            undefined;
+        _UnknownToken ->
+            lager:warning("got unknown pull ack for ~p", [_UnknownToken]),
+            ignore
+    end.
+
+-spec handle_pull_resp(binary(), libp2p_crypto:pubkey_bin(), gwmp_udp_socket:socket(), function()) ->
+    any().
+handle_pull_resp(Data, PubKeyBin, Socket, PullRespFunction) ->
+    _ = PullRespFunction(Data),
+    handle_pull_response(Data, PubKeyBin, Socket),
+    StateUpdates = #{},
+    StateUpdates.
+
+handle_pull_response(Data, PubKeyBin, Socket) ->
+    Token = semtech_udp:token(Data),
+    send_tx_ack(Token, #{pubkeybin => PubKeyBin, socket => Socket}).
+
+-spec send_tx_ack(
+    binary(),
+    #{
+        pubkeybin := libp2p_crypto:pubkey_bin(),
+        socket := gwmp_udp_socket:socket()
+    }
+) -> ok | {error, any()}.
+send_tx_ack(
+    Token,
+    #{pubkeybin := PubKeyBin, socket := Socket}
+) ->
+    Data = semtech_udp:tx_ack(Token, pubkeybin_to_mac(PubKeyBin)),
+    Reply = gwmp_udp_socket:send(Socket, Data),
+    lager:debug("sent ~p/~p to ~p replied: ~p", [
+        Token,
+        Data,
+        gwmp_udp_socket:get_address(Socket),
+        Reply
+    ]),
+    Reply.
