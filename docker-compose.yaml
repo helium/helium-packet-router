@@ -1,0 +1,20 @@
+version: '3'
+services:
+  hpr:
+    build:
+      context: .
+    image: quay.io/team-helium/hpr:local
+    container_name: helium_packet_router
+    restart: always
+    env_file: .env
+    ports:
+      - 8081:8080
+    volumes:
+      - /var/data/hpr:/var/data
+      - /var/log/hpr:/var/log/hpr
+  promtail:
+    image: grafana/promtail
+    volumes:
+      - /var/log:/var/log
+      - /var/data/hpr/promtail-config.yaml:/etc/promtail/promtail-config.yaml
+    command: -config.file=/etc/promtail/promtail-config.yaml

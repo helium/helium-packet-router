@@ -39,12 +39,13 @@ start_link() ->
 init([]) ->
     lager:info("sup init"),
 
-    BaseDir = application:get_env(?APP, base_dir, "/var/data/hpr"),
+    BaseDir = application:get_env(?APP, base_dir, "/var/data"),
     ok = filelib:ensure_dir(BaseDir),
 
     ok = hpr_routing:init(),
 
     ChildSpecs = [
+        ?WORKER(hpr_metrics, [#{}]),
         ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}]),
         ?SUP(hpr_gwmp_udp_sup, [])
     ],
