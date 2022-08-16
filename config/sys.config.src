@@ -55,5 +55,16 @@
                 ]}
             ]}
         ]}
+    ]},
+    {prometheus, [
+        {collectors, [
+            prometheus_boolean,
+            prometheus_counter,
+            prometheus_gauge,
+            prometheus_histogram,
+            prometheus_vm_memory_collector,
+            prometheus_vm_system_info_collector
+        ]},
+        {vm_system_info_collector_metrics, [process_count]}
     ]}
 ].
