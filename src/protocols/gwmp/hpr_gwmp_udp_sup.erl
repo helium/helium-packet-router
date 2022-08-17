@@ -36,12 +36,12 @@ init([]) ->
     gwmp_udp_sup_init(?ETS, ?UDP_WORKER, ?FLAGS).
 
 -spec maybe_start_worker(
-PubKeyBin :: binary(),
-Args :: map() | {error, any()},
-AppName :: atom(),
-UDPWorker :: atom(),
-ETSTableName :: atom(),
-SupModule :: atom()
+    PubKeyBin :: binary(),
+    Args :: map() | {error, any()},
+    AppName :: atom(),
+    UDPWorker :: atom(),
+    ETSTableName :: atom(),
+    SupModule :: atom()
 ) -> {ok, pid()} | {error, any()} | {error, worker_not_started, any()}.
 maybe_start_worker(_WorkerKey, {error, _} = Err, _, _, _, _) ->
     Err;
