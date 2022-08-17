@@ -262,7 +262,7 @@ push_data_test() ->
                 }
             ]
         },
-        jsx:decode(BinJSX0)
+        jsx:decode(BinJSX0, [return_maps])
     ),
     STAT = #{
         regi => 'US_915',
@@ -303,7 +303,7 @@ push_data_test() ->
                 <<"pubk">> => "pubkey_b58"
             }
         },
-        jsx:decode(BinJSX1)
+        jsx:decode(BinJSX1, [return_maps])
     ),
     ok.
 
@@ -370,7 +370,7 @@ pull_resp_test() ->
                 <<"data">> => <<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>
             }
         },
-        jsx:decode(BinJSX)
+        jsx:decode(BinJSX, [return_maps])
     ),
     ok.
 
@@ -390,7 +390,7 @@ tx_ack_test() ->
                 <<"error">> => ?TX_ACK_ERROR_NONE
             }
         },
-        jsx:decode(BinJSX)
+        jsx:decode(BinJSX, [return_maps])
     ),
     ok.
 
