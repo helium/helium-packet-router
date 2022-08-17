@@ -201,7 +201,6 @@ handle_info(
             {noreply, State};
         {_Data, _} ->
             lager:debug("got push data timeout ~p, ignoring lack of ack", [Token]),
-            ok = gwmp_metrics:push_ack_missed(?METRICS_PREFIX, <<"todo">>),
             {noreply, State#state{push_data = maps:remove(Token, PushData)}}
     end;
 handle_info(
