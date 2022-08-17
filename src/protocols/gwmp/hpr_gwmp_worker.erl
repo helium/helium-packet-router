@@ -44,7 +44,7 @@
     pubkeybin :: libp2p_crypto:pubkey_bin(),
     socket :: gwmp_udp_socket:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
-    response_handler_pid :: undefined | pid(),
+    response_stream :: undefined | tuple(),
     pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
     shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()}
@@ -152,7 +152,7 @@ handle_call(
     {reply, Reply, State#state{
         socket = Socket1,
         push_data = NewPushData,
-        response_handler_pid = StreamHandler,
+        response_stream = StreamHandler,
         shutdown_timer = NewShutdownTimer
     }};
 handle_call(Request, From, State) ->
@@ -285,7 +285,7 @@ handle_udp(
         pull_data_timer = PullDataTimer,
         pull_data = PullDataMap0,
         socket = Socket,
-        response_handler_pid = StreamHandler,
+        response_stream = StreamHandler,
         pubkeybin = PubKeyBin
     } = State0
 ) ->
@@ -418,7 +418,7 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
     Data :: binary(),
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     Socket :: gwmp_udp_socket:socket(),
-    StreamHandler :: pid()
+    StreamHandler :: tuple()
 ) ->
     ok.
 handle_pull_resp(Data, PubKeyBin, Socket, StreamHandler) ->
