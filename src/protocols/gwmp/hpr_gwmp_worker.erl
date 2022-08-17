@@ -16,7 +16,11 @@
 -include("semtech_udp.hrl").
 
 %% API
--export([start_link/1, push_data/4, handle_hpr_packet_up_data/4, pubkeybin_to_mac/1]).
+-export([
+    start_link/1,
+    push_data/4,
+    pubkeybin_to_mac/1
+]).
 
 %% gen_server callbacks
 -export([
@@ -32,14 +36,18 @@
 
 -define(METRICS_PREFIX, "helium_packet_router_").
 
--record(hpr_gwmp_worker_state, {
+-type pull_data_map() :: #{
+    gwmp_udp_socket:socket_dest() => #{timer_ref := reference(), token := binary()}
+}.
+
+-record(state, {
     location :: no_location | {pos_integer(), float(), float()} | undefined,
     pubkeybin :: libp2p_crypto:pubkey_bin(),
     socket :: gwmp_udp_socket:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
     response_handler_pid :: undefined | pid(),
     pull_resp_fun :: undefined | function(),
-    pull_data :: {reference(), binary()} | undefined,
+    pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
     shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()}
 }).
@@ -58,10 +66,10 @@ start_link(Args) ->
     WorkerPid :: pid(),
     Data :: {Token :: binary(), Payload :: binary()},
     HandlerPid :: pid(),
-    Protocol :: {string(), integer()}
+    SocketDest :: gwmp_udp_socket:socket_dest()
 ) -> ok | {error, any()}.
-push_data(WorkerPid, Data, HandlerPid, Protocol) ->
-    gen_server:call(WorkerPid, {push_data, Data, HandlerPid, Protocol}).
+push_data(WorkerPid, Data, HandlerPid, SocketDest) ->
+    gen_server:call(WorkerPid, {push_data, Data, HandlerPid, SocketDest}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -70,8 +78,8 @@ push_data(WorkerPid, Data, HandlerPid, Protocol) ->
 %% @private
 %% @doc Initializes the server
 -spec init(Args :: term()) ->
-    {ok, State :: #hpr_gwmp_worker_state{}}
-    | {ok, State :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
+    {ok, State :: #state{}}
+    | {ok, State :: #state{}, timeout() | hibernate}
     | {stop, Reason :: term()}
     | ignore.
 init(Args) ->
@@ -87,17 +95,16 @@ init(Args) ->
         {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
 
-    {ok, Socket} = gwmp_udp_socket:open(Protocol, undefined),
+    {ok, Socket} = gwmp_udp_socket:open(SocketDest, undefined),
 
-    %% Pull data immediately so we can establish a connection for the first
-    %% pull_response.
-    self() ! ?PULL_DATA_TICK,
-    schedule_pull_data(PullDataTimer),
+    %% NOTE: Pull data is sent at the first push_data to
+    %% initiate the connection and allow downlinks to start
+    %% flowing.
 
     ShutdownTimeout = maps:get(shutdown_timer, Args, ?SHUTDOWN_TIMER),
     ShutdownRef = schedule_shutdown(ShutdownTimeout),
 
-    {ok, #hpr_gwmp_worker_state{
+    {ok, #state{
         pubkeybin = PubKeyBin,
         socket = Socket,
         pull_data_timer = PullDataTimer,
@@ -110,40 +117,42 @@ init(Args) ->
 -spec handle_call(
     Request :: term(),
     From :: {pid(), Tag :: term()},
-    State :: #hpr_gwmp_worker_state{}
+    State :: #state{}
 ) ->
-    {reply, Reply :: term(), NewState :: #hpr_gwmp_worker_state{}}
-    | {reply, Reply :: term(), NewState :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
-    | {noreply, NewState :: #hpr_gwmp_worker_state{}}
-    | {noreply, NewState :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), Reply :: term(), NewState :: #hpr_gwmp_worker_state{}}
-    | {stop, Reason :: term(), NewState :: #hpr_gwmp_worker_state{}}.
+    {reply, Reply :: term(), NewState :: #state{}}
+    | {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate}
+    | {noreply, NewState :: #state{}}
+    | {noreply, NewState :: #state{}, timeout() | hibernate}
+    | {stop, Reason :: term(), Reply :: term(), NewState :: #state{}}
+    | {stop, Reason :: term(), NewState :: #state{}}.
 handle_call(
     {update_address, Address, Port},
     _From,
-    #hpr_gwmp_worker_state{socket = Socket0} = State
+    #state{socket = Socket0} = State
 ) ->
     Socket1 = update_address(Socket0, Address, Port),
-    {reply, ok, State#hpr_gwmp_worker_state{socket = Socket1}};
+    {reply, ok, State#state{socket = Socket1}};
 handle_call(
-    {push_data, _Data = {Token, Payload}, StreamHandler, Protocol},
+    {push_data, _Data = {Token, Payload}, StreamHandler, SocketDest},
     _From,
-    #hpr_gwmp_worker_state{
+    #state{
         push_data = PushData,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
         socket = Socket0
     } =
-        State
+        State0
 ) ->
     _ = erlang:cancel_timer(ShutdownRef),
 
-    {ok, Socket1} = gwmp_udp_socket:update_address(Socket0, Protocol),
+    State = maybe_send_pull_data(SocketDest, State0),
+
+    {ok, Socket1} = gwmp_udp_socket:update_address(Socket0, SocketDest),
     {Reply, TimerRef} = send_push_data(Token, Payload, Socket1),
     {NewPushData, NewShutdownTimer} = new_push_and_shutdown(
         Token, Payload, TimerRef, PushData, ShutdownTimeout
     ),
 
-    {reply, Reply, State#hpr_gwmp_worker_state{
+    {reply, Reply, State#state{
         socket = Socket1,
         push_data = NewPushData,
         response_handler_pid = StreamHandler,
@@ -156,27 +165,27 @@ handle_call(Request, From, State) ->
 
 %% @private
 %% @doc Handling cast messages
--spec handle_cast(Request :: term(), State :: #hpr_gwmp_worker_state{}) ->
-    {noreply, NewState :: #hpr_gwmp_worker_state{}}
-    | {noreply, NewState :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), NewState :: #hpr_gwmp_worker_state{}}.
+-spec handle_cast(Request :: term(), State :: #state{}) ->
+    {noreply, NewState :: #state{}}
+    | {noreply, NewState :: #state{}, timeout() | hibernate}
+    | {stop, Reason :: term(), NewState :: #state{}}.
 handle_cast(Request, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [Request]),
     {noreply, State}.
 
 %% @private
 %% @doc Handling all non call/cast messages
--spec handle_info(Info :: timeout() | term(), State :: #hpr_gwmp_worker_state{}) ->
-    {noreply, NewState :: #hpr_gwmp_worker_state{}}
-    | {noreply, NewState :: #hpr_gwmp_worker_state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), NewState :: #hpr_gwmp_worker_state{}}.
+-spec handle_info(Info :: timeout() | term(), State :: #state{}) ->
+    {noreply, NewState :: #state{}}
+    | {noreply, NewState :: #state{}, timeout() | hibernate}
+    | {stop, Reason :: term(), NewState :: #state{}}.
 handle_info(
-    {udp, Socket, _Address, _Port, Data},
-    #hpr_gwmp_worker_state{
+    {udp, Socket, Address, Port, Data},
+    #state{
         socket = {socket, Socket, _}
     } = State
 ) ->
-    try handle_udp(Data, State) of
+    try handle_udp(Data, {Address, Port}, State) of
         {noreply, _} = NoReply -> NoReply
     catch
         _E:_R ->
@@ -185,7 +194,7 @@ handle_info(
     end;
 handle_info(
     {?PUSH_DATA_TICK, Token},
-    #hpr_gwmp_worker_state{push_data = PushData} = State
+    #state{push_data = PushData} = State
 ) ->
     case maps:get(Token, PushData, undefined) of
         undefined ->
@@ -193,31 +202,43 @@ handle_info(
         {_Data, _} ->
             lager:debug("got push data timeout ~p, ignoring lack of ack", [Token]),
             ok = gwmp_metrics:push_ack_missed(?METRICS_PREFIX, <<"todo">>),
-            {noreply, State#hpr_gwmp_worker_state{push_data = maps:remove(Token, PushData)}}
+            {noreply, State#state{push_data = maps:remove(Token, PushData)}}
     end;
 handle_info(
-    ?PULL_DATA_TICK,
-    #hpr_gwmp_worker_state{
+    {?PULL_DATA_TICK, SocketDest},
+    #state{
         pubkeybin = PubKeyBin,
         socket = Socket,
-        pull_data_timer = PullDataTimer
+        pull_data_timer = PullDataTimer,
+        pull_data = PullDataMap0
     } =
         State
 ) ->
-    {ok, RefAndToken} = send_pull_data(#{
-        pubkeybin => PubKeyBin,
-        socket => Socket,
-        pull_data_timer => PullDataTimer
-    }),
-
-    {noreply, State#hpr_gwmp_worker_state{pull_data = RefAndToken}};
+    case
+        send_pull_data(#{
+            pubkeybin => PubKeyBin,
+            socket => Socket,
+            dest => SocketDest,
+            pull_data_timer => PullDataTimer
+        })
+    of
+        {ok, RefAndToken} ->
+            PullDataMap1 = maps:put(SocketDest, RefAndToken, PullDataMap0),
+            {noreply, State#state{pull_data = PullDataMap1}};
+        {error, Reason} ->
+            lager:warning(
+                [{error, Reason}, {lns, SocketDest}],
+                "could not send pull_data"
+            ),
+            {noreply, State}
+    end;
 handle_info(
-    ?PULL_DATA_TIMEOUT_TICK,
-    #hpr_gwmp_worker_state{pull_data_timer = PullDataTimer} = State
+    {?PULL_DATA_TIMEOUT_TICK, SocketDest},
+    #state{pull_data_timer = PullDataTimer} = State
 ) ->
-    handle_pull_data_timeout(PullDataTimer, <<"todo">>, ?METRICS_PREFIX),
+    handle_pull_data_timeout(PullDataTimer, SocketDest),
     {noreply, State};
-handle_info(?SHUTDOWN_TICK, #hpr_gwmp_worker_state{shutdown_timer = {ShutdownTimeout, _}} = State) ->
+handle_info(?SHUTDOWN_TICK, #state{shutdown_timer = {ShutdownTimeout, _}} = State) ->
     lager:info("shutting down, haven't sent data in ~p", [ShutdownTimeout]),
     {stop, normal, State};
 handle_info(_Msg, State) ->
@@ -231,111 +252,74 @@ handle_info(_Msg, State) ->
 %% with Reason. The return value is ignored.
 -spec terminate(
     Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #hpr_gwmp_worker_state{}
+    State :: #state{}
 ) -> term().
-terminate(_Reason, _State = #hpr_gwmp_worker_state{socket = Socket}) ->
+terminate(_Reason, _State = #state{socket = Socket}) ->
     ok = gwmp_udp_socket:close(Socket).
 
 %% @private
 %% @doc Convert process state when code is changed
 -spec code_change(
     OldVsn :: term() | {down, term()},
-    State :: #hpr_gwmp_worker_state{},
+    State :: #state{},
     Extra :: term()
 ) ->
-    {ok, NewState :: #hpr_gwmp_worker_state{}} | {error, Reason :: term()}.
-code_change(_OldVsn, State = #hpr_gwmp_worker_state{}, _Extra) ->
+    {ok, NewState :: #state{}} | {error, Reason :: term()}.
+code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec handle_hpr_packet_up_data(
-    HPRPacketUp :: hpr_packet_up:packet(),
-    PacketTime :: pos_integer(),
-    Location :: {pos_integer(), float(), float()} | no_location | undefined,
-    PubKeyBin :: libp2p_crypto:pubkey_bin()
-) -> {binary(), binary()}.
-
-handle_hpr_packet_up_data(HPRPacketUp, PacketTime, Location, PubKeyBin) ->
-    PushDataMap = values_for_push_from(HPRPacketUp, PubKeyBin),
-    handle_push_data(PushDataMap, Location, PacketTime).
-
-values_for_push_from(
-    #packet_router_packet_up_v1_pb{} = HPRPacketUp,
-    PubKeyBin
-) ->
-    Payload = hpr_packet_up:payload(HPRPacketUp),
-    MAC = hpr_packet_up:hotspot(HPRPacketUp),
-    Region = hpr_packet_up:region(HPRPacketUp),
-    Tmst = hpr_packet_up:timestamp(HPRPacketUp),
-    Frequency = hpr_packet_up:frequency(HPRPacketUp),
-    Datarate = hpr_packet_up:datarate(HPRPacketUp),
-    SignalStrength = hpr_packet_up:signal_strength(HPRPacketUp),
-    Snr = hpr_packet_up:snr(HPRPacketUp),
-    #{
-        region => Region,
-        tmst => Tmst,
-        payload => Payload,
-        frequency => Frequency,
-        datarate => Datarate,
-        signal_strength => SignalStrength,
-        snr => Snr,
-        mac => MAC,
-        pub_key_bin => PubKeyBin
-    }.
 
 hpr_gwmp_send_response_function(Handler) ->
     fun(Data) ->
-        PacketDown = hpr_hotspot_service:txpk_to_packet_down(Data),
+        PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
         grpcbox_stream:send(false, PacketDown, Handler),
         lager:info("hpr_gwmp_send_response: Data: ~p, Handler: ~p", [Data, Handler])
     end.
 
-update_state(StateUpdates, InitialState) ->
-    Fun = fun(Key, Value, State) ->
-        case Key of
-            push_data -> State#hpr_gwmp_worker_state{push_data = Value};
-            pull_data -> State#hpr_gwmp_worker_state{pull_data = Value};
-            _ -> State
-        end
-    end,
-    maps:fold(Fun, InitialState, StateUpdates).
-
--spec handle_udp(binary(), #hpr_gwmp_worker_state{}) -> {noreply, #hpr_gwmp_worker_state{}}.
+-spec handle_udp(
+    Data :: binary(),
+    DataSrc :: gwmp_udp_socket:socket_dest(),
+    State :: #state{}
+) -> {noreply, #state{}}.
 handle_udp(
     Data,
-    #hpr_gwmp_worker_state{
-        push_data = PushData,
+    DataSrc,
+    #state{
+        push_data = PushData0,
         pull_data_timer = PullDataTimer,
-        pull_data = PullData,
+        pull_data = PullDataMap0,
         socket = Socket,
         pull_resp_fun = PullRespFunction,
         pubkeybin = PubKeyBin
-    } = State
+    } = State0
 ) ->
-    ID = todo,
-    StateUpdates =
-        handle_udp(
-            Data,
-            PushData,
-            ID,
-            PullData,
-            PullDataTimer,
-            PubKeyBin,
-            Socket,
-            PullRespFunction,
-            ?METRICS_PREFIX
-        ),
-    {noreply, update_state(StateUpdates, State)}.
+    State1 =
+        case semtech_udp:identifier(Data) of
+            ?PUSH_ACK ->
+                PushData1 = handle_push_ack(Data, PushData0),
+                State0#state{push_data = PushData1};
+            ?PULL_ACK ->
+                PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
+                State0#state{pull_data = PullDataMap1};
+            ?PULL_RESP ->
+                ok = handle_pull_resp(Data, PubKeyBin, Socket, PullRespFunction),
+                State0;
+            _Id ->
+                lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
+                State0
+        end,
+    {noreply, State1}.
 
 -spec pubkeybin_to_mac(binary()) -> binary().
 pubkeybin_to_mac(PubKeyBin) ->
     <<(xxhash:hash64(PubKeyBin)):64/unsigned-integer>>.
 
--spec schedule_pull_data(non_neg_integer()) -> reference().
-schedule_pull_data(PullDataTimer) ->
-    _ = erlang:send_after(PullDataTimer, self(), ?PULL_DATA_TICK).
+-spec schedule_pull_data(non_neg_integer(), gwmp_udp_socket:socket_dest()) -> reference().
+schedule_pull_data(PullDataTimer, SocketDest) ->
+    _ = erlang:send_after(PullDataTimer, self(), {?PULL_DATA_TICK, SocketDest}).
 
 -spec schedule_shutdown(non_neg_integer()) -> reference().
 schedule_shutdown(ShutdownTimer) ->
@@ -374,162 +358,80 @@ new_push_and_shutdown(Token, Data, TimerRef, PushData, ShutdownTimeout) ->
 -spec send_pull_data(#{
     pubkeybin := libp2p_crypto:pubkey_bin(),
     socket := gwmp_udp_socket:socket(),
+    dest := gwmp_udp_socket:socket_dest(),
     pull_data_timer := non_neg_integer()
-}) -> {ok, {reference(), binary()}} | {error, any()}.
+}) -> {ok, #{timer_ref := reference(), token := binary()}} | {error, any()}.
 send_pull_data(
     #{
         pubkeybin := PubKeyBin,
-        socket := Socket,
+        socket := Socket0,
+        dest := SocketDest,
         pull_data_timer := PullDataTimer
     }
 ) ->
+    {ok, Socket} = gwmp_udp_socket:update_address(Socket0, SocketDest),
     Token = semtech_udp:token(),
     Data = semtech_udp:pull_data(Token, pubkeybin_to_mac(PubKeyBin)),
     case gwmp_udp_socket:send(Socket, Data) of
         ok ->
             lager:debug("sent pull data keepalive ~p", [Token]),
-            TimerRef = erlang:send_after(PullDataTimer, self(), ?PULL_DATA_TIMEOUT_TICK),
-            {ok, {TimerRef, Token}};
+            TimerRef = erlang:send_after(
+                PullDataTimer, self(), {?PULL_DATA_TIMEOUT_TICK, SocketDest}
+            ),
+            {ok, #{timer_ref => TimerRef, token => Token}};
         Error ->
             lager:warning("failed to send pull data keepalive ~p: ~p", [Token, Error]),
             Error
     end.
 
-handle_pull_data_timeout(PullDataTimer, NetID, MetricsPrefix) ->
+handle_pull_data_timeout(PullDataTimer, SocketDest) ->
     lager:debug("got a pull data timeout, ignoring missed pull_ack [retry: ~p]", [PullDataTimer]),
-    ok = gwmp_metrics:pull_ack_missed(MetricsPrefix, NetID),
-    _ = schedule_pull_data(PullDataTimer).
+    _ = schedule_pull_data(PullDataTimer, SocketDest).
 
-handle_push_data(PushDataMap, Location, PacketTime) ->
-    #{
-        pub_key_bin := PubKeyBin,
-        mac := MAC,
-        region := Region,
-        tmst := Tmst,
-        payload := Payload,
-        frequency := Frequency,
-        datarate := Datarate,
-        signal_strength := SignalStrength,
-        snr := Snr
-    } = PushDataMap,
-
-    Token = semtech_udp:token(),
-    {Index, Lat, Long} =
-        case Location of
-            undefined -> {undefined, undefined, undefined};
-            no_location -> {undefined, undefined, undefined};
-            {_, _, _} = L -> L
-        end,
-
-    Data = semtech_udp:push_data(
-        Token,
-        MAC,
-        #{
-            time => iso8601:format(
-                calendar:system_time_to_universal_time(PacketTime, millisecond)
-            ),
-            tmst => Tmst band 16#FFFFFFFF,
-            freq => Frequency,
-            rfch => 0,
-            modu => <<"LORA">>,
-            codr => <<"4/5">>,
-            stat => 1,
-            chan => 0,
-            datr => erlang:list_to_binary(Datarate),
-            rssi => erlang:trunc(SignalStrength),
-            lsnr => Snr,
-            size => erlang:byte_size(Payload),
-            data => base64:encode(Payload)
-        },
-        #{
-            regi => Region,
-            inde => Index,
-            lati => Lat,
-            long => Long,
-            pubk => libp2p_crypto:bin_to_b58(PubKeyBin)
-        }
-    ),
-    {Token, Data}.
-
-handle_udp(
-    Data,
-    PushData,
-    ID,
-    PullData,
-    PullDataTimer,
-    PubKeyBin,
-    Socket,
-    PullRespFunction,
-    MetricsPrefix
-) ->
-    Identifier = semtech_udp:identifier(Data),
-    lager:debug("got udp ~p / ~p", [semtech_udp:identifier_to_atom(Identifier), Data]),
-    StateUpdates =
-        case semtech_udp:identifier(Data) of
-            ?PUSH_ACK ->
-                handle_push_ack(Data, PushData, ID, MetricsPrefix);
-            ?PULL_ACK ->
-                handle_pull_ack(Data, PullData, PullDataTimer, ID, MetricsPrefix);
-            ?PULL_RESP ->
-                handle_pull_resp(Data, PubKeyBin, Socket, PullRespFunction);
-            _Id ->
-                lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
-                #{}
-        end,
-    StateUpdates.
-
-handle_push_ack(Data, PushData, NetID, MetricsPrefix) ->
+handle_push_ack(Data, PushData) ->
     Token = semtech_udp:token(Data),
     case maps:get(Token, PushData, undefined) of
         undefined ->
             lager:debug("got unknown push ack ~p", [Token]),
-            #{push_data => PushData};
+            PushData;
         {_, TimerRef} ->
             lager:debug("got push ack ~p", [Token]),
             _ = erlang:cancel_timer(TimerRef),
-            ok = gwmp_metrics:push_ack(MetricsPrefix, NetID),
             NewPushData = maps:remove(Token, PushData),
-            #{push_data => NewPushData}
+            NewPushData
     end.
 
 -spec handle_pull_ack(
-    binary(),
-    {reference(), binary()} | undefined,
-    non_neg_integer(),
-    non_neg_integer(),
-    string()
-) -> map().
-handle_pull_ack(Data, undefined, _PullDataTimer, _NetID, _MetricsPrefix) ->
-    lager:warning("got unknown pull ack for ~p", [Data]),
-    #{};
-handle_pull_ack(Data, {PullDataRef, PullDataToken}, PullDataTimer, NetID, MetricsPrefix) ->
-    NewPullData =
-        handle_pull_ack(Data, PullDataToken, PullDataRef, PullDataTimer, NetID, MetricsPrefix),
-    case NewPullData of
-        undefined -> #{pull_data => NewPullData};
-        _ -> #{pull_data => {PullDataRef, PullDataToken}}
+    Data :: binary(),
+    DataSrc :: gwmp_udp_socket:socket_dest(),
+    PullData :: pull_data_map(),
+    PullDataTime :: non_neg_integer()
+) -> pull_data_map().
+handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
+    case {semtech_udp:token(Data), maps:get(DataSrc, PullDataMap, undefined)} of
+        {Token, #{token := Token, timer_ref := TimerRef}} ->
+            _ = erlang:cancel_timer(TimerRef),
+            _ = schedule_pull_data(PullDataTimer, DataSrc),
+            maps:remove(DataSrc, PullDataMap);
+        {_, undefined} ->
+            lager:warning("pull_ack for unknown source"),
+            PullDataMap;
+        _ ->
+            lager:warning("pull_ack with unknown token"),
+            PullDataMap
     end.
 
-handle_pull_ack(Data, PullDataToken, PullDataRef, PullDataTimer, NetID, MetricsPrefix) ->
-    case semtech_udp:token(Data) of
-        PullDataToken ->
-            erlang:cancel_timer(PullDataRef),
-            lager:debug("got pull ack for ~p", [PullDataToken]),
-            _ = schedule_pull_data(PullDataTimer),
-            ok = gwmp_metrics:pull_ack(MetricsPrefix, NetID),
-            undefined;
-        _UnknownToken ->
-            lager:warning("got unknown pull ack for ~p", [_UnknownToken]),
-            ignore
-    end.
-
--spec handle_pull_resp(binary(), libp2p_crypto:pubkey_bin(), gwmp_udp_socket:socket(), function()) ->
-    any().
+-spec handle_pull_resp(
+    Data :: binary(),
+    PubKeyBin :: libp2p_crypto:pubkey_bin(),
+    Socket :: gwmp_udp_socket:socket(),
+    PullRespFunc :: function()
+) ->
+    ok.
 handle_pull_resp(Data, PubKeyBin, Socket, PullRespFunction) ->
     _ = PullRespFunction(Data),
     handle_pull_response(Data, PubKeyBin, Socket),
-    StateUpdates = #{},
-    StateUpdates.
+    ok.
 
 handle_pull_response(Data, PubKeyBin, Socket) ->
     Token = semtech_udp:token(Data),
@@ -555,3 +457,45 @@ send_tx_ack(
         Reply
     ]),
     Reply.
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% Only send a PULL_DATA if we haven't seen the destination
+%% before. If we have, the lifecycle for sending PULL_DATA
+%% is already being handled.
+%% @end
+%%%-------------------------------------------------------------------
+-spec maybe_send_pull_data(
+    SocketDest :: gwmp_udp_socket:socket_dest(),
+    State :: #state{}
+) -> #state{}.
+maybe_send_pull_data(SocketDest, #state{pull_data = PullDataMap} = State) ->
+    case maps:get(SocketDest, PullDataMap, undefined) of
+        undefined ->
+            #state{
+                pubkeybin = PubKeyBin,
+                socket = Socket,
+                pull_data_timer = PullDataTimer
+            } = State,
+            case
+                send_pull_data(#{
+                    pubkeybin => PubKeyBin,
+                    socket => Socket,
+                    dest => SocketDest,
+                    pull_data_timer => PullDataTimer
+                })
+            of
+                {ok, RefAndToken} ->
+                    State#state{
+                        pull_data = maps:put(SocketDest, RefAndToken, PullDataMap)
+                    };
+                {error, Reason} ->
+                    lager:warning(
+                        [{error, Reason}, {lns, SocketDest}],
+                        "could not send pull_data"
+                    ),
+                    State
+            end;
+        _ ->
+            State
+    end.
