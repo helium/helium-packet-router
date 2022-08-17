@@ -18,7 +18,10 @@ init() ->
     ok = throttle:setup(?HOTSPOT_THROTTLE, HotspotRateLimit, per_second),
     ok.
 
--spec handle_packet(Packet :: hpr_packet_up:packet(), HandlerPid :: pid()) -> ok | {error, any()}.
+-spec handle_packet(
+    Packet :: hpr_packet_up:packet(),
+    HandlerPid :: grpcbox_stream:t()
+) -> ok | {error, any()}.
 handle_packet(Packet, HandlerPid) ->
     HotspotName = hpr_utils:hotspot_name(hpr_packet_up:hotspot(Packet)),
     lager:md([{hotspot, HotspotName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
@@ -64,7 +67,7 @@ handle_packet(Packet, HandlerPid) ->
 %% ------------------------------------------------------------------
 -spec deliver_packet(
     Packet :: hpr_packet_up:packet(),
-    HandlerPid :: pid(),
+    HandlerPid :: grpcbox_stream:t(),
     Routes :: [hpr_route:route()]
 ) -> ok.
 deliver_packet(_Packet, _HandlerPid, []) ->
