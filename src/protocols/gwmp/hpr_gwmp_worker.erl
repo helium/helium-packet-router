@@ -78,7 +78,7 @@ init(Args) ->
     process_flag(trap_exit, true),
     lager:info("~p init with ~p", [?SERVER, Args]),
 
-    #{pubkeybin := PubKeyBin, protocol := Protocol} = Args,
+    #{pubkeybin := PubKeyBin, socket_dest := SocketDest} = Args,
 
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 

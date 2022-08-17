@@ -85,7 +85,10 @@ deliver_packet(Packet, HandlerPid, [Route | Routes]) ->
     case hpr_route:protocol(Route) of
         router ->
             hpr_protocol_router:send(Packet, HandlerPid, Route);
+        gwmp ->
+            hpr_gwmp_router:send(Packet, HandlerPid, Route);
         _OtherProtocol ->
+            lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
             ok
     end,
     deliver_packet(Packet, HandlerPid, Routes).
