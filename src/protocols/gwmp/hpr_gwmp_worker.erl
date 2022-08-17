@@ -41,7 +41,6 @@
 }.
 
 -record(state, {
-    location :: no_location | {pos_integer(), float(), float()} | undefined,
     pubkeybin :: libp2p_crypto:pubkey_bin(),
     socket :: gwmp_udp_socket:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
@@ -108,8 +107,7 @@ init(Args) ->
         pubkeybin = PubKeyBin,
         socket = Socket,
         pull_data_timer = PullDataTimer,
-        shutdown_timer = {ShutdownTimeout, ShutdownRef},
-        location = no_location
+        shutdown_timer = {ShutdownTimeout, ShutdownRef}
     }}.
 
 %% @private

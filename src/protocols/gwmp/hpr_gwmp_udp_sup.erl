@@ -98,4 +98,3 @@ start_worker(PubKeyBin, Args) ->
                     maybe_start_worker(PubKeyBin, Args)
             end
     end.
-
