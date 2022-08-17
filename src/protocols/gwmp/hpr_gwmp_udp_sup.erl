@@ -83,12 +83,12 @@ init([]) ->
     PubKeyBin :: binary(),
     Args :: map()
 ) ->
-    {ok, pid()} | {error, worker_not_started, any()}.
+    {ok, pid()} | {error, any()}.
 start_worker(PubKeyBin, Args) ->
     ChildArgs = maps:merge(#{pubkeybin => PubKeyBin}, Args),
     case supervisor:start_child(?MODULE, [ChildArgs]) of
         {error, Err} ->
-            {error, worker_not_started, Err};
+            {error, Err};
         {ok, Pid} = OK ->
             case ets:insert_new(?ETS, {PubKeyBin, Pid}) of
                 true ->
