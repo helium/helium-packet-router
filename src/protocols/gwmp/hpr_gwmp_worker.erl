@@ -45,7 +45,6 @@
     socket :: gwmp_udp_socket:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
     response_handler_pid :: undefined | pid(),
-    pull_resp_fun :: undefined | function(),
     pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
     shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()}
@@ -154,7 +153,6 @@ handle_call(
         socket = Socket1,
         push_data = NewPushData,
         response_handler_pid = StreamHandler,
-        pull_resp_fun = hpr_gwmp_send_response_function(StreamHandler),
         shutdown_timer = NewShutdownTimer
     }};
 handle_call(Request, From, State) ->
@@ -269,12 +267,10 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-hpr_gwmp_send_response_function(Handler) ->
-    fun(Data) ->
-        PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
-        grpcbox_stream:send(false, PacketDown, Handler),
-        lager:info("hpr_gwmp_send_response: Data: ~p, Handler: ~p", [Data, Handler])
-    end.
+hpr_gwmp_send_response(Data, StreamHandler) ->
+    PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
+    grpcbox_stream:send(false, PacketDown, StreamHandler),
+    lager:info("hpr_gwmp_send_response: Data: ~p, StreamHandler: ~p", [Data, StreamHandler]).
 
 -spec handle_udp(
     Data :: binary(),
@@ -289,7 +285,7 @@ handle_udp(
         pull_data_timer = PullDataTimer,
         pull_data = PullDataMap0,
         socket = Socket,
-        pull_resp_fun = PullRespFunction,
+        response_handler_pid = StreamHandler,
         pubkeybin = PubKeyBin
     } = State0
 ) ->
@@ -302,7 +298,7 @@ handle_udp(
                 PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
                 State0#state{pull_data = PullDataMap1};
             ?PULL_RESP ->
-                ok = handle_pull_resp(Data, PubKeyBin, Socket, PullRespFunction),
+                ok = handle_pull_resp(Data, PubKeyBin, Socket, StreamHandler),
                 State0;
             _Id ->
                 lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
@@ -422,11 +418,11 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
     Data :: binary(),
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     Socket :: gwmp_udp_socket:socket(),
-    PullRespFunc :: function()
+    StreamHandler :: pid()
 ) ->
     ok.
-handle_pull_resp(Data, PubKeyBin, Socket, PullRespFunction) ->
-    _ = PullRespFunction(Data),
+handle_pull_resp(Data, PubKeyBin, Socket, StreamHandler) ->
+    _ = hpr_gwmp_send_response(Data, StreamHandler),
     handle_pull_response(Data, PubKeyBin, Socket),
     ok.
 
