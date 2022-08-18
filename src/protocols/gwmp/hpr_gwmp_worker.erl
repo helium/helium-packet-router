@@ -265,11 +265,6 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-hpr_gwmp_send_response(Data, StreamHandler) ->
-    PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
-    grpcbox_stream:send(false, PacketDown, StreamHandler),
-    lager:info("hpr_gwmp_send_response: Data: ~p, StreamHandler: ~p", [Data, StreamHandler]).
-
 -spec handle_udp(
     Data :: binary(),
     DataSrc :: gwmp_udp_socket:socket_dest(),
@@ -420,13 +415,14 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
 ) ->
     ok.
 handle_pull_resp(Data, PubKeyBin, Socket, StreamHandler) ->
-    _ = hpr_gwmp_send_response(Data, StreamHandler),
-    handle_pull_response(Data, PubKeyBin, Socket),
-    ok.
+    %% Send downlink to grpc handler
+    PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
+    grpcbox_stream:send(false, PacketDown, StreamHandler),
 
-handle_pull_response(Data, PubKeyBin, Socket) ->
+    %% Ack the downlink
     Token = semtech_udp:token(Data),
-    send_tx_ack(Token, #{pubkeybin => PubKeyBin, socket => Socket}).
+    send_tx_ack(Token, #{pubkeybin => PubKeyBin, socket => Socket}),
+    ok.
 
 -spec send_tx_ack(
     binary(),
