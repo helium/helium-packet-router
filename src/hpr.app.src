@@ -13,7 +13,9 @@
         helium_proto,
         grpcbox,
         erlang_lorawan,
-        libp2p_crypto
+        libp2p_crypto,
+        erl_angry_purple_tiger,
+        prometheus
     ]},
     {env, []},
     {modules, []},

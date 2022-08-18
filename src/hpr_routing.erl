@@ -20,24 +20,40 @@ init() ->
 
 -spec handle_packet(Packet :: hpr_packet_up:packet(), HandlerPid :: pid()) -> ok | {error, any()}.
 handle_packet(Packet, HandlerPid) ->
+    HotspotName = hpr_utils:hotspot_name(hpr_packet_up:hotspot(Packet)),
+    lager:md([{hotspot, HotspotName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
+    lager:debug("received packet from ~p", [HandlerPid]),
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
         {fun throttle_check/1, hotspot_limit_exceeded}
     ],
     case execute_checks(Packet, Checks) of
-        {error, _} = Error ->
+        {error, _Reason} = Error ->
+            lager:debug("packet failed verification: ~p", [_Reason]),
             HandlerPid ! Error,
             Error;
         ok ->
             case packet_type(Packet) of
                 undefined ->
+                    lager:debug("invalid packet type"),
                     Error = {error, invalid_packet_type},
                     HandlerPid ! Error,
                     Error;
                 {join_req, AppEUI, DevEUI} ->
                     Routes = hpr_routing_config_worker:lookup_eui(AppEUI, DevEUI),
+                    lager:debug(
+                        [
+                            {app_eui, hpr_utils:int_to_hex(AppEUI)},
+                            {dev_eui, hpr_utils:int_to_hex(DevEUI)}
+                        ],
+                        "handling join"
+                    ),
                     ok = deliver_packet(Packet, HandlerPid, Routes);
                 {uplink, DevAddr} ->
+                    lager:debug(
+                        [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
+                        "handling uplink"
+                    ),
                     Routes = hpr_routing_config_worker:lookup_devaddr(DevAddr),
                     ok = deliver_packet(Packet, HandlerPid, Routes)
             end
@@ -54,11 +70,20 @@ handle_packet(Packet, HandlerPid) ->
 deliver_packet(_Packet, _HandlerPid, []) ->
     ok;
 deliver_packet(Packet, HandlerPid, [Route | Routes]) ->
+    lager:debug(
+        [
+            {oui, hpr_route:oui(Route)},
+            {protocol, hpr_route:protocol(Route)},
+            {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))}
+        ],
+        "delivering packet to ~s",
+        [hpr_route:lns(Route)]
+    ),
     case hpr_route:protocol(Route) of
         router ->
             hpr_protocol_router:send(Packet, HandlerPid, Route);
-        Protocol ->
-            lager:warning("protocol ~p unsuported", [Protocol])
+        _OtherProtocol ->
+            ok
     end,
     deliver_packet(Packet, HandlerPid, Routes).
 

@@ -9,7 +9,7 @@ REBAR=./rebar3
 # Therefore, this target depends on $(grpc_services_directory),
 # but rebar.config omits `grpc` in `pre_hooks`.
 compile: | $(grpc_services_directory)
-	BUILD_WITHOUT_QUIC=1 $(REBAR) compile
+	$(REBAR) compile
 	$(REBAR) format
 
 clean:
