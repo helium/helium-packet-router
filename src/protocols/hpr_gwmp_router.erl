@@ -18,7 +18,7 @@
 send(PacketUp, Stream, Route) ->
     Hotspot = hpr_packet_up:hotspot(PacketUp),
 
-    case hpr_gwmp_udp_sup:maybe_start_worker(Hotspot, #{socket_dest => route_to_dest(Route)}) of
+    case hpr_gwmp_udp_sup:maybe_start_worker(Hotspot) of
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
@@ -106,7 +106,10 @@ route_to_dest(Route) ->
     Lns = hpr_route:lns(Route),
     case binary:split(Lns, <<":">>) of
         [Address, Port] ->
-            {erlang:binary_to_list(Address), erlang:binary_to_integer(Port)};
+            {
+                erlang:binary_to_list(Address),
+                erlang:binary_to_integer(Port)
+            };
         Err ->
             throw({route_to_dest_err, Err})
     end.

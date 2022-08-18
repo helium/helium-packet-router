@@ -11,8 +11,6 @@
 
 -behaviour(gen_server).
 
--include("../../grpc/autogen/server/packet_router_pb.hrl").
-
 -include("semtech_udp.hrl").
 
 %% API
@@ -35,12 +33,16 @@
 -define(SERVER, ?MODULE).
 
 -type pull_data_map() :: #{
-    gwmp_udp_socket:socket_dest() => #{timer_ref := reference(), token := binary()}
+    socket_dest() => #{timer_ref := reference(), token := binary()}
 }.
+
+-type socket_address() :: inet:socket_address() | inet:hostname().
+-type socket_port() :: inet:port_number().
+-type socket_dest() :: {socket_address(), socket_port()}.
 
 -record(state, {
     pubkeybin :: libp2p_crypto:pubkey_bin(),
-    socket :: gwmp_udp_socket:socket(),
+    socket :: gen_udp:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
     response_stream :: undefined | tuple(),
     pull_data = #{} :: pull_data_map(),
@@ -62,7 +64,7 @@ start_link(Args) ->
     WorkerPid :: pid(),
     Data :: {Token :: binary(), Payload :: binary()},
     HandlerPid :: pid(),
-    SocketDest :: gwmp_udp_socket:socket_dest()
+    SocketDest :: socket_dest()
 ) -> ok | {error, any()}.
 push_data(WorkerPid, Data, HandlerPid, SocketDest) ->
     gen_server:call(WorkerPid, {push_data, Data, HandlerPid, SocketDest}).
@@ -82,7 +84,7 @@ init(Args) ->
     process_flag(trap_exit, true),
     lager:info("~p init with ~p", [?SERVER, Args]),
 
-    #{pubkeybin := PubKeyBin, socket_dest := SocketDest} = Args,
+    #{pubkeybin := PubKeyBin} = Args,
 
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
@@ -91,7 +93,7 @@ init(Args) ->
         {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
 
-    {ok, Socket} = gwmp_udp_socket:open(SocketDest, undefined),
+    {ok, Socket} = gen_udp:open(0, [binary, {active, true}]),
 
     %% NOTE: Pull data is sent at the first push_data to
     %% initiate the connection and allow downlinks to start
@@ -121,19 +123,12 @@ init(Args) ->
     | {stop, Reason :: term(), Reply :: term(), NewState :: #state{}}
     | {stop, Reason :: term(), NewState :: #state{}}.
 handle_call(
-    {update_address, Address, Port},
-    _From,
-    #state{socket = Socket0} = State
-) ->
-    Socket1 = update_address(Socket0, Address, Port),
-    {reply, ok, State#state{socket = Socket1}};
-handle_call(
     {push_data, _Data = {Token, Payload}, StreamHandler, SocketDest},
     _From,
     #state{
         push_data = PushData,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
-        socket = Socket0
+        socket = Socket
     } =
         State0
 ) ->
@@ -141,14 +136,12 @@ handle_call(
 
     State = maybe_send_pull_data(SocketDest, State0),
 
-    {ok, Socket1} = gwmp_udp_socket:update_address(Socket0, SocketDest),
-    {Reply, TimerRef} = send_push_data(Token, Payload, Socket1),
+    {Reply, TimerRef} = send_push_data(Token, Payload, Socket, SocketDest),
     {NewPushData, NewShutdownTimer} = new_push_and_shutdown(
         Token, Payload, TimerRef, PushData, ShutdownTimeout
     ),
 
     {reply, Reply, State#state{
-        socket = Socket1,
         push_data = NewPushData,
         response_stream = StreamHandler,
         shutdown_timer = NewShutdownTimer
@@ -175,9 +168,7 @@ handle_cast(Request, State) ->
     | {stop, Reason :: term(), NewState :: #state{}}.
 handle_info(
     {udp, Socket, Address, Port, Data},
-    #state{
-        socket = {socket, Socket, _}
-    } = State
+    #state{socket = Socket} = State
 ) ->
     try handle_udp(Data, {Address, Port}, State) of
         {noreply, _} = NoReply -> NoReply
@@ -248,7 +239,7 @@ handle_info(_Msg, State) ->
     State :: #state{}
 ) -> term().
 terminate(_Reason, _State = #state{socket = Socket}) ->
-    ok = gwmp_udp_socket:close(Socket).
+    ok = gen_udp:close(Socket).
 
 %% @private
 %% @doc Convert process state when code is changed
@@ -267,7 +258,7 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
 
 -spec handle_udp(
     Data :: binary(),
-    DataSrc :: gwmp_udp_socket:socket_dest(),
+    DataSrc :: socket_dest(),
     State :: #state{}
 ) -> {noreply, #state{}}.
 handle_udp(
@@ -304,7 +295,7 @@ handle_udp(
 pubkeybin_to_mac(PubKeyBin) ->
     <<(xxhash:hash64(PubKeyBin)):64/unsigned-integer>>.
 
--spec schedule_pull_data(non_neg_integer(), gwmp_udp_socket:socket_dest()) -> reference().
+-spec schedule_pull_data(non_neg_integer(), socket_dest()) -> reference().
 schedule_pull_data(PullDataTimer, SocketDest) ->
     _ = erlang:send_after(PullDataTimer, self(), {?PULL_DATA_TICK, SocketDest}).
 
@@ -312,29 +303,20 @@ schedule_pull_data(PullDataTimer, SocketDest) ->
 schedule_shutdown(ShutdownTimer) ->
     _ = erlang:send_after(ShutdownTimer, self(), ?SHUTDOWN_TICK).
 
-update_address(Socket0, Address, Port) ->
-    lager:debug("Updating address and port [old: ~p] [new: ~p]", [
-        gwmp_udp_socket:get_address(Socket0),
-        {Address, Port}
-    ]),
-    {ok, Socket1} = gwmp_udp_socket:update_address(Socket0, {Address, Port}),
-    Socket1.
-
--spec send_push_data(binary(), binary(), gwmp_udp_socket:socket()) ->
+-spec send_push_data(binary(), binary(), gen_udp:socket(), socket_dest()) ->
     {ok | {error, any()}, reference()}.
 send_push_data(
     Token,
     Data,
-    Socket
+    Socket,
+    SocketDest
 ) ->
-    Reply = gwmp_udp_socket:send(Socket, Data),
+    Reply = udp_send(Socket, SocketDest, Data),
     TimerRef = erlang:send_after(?PUSH_DATA_TIMER, self(), {?PUSH_DATA_TICK, Token}),
-    lager:debug("sent ~p/~p to ~p replied: ~p", [
-        Token,
-        Data,
-        gwmp_udp_socket:get_address(Socket),
-        Reply
-    ]),
+    lager:debug(
+        "sent ~p/~p to ~p replied: ~p",
+        [Token, Data, SocketDest, Reply]
+    ),
     {Reply, TimerRef}.
 
 new_push_and_shutdown(Token, Data, TimerRef, PushData, ShutdownTimeout) ->
@@ -344,22 +326,21 @@ new_push_and_shutdown(Token, Data, TimerRef, PushData, ShutdownTimeout) ->
 
 -spec send_pull_data(#{
     pubkeybin := libp2p_crypto:pubkey_bin(),
-    socket := gwmp_udp_socket:socket(),
-    dest := gwmp_udp_socket:socket_dest(),
+    socket := gen_udp:socket(),
+    dest := socket_dest(),
     pull_data_timer := non_neg_integer()
 }) -> {ok, #{timer_ref := reference(), token := binary()}} | {error, any()}.
 send_pull_data(
     #{
         pubkeybin := PubKeyBin,
-        socket := Socket0,
+        socket := Socket,
         dest := SocketDest,
         pull_data_timer := PullDataTimer
     }
 ) ->
-    {ok, Socket} = gwmp_udp_socket:update_address(Socket0, SocketDest),
     Token = semtech_udp:token(),
     Data = semtech_udp:pull_data(Token, pubkeybin_to_mac(PubKeyBin)),
-    case gwmp_udp_socket:send(Socket, Data) of
+    case udp_send(Socket, SocketDest, Data) of
         ok ->
             lager:debug("sent pull data keepalive ~p", [Token]),
             TimerRef = erlang:send_after(
@@ -390,7 +371,7 @@ handle_push_ack(Data, PushData) ->
 
 -spec handle_pull_ack(
     Data :: binary(),
-    DataSrc :: gwmp_udp_socket:socket_dest(),
+    DataSrc :: socket_dest(),
     PullData :: pull_data_map(),
     PullDataTime :: non_neg_integer()
 ) -> pull_data_map().
@@ -410,42 +391,40 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
 
 -spec handle_pull_resp(
     Data :: binary(),
-    DataSrc :: gwmp_udp_socket:socket_dest(),
+    DataSrc :: socket_dest(),
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
-    Socket :: gwmp_udp_socket:socket(),
+    Socket :: gen_udp:socket(),
     StreamHandler :: tuple()
 ) ->
     ok.
-handle_pull_resp(Data, DataSrc, PubKeyBin, Socket0, StreamHandler) ->
+handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler) ->
     %% Send downlink to grpc handler
     PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
     grpcbox_stream:send(false, PacketDown, StreamHandler),
 
     %% Ack the downlink
     Token = semtech_udp:token(Data),
-    {ok, Socket} = gwmp_udp_socket:update_address(Socket0, DataSrc),
-    send_tx_ack(Token, #{pubkeybin => PubKeyBin, socket => Socket}),
+    send_tx_ack(Token, #{pubkeybin => PubKeyBin, socket => Socket, socket_dest => DataSrc}),
     ok.
 
 -spec send_tx_ack(
     binary(),
     #{
         pubkeybin := libp2p_crypto:pubkey_bin(),
-        socket := gwmp_udp_socket:socket()
+        socket := gen_udp:socket(),
+        socket_dest := socket_dest()
     }
 ) -> ok | {error, any()}.
 send_tx_ack(
     Token,
-    #{pubkeybin := PubKeyBin, socket := Socket}
+    #{pubkeybin := PubKeyBin, socket := Socket, socket_dest := SocketDest}
 ) ->
     Data = semtech_udp:tx_ack(Token, pubkeybin_to_mac(PubKeyBin)),
-    Reply = gwmp_udp_socket:send(Socket, Data),
-    lager:debug("sent ~p/~p to ~p replied: ~p", [
-        Token,
-        Data,
-        gwmp_udp_socket:get_address(Socket),
-        Reply
-    ]),
+    Reply = udp_send(Socket, SocketDest, Data),
+    lager:debug(
+        "sent ~p/~p to ~p replied: ~p",
+        [Token, Data, SocketDest, Reply]
+    ),
     Reply.
 
 %%%-------------------------------------------------------------------
@@ -456,7 +435,7 @@ send_tx_ack(
 %% @end
 %%%-------------------------------------------------------------------
 -spec maybe_send_pull_data(
-    SocketDest :: gwmp_udp_socket:socket_dest(),
+    SocketDest :: socket_dest(),
     State :: #state{}
 ) -> #state{}.
 maybe_send_pull_data(SocketDest, #state{pull_data = PullDataMap} = State) ->
@@ -489,3 +468,7 @@ maybe_send_pull_data(SocketDest, #state{pull_data = PullDataMap} = State) ->
         _ ->
             State
     end.
+
+-spec udp_send(gen_udp:socket(), socket_dest(), binary()) -> ok | {error, any()}.
+udp_send(Socket, {Address, Port}, Data) ->
+    gen_udp:send(Socket, Address, Port, Data).
