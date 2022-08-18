@@ -13,6 +13,7 @@
     hold_time/1,
     hotspot/1,
     signature/1,
+    phash/1,
     verify/1,
     encode/1,
     decode/1
@@ -70,6 +71,11 @@ hotspot(Packet) ->
 -spec signature(Packet :: packet()) -> binary().
 signature(Packet) ->
     Packet#packet_router_packet_up_v1_pb.signature.
+
+-spec phash(Packet :: packet()) -> binary().
+phash(Packet) ->
+    Payload = ?MODULE:payload(Packet),
+    crypto:hash(sha256, Payload).
 
 -spec verify(Packet :: packet()) -> boolean().
 verify(Packet) ->
