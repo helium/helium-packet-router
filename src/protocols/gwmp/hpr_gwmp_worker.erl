@@ -291,7 +291,8 @@ handle_udp(
                 PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
                 State0#state{pull_data = PullDataMap1};
             ?PULL_RESP ->
-                ok = handle_pull_resp(Data, PubKeyBin, Socket, StreamHandler),
+                %% FIXME: include data source for socket ack
+                ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler),
                 State0;
             _Id ->
                 lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
@@ -409,18 +410,20 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
 
 -spec handle_pull_resp(
     Data :: binary(),
+    DataSrc :: gwmp_udp_socket:socket_dest(),
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     Socket :: gwmp_udp_socket:socket(),
     StreamHandler :: tuple()
 ) ->
     ok.
-handle_pull_resp(Data, PubKeyBin, Socket, StreamHandler) ->
+handle_pull_resp(Data, DataSrc, PubKeyBin, Socket0, StreamHandler) ->
     %% Send downlink to grpc handler
     PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
     grpcbox_stream:send(false, PacketDown, StreamHandler),
 
     %% Ack the downlink
     Token = semtech_udp:token(Data),
+    {ok, Socket} = gwmp_udp_socket:update_address(Socket0, DataSrc),
     send_tx_ack(Token, #{pubkeybin => PubKeyBin, socket => Socket}),
     ok.
 

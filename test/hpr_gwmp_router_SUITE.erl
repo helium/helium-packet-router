@@ -9,7 +9,8 @@
 -export([
     single_lns_test/1,
     multi_lns_test/1,
-    downlink_test/1
+    single_lns_downlink_test/1,
+    multi_lns_downlink_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -30,7 +31,8 @@ all() ->
     [
         single_lns_test,
         multi_lns_test,
-        downlink_test
+        single_lns_downlink_test,
+        multi_lns_downlink_test
     ].
 
 %%--------------------------------------------------------------------
@@ -102,7 +104,7 @@ multi_lns_test(_Config) ->
 
     ok.
 
-downlink_test(_Config) ->
+single_lns_downlink_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
     %% Sending a packet up, to get a packet down.
@@ -133,21 +135,7 @@ downlink_test(_Config) ->
 
     %% Send a downlink to the worker
     %% we don't care about the contents
-    DownMap = #{
-        imme => true,
-        freq => 904.1,
-        rfch => 0,
-        powe => 27,
-        modu => <<"LORA">>,
-        datr => <<"SF11BW125">>,
-        codr => <<"4/6">>,
-        ipol => false,
-        size => 32,
-        tmst => erlang:system_time(millisecond) band 16#FFFF_FFFF,
-        data => base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>)
-    },
-    DownToken = semtech_udp:token(),
-    DownPullResp = semtech_udp:pull_resp(DownToken, DownMap),
+    {DownToken, DownPullResp} = fake_down_packet(),
     ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
 
     %% receive the PacketRouterPacketDownV1 as the grpc stream.
@@ -165,6 +153,68 @@ downlink_test(_Config) ->
         {udp, LnsSocket, _Address, _Port, Data2} ->
             ?assertEqual(tx_ack, semtech_id_atom(Data2)),
             ?assertEqual(DownToken, semtech_udp:token(Data2))
+    after timer:seconds(2) -> ct:fail(no_tx_ack_for_downlink)
+    end,
+
+    meck:unload(grpcbox_stream),
+
+    ok.
+
+
+multi_lns_downlink_test(_Config) ->
+    %% When communicating with multiple LNS, the udp worker needs to be able to
+    %% ack pull_resp to the proper LNS.
+    PacketUp = fake_join_up_packet(),
+
+    %% Sending a packet up, to get a packet down.
+    Route1 = hpr_route:new(1337, [], [], <<"127.0.0.1:1777">>, gwmp, 42),
+    Route2 = hpr_route:new(1337, [], [], <<"127.0.0.1:1778">>, gwmp, 42),
+
+    {ok, LNSSocket1} = gen_udp:open(1777, [binary, {active, true}]),
+    {ok, LNSSocket2} = gen_udp:open(1778, [binary, {active, true}]),
+
+    %% Send packet to LNS 1
+    _ = hpr_gwmp_router:send(PacketUp, self(), Route1),
+    ok = expect_pull_data(LNSSocket1, downlink_test_initiate_connection_lns1),
+    %% Receive the uplink from LNS 1 (mostly to get the return address)
+    {ok, UDPWorkerAddress} =
+        receive
+            {udp, LNSSocket1, Address, Port, Data1} ->
+                ?assertEqual(push_data, semtech_id_atom(Data1)),
+                {ok, {Address, Port}}
+        after timer:seconds(2) -> ct:fail(no_push_data)
+        end,
+
+    %% Send packet to LNS 2
+    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route2),
+    ok = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
+    {ok, _} = expect_push_data(LNSSocket2, route2_push_data),
+
+    %% LNS 2 is now the most recent communicator with the UDP worker.
+    %% Regardless, sending a PULL_RESP, the UDP worker should ack the sender,
+    %% not the most recent.
+
+    %% Mock out the return path for the downlink (grpc)
+    Self = self(),
+    meck:new(grpcbox_stream, [passthrough, no_history]),
+    meck:expect(grpcbox_stream, send, fun(Eos, PacketDown, _StreamHandler) ->
+        ?assertEqual(false, Eos, "we don't want to be ending the stream"),
+        Self ! {packet_down, PacketDown}
+    end),
+
+    %% Send a downlink to the worker from LNS 1
+    %% we don't care about the contents
+    {DownToken, DownPullResp} = fake_down_packet(),
+    ok = gen_udp:send(LNSSocket1, UDPWorkerAddress, DownPullResp),
+
+    %% expect the ack for our downlink
+    receive
+        {udp, LNSSocket1, _Address, _Port, Data2} ->
+            ?assertEqual(tx_ack, semtech_id_atom(Data2)),
+            ?assertEqual(DownToken, semtech_udp:token(Data2));
+        {udp, LNSSocket2, _Address, _Port, Data2} ->
+            ?assertEqual(tx_ack, semtech_id_atom(Data2)),
+            ct:fail({tx_ack_for_wrong_socket, [{expected, 1}, {got, 2}]})
     after timer:seconds(2) -> ct:fail(no_tx_ack_for_downlink)
     end,
 
@@ -224,3 +274,22 @@ fake_join_up_packet() ->
                 61, 200, 166, 101, 111, 8, 25, 81, 34, 7, 218, 70, 180, 134, 3, 206, 244, 175, 46,
                 185, 130, 191, 104, 131, 164, 40, 68, 11>>
     }.
+
+%% Pulled from semtech_udp eunit.
+%% data needed to encoded to be valid to use.
+fake_down_packet() ->
+    DownMap = #{
+        imme => true,
+        freq => 904.1,
+        rfch => 0,
+        powe => 27,
+        modu => <<"LORA">>,
+        datr => <<"SF11BW125">>,
+        codr => <<"4/6">>,
+        ipol => false,
+        size => 32,
+        tmst => erlang:system_time(millisecond) band 16#FFFF_FFFF,
+        data => base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>)
+    },
+    DownToken = semtech_udp:token(),
+    {DownToken, semtech_udp:pull_resp(DownToken, DownMap)}.
