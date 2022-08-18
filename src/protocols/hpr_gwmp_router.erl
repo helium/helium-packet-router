@@ -31,8 +31,7 @@ send(PacketUp, Stream, Route) ->
                     lager:error("sending err: ~p", [{Type, Err, Stack}]),
                     {error, {Type, Err}}
             end
-    end,
-    ok.
+    end.
 
 %% ===================================================================
 %% Internal
