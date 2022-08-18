@@ -34,8 +34,6 @@
 
 -define(SERVER, ?MODULE).
 
--define(METRICS_PREFIX, "helium_packet_router_").
-
 -type pull_data_map() :: #{
     gwmp_udp_socket:socket_dest() => #{timer_ref := reference(), token := binary()}
 }.
