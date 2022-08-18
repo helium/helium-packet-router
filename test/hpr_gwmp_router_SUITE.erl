@@ -65,9 +65,9 @@ single_lns_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_gwmp_router:send(PacketUp, self(), Route),
+    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
     %% Initial PULL_DATA
-    ok = expect_pull_data(RcvSocket, route_pull_ata),
+    ok = expect_pull_data(RcvSocket, route_pull_data),
     %% PUSH_DATA
     {ok, _} = expect_push_data(RcvSocket, router_push_data),
 
@@ -85,17 +85,17 @@ multi_lns_test(_Config) ->
     {ok, RcvSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to route 1
-    hpr_gwmp_router:send(PacketUp, self(), Route1),
+    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
     ok = expect_pull_data(RcvSocket1, route1_pull_data),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data),
 
     %% Same packet to route 2
-    hpr_gwmp_router:send(PacketUp, self(), Route2),
+    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route2),
     ok = expect_pull_data(RcvSocket2, route2_pull_data),
     {ok, _} = expect_push_data(RcvSocket2, route2_push_data),
 
     %% Another packet to route 1
-    hpr_gwmp_router:send(PacketUp, self(), Route1),
+    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data_repeat),
     ok = no_more_messages(),
 
@@ -112,7 +112,7 @@ single_lns_downlink_test(_Config) ->
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
-    _ = hpr_gwmp_router:send(PacketUp, self(), Route1),
+    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
 
     %% Eat the pull_data
     ok = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
@@ -174,7 +174,7 @@ multi_lns_downlink_test(_Config) ->
     {ok, LNSSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to LNS 1
-    _ = hpr_gwmp_router:send(PacketUp, self(), Route1),
+    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
     ok = expect_pull_data(LNSSocket1, downlink_test_initiate_connection_lns1),
     %% Receive the uplink from LNS 1 (mostly to get the return address)
     {ok, UDPWorkerAddress} =
