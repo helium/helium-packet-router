@@ -25,23 +25,21 @@ init() ->
 handle_packet(Packet, StreamHandler) ->
     HotspotName = hpr_utils:hotspot_name(hpr_packet_up:hotspot(Packet)),
     lager:md([{hotspot, HotspotName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
-    lager:debug("received packet from ~p", [HandlerPid]),
+    %% TODO: log some identifying information?
+    lager:debug("received packet"),
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
         {fun throttle_check/1, hotspot_limit_exceeded}
     ],
     case execute_checks(Packet, Checks) of
         {error, _Reason} = Error ->
-            lager:debug("packet failed verification: ~p", [_Reason]),
-            HandlerPid ! Error,
+            lager:error("packet failed verification: ~p", [_Reason]),
             Error;
         ok ->
             case packet_type(Packet) of
                 undefined ->
-                    lager:debug("invalid packet type"),
-                    Error = {error, invalid_packet_type},
-                    HandlerPid ! Error,
-                    Error;
+                    lager:error("invalid packet type"),
+                    {error, invalid_packet_type};
                 {join_req, AppEUI, DevEUI} ->
                     Routes = hpr_routing_config_worker:lookup_eui(AppEUI, DevEUI),
                     lager:debug(
