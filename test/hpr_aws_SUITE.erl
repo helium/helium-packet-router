@@ -36,9 +36,9 @@ all() ->
 init_per_suite(Config) ->
     {ok, AWS} = httpc_aws:start_link(),
     #{
-        access_key_id => AccessKey,
-        secret_access_key => Secret,
-        aws_region => Region
+        access_key_id := AccessKey,
+        secret_access_key := Secret,
+        aws_region := Region
     } = maps:from_list(application:get_env(hpr, aws_config, [])),
     httpc_aws:set_credentials(AWS, AccessKey, Secret),
     httpc_aws:set_region(AWS, Region),
@@ -61,6 +61,16 @@ end_per_testcase(_TestCase, Config) -> Config.
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-s3_test(Config) ->
-    AWS = proplists:get_value(aws, Config),
-    hpr_aws:upload_file(AWS, <<"test-bucket">>, <<"test.txt">>, <<"Hello World">>).
+s3_test(_Config) ->
+    {ok, AWS} = httpc_aws:start_link(),
+    #{
+        access_key_id := AccessKey,
+        secret_access_key := Secret,
+        aws_region := Region
+    } = maps:from_list(application:get_env(hpr, aws_config, [])),
+    httpc_aws:set_credentials(AWS, AccessKey, Secret),
+    httpc_aws:set_region(AWS, Region),
+
+    ct:print("TEST: ~p~n", [
+        hpr_aws:upload_file(AWS, <<"test-bucket">>, <<"test.txt">>, <<"Hello World">>)
+    ]).
