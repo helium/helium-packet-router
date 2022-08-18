@@ -80,13 +80,28 @@ deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
         "delivering packet to ~s",
         [hpr_route:lns(Route)]
     ),
-    case hpr_route:protocol(Route) of
-        router ->
-            hpr_protocol_router:send(Packet, StreamHandler, Route);
-        gwmp ->
-            hpr_gwmp_router:send(Packet, StreamHandler, Route);
-        _OtherProtocol ->
-            lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
+    Protocol = hpr_route:protocol(Route),
+    %% FIXME: delivery could be halted to multiple routes if one of the earlier
+    %% Protocol:send(...) errors out.
+    Resp =
+        case Protocol of
+            router ->
+                hpr_protocol_router:send(Packet, StreamHandler, Route);
+            gwmp ->
+                hpr_gwmp_router:send(Packet, StreamHandler, Route);
+            _OtherProtocol ->
+                lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
+                ok
+        end,
+    case Resp of
+        ok ->
+            ok;
+        {error, Err} ->
+            %% FIXME: might be dangerous to log full `Err` tuple right now
+            lager:warning(
+                [{protocol, Protocol}, {error, Err}],
+                "error sending"
+            ),
             ok
     end,
     deliver_packet(Packet, StreamHandler, Routes).

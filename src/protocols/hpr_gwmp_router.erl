@@ -20,7 +20,7 @@ send(PacketUp, Stream, Route) ->
 
     case hpr_gwmp_udp_sup:maybe_start_worker(Hotspot, #{socket_dest => route_to_dest(Route)}) of
         {error, Reason} ->
-            throw({gwmp_sup_err, Reason});
+            {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
             PushData = ?MODULE:packet_up_to_push_data(PacketUp, erlang:system_time(millisecond)),
             Dest = ?MODULE:route_to_dest(Route),
@@ -28,7 +28,8 @@ send(PacketUp, Stream, Route) ->
                 _ -> ok
             catch
                 Type:Err:Stack ->
-                    lager:error("sending err: ~p", [{Type, Err, Stack}])
+                    lager:error("sending err: ~p", [{Type, Err, Stack}]),
+                    {error, {Type, Err}}
             end
     end,
     ok.
