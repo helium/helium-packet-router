@@ -17,7 +17,7 @@ init(Stream) ->
 -spec send_packet(hpr_packet_up:packet(), grpcbox_stream:t()) ->
     ok | {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 send_packet(PacketUp, Stream) ->
-    _ = erlang:spawn(hpr_routing, handle_packet, [PacketUp, Stream]),
+    _ = proc_lib:spawn(hpr_routing, handle_packet, [PacketUp, Stream]),
     {continue, Stream}.
 
 -spec handle_info(Msg :: any(), Stream :: grpcbox_stream:t()) -> grpcbox_stream:t().
