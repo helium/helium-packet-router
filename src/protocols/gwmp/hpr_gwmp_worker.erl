@@ -26,8 +26,7 @@
     handle_call/3,
     handle_cast/2,
     handle_info/2,
-    terminate/2,
-    code_change/3
+    terminate/2
 ]).
 
 -define(SERVER, ?MODULE).
@@ -54,9 +53,6 @@
 %%% API
 %%%===================================================================
 
-%% @doc Spawns the server and registers the local name (unique)
--spec start_link(Args :: map()) ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
 start_link(Args) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Args, []).
 
@@ -73,13 +69,6 @@ push_data(WorkerPid, Data, HandlerPid, SocketDest) ->
 %%% gen_server callbacks
 %%%===================================================================
 
-%% @private
-%% @doc Initializes the server
--spec init(Args :: term()) ->
-    {ok, State :: #state{}}
-    | {ok, State :: #state{}, timeout() | hibernate}
-    | {stop, Reason :: term()}
-    | ignore.
 init(Args) ->
     process_flag(trap_exit, true),
     lager:info("~p init with ~p", [?SERVER, Args]),
@@ -109,19 +98,6 @@ init(Args) ->
         shutdown_timer = {ShutdownTimeout, ShutdownRef}
     }}.
 
-%% @private
-%% @doc Handling call messages
--spec handle_call(
-    Request :: term(),
-    From :: {pid(), Tag :: term()},
-    State :: #state{}
-) ->
-    {reply, Reply :: term(), NewState :: #state{}}
-    | {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate}
-    | {noreply, NewState :: #state{}}
-    | {noreply, NewState :: #state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), Reply :: term(), NewState :: #state{}}
-    | {stop, Reason :: term(), NewState :: #state{}}.
 handle_call(
     {push_data, _Data = {Token, Payload}, StreamHandler, SocketDest},
     _From,
@@ -150,22 +126,10 @@ handle_call(Request, From, State) ->
     lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
     {reply, ok, State}.
 
-%% @private
-%% @doc Handling cast messages
--spec handle_cast(Request :: term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}}
-    | {noreply, NewState :: #state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), NewState :: #state{}}.
 handle_cast(Request, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [Request]),
     {noreply, State}.
 
-%% @private
-%% @doc Handling all non call/cast messages
--spec handle_info(Info :: timeout() | term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}}
-    | {noreply, NewState :: #state{}, timeout() | hibernate}
-    | {stop, Reason :: term(), NewState :: #state{}}.
 handle_info(
     {udp, Socket, Address, Port, Data},
     #state{socket = Socket} = State
@@ -229,28 +193,8 @@ handle_info(_Msg, State) ->
     lager:warning("rcvd unknown info msg: ~p, ~p", [_Msg, State]),
     {noreply, State}.
 
-%% @private
-%% @doc This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
--spec terminate(
-    Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #state{}
-) -> term().
 terminate(_Reason, _State = #state{socket = Socket}) ->
     ok = gen_udp:close(Socket).
-
-%% @private
-%% @doc Convert process state when code is changed
--spec code_change(
-    OldVsn :: term() | {down, term()},
-    State :: #state{},
-    Extra :: term()
-) ->
-    {ok, NewState :: #state{}} | {error, Reason :: term()}.
-code_change(_OldVsn, State = #state{}, _Extra) ->
-    {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
