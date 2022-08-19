@@ -258,8 +258,8 @@ send_push_data(
     Reply = udp_send(Socket, SocketDest, Data),
     TimerRef = erlang:send_after(?PUSH_DATA_TIMER, self(), {?PUSH_DATA_TICK, Token}),
     lager:debug(
-        "sent ~p/~p to ~p replied: ~p",
-        [Token, Data, SocketDest, Reply]
+        [{token, Token}, {dest, SocketDest}, {reply, Reply}],
+        "sent push_data"
     ),
     {Reply, TimerRef}.
 
