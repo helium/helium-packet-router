@@ -10,7 +10,8 @@
     single_lns_test/1,
     multi_lns_test/1,
     single_lns_downlink_test/1,
-    multi_lns_downlink_test/1
+    multi_lns_downlink_test/1,
+    multi_gw_single_lns_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -32,7 +33,8 @@ all() ->
         single_lns_test,
         multi_lns_test,
         single_lns_downlink_test,
-        multi_lns_downlink_test
+        multi_lns_downlink_test,
+        multi_gw_single_lns_test
     ].
 
 %%--------------------------------------------------------------------
@@ -218,6 +220,38 @@ multi_lns_downlink_test(_Config) ->
     end,
 
     meck:unload(grpcbox_stream),
+
+    ok.
+
+multi_gw_single_lns_test(_Config) ->
+    %% Ensure gws start up uniquely
+    PacketUp1 = fake_join_up_packet(),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{hotspot = PubKeyBin},
+
+    Route = hpr_route:new(
+        1337,
+        [],
+        [],
+        <<"127.0.0.1:1777">>,
+        gwmp,
+        42
+    ),
+
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    %% Send the packet from the first hotspot
+    hpr_gwmp_router:send(PacketUp1, unused_test_stream_handler, Route),
+    ok = expect_pull_data(RcvSocket, first_gw_pull_data),
+    {ok, _} = expect_push_data(RcvSocket, first_gw_push_data),
+
+    %% Send the same packet from the second hotspot
+    hpr_gwmp_router:send(PacketUp2, unused_test_stream_handler, Route),
+    ok = expect_pull_data(RcvSocket, second_gw_pull_data),
+    {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
+
+    ok = gen_udp:close(RcvSocket),
 
     ok.
 

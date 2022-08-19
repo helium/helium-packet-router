@@ -54,16 +54,16 @@
 %%%===================================================================
 
 start_link(Args) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, Args, []).
+    gen_server:start_link(?MODULE, Args, []).
 
 -spec push_data(
     WorkerPid :: pid(),
     Data :: {Token :: binary(), Payload :: binary()},
-    HandlerPid :: pid(),
+    StreamHandler :: grpcbox_stream:t(),
     SocketDest :: socket_dest()
 ) -> ok | {error, any()}.
-push_data(WorkerPid, Data, HandlerPid, SocketDest) ->
-    gen_server:call(WorkerPid, {push_data, Data, HandlerPid, SocketDest}).
+push_data(WorkerPid, Data, StreamHandler, SocketDest) ->
+    gen_server:call(WorkerPid, {push_data, Data, StreamHandler, SocketDest}).
 
 %%%===================================================================
 %%% gen_server callbacks
