@@ -3,11 +3,17 @@
 -define(HEADERS, [{"content-type", "application/json"}]).
 
 %% API
--export([upload_file/4]).
+-export([upload_file/5]).
 
--spec upload_file(AWS :: pid(), S3Bucket :: binary(), FileName :: binary(), Body :: binary()) ->
+-spec upload_file(
+    AWS :: pid(),
+    S3Bucket :: binary(),
+    FileName :: binary(),
+    Body :: binary(),
+    Headers :: proplists:proplist()
+) ->
     ok | {error, binary()}.
-upload_file(AWS, S3Bucket, FileName, Body) ->
+upload_file(AWS, S3Bucket, FileName, Body, Headers) ->
     case
         httpc_aws:put(
             AWS,
@@ -16,7 +22,7 @@ upload_file(AWS, S3Bucket, FileName, Body) ->
                 <<"/", S3Bucket/binary, "/", FileName/binary>>
             ),
             Body,
-            ?HEADERS
+            Headers
         )
     of
         {error, Reason, _} ->
