@@ -13,6 +13,9 @@
         erlang_lorawan,
         libp2p_crypto,
         erl_angry_purple_tiger,
+        jsx,
+        iso8601,
+        xxhash,
         prometheus
     ]},
     {env, []},
