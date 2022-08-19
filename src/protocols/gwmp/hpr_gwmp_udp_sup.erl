@@ -76,7 +76,7 @@ init([]) ->
     {ok, {?FLAGS, [?WORKER(?UDP_WORKER)]}}.
 
 %%====================================================================
-%% Internal Funtions
+%% Internal Functions
 %%====================================================================
 
 -spec start_worker(PubKeyBin :: binary()) ->

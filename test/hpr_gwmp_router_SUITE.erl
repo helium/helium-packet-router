@@ -160,7 +160,6 @@ single_lns_downlink_test(_Config) ->
 
     ok.
 
-
 multi_lns_downlink_test(_Config) ->
     %% When communicating with multiple LNS, the udp worker needs to be able to
     %% ack pull_resp to the proper LNS.
