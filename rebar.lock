@@ -34,6 +34,10 @@
        {ref,"39bab5e24ef013689f9dc14f4365cd423f04cdc8"}},
   0},
  {<<"hpack">>,{pkg,<<"hpack_erl">>,<<"0.2.3">>},2},
+ {<<"iso8601">>,
+  {git,"https://github.com/erlsci/iso8601.git",
+       {ref,"fdb0fd12d729c53f4ae6f8c2f893fd6698b8b10e"}},
+  0},
  {<<"lager">>,{pkg,<<"lager">>,<<"3.9.2">>},0},
  {<<"libp2p_crypto">>,
   {git,"https://github.com/helium/libp2p_crypto.git",
@@ -44,7 +48,11 @@
  {<<"prometheus">>,{pkg,<<"prometheus">>,<<"4.9.0">>},0},
  {<<"quantile_estimator">>,{pkg,<<"quantile_estimator">>,<<"0.2.1">>},1},
  {<<"small_ints">>,{pkg,<<"small_ints">>,<<"0.1.0">>},2},
- {<<"throttle">>,{pkg,<<"lambda_throttle">>,<<"0.3.0">>},0}]}.
+ {<<"throttle">>,{pkg,<<"lambda_throttle">>,<<"0.3.0">>},0},
+ {<<"xxhash">>,
+  {git,"https://github.com/pierreis/erlang-xxhash",
+       {ref,"92fcfe57a74d3ea1fe794ccdfdf62ce4a036c01b"}},
+  0}]}.
 [
 {pkg_hash,[
  {<<"base32">>, <<"044F6DC95709727CA2176F3E97A41DDAA76B5BC690D3536908618C0CB32616A2">>},

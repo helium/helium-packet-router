@@ -15,15 +15,13 @@ init(Stream) ->
     Stream.
 
 -spec send_packet(hpr_packet_up:packet(), grpcbox_stream:t()) ->
-    ok
-    | {ok, grpcbox_stream:t()}
-    | {ok, packet_router_pb:packet_router_packet_down_v1_pb(), grpcbox_stream:t()}
-    | {stop, grpcbox_stream:t()}
-    | {stop, packet_router_pb:packet_router_packet_down_v1_pb(), grpcbox_stream:t()}
-    | grpcbox_stream:grpc_error_response().
-send_packet(_PacketUp, Stream) ->
+    {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+send_packet(PacketUp, Stream) ->
+    _ = proc_lib:spawn(hpr_routing, handle_packet, [PacketUp, Stream]),
     {ok, Stream}.
 
 -spec handle_info(Msg :: any(), Stream :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(_Msg, Stream) ->
     Stream.
+
+%% ===================================================================

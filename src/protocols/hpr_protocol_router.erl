@@ -4,7 +4,7 @@
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    HandlerPid :: pid(),
+    HandlerPid :: grpcbox_stream:t(),
     Routes :: hpr_route:route()
 ) -> ok | {error, any()}.
 send(_Packet, _HandlerPid, _Route) ->

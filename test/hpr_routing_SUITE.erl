@@ -55,12 +55,6 @@ join_req_test(_Config) ->
         hotspot => Hotspot, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
     ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, Self)),
-    receive
-        {error, bad_signature} -> ok;
-        Other0 -> ct:fail(Other0)
-    after 100 ->
-        ct:fail("bad_signature, timeout")
-    end,
 
     JoinPacketUpInvalid = test_utils:join_packet_up(#{
         hotspot => Hotspot, sig_fun => SigFun, payload => <<>>
@@ -68,12 +62,6 @@ join_req_test(_Config) ->
     ?assertEqual(
         {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid, Self)
     ),
-    receive
-        {error, invalid_packet_type} -> ok;
-        Other1 -> ct:fail(Other1)
-    after 100 ->
-        ct:fail("invalid_packet_type, timeout")
-    end,
 
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
