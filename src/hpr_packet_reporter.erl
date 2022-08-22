@@ -15,8 +15,17 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
-    aws :: pid()
+    aws_client :: aws_client:aws_client()
 }).
+
+%%%===================================================================
+%%% API
+%%%===================================================================
+
+%% TODO:
+%%
+%% API to report packet
+%% report_packet() -> ok.
 
 %%%===================================================================
 %%% Spawning and gen_server implementation
@@ -26,9 +35,9 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 init([]) ->
-    {ok, AWS} = setup_aws(),
+    AWSClient = setup_aws(),
     {ok, #state{
-        aws = AWS
+        aws_client = AWSClient
     }}.
 
 handle_call(_Request, _From, State = #state{}) ->
@@ -55,15 +64,37 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec setup_aws() -> {ok, AWSPid :: pid()} | {error, any()}.
+-spec setup_aws() -> aws_client:aws_client().
 setup_aws() ->
-    {ok, AWS} = httpc_aws:start_link(),
     #{
         access_key_id := AccessKey,
         secret_access_key := Secret,
         aws_region := Region
     } = maps:from_list(application:get_env(hpr, aws_config, [])),
-    httpc_aws:set_credentials(AWS, AccessKey, Secret),
-    httpc_aws:set_region(AWS, Region),
+    aws_client:make_client(AccessKey, Secret, Region).
 
-    {ok, AWS}.
+% ------------------------------------------------------------------
+% EUNIT Tests
+% ------------------------------------------------------------------
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+aws_test() ->
+    AccessKey = <<"">>,
+    SecretKey = <<"">>,
+    Region = <<"">>,
+    Client = aws_client:make_client(AccessKey, SecretKey, Region),
+    {ok, S} = file:open("/tmp/test.txt", [write, compressed]),
+    file:write(S, <<"HelloWorld">>),
+    file:close(S),
+
+    {ok, Content} = file:read_file("/tmp/test.txt"),
+    io:format("~p~n", [Content]),
+    aws_s3:put_object(Client, <<"test-bucket-hw">>, <<"my-key3">>, #{
+        <<"Body">> => Content
+    }),
+    {ok, Response, _} = aws_s3:get_object(Client, <<"test-bucket-hw">>, <<"my-key3">>),
+    io:format("Test2: ~p~n", [Response]),
+    Content = maps:get(<<"Body">>, Response).
+
+-endif.
