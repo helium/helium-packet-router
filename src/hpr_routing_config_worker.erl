@@ -9,7 +9,8 @@
     start_link/1,
     lookup_eui/2,
     lookup_devaddr/1,
-    dev_only_add_route/6]).
+    dev_only_add_route/6
+]).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -167,34 +168,38 @@ dev_only_add_route(
     EUIStrings,
     LNS,
     Protocol,
-    OUI) ->
-%%    delete route from dets
+    OUI
+) ->
+    %%    delete route from dets
     ok = dets:delete(?DETS, OUI),
 
-    EUIs = lists:map(fun({AppEUIString, DevEUIString}) ->
-        {
-            erlang:list_to_integer(AppEUIString, 16),
-            erlang:list_to_integer(DevEUIString, 16)
-        }
-                     end,
-        EUIStrings),
+    EUIs = lists:map(
+        fun({AppEUIString, DevEUIString}) ->
+            {
+                erlang:list_to_integer(AppEUIString, 16),
+                erlang:list_to_integer(DevEUIString, 16)
+            }
+        end,
+        EUIStrings
+    ),
     Route = hpr_route:new(
         erlang:list_to_integer(NetIDString, 16),
         DevAddrRanges,
         EUIs,
         LNS,
         Protocol,
-        OUI),
+        OUI
+    ),
 
-%%    add route to dets
+    %%    add route to dets
     ok = dets:insert(?DETS, {OUI, Route}),
 
     HPRSup = whereis(hpr_sup),
 
-%%    terminate hpr_routing_config_worker
+    %%    terminate hpr_routing_config_worker
     ok = supervisor:terminate_child(HPRSup, hpr_routing_config_worker),
 
-%%    restart hpr_routing_config_worker
+    %%    restart hpr_routing_config_worker
     {ok, RoutingConfigPid} = supervisor:restart_child(HPRSup, hpr_routing_config_worker),
     RoutingConfigPid.
 
