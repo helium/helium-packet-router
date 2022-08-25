@@ -5,6 +5,8 @@
             {secret_access_key, <<"${AWS_SECRET_ACCESS_KEY}">>},
             {aws_region, "${AWS_DEFAULT_REGION}"}
         ]},
+        {packet_reporter_bucket, "bucket_name"},
+        {packet_reporter_report_interval, 300000},
         {base_dir, "/var/data"}
     ]},
     {grpcbox, [

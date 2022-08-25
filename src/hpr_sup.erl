@@ -57,6 +57,7 @@ init([]) ->
     BaseDir = application:get_env(?APP, base_dir, "/var/data"),
     ok = filelib:ensure_dir(BaseDir),
 
+    ok = hpr_packet_reporter:init_ets(),
     ok = hpr_routing:init(),
 
     ChildSpecs = [
