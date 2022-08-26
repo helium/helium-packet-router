@@ -2,8 +2,11 @@
 
 -behaviour(gen_server).
 
+-include("./grpc/autogen/server/packet_router_pb.hrl").
+
 -export([
     start_link/0,
+    start_link/1,
     init_ets/0,
     report_packet/1,
     write_packets/1
@@ -28,29 +31,80 @@
     aws_client :: aws_client:aws_client()
 }).
 
+%% WIP: Should be moved to helium_proto lib
+% -record(packet_router_packet_report_v1 , {
+%   bytes packet_hash = 1;
+%   uint64 timestamp = 2;
+%   uint32 oui = 3; Not defined until routing (Deliver packet). Should write at deliver? Twice?
+%   float signal_strength = 4;
+%   float frequency = 5;
+%   string datarate = 6;
+%   float snr = 7;
+%   region region = 8;
+% }).
+
+-record(packet_router_packet_report_v1, {
+    packet_hash :: iodata() | undefined,
+    oui = 0 :: non_neg_integer() | undefined,
+    % = 2, enum packet_pb.packet_type
+    type = longfi :: longfi | lorawan | integer() | undefined,
+    % = 3
+    payload = <<>> :: iodata() | undefined,
+    % = 4, 64 bits
+    timestamp = 0 :: non_neg_integer() | undefined,
+    % = 5
+    signal_strength = 0.0 :: float() | integer() | infinity | '-infinity' | nan | undefined,
+    % = 6
+    frequency = 0.0 :: float() | integer() | infinity | '-infinity' | nan | undefined,
+    % = 7
+    datarate = [] :: iodata() | undefined,
+    % = 8
+    snr = 0.0 :: float() | integer() | infinity | '-infinity' | nan | undefined,
+    % = 9 optional, enum helium.region
+    region = 'US915' ::
+        'US915'
+        | 'EU868'
+        | 'EU433'
+        | 'CN470'
+        | 'CN779'
+        | 'AU915'
+        | 'AS923_1'
+        | 'KR920'
+        | 'IN865'
+        | 'AS923_2'
+        | 'AS923_3'
+        | 'AS923_4'
+        | 'AS923_1B'
+        | 'CD900_1A'
+        | integer()
+        | undefined
+}).
+
 %%%===================================================================
 %%% API Functions
 %%%===================================================================
 
 -spec init_ets() -> ok.
 init_ets() ->
-    ?ETS = ets:new(?ETS, [named_table, set]),
+    ?ETS = ets:new(?ETS, [named_table, set, public]),
     ok.
 
 %% API to report packet
 %% TODO: Handle packet data
 %% Can be set to pattern match on different inputs
-report_packet(ID) ->
+report_packet(Packet) ->
+    EncodedPacket = encode_packet(Packet),
     Timestamp = erlang:system_time(),
-    true = ets:insert(?ETS, {ID, Timestamp}),
+    true = ets:insert(?ETS, {Timestamp, EncodedPacket}),
     ok.
 
 %%%===================================================================
 %%% Spawning and gen_server implementation
 %%%===================================================================
 
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link() -> start_link([]).
+start_link(Options) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
 
 init([]) ->
     AWSClient = setup_aws(),
@@ -61,7 +115,8 @@ init([]) ->
 
 handle_call(write, _From, State = #state{}) ->
     Timestamp = erlang:system_time(millisecond),
-    FilePath = "./tmp/packetreport.gz",
+    %% TODO: Use base dir
+    FilePath = application:get_env(hpr, packet_reporter_tmp_filepath, "./tmp/packetreport.gz"),
 
     {ok, S} = open_tmp_file(FilePath),
     Data = get_packets_by_timestamp(Timestamp),
@@ -124,8 +179,35 @@ start_report_interval(Pid) ->
 write_packets(Pid) ->
     gen_server:call(Pid, write).
 
+encode_packet(#packet_router_packet_up_v1_pb{
+    payload = Payload,
+    timestamp = Timestamp,
+    signal_strength = SignalStrength,
+    frequency = Frequency,
+    datarate = Datarate,
+    snr = SNR,
+    region = Region
+}) ->
+    #packet_router_packet_report_v1{
+        packet_hash = crypto:hash(sha256, Payload),
+        timestamp = Timestamp,
+        signal_strength = SignalStrength,
+        frequency = Frequency,
+        datarate = Datarate,
+        snr = SNR,
+        region = Region
+    };
+encode_packet(#packet_router_packet_down_v1_pb{
+    payload = Payload
+}) ->
+    #packet_router_packet_report_v1{
+        packet_hash = crypto:hash(sha256, Payload),
+        timestamp = erlang:system_time()
+    }.
+
 -spec open_tmp_file(string()) -> {ok, file:io_device()} | {error, atom()}.
 open_tmp_file(FilePath) ->
+    ct:print("TMP file: ~p~n", [{FilePath, file:list_dir("./")}]),
     case file:open(FilePath, [write, compressed]) of
         {error, Error} ->
             lager:error("failed to open tmp write file: ~p~n", [Error]);
@@ -192,5 +274,9 @@ file_test() ->
 %     {ok, Response, _} = aws_s3:get_object(Client, <<"test-bucket-hw">>, <<"my-key3">>),
 %     io:format("Test2: ~p~n", [Response]),
 %     Content = maps:get(<<"Body">>, Response).
+
+% packet_encoding() ->
+
+%     ok.
 
 -endif.
