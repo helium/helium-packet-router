@@ -5,7 +5,6 @@
 -include("./grpc/autogen/server/packet_router_pb.hrl").
 
 -export([
-    start_link/0,
     start_link/1,
     init_ets/0,
     report_packet/1,
@@ -28,7 +27,8 @@
 -define(MAX_FILE_SIZE, 50_000_000).
 
 -record(state, {
-    aws_client :: aws_client:aws_client()
+    aws_client :: aws_client:aws_client(),
+    base_dir :: string()
 }).
 
 %% WIP: Should be moved to helium_proto lib
@@ -86,7 +86,7 @@
 
 -spec init_ets() -> ok.
 init_ets() ->
-    ?ETS = ets:new(?ETS, [named_table, set, public]),
+    ?ETS = ets:new(?ETS, [named_table, bag, public, {write_concurrency, true}]),
     ok.
 
 %% API to report packet
@@ -102,21 +102,28 @@ report_packet(Packet) ->
 %%% Spawning and gen_server implementation
 %%%===================================================================
 
-start_link() -> start_link([]).
-start_link(Options) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
+start_link(Args) ->
+    gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
 
-init([]) ->
+init(#{base_dir := BaseDir} = _Args) ->
     AWSClient = setup_aws(),
+    FilePath = filename:join(BaseDir, "tmp/"),
+    ok = filelib:ensure_dir(FilePath),
     start_report_interval(self()),
     {ok, #state{
-        aws_client = AWSClient
+        aws_client = AWSClient,
+        base_dir = FilePath
     }}.
 
-handle_call(write, _From, State = #state{}) ->
+handle_call(
+    write,
+    _From,
+    State = #state{
+        base_dir = BaseDir
+    }
+) ->
     Timestamp = erlang:system_time(millisecond),
-    %% TODO: Use base dir
-    FilePath = application:get_env(hpr, packet_reporter_tmp_filepath, "./tmp/packetreport.gz"),
+    FilePath = filename:join(BaseDir, "packetreport.gz"),
 
     {ok, S} = open_tmp_file(FilePath),
     Data = get_packets_by_timestamp(Timestamp),
@@ -173,6 +180,7 @@ setup_aws() ->
 
 -spec start_report_interval(pid()) -> ok.
 start_report_interval(Pid) ->
+    %% TODO: Store timer reference, allow for pause/restart
     Interval = application:get_env(hpr, packet_reporter_report_interval, ?DEFAULT_REPORT_INTERVAL),
     timer:apply_interval(Interval, ?MODULE, write_packets, [Pid]).
 
@@ -208,7 +216,6 @@ encode_packet(#packet_router_packet_down_v1_pb{
 
 -spec open_tmp_file(string()) -> {ok, file:io_device()} | {error, atom()}.
 open_tmp_file(FilePath) ->
-    ct:print("TMP file: ~p~n", [{FilePath, file:list_dir("./")}]),
     case file:open(FilePath, [write, compressed]) of
         {error, Error} ->
             lager:error("failed to open tmp write file: ~p~n", [Error]);

@@ -63,7 +63,7 @@ init([]) ->
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
         ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}]),
-        ?WORKER(hpr_packet_reporter, []),
+        ?WORKER(hpr_packet_reporter, [#{base_dir => BaseDir}]),
         ?SUP(hpr_gwmp_udp_sup, [])
     ],
     {ok, {
