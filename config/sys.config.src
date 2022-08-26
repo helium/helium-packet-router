@@ -3,11 +3,12 @@
         {aws_config, [
             {access_key_id, <<"${AWS_ACCESS_KEY_ID}">>},
             {secret_access_key, <<"${AWS_SECRET_ACCESS_KEY}">>},
-            {aws_region, "${AWS_DEFAULT_REGION}"}
+            {aws_region, <<"${AWS_DEFAULT_REGION}">>}
         ]},
-        {packet_reporter_bucket, "bucket_name"},
+        {packet_reporter_bucket, <<"${PACKET_REPORTER_BUCKET_NAME}">>},
         {packet_reporter_report_interval, 300000},
-        {base_dir, "/var/data"}
+        {packet_reporter_max_file_size, 50_000_000},
+        {base_dir, "./data"}
     ]},
     {grpcbox, [
         {servers, [
