@@ -17,6 +17,7 @@ init(Stream) ->
 -spec send_packet(hpr_packet_up:packet(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 send_packet(PacketUp, Stream) ->
+    hpr_packet_reporter:report_packet(PacketUp),
     _ = proc_lib:spawn(hpr_routing, handle_packet, [PacketUp, Stream]),
     {ok, Stream}.
 

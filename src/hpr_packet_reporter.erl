@@ -94,7 +94,7 @@ init_ets() ->
 %% Can be set to pattern match on different inputs
 report_packet(Packet) ->
     EncodedPacket = encode_packet(Packet),
-    Timestamp = erlang:system_time(),
+    Timestamp = erlang:system_time(millisecond),
     true = ets:insert(?ETS, {Timestamp, EncodedPacket}),
     ok.
 
@@ -129,7 +129,8 @@ handle_call(write, _From, State = #state{}) ->
     ),
     file:close(S),
 
-    delete_packets_by_timestamp(Timestamp),
+    NumDeleted = delete_packets_by_timestamp(Timestamp),
+    io:format("Deleted: ~p~n, Data: ~p~n", [NumDeleted, length(Data)]),
 
     case filelib:file_size(FilePath) >= ?MAX_FILE_SIZE of
         true -> gen_server:cast(?SERVER, {upload, FilePath});
@@ -225,11 +226,11 @@ upload_file(AWSClient, Path, FileName) ->
 %% TODO: Adjust match patterns for packets
 -spec get_packets_by_timestamp(integer()) -> [term()].
 get_packets_by_timestamp(Timestamp) ->
-    ets:select(?ETS, [{{'$1', '$2'}, [{'>', '$2', Timestamp}], [{{'$1', '$2'}}]}]).
+    ets:select(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], [{{'$1', '$2'}}]}]).
 
 -spec delete_packets_by_timestamp(integer()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
-    ets:select_delete(?ETS, [{{'$1', '$2'}, [{'>', '$2', Timestamp}], [{{'$1', '$2'}}]}]).
+    ets:select_delete(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], [true]}]).
 
 % ------------------------------------------------------------------
 % EUNIT Tests
