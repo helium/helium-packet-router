@@ -245,7 +245,7 @@ upload_file(AWSClient, Path, FileName) ->
 
 -spec get_packets_by_timestamp(integer()) -> [term()].
 get_packets_by_timestamp(Timestamp) ->
-    ets:select(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], [{{'$1', '$2'}}]}]).
+    ets:select(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], ['$2']}]).
 
 -spec delete_packets_by_timestamp(integer()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
