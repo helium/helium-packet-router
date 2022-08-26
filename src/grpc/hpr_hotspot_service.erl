@@ -7,6 +7,7 @@
 -export([
     init/1,
     send_packet/2,
+    send_downlink/2,
     handle_info/2
 ]).
 
@@ -20,6 +21,12 @@ send_packet(PacketUp, Stream) ->
     hpr_packet_reporter:report_packet(PacketUp),
     _ = proc_lib:spawn(hpr_routing, handle_packet, [PacketUp, Stream]),
     {ok, Stream}.
+
+-spec send_downlink(#packet_router_packet_down_v1_pb{}, grpcbox_stream:t()) ->
+    grpcbox_stream:t().
+send_downlink(PacketDown, Stream) ->
+    hpr_packet_reporter:report_packet(PacketDown),
+    grpcbox_stream:send(false, PacketDown, Stream).
 
 -spec handle_info(Msg :: any(), Stream :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(_Msg, Stream) ->

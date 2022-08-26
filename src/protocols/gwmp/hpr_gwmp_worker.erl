@@ -344,7 +344,7 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
 handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler) ->
     %% Send downlink to grpc handler
     PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
-    grpcbox_stream:send(false, PacketDown, StreamHandler),
+    hpr_hotspot_service:send_downlink(PacketDown, StreamHandler),
 
     %% Ack the downlink
     Token = semtech_udp:token(Data),
