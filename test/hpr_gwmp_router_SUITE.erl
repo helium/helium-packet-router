@@ -11,7 +11,10 @@
     multi_lns_test/1,
     single_lns_downlink_test/1,
     multi_lns_downlink_test/1,
-    multi_gw_single_lns_test/1
+    multi_gw_single_lns_test/1,
+    shutdown_idle_worker_test/1,
+    pull_data_test/1,
+    failed_pull_data_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -34,7 +37,10 @@ all() ->
         multi_lns_test,
         single_lns_downlink_test,
         multi_lns_downlink_test,
-        multi_gw_single_lns_test
+        multi_gw_single_lns_test,
+        shutdown_idle_worker_test,
+        pull_data_test,
+        failed_pull_data_test
     ].
 
 %%--------------------------------------------------------------------
@@ -56,14 +62,7 @@ end_per_testcase(TestCase, Config) ->
 single_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
-    Route = hpr_route:new(
-        1337,
-        [],
-        [],
-        <<"127.0.0.1:1777">>,
-        gwmp,
-        42
-    ),
+    Route = test_route_1777(),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
@@ -76,6 +75,16 @@ single_lns_test(_Config) ->
     ok = gen_udp:close(RcvSocket),
 
     ok.
+
+test_route_1777() ->
+    hpr_route:new(
+        1337,
+        [],
+        [],
+        <<"127.0.0.1:1777">>,
+        gwmp,
+        42
+    ).
 
 multi_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
@@ -253,6 +262,46 @@ multi_gw_single_lns_test(_Config) ->
 
     ok = gen_udp:close(RcvSocket),
 
+    ok.
+
+shutdown_idle_worker_test(_Config) ->
+%%    make an up packet
+    PacketUp = fake_join_up_packet(),
+
+    PubKeyBin = hpr_packet_up:hotspot(PacketUp),
+%%    start worker
+    {ok, WorkerPid1} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
+    ?assert(erlang:is_process_alive(WorkerPid1)),
+
+%%    wait for shutdown timer to expire
+    timer:sleep(120),
+    ?assertNot(erlang:is_process_alive(WorkerPid1)),
+
+%%    start worker
+    {ok, WorkerPid2} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
+    ?assert(erlang:is_process_alive(WorkerPid2)),
+    timer:sleep(50),
+
+%%    before timer expires, send push_data
+    Route = test_route_1777(),
+    ok = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
+
+%%    check that timer restarted when the push_data occurred
+    timer:sleep(50),
+    ?assert(erlang:is_process_alive(WorkerPid2)),
+
+%%    check that the timer expires and the worker is shut down
+    timer:sleep(100),
+    ?assertNot(erlang:is_process_alive(WorkerPid2)),
+
+    ok.
+
+pull_data_test(_Config) ->
+    todo,
+    ok.
+
+failed_pull_data_test(_Config) ->
+    todo,
     ok.
 
 %% ===================================================================

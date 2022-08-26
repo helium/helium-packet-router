@@ -18,7 +18,7 @@
 send(PacketUp, Stream, Route) ->
     Hotspot = hpr_packet_up:hotspot(PacketUp),
 
-    case hpr_gwmp_udp_sup:maybe_start_worker(Hotspot) of
+    case hpr_gwmp_udp_sup:maybe_start_worker(Hotspot, #{}) of
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->

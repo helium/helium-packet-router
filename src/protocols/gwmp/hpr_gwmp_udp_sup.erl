@@ -11,7 +11,7 @@
 -export([
     start_link/0,
     init/1,
-    maybe_start_worker/1,
+    maybe_start_worker/2,
     lookup_worker/1
 ]).
 
@@ -40,18 +40,18 @@
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
--spec maybe_start_worker(WorkerKey :: binary()) -> {ok, pid()} | {error, any()}.
-maybe_start_worker(WorkerKey) ->
+-spec maybe_start_worker(WorkerKey :: binary(), Args :: map()) -> {ok, pid()} | {error, any()}.
+maybe_start_worker(WorkerKey, Args) ->
     case ets:lookup(?ETS, WorkerKey) of
         [] ->
-            start_worker(WorkerKey);
+            start_worker(WorkerKey, Args);
         [{WorkerKey, Pid}] ->
             case erlang:is_process_alive(Pid) of
                 true ->
                     {ok, Pid};
                 false ->
                     _ = ets:delete(?ETS, WorkerKey),
-                    start_worker(WorkerKey)
+                    start_worker(WorkerKey, Args)
             end
     end.
 
@@ -79,10 +79,12 @@ init([]) ->
 %% Internal Functions
 %%====================================================================
 
--spec start_worker(PubKeyBin :: binary()) ->
+-spec start_worker(PubKeyBin :: binary(), Args :: map()) ->
     {ok, pid()} | {error, any()}.
-start_worker(PubKeyBin) ->
-    ChildArgs = #{pubkeybin => PubKeyBin},
+start_worker(PubKeyBin, Args) ->
+    ChildArgs = maps:merge(
+        #{pubkeybin => PubKeyBin},
+        Args),
     case supervisor:start_child(?MODULE, [ChildArgs]) of
         {error, Err} ->
             {error, Err};
@@ -92,6 +94,6 @@ start_worker(PubKeyBin) ->
                     OK;
                 false ->
                     supervisor:terminate_child(?UDP_WORKER, Pid),
-                    maybe_start_worker(PubKeyBin)
+                    maybe_start_worker(PubKeyBin, Args)
             end
     end.
