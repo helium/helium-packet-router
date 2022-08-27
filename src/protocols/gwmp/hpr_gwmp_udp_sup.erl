@@ -84,7 +84,8 @@ init([]) ->
 start_worker(PubKeyBin, Args) ->
     ChildArgs = maps:merge(
         #{pubkeybin => PubKeyBin},
-        Args),
+        Args
+    ),
     case supervisor:start_child(?MODULE, [ChildArgs]) of
         {error, Err} ->
             {error, Err};

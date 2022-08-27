@@ -13,8 +13,7 @@
     multi_lns_downlink_test/1,
     multi_gw_single_lns_test/1,
     shutdown_idle_worker_test/1,
-    pull_data_test/1,
-    failed_pull_data_test/1
+    pull_data_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -39,8 +38,7 @@ all() ->
         multi_lns_downlink_test,
         multi_gw_single_lns_test,
         shutdown_idle_worker_test,
-        pull_data_test,
-        failed_pull_data_test
+        pull_data_test
     ].
 
 %%--------------------------------------------------------------------
@@ -68,7 +66,7 @@ single_lns_test(_Config) ->
 
     hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
     %% Initial PULL_DATA
-    ok = expect_pull_data(RcvSocket, route_pull_data),
+    {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
     %% PUSH_DATA
     {ok, _} = expect_push_data(RcvSocket, router_push_data),
 
@@ -97,12 +95,12 @@ multi_lns_test(_Config) ->
 
     %% Send packet to route 1
     hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
-    ok = expect_pull_data(RcvSocket1, route1_pull_data),
+    {ok, _Token, _MAC} = expect_pull_data(RcvSocket1, route1_pull_data),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data),
 
     %% Same packet to route 2
     hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route2),
-    ok = expect_pull_data(RcvSocket2, route2_pull_data),
+    {ok, _Token2, _MAC2} = expect_pull_data(RcvSocket2, route2_pull_data),
     {ok, _} = expect_push_data(RcvSocket2, route2_push_data),
 
     %% Another packet to route 1
@@ -126,7 +124,7 @@ single_lns_downlink_test(_Config) ->
     _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
 
     %% Eat the pull_data
-    ok = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
+    {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
     %% Receive the uplink (mostly to get the return address)
     {ok, ReturnSocketDest} =
         receive
@@ -185,7 +183,7 @@ multi_lns_downlink_test(_Config) ->
 
     %% Send packet to LNS 1
     _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
-    ok = expect_pull_data(LNSSocket1, downlink_test_initiate_connection_lns1),
+    {ok, _Token, _Data} = expect_pull_data(LNSSocket1, downlink_test_initiate_connection_lns1),
     %% Receive the uplink from LNS 1 (mostly to get the return address)
     {ok, UDPWorkerAddress} =
         receive
@@ -197,7 +195,7 @@ multi_lns_downlink_test(_Config) ->
 
     %% Send packet to LNS 2
     _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route2),
-    ok = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
+    {ok, _Token2, _Data2} = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
     {ok, _} = expect_push_data(LNSSocket2, route2_push_data),
 
     %% LNS 2 is now the most recent communicator with the UDP worker.
@@ -252,12 +250,12 @@ multi_gw_single_lns_test(_Config) ->
 
     %% Send the packet from the first hotspot
     hpr_gwmp_router:send(PacketUp1, unused_test_stream_handler, Route),
-    ok = expect_pull_data(RcvSocket, first_gw_pull_data),
+    {ok, _Token, _Data} = expect_pull_data(RcvSocket, first_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, first_gw_push_data),
 
     %% Send the same packet from the second hotspot
     hpr_gwmp_router:send(PacketUp2, unused_test_stream_handler, Route),
-    ok = expect_pull_data(RcvSocket, second_gw_pull_data),
+    {ok, _Token2, _Data2} = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
 
     ok = gen_udp:close(RcvSocket),
@@ -265,43 +263,53 @@ multi_gw_single_lns_test(_Config) ->
     ok.
 
 shutdown_idle_worker_test(_Config) ->
-%%    make an up packet
+    %%    make an up packet
     PacketUp = fake_join_up_packet(),
 
     PubKeyBin = hpr_packet_up:hotspot(PacketUp),
-%%    start worker
+    %%    start worker
     {ok, WorkerPid1} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
     ?assert(erlang:is_process_alive(WorkerPid1)),
 
-%%    wait for shutdown timer to expire
+    %%    wait for shutdown timer to expire
     timer:sleep(120),
     ?assertNot(erlang:is_process_alive(WorkerPid1)),
 
-%%    start worker
+    %%    start worker
     {ok, WorkerPid2} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
     ?assert(erlang:is_process_alive(WorkerPid2)),
     timer:sleep(50),
 
-%%    before timer expires, send push_data
+    %%    before timer expires, send push_data
     Route = test_route_1777(),
     ok = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
 
-%%    check that timer restarted when the push_data occurred
+    %%    check that timer restarted when the push_data occurred
     timer:sleep(50),
     ?assert(erlang:is_process_alive(WorkerPid2)),
 
-%%    check that the timer expires and the worker is shut down
+    %%    check that the timer expires and the worker is shut down
     timer:sleep(100),
     ?assertNot(erlang:is_process_alive(WorkerPid2)),
 
     ok.
 
 pull_data_test(_Config) ->
-    todo,
-    ok.
+    %%    send push_data to start sending of pull_data
+    PacketUp = fake_join_up_packet(),
+    PubKeyBin = hpr_packet_up:hotspot(PacketUp),
 
-failed_pull_data_test(_Config) ->
-    todo,
+    Route = test_route_1777(),
+
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
+
+    %% Initial PULL_DATA
+    {ok, Token, MAC} = expect_pull_data(RcvSocket, route_pull_data),
+    ?assert(erlang:is_binary(Token)),
+    ?assertEqual(MAC, hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin)),
+
     ok.
 
 %% ===================================================================
@@ -312,7 +320,9 @@ expect_pull_data(Socket, Reason) ->
     receive
         {udp, Socket, _Address, _Port, Data} ->
             ?assertEqual(pull_data, semtech_id_atom(Data), Reason),
-            ok
+            Token = semtech_udp:token(Data),
+            MAC = semtech_udp:mac(Data),
+            {ok, Token, MAC}
     after timer:seconds(2) -> ct:fail({no_pull_data, Reason})
     end.
 

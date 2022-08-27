@@ -17,6 +17,7 @@
     tx_ack/2, tx_ack/3,
     token/0,
     token/1,
+    mac/1,
     identifier/1,
     identifier_to_atom/1,
     json_data/1,
@@ -167,6 +168,12 @@ token() ->
 -spec token(binary()) -> binary().
 token(<<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, _/binary>>) ->
     Token.
+
+-spec mac(binary()) -> binary().
+mac(
+    <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PULL_DATA:8/integer-unsigned, MAC:8/binary>>
+) ->
+    MAC.
 
 -spec identifier(binary()) -> integer().
 identifier(
