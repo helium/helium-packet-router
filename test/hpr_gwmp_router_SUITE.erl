@@ -141,12 +141,12 @@ single_lns_downlink_test(_Config) ->
     meck:expect(grpcbox_stream, send, fun(Eos, PacketDown, _StreamHandler) ->
         ?assertEqual(false, Eos, "we don't want to be ending the stream"),
         Self ! {packet_down, PacketDown}
-                                      end),
+    end),
 
     %% Send a downlink to the worker
     {DownToken, DownPullResp} = fake_down_packet(),
 
-%%    save these fake values to compare with what is received
+    %%    save these fake values to compare with what is received
     #{
         data := Data,
         freq := Freq,
