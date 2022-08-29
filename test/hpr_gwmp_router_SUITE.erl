@@ -141,17 +141,33 @@ single_lns_downlink_test(_Config) ->
     meck:expect(grpcbox_stream, send, fun(Eos, PacketDown, _StreamHandler) ->
         ?assertEqual(false, Eos, "we don't want to be ending the stream"),
         Self ! {packet_down, PacketDown}
-    end),
+                                      end),
 
     %% Send a downlink to the worker
-    %% we don't care about the contents
     {DownToken, DownPullResp} = fake_down_packet(),
+
+%%    save these fake values to compare with what is received
+    #{
+        data := Data,
+        freq := Freq,
+        datr := Datr
+    } = fake_down_map(),
     ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
 
     %% receive the PacketRouterPacketDownV1 as the grpc stream.
     receive
-        {packet_down, #packet_router_packet_down_v1_pb{}} ->
-            %% Nothing in the packet_down we care to assert right now.
+        {packet_down, #packet_router_packet_down_v1_pb{
+            payload = Payload,
+            rx1 = #window_v1_pb{
+                timestamp = Timestamp,
+                frequency = Frequency,
+                datarate = Datarate
+            }
+        }} ->
+            ?assert(erlang:is_integer(Timestamp)),
+            ?assertEqual(Data, base64:encode(Payload)),
+            ?assertEqual(Freq, Frequency),
+            ?assertEqual(Datr, Datarate),
             ok;
         {packet_down, Other} ->
             ct:fail({rcvd_bad_packet_down, Other})
@@ -371,6 +387,11 @@ fake_join_up_packet() ->
 %% Pulled from semtech_udp eunit.
 %% data needed to encoded to be valid to use.
 fake_down_packet() ->
+    DownMap = fake_down_map(),
+    DownToken = semtech_udp:token(),
+    {DownToken, semtech_udp:pull_resp(DownToken, DownMap)}.
+
+fake_down_map() ->
     DownMap = #{
         imme => true,
         freq => 904.1,
@@ -384,8 +405,7 @@ fake_down_packet() ->
         tmst => erlang:system_time(millisecond) band 16#FFFF_FFFF,
         data => base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>)
     },
-    DownToken = semtech_udp:token(),
-    {DownToken, semtech_udp:pull_resp(DownToken, DownMap)}.
+    DownMap.
 
 verify_push_data(PacketUp, PushDataBinary) ->
     JsonData = semtech_udp:json_data(PushDataBinary),

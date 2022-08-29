@@ -138,9 +138,9 @@ pull_resp(Token, Map) ->
 %% @doc
 %% That packet type is used by the gateway to send a feedback to the server
 %% to inform if a downlink request has been accepted or rejected by the gateway.
-%% The datagram may optionnaly contain a JSON string to give more details on
-%% acknoledge. If no JSON is present (empty string), this means than no error
-%% occured.
+%% The datagram may optionally contain a JSON string to give more details on
+%% acknowledge. If no JSON is present (empty string), this means than no error
+%% occurred.
 %% @end
 %%%-------------------------------------------------------------------
 -spec tx_ack(
