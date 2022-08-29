@@ -68,7 +68,8 @@ single_lns_test(_Config) ->
     %% Initial PULL_DATA
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
     %% PUSH_DATA
-    {ok, _} = expect_push_data(RcvSocket, router_push_data),
+    {ok, Data} = expect_push_data(RcvSocket, router_push_data),
+    ok = verify_push_data(PacketUp, Data),
 
     ok = gen_udp:close(RcvSocket),
 
@@ -385,3 +386,36 @@ fake_down_packet() ->
     },
     DownToken = semtech_udp:token(),
     {DownToken, semtech_udp:pull_resp(DownToken, DownMap)}.
+
+verify_push_data(PacketUp, PushDataBinary) ->
+    JsonData = semtech_udp:json_data(PushDataBinary),
+
+    PubKeyBin = hpr_packet_up:hotspot(PacketUp),
+    MapFromPacketUp = #{
+        <<"rxpk">> =>
+            [
+                #{
+                    <<"chan">> => 0,
+                    <<"codr">> => <<"4/5">>,
+                    <<"data">> => base64:encode(hpr_packet_up:payload(PacketUp)),
+                    <<"datr">> => erlang:list_to_binary(hpr_packet_up:datarate(PacketUp)),
+                    <<"freq">> => list_to_float(
+                        float_to_list(hpr_packet_up:frequency(PacketUp), [{decimals, 4}, compact])
+                    ),
+                    <<"lsnr">> => hpr_packet_up:snr(PacketUp),
+                    <<"modu">> => <<"LORA">>,
+                    <<"rfch">> => 0,
+                    <<"rssi">> => erlang:trunc(hpr_packet_up:signal_strength(PacketUp)),
+                    <<"size">> => erlang:byte_size(hpr_packet_up:payload(PacketUp)),
+                    <<"stat">> => 1,
+                    <<"time">> => fun erlang:is_binary/1,
+                    <<"tmst">> => hpr_packet_up:timestamp(PacketUp) band 16#FFFF_FFFF
+                }
+            ],
+        <<"stat">> =>
+            #{
+                <<"pubk">> => libp2p_crypto:bin_to_b58(PubKeyBin),
+                <<"regi">> => erlang:atom_to_binary(hpr_packet_up:region(PacketUp))
+            }
+    },
+    ?assert(test_utils:match_map(MapFromPacketUp, JsonData)).
