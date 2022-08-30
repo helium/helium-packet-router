@@ -29,7 +29,7 @@
 
 -record(state, {
     aws_client :: aws_client:aws_client(),
-    base_dir :: string()
+    file_path :: string()
 }).
 
 %% WIP: Should be moved to helium_proto lib
@@ -115,23 +115,58 @@ upload_packets(FilePath) ->
 
 init(#{base_dir := BaseDir} = _Args) ->
     AWSClient = setup_aws(),
-    FilePath = filename:join(BaseDir, "tmp/"),
-    ok = filelib:ensure_dir(FilePath),
+    WriteDir = filename:join(BaseDir, "tmp/"),
+    ok = filelib:ensure_dir(WriteDir),
+    %% TODO: File rotation
+    TempFilePath = filename:join(WriteDir, "packetreport.gz"),
     start_report_interval(),
     {ok, #state{
         aws_client = AWSClient,
-        base_dir = FilePath
+        file_path = TempFilePath
     }}.
 
 handle_call(_Request, _From, State = #state{}) ->
     {reply, ok, State}.
 
-handle_cast(write, State = #state{base_dir = BaseDir}) ->
-    Timestamp = erlang:system_time(millisecond),
-    %% TODO: File rotation
-    FilePath = filename:join(BaseDir, "packetreport.gz"),
+handle_cast(write, State = #state{file_path = FilePath}) ->
+    {ok, FileSize, MaxFileSize} = handle_write(FilePath),
 
-    {ok, S} = open_tmp_file(FilePath),
+    case FileSize >= MaxFileSize of
+        true -> ?MODULE:upload_packets(FilePath);
+        false -> skip
+    end,
+    {noreply, State};
+handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
+    Timestamp = erlang:system_time(millisecond),
+    FileName = list_to_binary("packetreport." ++ integer_to_list(Timestamp) ++ ".gz"),
+    upload_file(AWSClient, FilePath, FileName),
+    file:delete(FilePath),
+    {noreply, State};
+handle_cast(_Request, State = #state{}) ->
+    {noreply, State}.
+
+handle_info(_Info, State = #state{}) ->
+    {noreply, State}.
+
+terminate(Reason, _State = #state{file_path = FilePath}) ->
+    handle_write(FilePath),
+    lager:warning("packet reporter process terminated: ~s", [Reason]),
+    ok.
+
+code_change(_OldVsn, State = #state{}, _Extra) ->
+    {ok, State}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+-spec handle_write(string()) -> {ok, integer(), integer()}.
+-spec handle_write(string(), [atom()]) -> {ok, integer(), integer()}.
+
+handle_write(FilePath) -> handle_write(FilePath, [compressed]).
+handle_write(FilePath, Options) ->
+    Timestamp = erlang:system_time(millisecond),
+    {ok, S} = open_tmp_file(FilePath, Options),
     Data = get_packets_by_timestamp(Timestamp),
 
     lists:foreach(
@@ -145,6 +180,7 @@ handle_cast(write, State = #state{base_dir = BaseDir}) ->
     NumDeleted = delete_packets_by_timestamp(Timestamp),
     FileSize = filelib:file_size(FilePath),
     MaxFileSize = application:get_env(hpr, packet_reporter_max_file_size, ?MAX_FILE_SIZE),
+
     lager:info(
         [
             {packets_processed, length(Data)},
@@ -154,33 +190,7 @@ handle_cast(write, State = #state{base_dir = BaseDir}) ->
         ],
         "packet reporter processing"
     ),
-
-    case FileSize >= MaxFileSize of
-        true -> ?MODULE:upload_packets(FilePath);
-        false -> skip
-    end,
-    {noreply, State};
-handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
-    Timestamp = erlang:system_time(millisecond),
-    FileName = "packetreport." ++ integer_to_list(Timestamp) ++ ".gz",
-    upload_file(AWSClient, FilePath, FileName),
-    file:delete(FilePath),
-    {noreply, State};
-handle_cast(_Request, State = #state{}) ->
-    {noreply, State}.
-
-handle_info(_Info, State = #state{}) ->
-    {noreply, State}.
-
-terminate(_Reason, _State = #state{}) ->
-    ok.
-
-code_change(_OldVsn, State = #state{}, _Extra) ->
-    {ok, State}.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+    {ok, FileSize, MaxFileSize}.
 
 -spec setup_aws() -> aws_client:aws_client().
 setup_aws() ->
@@ -227,21 +237,31 @@ encode_packet(#packet_router_packet_down_v1_pb{
         timestamp = erlang:system_time(millisecond)
     }.
 
--spec open_tmp_file(string()) -> {ok, file:io_device()} | {error, atom()}.
-open_tmp_file(FilePath) ->
-    case file:open(FilePath, [write, compressed]) of
+-spec open_tmp_file(string(), [atom()]) -> {ok, file:io_device()} | {error, atom()}.
+open_tmp_file(FilePath, Options) ->
+    case file:open(FilePath, [append] ++ Options) of
         {error, Error} ->
-            lager:error("failed to open tmp write file: ~p~n", [Error]);
+            lager:error("failed to open tmp write file: ~p", [Error]);
         IODevice ->
             IODevice
     end.
 
+-spec upload_file(aws_client:aws_client(), string(), binary()) -> ok.
 upload_file(AWSClient, Path, FileName) ->
-    BucketName = application:get_env(hpr, packet_reporter_bucket),
+    BucketName = application:get_env(hpr, packet_reporter_bucket, <<"default_bucket">>),
     {ok, Content} = file:read_file(Path),
-    aws_s3:put_object(AWSClient, BucketName, FileName, #{
-        <<"Body">> => Content
-    }).
+    case
+        aws_s3:put_object(AWSClient, BucketName, FileName, #{
+            <<"Body">> => Content
+        })
+    of
+        {ok, _, _} ->
+            ok;
+        Error ->
+            lager:error(
+                "failed to upload packet report: file: ~p, error: ~p", [Path, Error]
+            )
+    end.
 
 -spec get_packets_by_timestamp(integer()) -> [term()].
 get_packets_by_timestamp(Timestamp) ->
@@ -259,23 +279,39 @@ delete_packets_by_timestamp(Timestamp) ->
 -include_lib("common_test/include/ct.hrl").
 
 file_test() ->
-    Table = ets:new(test_ets, [named_table, set]),
+    ?ETS = ets:new(?ETS, [named_table, bag, public, {write_concurrency, true}]),
     Timestamp = erlang:system_time(millisecond),
-    FilePath = "./tmp/packetreport." ++ integer_to_list(Timestamp) ++ ".txt",
+    FilePath = "./data/tmp/packetreport." ++ integer_to_list(Timestamp) ++ ".txt",
 
-    true = ets:insert(Table, {<<"1A2B3C4D">>, list_to_binary(integer_to_list(Timestamp))}),
-    true = ets:insert(Table, {<<"1A2B3C4E">>, list_to_binary(integer_to_list(Timestamp))}),
+    Packet = test_utils:join_packet_up(#{}),
+    Packet2 = test_utils:uplink_packet_up(#{}),
 
-    {ok, S} = open_tmp_file(FilePath),
-    Data = ets:select(Table, [{{'$1', '$2'}, [], ['$$']}]),
+    report_packet(Packet),
+    report_packet(Packet2),
 
-    Fun = fun([A, B]) ->
-        Prop = [{a, A}, {b, B}],
+    timer:sleep(1000),
 
-        io:fwrite(S, "~w~n", [Prop])
-    end,
-    lists:foreach(Fun, Data),
-    file:close(S).
+    handle_write(FilePath, []),
+
+    {ok, Content} = file:read_file(FilePath),
+
+    2 = length(binary:split(Content, <<"\n">>, [trim, global])),
+
+    Packet3 = test_utils:join_packet_up(#{}),
+    Packet4 = test_utils:uplink_packet_up(#{}),
+
+    report_packet(Packet3),
+    report_packet(Packet4),
+
+    timer:sleep(1000),
+
+    handle_write(FilePath, []),
+
+    {ok, Content2} = file:read_file(FilePath),
+
+    4 = length(binary:split(Content2, <<"\n">>, [trim, global])),
+
+    ok.
 
 % aws_test() ->
 %     AccessKey = <<"">>,
@@ -294,9 +330,5 @@ file_test() ->
 %     {ok, Response, _} = aws_s3:get_object(Client, <<"test-bucket-hw">>, <<"my-key3">>),
 %     io:format("Test2: ~p~n", [Response]),
 %     Content = maps:get(<<"Body">>, Response).
-
-% packet_encoding() ->
-
-%     ok.
 
 -endif.
