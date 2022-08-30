@@ -4,7 +4,8 @@
     init_per_testcase/2,
     end_per_testcase/2,
     join_packet_up/1,
-    uplink_packet_up/1
+    uplink_packet_up/1,
+    match_map/2
 ]).
 
 -include("hpr.hrl").
@@ -73,3 +74,52 @@ uplink_packet_up(Opts0) ->
     PacketUp = hpr_packet_up:new(Opts1),
     SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
     hpr_packet_up:sign(PacketUp, SigFun).
+
+-spec match_map(map(), any()) -> true | {false, term()}.
+match_map(Expected, Got) when is_map(Got) ->
+    ESize = maps:size(Expected),
+    GSize = maps:size(Got),
+    case ESize == GSize of
+        false ->
+            Flavor =
+                case ESize > GSize of
+                    true -> {missing_keys, maps:keys(Expected) -- maps:keys(Got)};
+                    false -> {extra_keys, maps:keys(Got) -- maps:keys(Expected)}
+                end,
+            {false, {size_mismatch, {expected, ESize}, {got, GSize}, Flavor}};
+        true ->
+            maps:fold(
+                fun
+                    (_K, _V, {false, _} = Acc) ->
+                        Acc;
+                    (K, V, true) when is_function(V) ->
+                        case V(maps:get(K, Got, undefined)) of
+                            true ->
+                                true;
+                            false ->
+                                {false, {value_predicate_failed, K, maps:get(K, Got, undefined)}}
+                        end;
+                    (K, '_', true) ->
+                        case maps:is_key(K, Got) of
+                            true -> true;
+                            false -> {false, {missing_key, K}}
+                        end;
+                    (K, V, true) when is_map(V) ->
+                        match_map(V, maps:get(K, Got, #{}));
+                    (K, V0, true) when is_list(V0) ->
+                        V1 = lists:zip(lists:seq(1, erlang:length(V0)), lists:sort(V0)),
+                        G0 = maps:get(K, Got, []),
+                        G1 = lists:zip(lists:seq(1, erlang:length(G0)), lists:sort(G0)),
+                        match_map(maps:from_list(V1), maps:from_list(G1));
+                    (K, V, true) ->
+                        case maps:get(K, Got, undefined) of
+                            V -> true;
+                            _ -> {false, {value_mismatch, K, V, maps:get(K, Got, undefined)}}
+                        end
+                end,
+                true,
+                Expected
+            )
+    end;
+match_map(_Expected, _Got) ->
+    {false, not_map}.
