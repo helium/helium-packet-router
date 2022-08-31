@@ -8,14 +8,36 @@
 
 -export([send/3]).
 
+% grpc_client:unary/6 Message argument is typed as map() when it is really
+% the type expected/returned by the message encoder. In this case, messages
+% are records. Tell dialyzer to ignore warnings in send/3, but the warnings
+% makes dialyzer think handle_router_response is not getting called, so
+% we ignore warnings for this function as well.
+-dialyzer({nowarn_function, [send/3, handle_router_response/2]}).
+-export([handle_router_response/2]).
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    HandlerPid :: grpcbox_stream:t(),
-    Routes :: hpr_route:route()
+    StreamState :: grpcbox_stream:t(),
+    Route :: hpr_route:route()
 ) -> ok | {error, any()}.
-send(Packet, _HandlerPid, Route) ->
+send(Packet, StreamState, Route) ->
+    Lns = Route#packet_router_route_v1_pb.lns,
     StateChannelMsg = blockchain_state_channel_message_v1(Route, Packet),
-    wrap_grpc_response(helium_router_client:route(StateChannelMsg)).
+    {ok, Connection, ReservationRef} =
+        hpr_grpc_client_connection_pool:reserve(self(), Lns),
+    try
+        BlockchainStateChannelMessageResponse = grpc_client:unary(
+            Connection,
+            StateChannelMsg,
+            router,
+            route,
+            router_pb,
+            []
+        ),
+        handle_router_response(StreamState, BlockchainStateChannelMessageResponse)
+    after
+        hpr_grpc_client_connection_pool:release(ReservationRef)
+    end.
 
 % translate hpr_packet_up:packet into blockchain_state_channel_message_v1
 -spec blockchain_state_channel_message_v1(
@@ -69,14 +91,47 @@ blockchain_state_channel_message_v1(Route, HprPacketUp) ->
     },
     #blockchain_state_channel_message_v1_pb{msg = {packet, StateChannelPacket}}.
 
--spec wrap_grpc_response
-    ({ok, router_pb:blockchain_state_channel_message_v1_pb(), grpcbox:metadata()}) -> ok;
-    ({error, Error}) -> {error, Error};
-    (grpcbox_stream:grpc_error_response()) ->
-        {error, grpcbox_stream:grpc_error_response()}.
-wrap_grpc_response({ok, _, _}) -> ok;
-wrap_grpc_response({error, _} = ErrorTuple) -> ErrorTuple;
-wrap_grpc_response({grpc_error, _} = GrpcError) -> {error, GrpcError}.
+-spec handle_router_response(grpcbox_stream:t(), grpc_client:unary_response()) -> ok.
+handle_router_response(_GrpcStream, {error, _} = ErrorTuple) ->
+    ErrorTuple;
+handle_router_response(StreamState, {ok, Response}) ->
+    #{result := Message} = Response,
+    PacketDown = packet_router_packet_down_v1(Message),
+    grpcbox_stream:send(false, PacketDown, StreamState).
+
+-spec packet_router_packet_down_v1(router_pb:blockchain_state_channel_message_v1_pb()) ->
+    packet_router_db:packet_router_packet_down_v1_pb().
+packet_router_packet_down_v1(BlockchainStateChannelMessage) ->
+    #blockchain_state_channel_message_v1_pb{
+        msg = {packet, StateChannelPacket}
+    } = BlockchainStateChannelMessage,
+    #blockchain_state_channel_packet_v1_pb{
+        packet = Packet
+    } = StateChannelPacket,
+    #packet_pb{
+        payload = Payload,
+        timestamp = RX1Timestamp,
+        frequency = RX1Frequency,
+        datarate = RX1Datarate,
+        rx2_window = #window_pb{
+            timestamp = RX2Timestamp,
+            frequency = RX2Frequency,
+            datarate = RX2Datarate
+        }
+    } = Packet,
+    #packet_router_packet_down_v1_pb{
+        payload = Payload,
+        rx1 = #window_v1_pb{
+            timestamp = RX1Timestamp,
+            frequency = RX1Frequency,
+            datarate = RX1Datarate
+        },
+        rx2 = #window_v1_pb{
+            timestamp = RX2Timestamp,
+            frequency = RX2Frequency,
+            datarate = RX2Datarate
+        }
+    }.
 
 -spec routing_information(binary()) -> router_pb:routing_information().
 routing_information(
@@ -87,3 +142,26 @@ routing_information(
     #routing_information_pb{data = {eui, EUI}};
 routing_information(<<_FType:3, _:5, DevAddr:32/integer-unsigned-little, _/binary>>) ->
     #routing_information_pb{data = {devaddr, DevAddr}}.
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+basic_test_() ->
+    [
+        ?_test(routing_information_t())
+    ].
+
+routing_information_t() ->
+    DevAddr = 1234,
+    ?assertEqual(
+        #routing_information_pb{data = {devaddr, DevAddr}},
+        routing_information(
+            <<?JOIN_REQUEST:3, 0:5, DevAddr:32/integer-unsigned-little, "unused">>
+        )
+    ).
+
+-endif.
