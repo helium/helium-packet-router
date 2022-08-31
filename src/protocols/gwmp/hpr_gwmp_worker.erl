@@ -224,12 +224,12 @@ handle_udp(
         case Data of
             <<"REMAP: ", _/binary>> ->
                 case maybe_remap_dest(DestMap0, DataSrc, Data) of
-                    noupdate ->
+                    noop ->
                         State0;
                     {DestMap1, Resend} ->
                         {{A, B, C, D}, Port} = DataSrc,
                         Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
-                        ?MODULE:push_data(self(), Resend, StreamHandler,  maps:get(Key, DestMap1)),
+                        ?MODULE:push_data(self(), Resend, StreamHandler, maps:get(Key, DestMap1)),
                         State0#state{dest_remap = DestMap1}
                 end;
             _ ->
@@ -249,16 +249,6 @@ handle_udp(
                 end
         end,
     {noreply, State1}.
-
-maybe_remap_dest(Map, {{A, B, C, D}, Port}, <<"REMAP: ", Data/binary>>) ->
-    #{<<"new_dest">> := New, <<"packet">> := Packet0} = jsx:decode(Data, [return_maps]),
-    %% NOTE: binaries don't encode 1:1
-    Packet = erlang:list_to_binary(Packet0),
-    Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
-    Token = semtech_udp:token(Packet),
-    {Map#{Key => hpr_gwmp_router:route_to_dest(New)}, {Token, Packet}};
-maybe_remap_dest(_, _, _) ->
-    noop.
 
 -spec pubkeybin_to_mac(binary()) -> binary().
 pubkeybin_to_mac(PubKeyBin) ->
@@ -395,6 +385,23 @@ send_tx_ack(
         [Token, Data, SocketDest, Reply]
     ),
     Reply.
+
+-spec maybe_remap_dest(
+    Map :: map(),
+    SocketDest :: socket_dest(),
+    IncomingPayload :: binary()
+) ->
+    {UpdatedMap :: map(), {Token :: binary(), Packet :: binary()}}
+    | noop.
+maybe_remap_dest(Map, {{A, B, C, D}, Port}, <<"REMAP: ", Data/binary>>) ->
+    #{<<"new_dest">> := New, <<"packet">> := Packet0} = jsx:decode(Data, [return_maps]),
+    %% NOTE: binaries don't encode 1:1, so we convert to list.
+    Packet = erlang:list_to_binary(Packet0),
+    Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
+    Token = semtech_udp:token(Packet),
+    {Map#{Key => hpr_gwmp_router:route_to_dest(New)}, {Token, Packet}};
+maybe_remap_dest(_, _, _) ->
+    noop.
 
 %%%-------------------------------------------------------------------
 %% @doc
