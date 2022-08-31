@@ -13,12 +13,15 @@
     multi_lns_downlink_test/1,
     multi_gw_single_lns_test/1,
     shutdown_idle_worker_test/1,
-    pull_data_test/1
+    pull_data_test/1,
+    gateway_dest_redirect/1
 ]).
 
--include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
+
+-define(REDIRECT_WORKER_PORT, 2777).
+-define(REDIRECT_WORKER_ENDPOINT, <<"127.0.0.1:2777">>).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -38,12 +41,22 @@ all() ->
         multi_lns_downlink_test,
         multi_gw_single_lns_test,
         shutdown_idle_worker_test,
-        pull_data_test
+        pull_data_test,
+        gateway_dest_redirect
     ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
+init_per_testcase(gateway_dest_redirect = TestCase, Config) ->
+    application:set_env(hpr, redirect_by_region, #{
+        port => ?REDIRECT_WORKER_PORT,
+        remap => #{
+            <<"US915">> => <<"127.0.0.1:1778">>,
+            <<"EU868">> => <<"127.0.0.1:1779">>
+        }
+    }),
+    test_utils:init_per_testcase(TestCase, Config);
 init_per_testcase(TestCase, Config) ->
     test_utils:init_per_testcase(TestCase, Config).
 
@@ -326,6 +339,35 @@ pull_data_test(_Config) ->
     {ok, Token, MAC} = expect_pull_data(RcvSocket, route_pull_data),
     ?assert(erlang:is_binary(Token)),
     ?assertEqual(MAC, hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin)),
+
+    ok.
+
+gateway_dest_redirect(_Config) ->
+    Route = hpr_route:new(1337, [], [], ?REDIRECT_WORKER_ENDPOINT, gwmp, 42),
+
+    {ok, USSocket} = gen_udp:open(1778, [binary, {active, true}]),
+    {ok, EUSocket} = gen_udp:open(1779, [binary, {active, true}]),
+
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    %% NOTE: Hotspot needs to be changed because 1 hotspot can't send from 2 regions.
+    USPacketUp = fake_join_up_packet(),
+    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{hotspot = PubKeyBin, region = 'EU868'},
+
+    %% US send packet
+    hpr_gwmp_router:send(USPacketUp, unused_test_stream_handler, Route),
+    {ok, _, _} = expect_pull_data(USSocket, us_redirected_pull_data),
+    {ok, _} = expect_push_data(USSocket, us_redirected_push_data),
+
+    %% EU send packet
+    hpr_gwmp_router:send(EUPacketUp, unused_test_stream_handler, Route),
+    {ok, _, _} = expect_pull_data(EUSocket, eu_redirected_pull_data),
+    {ok, _} = expect_push_data(EUSocket, eu_redirected_push_data),
+
+    %% cleanup
+    ok = gen_udp:close(USSocket),
+    ok = gen_udp:close(EUSocket),
 
     ok.
 
