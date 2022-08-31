@@ -44,9 +44,12 @@ init([]) ->
 
     ok = hpr_routing:init(),
 
+    RedirectMap = application:get_env(hpr, redirect_by_region, #{}),
+
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
         ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}]),
+        ?WORKER(hpr_gwmp_redirect_worker, [RedirectMap]),
         ?SUP(hpr_gwmp_udp_sup, [])
     ],
     {ok, {
