@@ -49,15 +49,15 @@ join_req_test(_Config) ->
 
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    Hotspot = libp2p_crypto:pubkey_to_bin(PubKey),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     JoinPacketBadSig = test_utils:join_packet_up(#{
-        hotspot => Hotspot, sig_fun => fun(_) -> <<"bad_sig">> end
+        gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
     ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, Self)),
 
     JoinPacketUpInvalid = test_utils:join_packet_up(#{
-        hotspot => Hotspot, sig_fun => SigFun, payload => <<>>
+        gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
         {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid, Self)
@@ -79,7 +79,7 @@ join_req_test(_Config) ->
     ok = hpr_routing_config_worker:insert(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
-        hotspot => Hotspot, sig_fun => SigFun
+        gateway => Gateway, sig_fun => SigFun
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, Self)),
 
@@ -94,7 +94,7 @@ join_req_test(_Config) ->
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
 
     UplinkPacketUp = test_utils:uplink_packet_up(#{
-        hotspot => Hotspot, sig_fun => SigFun, devadrr => DevAddr
+        gateway => Gateway, sig_fun => SigFun, devadrr => DevAddr
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, Self)),
 

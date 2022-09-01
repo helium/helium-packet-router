@@ -16,9 +16,9 @@
     Routes :: hpr_route:route()
 ) -> ok | {error, any()}.
 send(PacketUp, Stream, Route) ->
-    Hotspot = hpr_packet_up:hotspot(PacketUp),
+    Gateway = hpr_packet_up:gateway(PacketUp),
 
-    case hpr_gwmp_udp_sup:maybe_start_worker(Hotspot, #{}) of
+    case hpr_gwmp_udp_sup:maybe_start_worker(Gateway, #{}) of
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
@@ -62,7 +62,7 @@ txpk_to_packet_down(TxPkBin) ->
     {Token :: binary(), Payload :: binary()}.
 packet_up_to_push_data(Up, GatewayTime) ->
     Token = semtech_udp:token(),
-    PubKeyBin = hpr_packet_up:hotspot(Up),
+    PubKeyBin = hpr_packet_up:gateway(Up),
     MAC = hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin),
 
     %% TODO: Add back potential geo stuff
@@ -77,7 +77,7 @@ packet_up_to_push_data(Up, GatewayTime) ->
             ),
             tmst => hpr_packet_up:timestamp(Up) band 16#FFFF_FFFF,
             freq => list_to_float(
-                float_to_list(hpr_packet_up:frequency(Up), [{decimals, 4}, compact])
+                float_to_list(hpr_packet_up:frequency_mhz(Up), [{decimals, 4}, compact])
             ),
             rfch => 0,
             modu => <<"LORA">>,
@@ -86,7 +86,7 @@ packet_up_to_push_data(Up, GatewayTime) ->
             chan => 0,
 
             datr => erlang:list_to_binary(hpr_packet_up:datarate(Up)),
-            rssi => erlang:trunc(hpr_packet_up:signal_strength(Up)),
+            rssi => erlang:trunc(hpr_packet_up:rssi(Up)),
             lsnr => hpr_packet_up:snr(Up),
             size => erlang:byte_size(hpr_packet_up:payload(Up)),
             data => base64:encode(hpr_packet_up:payload(Up))
