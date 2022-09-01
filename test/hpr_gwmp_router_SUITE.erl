@@ -353,7 +353,7 @@ gateway_dest_redirect(_Config) ->
 
     %% NOTE: Hotspot needs to be changed because 1 hotspot can't send from 2 regions.
     USPacketUp = fake_join_up_packet(),
-    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{hotspot = PubKeyBin, region = 'EU868'},
+    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = PubKeyBin, region = 'EU868'},
 
     %% US send packet
     hpr_gwmp_router:send(USPacketUp, unused_test_stream_handler, Route),
@@ -462,7 +462,9 @@ verify_push_data(PacketUp, PushDataBinary) ->
                     <<"data">> => base64:encode(hpr_packet_up:payload(PacketUp)),
                     <<"datr">> => erlang:list_to_binary(hpr_packet_up:datarate(PacketUp)),
                     <<"freq">> => list_to_float(
-                        float_to_list(hpr_packet_up:frequency_mhz(PacketUp), [{decimals, 4}, compact])
+                        float_to_list(hpr_packet_up:frequency_mhz(PacketUp), [
+                            {decimals, 4}, compact
+                        ])
                     ),
                     <<"lsnr">> => hpr_packet_up:snr(PacketUp),
                     <<"modu">> => <<"LORA">>,
