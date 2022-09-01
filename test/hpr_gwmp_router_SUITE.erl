@@ -410,9 +410,9 @@ fake_join_up_packet() ->
             <<0, 139, 222, 157, 101, 233, 17, 95, 30, 219, 224, 30, 233, 253, 104, 189, 10, 37, 23,
                 110, 239, 137, 95>>,
         timestamp = 620124,
-        rssi = -112.0,
+        rssi = 112,
         frequency_mhz = 903.9000244140625,
-        datarate = "SF10BW125",
+        datarate = 'SF10BW125',
         snr = 5.5,
         region = 'US915',
         hold_time = 0,
@@ -460,7 +460,7 @@ verify_push_data(PacketUp, PushDataBinary) ->
                     <<"chan">> => 0,
                     <<"codr">> => <<"4/5">>,
                     <<"data">> => base64:encode(hpr_packet_up:payload(PacketUp)),
-                    <<"datr">> => erlang:list_to_binary(hpr_packet_up:datarate(PacketUp)),
+                    <<"datr">> => erlang:atom_to_binary(hpr_packet_up:datarate(PacketUp)),
                     <<"freq">> => list_to_float(
                         float_to_list(hpr_packet_up:frequency_mhz(PacketUp), [
                             {decimals, 4}, compact
@@ -469,7 +469,7 @@ verify_push_data(PacketUp, PushDataBinary) ->
                     <<"lsnr">> => hpr_packet_up:snr(PacketUp),
                     <<"modu">> => <<"LORA">>,
                     <<"rfch">> => 0,
-                    <<"rssi">> => erlang:trunc(hpr_packet_up:rssi(PacketUp)),
+                    <<"rssi">> => hpr_packet_up:rssi(PacketUp),
                     <<"size">> => erlang:byte_size(hpr_packet_up:payload(PacketUp)),
                     <<"stat">> => 1,
                     <<"time">> => fun erlang:is_binary/1,

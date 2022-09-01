@@ -85,8 +85,8 @@ packet_up_to_push_data(Up, GatewayTime) ->
             stat => 1,
             chan => 0,
 
-            datr => erlang:list_to_binary(hpr_packet_up:datarate(Up)),
-            rssi => erlang:trunc(hpr_packet_up:rssi(Up)),
+            datr => erlang:atom_to_binary(hpr_packet_up:datarate(Up)),
+            rssi => hpr_packet_up:rssi(Up),
             lsnr => hpr_packet_up:snr(Up),
             size => erlang:byte_size(hpr_packet_up:payload(Up)),
             data => base64:encode(hpr_packet_up:payload(Up))
