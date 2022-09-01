@@ -101,10 +101,9 @@ packet_up_to_push_data(Up, GatewayTime) ->
     ),
     {Token, Data}.
 
--spec route_to_dest(hpr_route:route()) -> {Address :: string(), Port :: non_neg_integer()}.
-route_to_dest(Route) ->
-    Lns = hpr_route:lns(Route),
-    case binary:split(Lns, <<":">>) of
+-spec route_to_dest(binary() | hpr_route:route()) -> {Address :: string(), Port :: non_neg_integer()}.
+route_to_dest(Route) when erlang:is_binary(Route) ->
+    case binary:split(Route, <<":">>) of
         [Address, Port] ->
             {
                 erlang:binary_to_list(Address),
@@ -112,4 +111,7 @@ route_to_dest(Route) ->
             };
         Err ->
             throw({route_to_dest_err, Err})
-    end.
+    end;
+route_to_dest(Route) ->
+    Lns = hpr_route:lns(Route),
+    route_to_dest(Lns).
