@@ -5,13 +5,13 @@
 -export([
     payload/1,
     timestamp/1,
-    signal_strength/1,
-    frequency/1,
+    rssi/1,
+    frequency_mhz/1,
     datarate/1,
     snr/1,
     region/1,
     hold_time/1,
-    hotspot/1,
+    gateway/1,
     signature/1,
     phash/1,
     verify/1,
@@ -40,15 +40,16 @@ payload(Packet) ->
 timestamp(Packet) ->
     Packet#packet_router_packet_up_v1_pb.timestamp.
 
--spec signal_strength(Packet :: packet()) -> float().
-signal_strength(Packet) ->
-    Packet#packet_router_packet_up_v1_pb.signal_strength.
+-spec rssi(Packet :: packet()) -> non_neg_integer() | undefined.
+rssi(Packet) ->
+    Packet#packet_router_packet_up_v1_pb.rssi.
 
--spec frequency(Packet :: packet()) -> float().
-frequency(Packet) ->
-    Packet#packet_router_packet_up_v1_pb.frequency.
+-spec frequency_mhz(Packet :: packet()) ->
+    float() | integer() | infinity | '-infinity' | nan | undefined.
+frequency_mhz(Packet) ->
+    Packet#packet_router_packet_up_v1_pb.frequency_mhz.
 
--spec datarate(Packet :: packet()) -> unicode:chardata().
+-spec datarate(Packet :: packet()) -> atom().
 datarate(Packet) ->
     Packet#packet_router_packet_up_v1_pb.datarate.
 
@@ -64,9 +65,9 @@ region(Packet) ->
 hold_time(Packet) ->
     Packet#packet_router_packet_up_v1_pb.hold_time.
 
--spec hotspot(Packet :: packet()) -> binary().
-hotspot(Packet) ->
-    Packet#packet_router_packet_up_v1_pb.hotspot.
+-spec gateway(Packet :: packet()) -> binary().
+gateway(Packet) ->
+    Packet#packet_router_packet_up_v1_pb.gateway.
 
 -spec signature(Packet :: packet()) -> binary().
 signature(Packet) ->
@@ -83,7 +84,7 @@ verify(Packet) ->
         BasePacket = Packet#packet_router_packet_up_v1_pb{signature = <<>>},
         EncodedPacket = ?MODULE:encode(BasePacket),
         Signature = ?MODULE:signature(Packet),
-        PubKeyBin = ?MODULE:hotspot(Packet),
+        PubKeyBin = ?MODULE:gateway(Packet),
         PubKey = libp2p_crypto:bin_to_pubkey(PubKeyBin),
         libp2p_crypto:verify(EncodedPacket, Signature, PubKey)
     of
@@ -111,14 +112,14 @@ new(Opts) ->
     #packet_router_packet_up_v1_pb{
         payload = maps:get(payload, Opts, <<"payload">>),
         timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond)),
-        signal_strength = maps:get(signal_strength, Opts, -35.0),
-        frequency = maps:get(frequency, Opts, 904.30),
-        datarate = maps:get(datarate, Opts, "SF7BW125"),
+        rssi = maps:get(rssi, Opts, 35),
+        frequency_mhz = maps:get(frequency_mhz, Opts, 904.30),
+        datarate = maps:get(datarate, Opts, 'SF7BW125'),
         snr = maps:get(snr, Opts, 7.0),
         region = maps:get(region, Opts, 'US915'),
         hold_time = maps:get(hold_time, Opts, 0),
-        hotspot = maps:get(hotspot, Opts, <<"hotspot">>),
-        signature = maps:get(hotspot, Opts, <<"signature">>)
+        gateway = maps:get(gateway, Opts, <<"gateway">>),
+        signature = maps:get(gateway, Opts, <<"signature">>)
     }.
 
 -spec sign(Packet :: packet(), SigFun :: fun()) -> packet().
@@ -150,19 +151,19 @@ timestamp_test() ->
     ?assertEqual(Now, timestamp(PacketUp)),
     ok.
 
-signal_strength_test() ->
+rssi_test() ->
     PacketUp = ?MODULE:new(#{}),
-    ?assertEqual(-35.0, signal_strength(PacketUp)),
+    ?assertEqual(35, rssi(PacketUp)),
     ok.
 
-frequency_test() ->
+frequency_mhz_test() ->
     PacketUp = ?MODULE:new(#{}),
-    ?assertEqual(904.30, frequency(PacketUp)),
+    ?assertEqual(904.30, frequency_mhz(PacketUp)),
     ok.
 
 datarate_test() ->
     PacketUp = ?MODULE:new(#{}),
-    ?assertEqual("SF7BW125", datarate(PacketUp)),
+    ?assertEqual('SF7BW125', datarate(PacketUp)),
     ok.
 
 snr_test() ->
@@ -180,9 +181,9 @@ hold_time_test() ->
     ?assertEqual(0, hold_time(PacketUp)),
     ok.
 
-hotspot_test() ->
+gateway_test() ->
     PacketUp = ?MODULE:new(#{}),
-    ?assertEqual(<<"hotspot">>, hotspot(PacketUp)),
+    ?assertEqual(<<"gateway">>, gateway(PacketUp)),
     ok.
 
 signature_test() ->
@@ -193,15 +194,15 @@ signature_test() ->
 verify_test() ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    Hotspot = libp2p_crypto:pubkey_to_bin(PubKey),
-    PacketUp = ?MODULE:new(#{hotspot => Hotspot}),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+    PacketUp = ?MODULE:new(#{gateway => Gateway}),
     SignedPacketUp = ?MODULE:sign(PacketUp, SigFun),
 
     ?assert(verify(SignedPacketUp)),
     ok.
 
 encode_decode_test() ->
-    PacketUp = ?MODULE:new(#{frequency => 904.0}),
+    PacketUp = ?MODULE:new(#{frequency_mhz => 904.0}),
     ?assertEqual(PacketUp, decode(encode(PacketUp))),
     ok.
 

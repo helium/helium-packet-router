@@ -17,6 +17,7 @@
     tx_ack/2, tx_ack/3,
     token/0,
     token/1,
+    mac/1,
     identifier/1,
     identifier_to_atom/1,
     json_data/1,
@@ -137,9 +138,9 @@ pull_resp(Token, Map) ->
 %% @doc
 %% That packet type is used by the gateway to send a feedback to the server
 %% to inform if a downlink request has been accepted or rejected by the gateway.
-%% The datagram may optionnaly contain a JSON string to give more details on
-%% acknoledge. If no JSON is present (empty string), this means than no error
-%% occured.
+%% The datagram may optionally contain a JSON string to give more details on
+%% acknowledge. If no JSON is present (empty string), this means than no error
+%% occurred.
 %% @end
 %%%-------------------------------------------------------------------
 -spec tx_ack(
@@ -167,6 +168,12 @@ token() ->
 -spec token(binary()) -> binary().
 token(<<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, _/binary>>) ->
     Token.
+
+-spec mac(binary()) -> binary().
+mac(
+    <<?PROTOCOL_2:8/integer-unsigned, _Token:2/binary, ?PULL_DATA:8/integer-unsigned, MAC:8/binary>>
+) ->
+    MAC.
 
 -spec identifier(binary()) -> integer().
 identifier(

@@ -1,17 +1,17 @@
 -module(hpr_utils).
 
 -export([
-    hotspot_name/1,
+    gateway_name/1,
     int_to_hex/1,
     bin_to_hex/1,
     hex_to_bin/1
 ]).
 
--spec hotspot_name(PubkeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
-hotspot_name(PubkeyBin) when is_binary(PubkeyBin) ->
+-spec gateway_name(PubkeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
+gateway_name(PubkeyBin) when is_binary(PubkeyBin) ->
     B58 = libp2p_crypto:bin_to_b58(PubkeyBin),
-    hotspot_name(B58);
-hotspot_name(B58) when is_list(B58) ->
+    gateway_name(B58);
+gateway_name(B58) when is_list(B58) ->
     {ok, Name} = erl_angry_purple_tiger:animal_name(B58),
     Name.
 

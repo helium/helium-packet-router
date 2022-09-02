@@ -1,6 +1,6 @@
--module(hpr_hotspot_service).
+-module(hpr_gateway_service).
 
--behaviour(helium_packet_router_hotspot_bhvr).
+-behaviour(helium_packet_router_gateway_bhvr).
 
 -include("../grpc/autogen/server/packet_router_pb.hrl").
 

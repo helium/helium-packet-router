@@ -5,8 +5,8 @@
     handle_packet/2
 ]).
 
--define(HOTSPOT_THROTTLE, hpr_routing_hotspot_throttle).
--define(DEFAULT_HOTSPOT_THROTTLE, 25).
+-define(GATEWAY_THROTTLE, hpr_routing_gateway_throttle).
+-define(DEFAULT_GATEWAY_THROTTLE, 25).
 
 -define(JOIN_REQUEST, 2#000).
 -define(UNCONFIRMED_UP, 2#010).
@@ -14,8 +14,8 @@
 
 -spec init() -> ok.
 init() ->
-    HotspotRateLimit = application:get_env(router, hotspot_rate_limit, ?DEFAULT_HOTSPOT_THROTTLE),
-    ok = throttle:setup(?HOTSPOT_THROTTLE, HotspotRateLimit, per_second),
+    GatewayRateLimit = application:get_env(router, gateway_rate_limit, ?DEFAULT_GATEWAY_THROTTLE),
+    ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     ok.
 
 -spec handle_packet(
@@ -23,13 +23,13 @@ init() ->
     StreamHandler :: grpcbox_stream:t()
 ) -> ok | {error, any()}.
 handle_packet(Packet, StreamHandler) ->
-    HotspotName = hpr_utils:hotspot_name(hpr_packet_up:hotspot(Packet)),
-    lager:md([{hotspot, HotspotName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
+    GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
+    lager:md([{gateway, GatewayName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
     %% TODO: log some identifying information?
     lager:debug("received packet"),
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
-        {fun throttle_check/1, hotspot_limit_exceeded}
+        {fun throttle_check/1, gateway_limit_exceeded}
     ],
     case execute_checks(Packet, Checks) of
         {error, _Reason} = Error ->
@@ -108,8 +108,8 @@ deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
 throttle_check(Packet) ->
-    Hotspot = hpr_packet_up:hotspot(Packet),
-    case throttle:check(?HOTSPOT_THROTTLE, Hotspot) of
+    Gateway = hpr_packet_up:gateway(Packet),
+    case throttle:check(?GATEWAY_THROTTLE, Gateway) of
         {limit_exceeded, _, _} -> false;
         _ -> true
     end.

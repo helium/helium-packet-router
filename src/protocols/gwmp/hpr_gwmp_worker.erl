@@ -46,7 +46,8 @@
     response_stream :: undefined | tuple(),
     pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
-    shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()}
+    shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()},
+    dest_remap = #{} :: #{socket_dest() => socket_dest()}
 }).
 
 %%%===================================================================
@@ -63,7 +64,7 @@ start_link(Args) ->
     SocketDest :: socket_dest()
 ) -> ok | {error, any()}.
 push_data(WorkerPid, Data, StreamHandler, SocketDest) ->
-    gen_server:call(WorkerPid, {push_data, Data, StreamHandler, SocketDest}).
+    gen_server:cast(WorkerPid, {push_data, Data, StreamHandler, SocketDest}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -78,7 +79,7 @@ init(Args) ->
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
     lager:md([
-        {gateway_mac, pubkeybin_to_mac(PubKeyBin)},
+        {gateway_mac, binary:encode_hex(pubkeybin_to_mac(PubKeyBin))},
         {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
 
@@ -98,34 +99,35 @@ init(Args) ->
         shutdown_timer = {ShutdownTimeout, ShutdownRef}
     }}.
 
-handle_call(
-    {push_data, _Data = {Token, Payload}, StreamHandler, SocketDest},
-    _From,
+handle_call(Request, From, State) ->
+    lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
+    {reply, ok, State}.
+
+handle_cast(
+    {push_data, _Data = {Token, Payload}, StreamHandler, SocketDest0},
     #state{
         push_data = PushData,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
-        socket = Socket
+        socket = Socket,
+        dest_remap = DestMap
     } =
         State0
 ) ->
     _ = erlang:cancel_timer(ShutdownRef),
 
+    SocketDest = maps:get(SocketDest0, DestMap, SocketDest0),
     State = maybe_send_pull_data(SocketDest, State0),
+    {_Reply, TimerRef} = send_push_data(Token, Payload, Socket, SocketDest),
 
-    {Reply, TimerRef} = send_push_data(Token, Payload, Socket, SocketDest),
     {NewPushData, NewShutdownTimer} = new_push_and_shutdown(
         Token, Payload, TimerRef, PushData, ShutdownTimeout
     ),
 
-    {reply, Reply, State#state{
+    {noreply, State#state{
         push_data = NewPushData,
         response_stream = StreamHandler,
         shutdown_timer = NewShutdownTimer
     }};
-handle_call(Request, From, State) ->
-    lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
-    {reply, ok, State}.
-
 handle_cast(Request, State) ->
     lager:warning("rcvd unknown cast msg: ~p", [Request]),
     {noreply, State}.
@@ -138,7 +140,7 @@ handle_info(
         {noreply, _} = NoReply -> NoReply
     catch
         _E:_R ->
-            lager:error("failed to handle UDP packet ~p: ~p/~p", [Data, _E, _R]),
+            lager:error("failed to handle UDP packet ~p/~p", [_E, _R]),
             {noreply, State}
     end;
 handle_info(
@@ -214,24 +216,37 @@ handle_udp(
         pull_data = PullDataMap0,
         socket = Socket,
         response_stream = StreamHandler,
-        pubkeybin = PubKeyBin
+        pubkeybin = PubKeyBin,
+        dest_remap = DestMap0
     } = State0
 ) ->
     State1 =
-        case semtech_udp:identifier(Data) of
-            ?PUSH_ACK ->
-                PushData1 = handle_push_ack(Data, PushData0),
-                State0#state{push_data = PushData1};
-            ?PULL_ACK ->
-                PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
-                State0#state{pull_data = PullDataMap1};
-            ?PULL_RESP ->
-                %% FIXME: include data source for socket ack
-                ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler),
-                State0;
-            _Id ->
-                lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
-                State0
+        case Data of
+            <<"REMAP: ", _/binary>> ->
+                case maybe_remap_dest(DestMap0, DataSrc, Data) of
+                    noop ->
+                        State0;
+                    {DestMap1, Resend} ->
+                        {{A, B, C, D}, Port} = DataSrc,
+                        Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
+                        ?MODULE:push_data(self(), Resend, StreamHandler, maps:get(Key, DestMap1)),
+                        State0#state{dest_remap = DestMap1}
+                end;
+            _ ->
+                case semtech_udp:identifier(Data) of
+                    ?PUSH_ACK ->
+                        PushData1 = handle_push_ack(Data, PushData0),
+                        State0#state{push_data = PushData1};
+                    ?PULL_ACK ->
+                        PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
+                        State0#state{pull_data = PullDataMap1};
+                    ?PULL_RESP ->
+                        ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler),
+                        State0;
+                    _Id ->
+                        lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
+                        State0
+                end
         end,
     {noreply, State1}.
 
@@ -370,6 +385,23 @@ send_tx_ack(
         [Token, Data, SocketDest, Reply]
     ),
     Reply.
+
+-spec maybe_remap_dest(
+    Map :: map(),
+    SocketDest :: socket_dest(),
+    IncomingPayload :: binary()
+) ->
+    {UpdatedMap :: map(), {Token :: binary(), Packet :: binary()}}
+    | noop.
+maybe_remap_dest(Map, {{A, B, C, D}, Port}, <<"REMAP: ", Data/binary>>) ->
+    #{<<"new_dest">> := New, <<"packet">> := Packet0} = jsx:decode(Data, [return_maps]),
+    %% NOTE: binaries don't encode 1:1, so we convert to list.
+    Packet = erlang:list_to_binary(Packet0),
+    Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
+    Token = semtech_udp:token(Packet),
+    {Map#{Key => hpr_gwmp_router:route_to_dest(New)}, {Token, Packet}};
+maybe_remap_dest(_, _, _) ->
+    noop.
 
 %%%-------------------------------------------------------------------
 %% @doc
