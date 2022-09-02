@@ -71,6 +71,7 @@ handle_packet(Packet, StreamHandler) ->
 deliver_packet(_Packet, _StreamHandler, []) ->
     ok;
 deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
+    hpr_packet_reporter:report_packet(Packet, Route),
     lager:debug(
         [
             {oui, hpr_route:oui(Route)},

@@ -5,10 +5,12 @@
     end_per_testcase/2,
     join_packet_up/1,
     uplink_packet_up/1,
+    packet_route/1,
     match_map/2
 ]).
 
 -include("hpr.hrl").
+-include("../src/grpc/autogen/server/packet_router_pb.hrl").
 
 -define(JOIN_REQUEST, 2#000).
 -define(UNCONFIRMED_UP, 2#010).
@@ -74,6 +76,18 @@ uplink_packet_up(Opts0) ->
     PacketUp = hpr_packet_up:new(Opts1),
     SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
     hpr_packet_up:sign(PacketUp, SigFun).
+
+-spec packet_route(Opts :: map()) -> hpr_packet_route:route().
+packet_route(Opts0) ->
+    NetID = maps:get(net_id, Opts0, 0),
+    DevAddrRanges = maps:get(devaddr_ranges, Opts0, [
+        #packet_router_route_devaddr_range_v1_pb{start = 1, 'end' = 10}
+    ]),
+    EUIs = maps:get(euis, Opts0, [#packet_router_route_eui_v1_pb{app_eui = 1, dev_eui = 1}]),
+    LNS = maps:get(lns, Opts0, <<"lsn.lora.com>">>),
+    Protocol = maps:get(protocol, Opts0, gwmp),
+    OUI = maps:get(oui, Opts0, 10),
+    hpr_route:new(NetID, DevAddrRanges, EUIs, LNS, Protocol, OUI).
 
 -spec match_map(map(), any()) -> true | {false, term()}.
 match_map(Expected, Got) when is_map(Got) ->
