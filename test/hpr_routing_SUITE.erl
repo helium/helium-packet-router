@@ -54,13 +54,13 @@ join_req_test(_Config) ->
     JoinPacketBadSig = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, Self)),
+    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
 
     JoinPacketUpInvalid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid, Self)
+        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid)
     ),
 
     meck:new(hpr_protocol_router, [passthrough]),
@@ -81,7 +81,7 @@ join_req_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, Self)),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
     Received1 =
         {Self,
@@ -96,7 +96,7 @@ join_req_test(_Config) ->
     UplinkPacketUp = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devadrr => DevAddr
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, Self)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
 
     Received2 =
         {Self,

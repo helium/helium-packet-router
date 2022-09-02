@@ -77,7 +77,7 @@ single_lns_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
+    hpr_gwmp_router:send(PacketUp, self(), Route),
     %% Initial PULL_DATA
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
     %% PUSH_DATA
@@ -108,17 +108,17 @@ multi_lns_test(_Config) ->
     {ok, RcvSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to route 1
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
+    hpr_gwmp_router:send(PacketUp, self(), Route1),
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket1, route1_pull_data),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data),
 
     %% Same packet to route 2
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route2),
+    hpr_gwmp_router:send(PacketUp, self(), Route2),
     {ok, _Token2, _MAC2} = expect_pull_data(RcvSocket2, route2_pull_data),
     {ok, _} = expect_push_data(RcvSocket2, route2_push_data),
 
     %% Another packet to route 1
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
+    hpr_gwmp_router:send(PacketUp, self(), Route1),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data_repeat),
     ok = no_more_messages(),
 
@@ -135,7 +135,7 @@ single_lns_downlink_test(_Config) ->
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
-    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
+    _ = hpr_gwmp_router:send(PacketUp, self(), Route1),
 
     %% Eat the pull_data
     {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
@@ -148,14 +148,6 @@ single_lns_downlink_test(_Config) ->
         after timer:seconds(2) -> ct:fail(no_push_data)
         end,
 
-    %% Mock out the return path for the downlink (grpc)
-    Self = self(),
-    meck:new(grpcbox_stream, [passthrough, no_history]),
-    meck:expect(grpcbox_stream, send, fun(Eos, PacketDown, _StreamHandler) ->
-        ?assertEqual(false, Eos, "we don't want to be ending the stream"),
-        Self ! {packet_down, PacketDown}
-    end),
-
     %% Send a downlink to the worker
     {DownToken, DownPullResp} = fake_down_packet(),
 
@@ -167,9 +159,9 @@ single_lns_downlink_test(_Config) ->
     } = fake_down_map(),
     ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
 
-    %% receive the PacketRouterPacketDownV1 as the grpc stream.
+    %% receive the PacketRouterPacketDownV1 sent to grcp_stream
     receive
-        {packet_down, #packet_router_packet_down_v1_pb{
+        {reply, #packet_router_packet_down_v1_pb{
             payload = Payload,
             rx1 = #window_v1_pb{
                 timestamp = Timestamp,
@@ -182,7 +174,7 @@ single_lns_downlink_test(_Config) ->
             ?assertEqual(Freq, Frequency),
             ?assertEqual(Datr, Datarate),
             ok;
-        {packet_down, Other} ->
+        {reply, Other} ->
             ct:fail({rcvd_bad_packet_down, Other})
     after timer:seconds(2) -> ct:fail(no_packet_down)
     end,
@@ -194,8 +186,6 @@ single_lns_downlink_test(_Config) ->
             ?assertEqual(DownToken, semtech_udp:token(Data2))
     after timer:seconds(2) -> ct:fail(no_tx_ack_for_downlink)
     end,
-
-    meck:unload(grpcbox_stream),
 
     ok.
 
@@ -212,7 +202,7 @@ multi_lns_downlink_test(_Config) ->
     {ok, LNSSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to LNS 1
-    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
+    _ = hpr_gwmp_router:send(PacketUp, self(), Route1),
     {ok, _Token, _Data} = expect_pull_data(LNSSocket1, downlink_test_initiate_connection_lns1),
     %% Receive the uplink from LNS 1 (mostly to get the return address)
     {ok, UDPWorkerAddress} =
@@ -224,7 +214,8 @@ multi_lns_downlink_test(_Config) ->
         end,
 
     %% Send packet to LNS 2
-    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route2),
+    _ = hpr_gwmp_router:send(PacketUp, self(), Route2),
+    ok = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
     {ok, _Token2, _Data2} = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
     {ok, _} = expect_push_data(LNSSocket2, route2_push_data),
 
@@ -232,18 +223,12 @@ multi_lns_downlink_test(_Config) ->
     %% Regardless, sending a PULL_RESP, the UDP worker should ack the sender,
     %% not the most recent.
 
-    %% Mock out the return path for the downlink (grpc)
-    Self = self(),
-    meck:new(grpcbox_stream, [passthrough, no_history]),
-    meck:expect(grpcbox_stream, send, fun(Eos, PacketDown, _StreamHandler) ->
-        ?assertEqual(false, Eos, "we don't want to be ending the stream"),
-        Self ! {packet_down, PacketDown}
-    end),
-
     %% Send a downlink to the worker from LNS 1
     %% we don't care about the contents
     {DownToken, DownPullResp} = fake_down_packet(),
     ok = gen_udp:send(LNSSocket1, UDPWorkerAddress, DownPullResp),
+
+    %% XXX: Why don't we expect a grcp reply here?
 
     %% expect the ack for our downlink
     receive
@@ -255,8 +240,6 @@ multi_lns_downlink_test(_Config) ->
             ct:fail({tx_ack_for_wrong_socket, [{expected, 1}, {got, 2}]})
     after timer:seconds(2) -> ct:fail(no_tx_ack_for_downlink)
     end,
-
-    meck:unload(grpcbox_stream),
 
     ok.
 
@@ -278,13 +261,14 @@ multi_gw_single_lns_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    %% Send the packet from the first gateway
-    hpr_gwmp_router:send(PacketUp1, unused_test_stream_handler, Route),
+    %% Send the packet from the first hotspot
+    hpr_gwmp_router:send(PacketUp1, self(), Route),
     {ok, _Token, _Data} = expect_pull_data(RcvSocket, first_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, first_gw_push_data),
 
-    %% Send the same packet from the second gateway
-    hpr_gwmp_router:send(PacketUp2, unused_test_stream_handler, Route),
+    %% Send the same packet from the second hotspot
+    hpr_gwmp_router:send(PacketUp2, self(), Route),
+    ok = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _Token2, _Data2} = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
 

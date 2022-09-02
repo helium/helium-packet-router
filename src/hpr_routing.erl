@@ -2,11 +2,21 @@
 
 -export([
     init/0,
-    handle_packet/2
+    handle_packet/1
 ]).
 
 -define(GATEWAY_THROTTLE, hpr_routing_gateway_throttle).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
+
+-export_type([hpr_routing_response/0]).
+
+-type uplink_packet_type() ::
+    {join_req, non_neg_integer(), non_neg_integer()} | {uplink, non_neg_integer()} | undefined.
+-type hpr_routing_response() :: ok | {error, any()}.
+
+-define(HOTSPOT_THROTTLE, hpr_routing_hotspot_throttle).
+-define(DEFAULT_HOTSPOT_THROTTLE, 25).
+>>>>>>> 85da990 (Refactor to use novalabsxyz grcpbox. Refactor grpc_client code to use maps instead of records.)
 
 -define(JOIN_REQUEST, 2#000).
 -define(UNCONFIRMED_UP, 2#010).
@@ -19,12 +29,11 @@ init() ->
     ok.
 
 -spec handle_packet(
-    Packet :: hpr_packet_up:packet(),
-    StreamState :: grpcbox_stream:t()
-) -> ok | {error, any()}.
-handle_packet(Packet, StreamHandler) ->
-    GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
-    lager:md([{gateway, GatewayName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
+    Packet :: hpr_packet_up:packet()
+) -> hpr_routing_response().
+handle_packet(Packet) ->
+    GatewayName = hpr_utils:gateway_name(hpr_packet_up:hotspot(Packet)),
+    lager:md([{hotspot, GatewayName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
     %% TODO: log some identifying information?
     lager:debug("received packet"),
     Checks = [
@@ -36,41 +45,42 @@ handle_packet(Packet, StreamHandler) ->
             lager:error("packet failed verification: ~p", [_Reason]),
             Error;
         ok ->
-            case packet_type(Packet) of
-                undefined ->
-                    lager:error("invalid packet type"),
-                    {error, invalid_packet_type};
-                {join_req, AppEUI, DevEUI} ->
-                    Routes = hpr_routing_config_worker:lookup_eui(AppEUI, DevEUI),
-                    lager:debug(
-                        [
-                            {app_eui, hpr_utils:int_to_hex(AppEUI)},
-                            {dev_eui, hpr_utils:int_to_hex(DevEUI)}
-                        ],
-                        "handling join"
-                    ),
-                    ok = deliver_packet(Packet, StreamState, Routes);
-                {uplink, DevAddr} ->
-                    lager:debug(
-                        [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
-                        "handling uplink"
-                    ),
-                    Routes = hpr_routing_config_worker:lookup_devaddr(DevAddr),
-                    ok = deliver_packet(Packet, StreamState, Routes)
-            end
+            dispatch_packet(packet_type(Packet), Packet)
     end.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+-spec dispatch_packet(uplink_packet_type(), hpr_packet_up:packet()) -> hpr_routing_response().
+dispatch_packet(undefined, _Packet) ->
+    lager:error("invalid packet type"),
+    {error, invalid_packet_type};
+dispatch_packet({join_req, AppEUI, DevEUI}, Packet) ->
+    Routes = hpr_routing_config_worker:lookup_eui(AppEUI, DevEUI),
+    lager:debug(
+        [
+            {app_eui, hpr_utils:int_to_hex(AppEUI)},
+            {dev_eui, hpr_utils:int_to_hex(DevEUI)}
+        ],
+        "handling join"
+    ),
+    deliver_packet(Packet, Routes);
+dispatch_packet({uplink, DevAddr}, Packet) ->
+    lager:debug(
+        [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
+        "handling uplink"
+    ),
+    Routes = hpr_routing_config_worker:lookup_devaddr(DevAddr),
+    deliver_packet(Packet, Routes).
+
 -spec deliver_packet(
     Packet :: hpr_packet_up:packet(),
-    StreamState :: grpcbox_stream:t(),
     Routes :: [hpr_route:route()]
 ) -> ok.
-deliver_packet(_Packet, _StreamHandler, []) ->
+deliver_packet(_Packet, []) ->
     ok;
-deliver_packet(Packet, StreamState, [Route | Routes]) ->
+deliver_packet(Packet, [Route | Routes]) ->
     lager:debug(
         [
             {oui, hpr_route:oui(Route)},
@@ -86,9 +96,9 @@ deliver_packet(Packet, StreamState, [Route | Routes]) ->
     Resp =
         case Protocol of
             router ->
-                hpr_protocol_router:send(Packet, StreamState, Route);
+                hpr_protocol_router:send(Packet, self(), Route);
             gwmp ->
-                hpr_gwmp_router:send(Packet, StreamState, Route);
+                hpr_gwmp_router:send(Packet, self(), Route);
             _OtherProtocol ->
                 lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
                 ok
@@ -101,10 +111,9 @@ deliver_packet(Packet, StreamState, [Route | Routes]) ->
             lager:warning(
                 [{protocol, Protocol}, {error, Err}],
                 "error sending"
-            ),
-            ok
+            )
     end,
-    deliver_packet(Packet, StreamState, Routes).
+    deliver_packet(Packet, Routes).
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
 throttle_check(Packet) ->
@@ -125,8 +134,7 @@ execute_checks(Packet, [{Fun, ErrorReason} | Rest]) ->
             execute_checks(Packet, Rest)
     end.
 
--spec packet_type(Packet :: hpr_packet_up:packet()) ->
-    {join_req, non_neg_integer(), non_neg_integer()} | {uplink, non_neg_integer()} | undefined.
+-spec packet_type(Packet :: hpr_packet_up:packet()) -> uplink_packet_type().
 packet_type(Packet) ->
     case hpr_packet_up:payload(Packet) of
         <<?JOIN_REQUEST:3, _:5, AppEUI:64/integer-unsigned-little,
