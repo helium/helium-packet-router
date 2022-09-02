@@ -265,7 +265,7 @@ multi_gw_single_lns_test(_Config) ->
     PacketUp1 = fake_join_up_packet(),
     #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{hotspot = PubKeyBin},
+    PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{gateway = PubKeyBin},
 
     Route = hpr_route:new(
         1337,
@@ -278,12 +278,12 @@ multi_gw_single_lns_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    %% Send the packet from the first hotspot
+    %% Send the packet from the first gateway
     hpr_gwmp_router:send(PacketUp1, unused_test_stream_handler, Route),
     {ok, _Token, _Data} = expect_pull_data(RcvSocket, first_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, first_gw_push_data),
 
-    %% Send the same packet from the second hotspot
+    %% Send the same packet from the second gateway
     hpr_gwmp_router:send(PacketUp2, unused_test_stream_handler, Route),
     {ok, _Token2, _Data2} = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
@@ -296,7 +296,7 @@ shutdown_idle_worker_test(_Config) ->
     %%    make an up packet
     PacketUp = fake_join_up_packet(),
 
-    PubKeyBin = hpr_packet_up:hotspot(PacketUp),
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
     %%    start worker
     {ok, WorkerPid1} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
     ?assert(erlang:is_process_alive(WorkerPid1)),
@@ -327,7 +327,7 @@ shutdown_idle_worker_test(_Config) ->
 pull_data_test(_Config) ->
     %%    send push_data to start sending of pull_data
     PacketUp = fake_join_up_packet(),
-    PubKeyBin = hpr_packet_up:hotspot(PacketUp),
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
 
     Route = test_route_1777(),
 
@@ -353,7 +353,7 @@ gateway_dest_redirect(_Config) ->
 
     %% NOTE: Hotspot needs to be changed because 1 hotspot can't send from 2 regions.
     USPacketUp = fake_join_up_packet(),
-    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{hotspot = PubKeyBin, region = 'EU868'},
+    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = PubKeyBin, region = 'EU868'},
 
     %% US send packet
     hpr_gwmp_router:send(USPacketUp, unused_test_stream_handler, Route),
@@ -410,13 +410,13 @@ fake_join_up_packet() ->
             <<0, 139, 222, 157, 101, 233, 17, 95, 30, 219, 224, 30, 233, 253, 104, 189, 10, 37, 23,
                 110, 239, 137, 95>>,
         timestamp = 620124,
-        signal_strength = -112.0,
-        frequency = 903.9000244140625,
-        datarate = "SF10BW125",
+        rssi = 112,
+        frequency_mhz = 903.9000244140625,
+        datarate = 'SF10BW125',
         snr = 5.5,
         region = 'US915',
         hold_time = 0,
-        hotspot =
+        gateway =
             <<1, 154, 70, 24, 151, 192, 204, 57, 167, 252, 250, 139, 253, 71, 222, 143, 87, 111,
                 170, 125, 26, 173, 134, 204, 181, 85, 5, 55, 163, 222, 154, 89, 114>>,
         signature =
@@ -452,7 +452,7 @@ fake_down_map() ->
 verify_push_data(PacketUp, PushDataBinary) ->
     JsonData = semtech_udp:json_data(PushDataBinary),
 
-    PubKeyBin = hpr_packet_up:hotspot(PacketUp),
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
     MapFromPacketUp = #{
         <<"rxpk">> =>
             [
@@ -460,14 +460,16 @@ verify_push_data(PacketUp, PushDataBinary) ->
                     <<"chan">> => 0,
                     <<"codr">> => <<"4/5">>,
                     <<"data">> => base64:encode(hpr_packet_up:payload(PacketUp)),
-                    <<"datr">> => erlang:list_to_binary(hpr_packet_up:datarate(PacketUp)),
+                    <<"datr">> => erlang:atom_to_binary(hpr_packet_up:datarate(PacketUp)),
                     <<"freq">> => list_to_float(
-                        float_to_list(hpr_packet_up:frequency(PacketUp), [{decimals, 4}, compact])
+                        float_to_list(hpr_packet_up:frequency_mhz(PacketUp), [
+                            {decimals, 4}, compact
+                        ])
                     ),
                     <<"lsnr">> => hpr_packet_up:snr(PacketUp),
                     <<"modu">> => <<"LORA">>,
                     <<"rfch">> => 0,
-                    <<"rssi">> => erlang:trunc(hpr_packet_up:signal_strength(PacketUp)),
+                    <<"rssi">> => hpr_packet_up:rssi(PacketUp),
                     <<"size">> => erlang:byte_size(hpr_packet_up:payload(PacketUp)),
                     <<"stat">> => 1,
                     <<"time">> => fun erlang:is_binary/1,

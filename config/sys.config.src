@@ -8,7 +8,7 @@
                 grpc_opts => #{
                     service_protos => [packet_router_pb],
                     services => #{
-                        'helium.packet_router.hotspot' => hpr_hotspot_service
+                        'helium.packet_router.gateway' => hpr_gateway_service
                     }
                 },
                 transport_opts => #{ssl => false},
