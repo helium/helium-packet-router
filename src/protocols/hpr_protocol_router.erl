@@ -41,13 +41,13 @@ blockchain_state_channel_message_v1(Route, HprPacketUp) ->
     #packet_router_packet_up_v1_pb{
         payload = Payload,
         timestamp = Timestamp,
-        signal_strength = SignalStrength,
-        frequency = Frequency,
+        rssi = SignalStrength,
+        frequency_mhz = Frequency,
         datarate = DataRate,
         snr = SNR,
         region = Region,
         hold_time = HoldTime,
-        hotspot = Hotspot,
+        gateway = Gateway,
         signature = Signature
     } = HprPacketUp,
     #packet_router_route_v1_pb{
@@ -78,7 +78,7 @@ blockchain_state_channel_message_v1(Route, HprPacketUp) ->
     % blockchain_state_channel_packet_v1_pb
     StateChannelPacket = #{
         packet => Packet,
-        hotspot => Hotspot,
+        hotspot => Gateway,
         signature => Signature,
         region => Region,
         hold_time => HoldTime

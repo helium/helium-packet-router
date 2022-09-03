@@ -105,7 +105,6 @@ handle_call(Request, From, State) ->
 
 handle_cast(
     {push_data, _Data = {Token, Payload}, Stream, SocketDest0},
-    _From,
     #state{
         push_data = PushData,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
@@ -237,7 +236,7 @@ handle_udp(
                     {DestMap1, Resend} ->
                         {{A, B, C, D}, Port} = DataSrc,
                         Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
-                        ?MODULE:push_data(self(), Resend, StreamHandler, maps:get(Key, DestMap1)),
+                        ?MODULE:push_data(self(), Resend, Stream, maps:get(Key, DestMap1)),
                         State0#state{dest_remap = DestMap1}
                 end;
             _ ->

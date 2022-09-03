@@ -215,7 +215,6 @@ multi_lns_downlink_test(_Config) ->
 
     %% Send packet to LNS 2
     _ = hpr_gwmp_router:send(PacketUp, self(), Route2),
-    ok = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
     {ok, _Token2, _Data2} = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
     {ok, _} = expect_push_data(LNSSocket2, route2_push_data),
 
@@ -268,7 +267,6 @@ multi_gw_single_lns_test(_Config) ->
 
     %% Send the same packet from the second hotspot
     hpr_gwmp_router:send(PacketUp2, self(), Route),
-    ok = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _Token2, _Data2} = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
 

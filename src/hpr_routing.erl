@@ -16,7 +16,6 @@
 
 -define(HOTSPOT_THROTTLE, hpr_routing_hotspot_throttle).
 -define(DEFAULT_HOTSPOT_THROTTLE, 25).
->>>>>>> 85da990 (Refactor to use novalabsxyz grcpbox. Refactor grpc_client code to use maps instead of records.)
 
 -define(JOIN_REQUEST, 2#000).
 -define(UNCONFIRMED_UP, 2#010).
@@ -32,7 +31,7 @@ init() ->
     Packet :: hpr_packet_up:packet()
 ) -> hpr_routing_response().
 handle_packet(Packet) ->
-    GatewayName = hpr_utils:gateway_name(hpr_packet_up:hotspot(Packet)),
+    GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
     lager:md([{hotspot, GatewayName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
     %% TODO: log some identifying information?
     lager:debug("received packet"),
