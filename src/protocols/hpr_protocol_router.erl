@@ -9,26 +9,26 @@
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    stream :: pid(),
-    route :: hpr_route:route()
+    Stream :: pid(),
+    Route :: hpr_route:route()
 ) -> hpr_routing:hr_routing_response().
-send(packet, stream, route) ->
-    lns = route#packet_router_route_v1_pb.lns,
-    statechannelmsg = blockchain_state_channel_message_v1(route, packet),
-    {ok, connection, reservationref} =
-        hpr_grpc_client_connection_pool:reserve(self(), lns),
+send(Packet, Stream, Route) ->
+    LNS = Route#packet_router_route_v1_pb.lns,
+    StateChannelMsg = blockchain_state_channel_message_v1(Route, Packet),
+    {ok, Connection, ReservationRef} =
+        hpr_grpc_client_connection_pool:reserve(self(), LNS),
     try
-        blockchainstatechannelmessageresponse = grpc_client:unary(
-            connection,
-            statechannelmsg,
+        BlockchainStateChannelMessageResponse = grpc_client:unary(
+            Connection,
+            StateChannelMsg,
             router,
             route,
             router_pb,
             []
         ),
-        handle_router_response(stream, blockchainstatechannelmessageresponse)
+        handle_router_response(Stream, BlockchainStateChannelMessageResponse)
     after
-        hpr_grpc_client_connection_pool:release(reservationref)
+        hpr_grpc_client_connection_pool:release(ReservationRef)
     end.
 
 % translate hpr_packet_up:packet into blockchain_state_channel_message_v1
