@@ -39,6 +39,7 @@ send(Packet, Stream, Route) ->
 blockchain_state_channel_message_v1(Route, HprPacketUp) ->
     % Decompose uplink message
     #packet_router_packet_up_v1_pb{
+        % signature = Signature
         payload = Payload,
         timestamp = Timestamp,
         rssi = SignalStrength,
@@ -47,17 +48,8 @@ blockchain_state_channel_message_v1(Route, HprPacketUp) ->
         snr = SNR,
         region = Region,
         hold_time = HoldTime,
-        gateway = Gateway,
-        signature = Signature
+        gateway = Gateway
     } = HprPacketUp,
-    #packet_router_route_v1_pb{
-        % net_id = NetId,
-        % devaddr_ranges = DevaddrRanges,
-        % euis = EUIs,
-        % lns = LNS,
-        % protocol = Protocol,
-        oui = OUI
-    } = Route,
 
     % construct blockchain_state_channel_message_v1_pb
     RoutingInformation = routing_information(Payload),
@@ -66,7 +58,7 @@ blockchain_state_channel_message_v1(Route, HprPacketUp) ->
         % Defaults:
         % type = longfi,
         % rx2_window = undefined
-        oui => OUI,
+        oui => hpr_route:oui(Route),
         payload => Payload,
         timestamp => Timestamp,
         signal_strength => SignalStrength,
@@ -79,7 +71,7 @@ blockchain_state_channel_message_v1(Route, HprPacketUp) ->
     StateChannelPacket = #{
         packet => Packet,
         hotspot => Gateway,
-        signature => Signature,
+        signature => <<>>,
         region => Region,
         hold_time => HoldTime
     },
