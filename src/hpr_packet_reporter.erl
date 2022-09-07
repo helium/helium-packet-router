@@ -215,18 +215,21 @@ encode_packet(
         net_id = NetID
     }
 ) ->
-    #packet_router_packet_report_v1_pb{
-        gateway_timestamp_ms = Timestamp,
-        oui = OUI,
-        net_id = NetID,
-        rssi = RSSI,
-        frequency_mhz = FrequencyMhz,
-        datarate = Datarate,
-        snr = SNR,
-        region = Region,
-        gateway = Gateway,
-        payload_hash = crypto:hash(sha256, Payload)
-    }.
+    packet_router_pb:encode_msg(
+        #packet_router_packet_report_v1_pb{
+            gateway_timestamp_ms = Timestamp,
+            oui = OUI,
+            net_id = NetID,
+            rssi = RSSI,
+            frequency_mhz = FrequencyMhz,
+            datarate = Datarate,
+            snr = SNR,
+            region = Region,
+            gateway = Gateway,
+            payload_hash = crypto:hash(sha256, Payload)
+        },
+        packet_router_packet_report_v1_pb
+    ).
 
 -spec open_tmp_file(string(), [atom()]) -> {ok, file:io_device()} | {error, atom()}.
 open_tmp_file(FilePath, Options) ->
