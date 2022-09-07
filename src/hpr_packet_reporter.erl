@@ -9,7 +9,9 @@
     init_ets/0,
     report_packet/2,
     write_packets/0,
-    upload_packets/1
+    upload_packets/1,
+    restart_report_interval/1,
+    stop_report_interval/0
 ]).
 -export([
     init/1,
@@ -27,9 +29,12 @@
 -define(DEFAULT_REPORT_INTERVAL, 300000).
 -define(MAX_FILE_SIZE, 50_000_000).
 
+-type interval_duration_ms() :: non_neg_integer().
+
 -record(state, {
     aws_client :: aws_client:aws_client(),
-    file_path :: string()
+    file_path :: string(),
+    report_interval :: timer:tref() | undefined
 }).
 
 %%%===================================================================
@@ -59,6 +64,13 @@ write_packets() ->
 upload_packets(FilePath) ->
     gen_server:cast(?SERVER, {upload, FilePath}).
 
+-spec restart_report_interval(interval_duration_ms()) -> ok.
+restart_report_interval(IntervalDuration) ->
+    gen_server:cast(?SERVER, {start_interval, IntervalDuration}).
+
+stop_report_interval() ->
+    gen_server:cast(?SERVER, stop_interval).
+
 %%%===================================================================
 %%% Spawning and gen_server implementation
 %%%===================================================================
@@ -69,13 +81,15 @@ init(#{base_dir := BaseDir} = _Args) ->
     ok = filelib:ensure_dir(WriteDir),
     %% TODO: File rotation
     TempFilePath = filename:join(WriteDir, "packetreport.gz"),
-    start_report_interval(),
+    {ok, ReportInterval} = start_report_interval(),
     {ok, #state{
         aws_client = AWSClient,
-        file_path = TempFilePath
+        file_path = TempFilePath,
+        report_interval = ReportInterval
     }}.
 
-handle_call(_Request, _From, State = #state{}) ->
+handle_call(Request, From, State = #state{}) ->
+    lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
     {reply, ok, State}.
 
 handle_cast(write, State = #state{file_path = FilePath}) ->
@@ -92,14 +106,22 @@ handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
     upload_file(AWSClient, FilePath, FileName),
     file:delete(FilePath),
     {noreply, State};
-handle_cast(_Request, State = #state{}) ->
+handle_cast({start_interval, IntervalDuration}, State = #state{report_interval = ReportInterval}) ->
+    {ok, ReportInterval2} = handle_restart_interval(ReportInterval, IntervalDuration),
+    {noreply, State#state{report_interval = ReportInterval2}};
+handle_cast(stop_interval, State = #state{report_interval = ReportInterval}) ->
+    handle_stop_interval(ReportInterval),
+    {noreply, State#state{report_interval = undefined}};
+handle_cast(Request, State = #state{}) ->
+    lager:warning("rcvd unknown cast msg: ~p", [Request]),
     {noreply, State}.
 
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
-terminate(Reason, _State = #state{file_path = FilePath}) ->
+terminate(Reason, _State = #state{file_path = FilePath, report_interval = ReportInterval}) ->
     handle_write(FilePath),
+    handle_stop_interval(ReportInterval),
     lager:warning("packet reporter process terminated: ~s", [Reason]),
     ok.
 
@@ -152,10 +174,28 @@ setup_aws() ->
     aws_client:make_client(AccessKey, Secret, Region).
 
 -spec start_report_interval() -> {ok, timer:tref()}.
+-spec start_report_interval(interval_duration_ms()) -> {ok, timer:tref()}.
+
 start_report_interval() ->
-    %% TODO: Store timer reference, allow for pause/restart
-    Interval = application:get_env(hpr, packet_reporter_report_interval, ?DEFAULT_REPORT_INTERVAL),
-    timer:apply_interval(Interval, ?MODULE, write_packets, []).
+    IntervalDuration = application:get_env(
+        hpr, packet_reporter_report_interval, ?DEFAULT_REPORT_INTERVAL
+    ),
+    start_report_interval(IntervalDuration).
+start_report_interval(IntervalDuration) ->
+    timer:apply_interval(IntervalDuration, ?MODULE, write_packets, []).
+
+-spec handle_restart_interval(
+    IntervalRef :: timer:tref() | undefined, IntervalDuration :: interval_duration_ms()
+) -> {ok, timer:tref()}.
+handle_restart_interval(undefined, IntervalDuration) ->
+    start_report_interval(IntervalDuration);
+handle_restart_interval(IntervalRef, IntervalDuration) ->
+    timer:cancel(IntervalRef),
+    start_report_interval(IntervalDuration).
+
+-spec handle_stop_interval(IntervalRef :: timer:tref()) -> {ok, cancel} | {error, term()}.
+handle_stop_interval(undefined) -> {ok, no_interval};
+handle_stop_interval(IntervalRef) -> timer:cancel(IntervalRef).
 
 -spec encode_packet(hpr_packet_up:packet(), hpr_route:route()) ->
     #packet_router_packet_report_v1_pb{}.
@@ -262,6 +302,8 @@ file_test() ->
     {ok, Content2} = file:read_file(FilePath),
 
     4 = length(binary:split(Content2, <<"\n">>, [trim, global])),
+
+    file:delete(FilePath),
 
     ok.
 
