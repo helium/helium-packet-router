@@ -50,6 +50,7 @@ init([]) ->
         ?WORKER(hpr_metrics, [#{}]),
         ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}]),
         ?WORKER(hpr_gwmp_redirect_worker, [RedirectMap]),
+        ?WORKER(hpr_grpc_client_connection_pool, [60_000]),
         ?SUP(hpr_gwmp_udp_sup, [])
     ],
     {ok, {
