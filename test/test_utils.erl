@@ -80,10 +80,8 @@ uplink_packet_up(Opts0) ->
 -spec packet_route(Opts :: map()) -> hpr_packet_route:route().
 packet_route(Opts0) ->
     NetID = maps:get(net_id, Opts0, 0),
-    DevAddrRanges = maps:get(devaddr_ranges, Opts0, [
-        #packet_router_route_devaddr_range_v1_pb{start = 1, 'end' = 10}
-    ]),
-    EUIs = maps:get(euis, Opts0, [#packet_router_route_eui_v1_pb{app_eui = 1, dev_eui = 1}]),
+    DevAddrRanges = maps:get(devaddr_ranges, Opts0, [{1, 10}]),
+    EUIs = maps:get(euis, Opts0, [{1, 1}]),
     LNS = maps:get(lns, Opts0, <<"lsn.lora.com>">>),
     Protocol = maps:get(protocol, Opts0, gwmp),
     OUI = maps:get(oui, Opts0, 10),

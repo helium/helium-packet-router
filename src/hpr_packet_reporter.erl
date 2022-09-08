@@ -197,8 +197,7 @@ handle_restart_interval(IntervalRef, IntervalDuration) ->
 handle_stop_interval(undefined) -> {ok, no_interval};
 handle_stop_interval(IntervalRef) -> timer:cancel(IntervalRef).
 
--spec encode_packet(hpr_packet_up:packet(), hpr_route:route()) ->
-    #packet_router_packet_report_v1_pb{}.
+-spec encode_packet(hpr_packet_up:packet(), hpr_route:route()) -> binary().
 encode_packet(
     #packet_router_packet_up_v1_pb{
         payload = Payload,
@@ -259,11 +258,11 @@ upload_file(AWSClient, Path, FileName) ->
 
 -spec get_packets_by_timestamp(integer()) -> [term()].
 get_packets_by_timestamp(Timestamp) ->
-    ets:select(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], ['$2']}]).
+    ets:select(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], ['$2']}]).
 
 -spec delete_packets_by_timestamp(integer()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
-    ets:select_delete(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], [true]}]).
+    ets:select_delete(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], [true]}]).
 
 % ------------------------------------------------------------------
 % EUNIT Tests
@@ -275,7 +274,7 @@ delete_packets_by_timestamp(Timestamp) ->
 file_test() ->
     ?ETS = ets:new(?ETS, [named_table, bag, public, {write_concurrency, true}]),
     Timestamp = erlang:system_time(millisecond),
-    FilePath = "./data/tmp/packetreport." ++ integer_to_list(Timestamp) ++ ".txt",
+    FilePath = "./packetreport." ++ integer_to_list(Timestamp) ++ ".txt",
 
     Packet = test_utils:join_packet_up(#{}),
     Packet2 = test_utils:uplink_packet_up(#{}),
@@ -290,7 +289,7 @@ file_test() ->
 
     {ok, Content} = file:read_file(FilePath),
 
-    2 = length(binary:split(Content, <<"\n">>, [trim, global])),
+    ?assertEqual(2, length(binary:split(Content, <<"\n">>, [trim, global]))),
 
     Packet3 = test_utils:join_packet_up(#{}),
     Packet4 = test_utils:uplink_packet_up(#{}),
@@ -298,34 +297,14 @@ file_test() ->
     report_packet(Packet3, Route),
     report_packet(Packet4, Route),
 
-    timer:sleep(1000),
-
     handle_write(FilePath, []),
 
     {ok, Content2} = file:read_file(FilePath),
 
-    4 = length(binary:split(Content2, <<"\n">>, [trim, global])),
+    ?assertEqual(4, length(binary:split(Content2, <<"\n">>, [trim, global]))),
 
     file:delete(FilePath),
 
     ok.
-
-% aws_test() ->
-%     AccessKey = <<"">>,
-%     SecretKey = <<"">>,
-%     Region = <<"">>,
-%     Client = aws_client:make_client(AccessKey, SecretKey, Region),
-%     {ok, S} = file:open("/tmp/test.txt", [write, compressed]),
-%     file:write(S, <<"HelloWorld">>),
-%     file:close(S),
-
-%     {ok, Content} = file:read_file("/tmp/test.txt"),
-%     io:format("~p~n", [Content]),
-%     aws_s3:put_object(Client, <<"test-bucket-hw">>, <<"my-key3">>, #{
-%         <<"Body">> => Content
-%     }),
-%     {ok, Response, _} = aws_s3:get_object(Client, <<"test-bucket-hw">>, <<"my-key3">>),
-%     io:format("Test2: ~p~n", [Response]),
-%     Content = maps:get(<<"Body">>, Response).
 
 -endif.
