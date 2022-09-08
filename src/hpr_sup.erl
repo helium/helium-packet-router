@@ -31,21 +31,6 @@
     modules => [I]
 }).
 
--define(WORKER(I, Mod, Args), #{
-    id => I,
-    start => {Mod, start_link, Args},
-    restart => permanent,
-    shutdown => 5000,
-    type => worker,
-    modules => [I]
-}).
-
--define(FLAGS, #{
-    strategy => rest_for_one,
-    intensity => 1,
-    period => 5
-}).
-
 -define(SERVER, ?MODULE).
 
 start_link() ->

@@ -49,22 +49,22 @@ init_ets() ->
     ?ETS = ets:new(?ETS, [named_table, bag, public, {write_concurrency, true}]),
     ok.
 
--spec report_packet(hpr_packet_up:packet(), hpr_route:route()) -> ok.
-report_packet(Packet, Route) ->
-    EncodedPacket = encode_packet(Packet, Route),
-    Timestamp = erlang:system_time(millisecond),
-    true = ets:insert(?ETS, {Timestamp, EncodedPacket}),
+-spec report_packet(Packet :: hpr_packet_up:packet(), PacketRoute :: hpr_route:route()) -> ok.
+report_packet(Packet, PacketRoute) ->
+    EncodedPacket = encode_packet(Packet, PacketRoute),
+    ReportTimestamp = erlang:system_time(millisecond),
+    true = ets:insert(?ETS, {ReportTimestamp, EncodedPacket}),
     ok.
 
 -spec write_packets() -> ok.
 write_packets() ->
     gen_server:cast(?SERVER, write).
 
--spec upload_packets(string()) -> ok.
+-spec upload_packets(FilePath :: string()) -> ok.
 upload_packets(FilePath) ->
     gen_server:cast(?SERVER, {upload, FilePath}).
 
--spec restart_report_interval(interval_duration_ms()) -> ok.
+-spec restart_report_interval(IntervalDuration :: interval_duration_ms()) -> ok.
 restart_report_interval(IntervalDuration) ->
     gen_server:cast(?SERVER, {start_interval, IntervalDuration}).
 
@@ -101,8 +101,8 @@ handle_cast(write, State = #state{file_path = FilePath}) ->
     end,
     {noreply, State};
 handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
-    Timestamp = erlang:system_time(millisecond),
-    FileName = list_to_binary("packetreport." ++ integer_to_list(Timestamp) ++ ".gz"),
+    UploadTimestamp = erlang:system_time(millisecond),
+    FileName = list_to_binary("packetreport." ++ integer_to_list(UploadTimestamp) ++ ".gz"),
     upload_file(AWSClient, FilePath, FileName),
     file:delete(FilePath),
     {noreply, State};
@@ -132,14 +132,14 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec handle_write(string()) -> {ok, integer(), integer()}.
--spec handle_write(string(), [atom()]) -> {ok, integer(), integer()}.
+-spec handle_write(FilePath :: string()) -> {ok, integer(), integer()}.
+-spec handle_write(FilePath :: string(), WriteOptions :: [atom()]) -> {ok, integer(), integer()}.
 
 handle_write(FilePath) -> handle_write(FilePath, [compressed]).
-handle_write(FilePath, Options) ->
-    Timestamp = erlang:system_time(millisecond),
-    {ok, S} = open_tmp_file(FilePath, Options),
-    Data = get_packets_by_timestamp(Timestamp),
+handle_write(FilePath, WriteOptions) ->
+    WriteTimestamp = erlang:system_time(millisecond),
+    {ok, S} = open_tmp_file(FilePath, WriteOptions),
+    Data = get_packets_by_timestamp(WriteTimestamp),
 
     lists:foreach(
         fun(Packet) ->
@@ -149,7 +149,7 @@ handle_write(FilePath, Options) ->
     ),
     file:close(S),
 
-    NumDeleted = delete_packets_by_timestamp(Timestamp),
+    NumDeleted = delete_packets_by_timestamp(WriteTimestamp),
     FileSize = filelib:file_size(FilePath),
     MaxFileSize = application:get_env(hpr, packet_reporter_max_file_size, ?MAX_FILE_SIZE),
 
@@ -174,7 +174,7 @@ setup_aws() ->
     aws_client:make_client(AccessKey, Secret, Region).
 
 -spec start_report_interval() -> {ok, timer:tref()}.
--spec start_report_interval(interval_duration_ms()) -> {ok, timer:tref()}.
+-spec start_report_interval(IntervalDuration :: interval_duration_ms()) -> {ok, timer:tref()}.
 
 start_report_interval() ->
     IntervalDuration = application:get_env(
@@ -197,11 +197,11 @@ handle_restart_interval(IntervalRef, IntervalDuration) ->
 handle_stop_interval(undefined) -> {ok, no_interval};
 handle_stop_interval(IntervalRef) -> timer:cancel(IntervalRef).
 
--spec encode_packet(hpr_packet_up:packet(), hpr_route:route()) -> binary().
+-spec encode_packet(Packet :: hpr_packet_up:packet(), PacketRoute :: hpr_route:route()) -> binary().
 encode_packet(
     #packet_router_packet_up_v1_pb{
         payload = Payload,
-        timestamp = Timestamp,
+        timestamp = GatewayTimestamp,
         rssi = RSSI,
         frequency_mhz = FrequencyMhz,
         datarate = Datarate,
@@ -216,7 +216,7 @@ encode_packet(
 ) ->
     packet_router_pb:encode_msg(
         #packet_router_packet_report_v1_pb{
-            gateway_timestamp_ms = Timestamp,
+            gateway_timestamp_ms = GatewayTimestamp,
             oui = OUI,
             net_id = NetID,
             rssi = RSSI,
@@ -230,21 +230,24 @@ encode_packet(
         packet_router_packet_report_v1_pb
     ).
 
--spec open_tmp_file(string(), [atom()]) -> {ok, file:io_device()} | {error, atom()}.
-open_tmp_file(FilePath, Options) ->
-    case file:open(FilePath, [append] ++ Options) of
+-spec open_tmp_file(FilePath :: string(), WriteOptions :: [atom()]) ->
+    {ok, IODevice :: file:io_device()} | {error, Reason :: atom()}.
+open_tmp_file(FilePath, WriteOptions) ->
+    case file:open(FilePath, [append] ++ WriteOptions) of
         {error, Error} ->
             lager:error("failed to open tmp write file: ~p", [Error]);
         IODevice ->
             IODevice
     end.
 
--spec upload_file(aws_client:aws_client(), string(), binary()) -> ok.
-upload_file(AWSClient, Path, FileName) ->
+-spec upload_file(
+    AWSClient :: aws_client:aws_client(), FilePath :: string(), S3FileName :: binary()
+) -> ok.
+upload_file(AWSClient, FilePath, S3FileName) ->
     BucketName = application:get_env(hpr, packet_reporter_bucket, <<"default_bucket">>),
-    {ok, Content} = file:read_file(Path),
+    {ok, Content} = file:read_file(FilePath),
     case
-        aws_s3:put_object(AWSClient, BucketName, FileName, #{
+        aws_s3:put_object(AWSClient, BucketName, S3FileName, #{
             <<"Body">> => Content
         })
     of
@@ -252,15 +255,15 @@ upload_file(AWSClient, Path, FileName) ->
             ok;
         Error ->
             lager:error(
-                "failed to upload packet report: file: ~p, error: ~p", [Path, Error]
+                "failed to upload packet report: file: ~p, error: ~p", [FilePath, Error]
             )
     end.
 
--spec get_packets_by_timestamp(integer()) -> [term()].
+-spec get_packets_by_timestamp(Timestamp :: integer()) -> [term()].
 get_packets_by_timestamp(Timestamp) ->
     ets:select(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], ['$2']}]).
 
--spec delete_packets_by_timestamp(integer()) -> integer().
+-spec delete_packets_by_timestamp(Timestamp :: integer()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
     ets:select_delete(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], [true]}]).
 
