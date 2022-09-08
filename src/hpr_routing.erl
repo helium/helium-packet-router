@@ -82,16 +82,25 @@ deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
         [hpr_route:lns(Route)]
     ),
     Protocol = hpr_route:protocol(Route),
-    %% FIXME: delivery could be halted to multiple routes if one of the earlier
-    %% Protocol:send(...) errors out.
+
     Resp =
-        case Protocol of
-            router ->
-                hpr_protocol_router:send(Packet, StreamHandler, Route);
-            gwmp ->
-                hpr_gwmp_router:send(Packet, StreamHandler, Route);
-            _OtherProtocol ->
-                lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
+        try
+            case Protocol of
+                router ->
+                    hpr_protocol_router:send(Packet, StreamHandler, Route);
+                gwmp ->
+                    hpr_gwmp_router:send(Packet, StreamHandler, Route);
+                _OtherProtocol ->
+                    lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
+                    ok
+            end
+        catch
+            Class:Exception:Stacktrace ->
+                lager:warning(
+                    [{protocol, Protocol}],
+                    "packet send failed: ~p, ~p, ~p",
+                    [Class, Exception, Stacktrace]
+                ),
                 ok
         end,
     case Resp of
@@ -105,6 +114,7 @@ deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
             ),
             ok
     end,
+
     deliver_packet(Packet, StreamHandler, Routes).
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
