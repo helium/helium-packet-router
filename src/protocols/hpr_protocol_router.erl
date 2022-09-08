@@ -114,15 +114,8 @@ packet_router_packet_down_v1(BlockchainStateChannelMessage) ->
         payload := Payload,
         timestamp := RX1Timestamp,
         frequency := RX1Frequency,
-        datarate := RX1Datarate,
-        rx2_window := RX2Window
+        datarate := RX1Datarate
     } = Packet,
-    % window_pb
-    #{
-        timestamp := RX2Timestamp,
-        frequency := RX2Frequency,
-        datarate := RX2Datarate
-    } = RX2Window,
     #packet_router_packet_down_v1_pb{
         payload = Payload,
         rx1 = #window_v1_pb{
@@ -130,12 +123,24 @@ packet_router_packet_down_v1(BlockchainStateChannelMessage) ->
             frequency = RX1Frequency,
             datarate = RX1Datarate
         },
-        rx2 = #window_v1_pb{
-            timestamp = RX2Timestamp,
-            frequency = RX2Frequency,
-            datarate = RX2Datarate
-        }
+        rx2 = rx2_window(Packet)
     }.
+
+-spec rx2_window(router_pb:oacket_pb()) ->
+    undefined | packet_router_pb:window_v1_pb().
+rx2_window(#{rx2_window := RX2Window}) ->
+    #{
+        timestamp := RX2Timestamp,
+        frequency := RX2Frequency,
+        datarate := RX2Datarate
+    } = RX2Window,
+    #window_v1_pb{
+        timestamp = RX2Timestamp,
+        frequency = RX2Frequency,
+        datarate = RX2Datarate
+    };
+rx2_window(_) ->
+    undefined.
 
 -spec routing_information(binary()) -> router_pb:routing_information().
 routing_information(

@@ -2,6 +2,9 @@
 
 -behaviour(gen_server).
 
+-define(CONNECTION_TAB, connection).
+-define(RESERVED_CONNECTION_TAB, reserved_connection).
+
 % API
 -export([
     reserve/2,
@@ -102,8 +105,7 @@ handle_info({timeout, Lns}, State) ->
     ok = handle_timeout(Lns),
     {noreply, State};
 % Owner pid exits while holding reservation.
-handle_info({{'DOWN', ReservaionRef},
-    _MonitorRef, process, _Owner, _Info}, State) ->
+handle_info({{'DOWN', ReservaionRef}, _MonitorRef, process, _Owner, _Info}, State) ->
     ok = release_connection(ReservaionRef, State#state.idle_timeout),
     {noreply, State}.
 
@@ -119,11 +121,12 @@ init_ets() ->
 init_ets(Options) ->
     % [#connection{}]
     ets:new(
-        connection,
-        Options ++ [named_table, set, {keypos, #connection.lns}]),
+        ?CONNECTION_TAB,
+        Options ++ [named_table, set, {keypos, #connection.lns}]
+    ),
     % [#reserved_connection{}]
     ets:new(
-        reserved_connection,
+        ?RESERVED_CONNECTION_TAB,
         Options ++
             [named_table, set, {keypos, #reserved_connection.reservation_ref}]
     ),
@@ -134,7 +137,7 @@ init_ets(Options) ->
 % If necessary, create connection, and update bookkeeping.
 reserve_connection(Owner, Lns, Endpoint) ->
     MaybeConnection =
-        case ets:lookup(connection, Lns) of
+        case ets:lookup(?CONNECTION_TAB, Lns) of
             [] ->
                 insert_connection(Lns, grpc_client_connect(Endpoint));
             [ConnectionRecord] ->
@@ -159,7 +162,7 @@ finish_reservation(_, _, {error, Error}) ->
 
 -spec release_connection(reservation_ref(), idle_timeout()) -> ok.
 release_connection(ReservationRef, IdleTimeout) ->
-    case ets:take(reserved_connection, ReservationRef) of
+    case ets:take(?RESERVED_CONNECTION_TAB, ReservationRef) of
         [] ->
             % released more than once
             ok;
@@ -180,14 +183,14 @@ release_connection(ReservationRef, IdleTimeout) ->
 
 -spec handle_timeout(lns()) -> ok.
 handle_timeout(Lns) ->
-    case ets:lookup(connection, Lns) of
+    case ets:lookup(?CONNECTION_TAB, Lns) of
         [] ->
             ok;
         [ConnectionRecord] ->
             % possible race condition - timeout just as connection is reserved
             if
                 ConnectionRecord#connection.reference_count == 0 ->
-                    ets:delete(connection, Lns),
+                    ets:delete(?CONNECTION_TAB, Lns),
                     ok = grpc_client:stop_connection(
                         ConnectionRecord#connection.connection
                     );
@@ -211,7 +214,7 @@ maybe_start_idle_timer(_Lns, _, _) ->
 -spec connection_reference_count(lns(), integer()) -> integer().
 connection_reference_count(Lns, Increment) ->
     ets:update_counter(
-        connection,
+        ?CONNECTION_TAB,
         Lns,
         {#connection.reference_count, Increment}
     ).
@@ -225,7 +228,7 @@ grpc_client_connect({Transport, Host, Port}) ->
     (lns(), {ok, grpc_client:connection()}) -> {ok, grpc_client:connection()};
     (lns(), {error, any()}) -> {error, any()}.
 insert_connection(Lns, {ok, GrpcClientConnection}) ->
-    ets:insert(connection, #connection{
+    ets:insert(?CONNECTION_TAB, #connection{
         lns = binary:copy(Lns),
         connection = GrpcClientConnection
     }),
@@ -237,8 +240,9 @@ insert_connection(_, {error, Error}) ->
 cancel_idle_timer(#connection{idle_timeout_timer_ref = undefined}) ->
     ok;
 cancel_idle_timer(ConnectionRecord) ->
-    timer:cancel(ConnectionRecord#connection.idle_timeout_timer_ref),
-    ets:update_element(connection, ConnectionRecord#connection.lns, {
+    {ok, cancel} =
+        timer:cancel(ConnectionRecord#connection.idle_timeout_timer_ref),
+    ets:update_element(?CONNECTION_TAB, ConnectionRecord#connection.lns, {
         #connection.idle_timeout_timer_ref, undefined
     }),
     ok.
@@ -246,7 +250,7 @@ cancel_idle_timer(ConnectionRecord) ->
 -spec insert_reserved_connection(lns(), reservation_ref(), monitor_ref()) -> ok.
 insert_reserved_connection(Lns, ReservationRef, MonitorRef) ->
     ets:insert(
-        reserved_connection,
+        ?RESERVED_CONNECTION_TAB,
         #reserved_connection{
             reservation_ref = ReservationRef,
             lns = binary:copy(Lns),
@@ -259,9 +263,9 @@ insert_reserved_connection(Lns, ReservationRef, MonitorRef) ->
 set_idle_timer(_Lns, infinity) ->
     ok;
 set_idle_timer(Lns, IdleTimeout) ->
-    TimerRef = timer:send_after(IdleTimeout, {timeout, Lns}),
+    {ok, TimerRef} = timer:send_after(IdleTimeout, {timeout, Lns}),
     ets:update_element(
-        connection,
+        ?CONNECTION_TAB,
         Lns,
         {#connection.idle_timeout_timer_ref, TimerRef}
     ),
@@ -296,18 +300,12 @@ decode_lns_parts(_) ->
 -include_lib("eunit/include/eunit.hrl").
 
 all_test_() ->
-    {setup,
-        fun setup/0,
-        {foreach,
-            fun foreach_setup/0,
-            fun foreach_cleanup/1,
-            [
-                ?_test(test_reservation()),
-                ?_test(test_owner_normal_exit()),
-                ?_test(test_owner_crash())
-            ]
-        }
-    }.
+    {setup, fun setup/0,
+        {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
+            ?_test(test_reservation()),
+            ?_test(test_owner_normal_exit()),
+            ?_test(test_owner_crash())
+        ]}}.
 
 setup() ->
     init_ets([public]),
@@ -330,10 +328,18 @@ test_reservation() ->
     Endpoint = {Transport, Host, Port},
     FakeGrcpConnection = #{fake => connection},
 
-    meck:expect(grpc_client, connect,
-        [Transport, Host, Port, []], {ok, FakeGrcpConnection}),
-    meck:expect(grpc_client, stop_connection,
-        [FakeGrcpConnection], ok),
+    meck:expect(
+        grpc_client,
+        connect,
+        [Transport, Host, Port, []],
+        {ok, FakeGrcpConnection}
+    ),
+    meck:expect(
+        grpc_client,
+        stop_connection,
+        [FakeGrcpConnection],
+        ok
+    ),
 
     % reservation makes connection
     {ok, GrpcConnection0, ReservationRef0} =
@@ -404,10 +410,18 @@ test_owner_exit(Owner) ->
     Endpoint = {Transport, Host, Port},
     FakeGrcpConnection = #{fake => connection},
 
-    meck:expect(grpc_client, connect,
-        [Transport, Host, Port, []], {ok, FakeGrcpConnection}),
-    meck:expect(grpc_client, stop_connection,
-        [FakeGrcpConnection], ok),
+    meck:expect(
+        grpc_client,
+        connect,
+        [Transport, Host, Port, []],
+        {ok, FakeGrcpConnection}
+    ),
+    meck:expect(
+        grpc_client,
+        stop_connection,
+        [FakeGrcpConnection],
+        ok
+    ),
 
     % connection released automatically when owner exits
     {ok, _GrpcConnection, _ReservationRef} =
@@ -439,14 +453,13 @@ fake_owner_(StopFun) ->
         end
     end.
 
-
 % return messages in mailbox
 purge_mailbox() ->
     receive
         Message ->
             [Message | purge_mailbox()]
-        after 0 ->
-            []
+    after 0 ->
+        []
     end.
 
 -endif.
