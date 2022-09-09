@@ -322,7 +322,7 @@ foreach_cleanup(ok) ->
 test_reservation() ->
     Owner = self(),
     Lns = <<"lns">>,
-    Transport = gen_tcp,
+    Transport = tcp,
     Host = <<"1,2,3,4">>,
     Port = 1234,
     Endpoint = {Transport, Host, Port},
@@ -345,7 +345,6 @@ test_reservation() ->
     {ok, GrpcConnection0, ReservationRef0} =
         reserve_connection(Owner, Lns, Endpoint),
     ?assertEqual(FakeGrcpConnection, GrpcConnection0),
-    ?assert(meck:validate(grpc_client)),
 
     % second reservation doesn't reconnect and returns a unique
     % reservation id
@@ -404,7 +403,7 @@ test_owner_crash() ->
 
 test_owner_exit(Owner) ->
     Lns = <<"lns">>,
-    Transport = gen_tcp,
+    Transport = tcp,
     Host = <<"1,2,3,4">>,
     Port = 1234,
     Endpoint = {Transport, Host, Port},
