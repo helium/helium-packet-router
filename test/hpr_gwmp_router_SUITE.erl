@@ -373,7 +373,7 @@ gateway_dest_redirect(_Config) ->
 
     ok.
 
-bad_route_test(Config) ->
+bad_route_test(_Config) ->
 
     Route1 = hpr_route:new(1337, [], [], <<"bad_route">>, gwmp, 42),
     Route2 = hpr_route:new(1337, [], [], <<"127.0.0.1:1778">>, gwmp, 42),
