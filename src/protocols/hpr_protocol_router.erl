@@ -7,6 +7,10 @@
 
 -export([send/3]).
 
+% ------------------------------------------------------------------------------
+% API
+% ------------------------------------------------------------------------------
+
 -spec send(
     Packet :: hpr_packet_up:packet(),
     Stream :: pid(),
@@ -30,6 +34,10 @@ send(Packet, Stream, Route) ->
     after
         hpr_grpc_client_connection_pool:release(ReservationRef)
     end.
+
+% ------------------------------------------------------------------------------
+% Private Functions
+% ------------------------------------------------------------------------------
 
 % translate hpr_packet_up:packet into blockchain_state_channel_message_v1
 -spec blockchain_state_channel_message_v1(
@@ -63,7 +71,7 @@ blockchain_state_channel_message_v1(Route, HprPacketUp) ->
         timestamp => Timestamp,
         signal_strength => SignalStrength,
         frequency => Frequency,
-        datarate => DataRate,
+        datarate => atom_to_binary(DataRate),
         snr => SNR,
         routing => RoutingInformation
     },
@@ -121,12 +129,12 @@ packet_router_packet_down_v1(BlockchainStateChannelMessage) ->
         rx1 = #window_v1_pb{
             timestamp = RX1Timestamp,
             frequency = RX1Frequency,
-            datarate = RX1Datarate
+            datarate = hpr_datarate(RX1Datarate)
         },
         rx2 = rx2_window(Packet)
     }.
 
--spec rx2_window(router_pb:oacket_pb()) ->
+-spec rx2_window(router_pb:packet_pb()) ->
     undefined | packet_router_pb:window_v1_pb().
 rx2_window(#{rx2_window := RX2Window}) ->
     #{
@@ -137,10 +145,16 @@ rx2_window(#{rx2_window := RX2Window}) ->
     #window_v1_pb{
         timestamp = RX2Timestamp,
         frequency = RX2Frequency,
-        datarate = RX2Datarate
+        datarate = hpr_datarate(RX2Datarate)
     };
 rx2_window(_) ->
     undefined.
+
+-spec hpr_datarate(unicode:chardata()) ->
+    packet_router_pb:'helium.data_rate'().
+hpr_datarate(DataRateString) ->
+    % TODO Is there a mapping needed for hpr data_rate to/from router data_rate?
+    binary_to_existing_atom(unicode:characters_to_binary(DataRateString)).
 
 -spec routing_information(binary()) -> router_pb:routing_information().
 routing_information(
@@ -164,7 +178,10 @@ routing_information(<<_FType:3, _:5, DevAddr:32/integer-unsigned-little, _/binar
 
 basic_test_() ->
     [
-        ?_test(routing_information_t())
+        ?_test(routing_information_t()),
+        ?_test(blockchain_state_channel_message_v1_t()),
+        ?_test(packet_router_packet_down_v1_t(rx2_window)),
+        ?_test(packet_router_packet_down_v1_t(no_rx2_window))
     ].
 
 routing_information_t() ->
@@ -176,5 +193,67 @@ routing_information_t() ->
             <<?JOIN_REQUEST:3, 0:5, DevAddr:32/integer-unsigned-little, "unused">>
         )
     ).
+
+blockchain_state_channel_message_v1_t() ->
+    % verify no errors in traqnslated packet
+    Route = hpr_route:new(1, [], [], <<"lns">>, router, 1),
+    HprPacketUp = test_utils:join_packet_up(#{}),
+    BlockchainStateChannelMessage =
+        blockchain_state_channel_message_v1(Route, HprPacketUp),
+    _EncodedBlockchainStateChannelMessage =
+        router_pb:encode_msg(
+            BlockchainStateChannelMessage,
+            blockchain_state_channel_message_v1_pb,
+            [verify]
+        ).
+
+packet_router_packet_down_v1_t(Option) ->
+    % verify no errors in traqnslated packet
+    Response = blockchain_state_channel_message_response(Option),
+    router_pb:verify_msg(Response, blockchain_state_channel_message_v1_pb),
+    PacketRouterPacketDown =
+        packet_router_packet_down_v1(Response),
+    _EncodedPacketRouterPacketDownMessage =
+        packet_router_pb:encode_msg(
+            PacketRouterPacketDown,
+            packet_router_packet_down_v1_pb,
+            [verify]
+        ).
+
+%% ------------------------------------------------------------------
+%% Private Test Functions
+%% ------------------------------------------------------------------
+
+blockchain_state_channel_message_response(Option) ->
+    #{
+        msg =>
+            {response, #{
+                accepted => true,
+                downlink => packet(Option)
+            }}
+    }.
+
+packet(rx2_window) ->
+    (packet(no_rx2_window))#{
+        rx2_window => #{
+            timestamp => 1,
+            frequency => 1.1,
+            datarate => "SF12BW125"
+        }
+    };
+packet(no_rx2_window) ->
+    #{
+        oui => 1,
+        type => lorawan,
+        payload => <<"payload">>,
+        timestamp => 1,
+        signal_strength => 1.1,
+        frequency => 1.1,
+        datarate => "SF12BW125",
+        snr => 1.1,
+        routing => #{
+            data => {devaddr, 1}
+        }
+    }.
 
 -endif.
