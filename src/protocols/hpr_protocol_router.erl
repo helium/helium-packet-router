@@ -181,8 +181,21 @@ basic_test_() ->
         ?_test(routing_information_t()),
         ?_test(blockchain_state_channel_message_v1_t()),
         ?_test(packet_router_packet_down_v1_t(rx2_window)),
-        ?_test(packet_router_packet_down_v1_t(no_rx2_window))
+        ?_test(packet_router_packet_down_v1_t(no_rx2_window)),
+        {foreach, fun per_testcase_setup/0, fun per_testcase_cleanup/1, [
+            ?_test(send_t1()),
+            ?_test(send_t2())
+        ]}
     ].
+
+per_testcase_setup() ->
+    meck:new(hpr_grpc_client_connection_pool),
+    meck:new(grpc_client),
+    ok.
+
+per_testcase_cleanup(_) ->
+    meck:unload(hpr_grpc_client_connection_pool),
+    meck:unload(grpc_client).
 
 routing_information_t() ->
     DevAddr = 1234,
@@ -196,7 +209,7 @@ routing_information_t() ->
 
 blockchain_state_channel_message_v1_t() ->
     % verify no errors in traqnslated packet
-    Route = hpr_route:new(1, [], [], <<"lns">>, router, 1),
+    Route = hpr_route:new(1, [], [], lns(), router, 1),
     HprPacketUp = test_utils:join_packet_up(#{}),
     BlockchainStateChannelMessage =
         blockchain_state_channel_message_v1(Route, HprPacketUp),
@@ -220,9 +233,109 @@ packet_router_packet_down_v1_t(Option) ->
             [verify]
         ).
 
+% send/3: happy path
+send_t1() ->
+    Owner = self(),
+    HprPacketUp = test_utils:join_packet_up(#{}),
+    Stream = self(),
+    Route = hpr_route:new(1, [], [], lns(), router, 1),
+    ReservationRef = make_ref(),
+    % random pid
+    Connection = self(),
+    GrcpClientUnaryResponse = blockchain_state_channel_message_response(),
+
+    meck:expect(
+        hpr_grpc_client_connection_pool, reserve, [Owner, lns()], {ok, Connection, ReservationRef}
+    ),
+    meck:expect(hpr_grpc_client_connection_pool, release, [ReservationRef], ok),
+    meck:expect(
+        grpc_client,
+        unary,
+        [
+            Connection,
+            blockchain_state_channel_message_v1(Route, HprPacketUp),
+            router,
+            route,
+            router_pb,
+            []
+        ],
+        {ok, #{result => GrcpClientUnaryResponse}}
+    ),
+
+    ResponseValue = send(HprPacketUp, Stream, Route),
+
+    receive
+        {reply, Reply} ->
+            ?assertEqual(packet_router_packet_down_v1(GrcpClientUnaryResponse), Reply),
+            ok
+    after 0 ->
+        ?assert(timedout == true)
+    end,
+
+    ?assertEqual(ok, ResponseValue),
+    ?assertEqual(1, meck:num_calls(hpr_grpc_client_connection_pool, reserve, 2)),
+    ?assertEqual(1, meck:num_calls(hpr_grpc_client_connection_pool, release, 1)),
+    ?assertEqual(1, meck:num_calls(grpc_client, unary, 6)).
+
+% send/3: grpc_client error
+send_t2() ->
+    Owner = self(),
+    HprPacketUp = test_utils:join_packet_up(#{}),
+    Stream = self(),
+    Route = hpr_route:new(1, [], [], lns(), router, 1),
+    ReservationRef = make_ref(),
+    % random pid
+    Connection = self(),
+
+    meck:expect(
+        hpr_grpc_client_connection_pool, reserve, [Owner, lns()], {ok, Connection, ReservationRef}
+    ),
+    meck:expect(hpr_grpc_client_connection_pool, release, [ReservationRef], ok),
+    meck:expect(
+        grpc_client,
+        unary,
+        [
+            Connection,
+            blockchain_state_channel_message_v1(Route, HprPacketUp),
+            router,
+            route,
+            router_pb,
+            []
+        ],
+        grpc_client_error_response()
+    ),
+
+    ResponseValue = send(HprPacketUp, Stream, Route),
+
+    receive
+        {reply, _Reply} ->
+            ?assert(unexpected_stream_reply == true)
+    after 0 ->
+        ok
+    end,
+
+    ?assertEqual(grpcbox_grpc_error_response(grpc_client_error_response()), ResponseValue),
+    ?assertEqual(1, meck:num_calls(hpr_grpc_client_connection_pool, reserve, 2)),
+    ?assertEqual(1, meck:num_calls(hpr_grpc_client_connection_pool, release, 1)),
+    ?assertEqual(1, meck:num_calls(grpc_client, unary, 6)).
+
 %% ------------------------------------------------------------------
 %% Private Test Functions
 %% ------------------------------------------------------------------
+
+host() -> "example-lns.com".
+port() -> 4321.
+lns() ->
+    <<(list_to_binary(host()))/binary, $:, (integer_to_binary(port()))/binary>>.
+
+grpc_client_error_response() ->
+    {error, #{
+        grpc_status => 1,
+        status_message => <<"fake error">>
+    }}.
+
+blockchain_state_channel_message_response() ->
+    blockchain_state_channel_message_response(rx2_window).
 
 blockchain_state_channel_message_response(Option) ->
     #{
