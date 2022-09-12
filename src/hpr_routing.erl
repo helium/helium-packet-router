@@ -96,7 +96,7 @@ deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
             end
         catch
             Class:Exception:Stacktrace ->
-                lager:warning(
+                lager:error(
                     [{protocol, Protocol}],
                     "packet send failed: ~p, ~p, ~p",
                     [Class, Exception, Stacktrace]
