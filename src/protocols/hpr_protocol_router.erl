@@ -1,6 +1,6 @@
 -module(hpr_protocol_router).
 
--include("grpc/autogen/server/packet_router_pb.hrl").
+-include("../grpc/autogen/server/packet_router_pb.hrl").
 
 % TODO: should be in a common include file
 -define(JOIN_REQUEST, 2#000).
@@ -16,21 +16,20 @@
     Stream :: pid(),
     Route :: hpr_route:route()
 ) -> hpr_routing:hr_routing_response().
-send(Packet, Stream, Route) ->
+send(PacketUp, IncomingStream, Route) ->
     LNS = Route#packet_router_route_v1_pb.lns,
-    StateChannelMsg = blockchain_state_channel_message_v1(Route, Packet),
-    {ok, Connection, ReservationRef} =
-        hpr_grpc_client_connection_pool:reserve(self(), LNS),
+    PacketUpMap = as_map(PacketUp),
+    %% NOTE: This has been broken to test with streaming over unary calls
+    {ok, Connection} = hpr_router_client_manager:get_stream(IncomingStream, LNS),
     try
-        BlockchainStateChannelMessageResponse = grpc_client:unary(
+        {ok, OutgoingStream} = grpc_client:new_stream(
             Connection,
-            StateChannelMsg,
-            router,
-            route,
-            router_pb,
-            []
+            'helium.packet_router.gateway',
+            send_packet,
+            client_packet_router_pb
         ),
-        handle_router_response(Stream, BlockchainStateChannelMessageResponse)
+        grpc_client:send(OutgoingStream, PacketUpMap)
+        %% handle_router_response(Stream, BlockchainStateChannelMessageResponse)
     after
         hpr_grpc_client_connection_pool:release(ReservationRef)
     end.
@@ -38,6 +37,20 @@ send(Packet, Stream, Route) ->
 % ------------------------------------------------------------------------------
 % Private Functions
 % ------------------------------------------------------------------------------
+-spec as_map(hpr_packet_up:packet()) -> client_packet_router_pb:packet_router_packet_up_v1_pb().
+as_map(Packet) ->
+    #{
+        payload => Packet#packet_router_packet_up_v1_pb.payload,
+        timestamp => Packet#packet_router_packet_up_v1_pb.timestamp,
+        rssi => Packet#packet_router_packet_up_v1_pb.rssi,
+        frequency_mhz => Packet#packet_router_packet_up_v1_pb.frequency_mhz,
+        datarate => Packet#packet_router_packet_up_v1_pb.datarate,
+        snr => Packet#packet_router_packet_up_v1_pb.snr,
+        region => Packet#packet_router_packet_up_v1_pb.region,
+        hold_time => Packet#packet_router_packet_up_v1_pb.hold_time,
+        gateway => Packet#packet_router_packet_up_v1_pb.gateway,
+        signature => Packet#packet_router_packet_up_v1_pb.signature
+    }.
 
 % translate hpr_packet_up:packet into blockchain_state_channel_message_v1
 -spec blockchain_state_channel_message_v1(
