@@ -14,7 +14,8 @@
     multi_gw_single_lns_test/1,
     shutdown_idle_worker_test/1,
     pull_data_test/1,
-    gateway_dest_redirect/1
+    gateway_dest_redirect/1,
+    bad_route_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -42,7 +43,8 @@ all() ->
         multi_gw_single_lns_test,
         shutdown_idle_worker_test,
         pull_data_test,
-        gateway_dest_redirect
+        gateway_dest_redirect,
+        bad_route_test
     ].
 
 %%--------------------------------------------------------------------
@@ -371,6 +373,28 @@ gateway_dest_redirect(_Config) ->
 
     ok.
 
+bad_route_test(_Config) ->
+    Route1 = hpr_route:new(1337, [], [], <<"bad_route">>, gwmp, 42),
+    Route2 = hpr_route:new(1337, [], [], <<"127.0.0.1:1778">>, gwmp, 42),
+
+    %%    First route is bad. Second route is good.
+    Routes = [
+        Route1,
+        Route2
+    ],
+
+    PacketUp = fake_join_up_packet(),
+    meck:new(hpr_packet_up, [passthrough, no_history]),
+    meck:new(hpr_routing_config_worker, [passthrough, no_history]),
+
+    meck:expect(hpr_packet_up, verify, fun(_) -> true end),
+    meck:expect(hpr_routing_config_worker, lookup_eui, fun(_, _) -> Routes end),
+
+    hpr_routing:handle_packet(PacketUp, unused),
+
+    meck:unload(hpr_packet_up),
+    meck:unload(hpr_routing_config_worker),
+    ok.
 %% ===================================================================
 %% Helpers
 %% ===================================================================
