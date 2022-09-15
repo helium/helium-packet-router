@@ -16,7 +16,8 @@
     phash/1,
     verify/1,
     encode/1,
-    decode/1
+    decode/1,
+    to_map/1
 ]).
 
 -ifdef(TEST).
@@ -29,8 +30,9 @@
 -endif.
 
 -type packet() :: #packet_router_packet_up_v1_pb{}.
+-type packet_map() :: client_packet_router_pb:packet_router_packet_up_v1_pb().
 
--export_type([packet/0]).
+-export_type([packet/0, packet_map/0]).
 
 -spec payload(Packet :: packet()) -> binary().
 payload(Packet) ->
@@ -101,6 +103,21 @@ encode(#packet_router_packet_up_v1_pb{} = Packet) ->
 -spec decode(BinaryPacket :: binary()) -> packet().
 decode(BinaryPacket) ->
     packet_router_pb:decode_msg(BinaryPacket, packet_router_packet_up_v1_pb).
+
+-spec to_map(packet()) -> packet_map().
+to_map(PacketRecord) ->
+    #{
+        payload => PacketRecord#packet_router_packet_up_v1_pb.payload,
+        timestamp => PacketRecord#packet_router_packet_up_v1_pb.timestamp,
+        rssi => PacketRecord#packet_router_packet_up_v1_pb.rssi,
+        frequency_mhz => PacketRecord#packet_router_packet_up_v1_pb.frequency_mhz,
+        datarate => PacketRecord#packet_router_packet_up_v1_pb.datarate,
+        snr => PacketRecord#packet_router_packet_up_v1_pb.snr,
+        region => PacketRecord#packet_router_packet_up_v1_pb.region,
+        hold_time => PacketRecord#packet_router_packet_up_v1_pb.hold_time,
+        gateway => PacketRecord#packet_router_packet_up_v1_pb.gateway,
+        signature => PacketRecord#packet_router_packet_up_v1_pb.signature
+    }.
 
 %% ------------------------------------------------------------------
 %% Tests Functions
@@ -205,5 +222,12 @@ encode_decode_test() ->
     PacketUp = ?MODULE:new(#{frequency_mhz => 904.0}),
     ?assertEqual(PacketUp, decode(encode(PacketUp))),
     ok.
+
+to_map_test() ->
+    HprPacketUp = test_utils:join_packet_up(#{}),
+    HprPacketUpMap = to_map(HprPacketUp),
+    ?assertEqual(
+        ok, client_packet_router_pb:verify_msg(HprPacketUpMap, packet_router_packet_up_v1_pb)
+    ).
 
 -endif.

@@ -1,6 +1,7 @@
-.PHONY: compile clean test rel run grpc docker-build docker-test docker-run
+.PHONY: compile clean test rel run grpc grpc_test docker-build docker-test docker-run
 
 grpc_services_directory=src/grpc/autogen
+grpc_services_test_directory=test/grpc/autogen
 
 REBAR=./rebar3
 
@@ -8,7 +9,7 @@ REBAR=./rebar3
 # but then use `rebar3 compile` directly for rapid iterations.
 # Therefore, this target depends on $(grpc_services_directory),
 # but rebar.config omits `grpc` in `pre_hooks`.
-compile: | $(grpc_services_directory)
+compile: | $(grpc_services_directory) #(grpc_services_test_directory)
 	$(REBAR) compile
 	$(REBAR) format
 
@@ -47,10 +48,22 @@ grpc_server:
 grpc_client:
 	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 
-$(grpc_services_directory): config/grpc_server_gen.config
+$(grpc_services_directory): config/grpc_server_gen.config config/grpc_client_gen.config
 	@echo "grpc service directory $(directory) does not exist, generating services"
 	$(REBAR) get-deps
 	$(MAKE) grpc
+
+grpc_test: grpc_test_server grpc_test_client
+
+grpc_test_server:
+	REBAR_CONFIG="config/grpc_test_server_gen.config" $(REBAR) grpc gen
+
+grpc_test_client:
+	REBAR_CONFIG="config/grpc_test_client_gen.config" $(REBAR) grpc gen
+
+$(grpc_services_test_directory): config/grpc_test_server_gen.config config/grpc_test_client_gen.config
+	$(REBAR) get-deps
+	$(MAKE) grpc_test
 
 # Pass all unknown targets straight to rebar3 (e.g. `make dialyzer`)
 %:
