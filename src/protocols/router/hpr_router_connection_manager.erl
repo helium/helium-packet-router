@@ -39,7 +39,7 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--spec get_connection(Lns :: lns()) -> {ok, grpc_client:connection()}.
+-spec get_connection(Lns :: lns()) -> {ok, grpc_client:connection()} | {error, any()}.
 %% @doc Return an existing connection to the Router at Lns, or create a
 %% new connection if one doesn't exist.
 get_connection(Lns) ->

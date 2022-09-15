@@ -63,7 +63,8 @@ handle_call(Msg, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
--spec handle_info({'EXIT', pid(), any()}, #state{}) -> #state{}.
+-spec handle_info({'EXIT', pid(), Reason}, #state{}) ->
+    {stop, {stream_exit, pid(), Reason}, #state{}}.
 handle_info({'EXIT', FromPid, Reason}, State) ->
     {stop, {stream_exit, FromPid, Reason}, State}.
 
