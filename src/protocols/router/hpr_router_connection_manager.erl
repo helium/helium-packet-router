@@ -93,6 +93,7 @@ do_get_connection(Lns, Endpoint, ConnectionTab) ->
         [] ->
             insert_connection(ConnectionTab, Lns, grpc_client_connect(Endpoint));
         [ConnectionRecord] ->
+            %% TODO: Handle the connection being dead
             {ok, ConnectionRecord#connection.connection}
     end.
 
