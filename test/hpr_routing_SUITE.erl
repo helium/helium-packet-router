@@ -11,6 +11,7 @@
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("hpr_route.hrl").
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -69,13 +70,13 @@ join_req_test(_Config) ->
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
     Route = hpr_route:new(
         NetID,
-        [{16#00000000, 16#0000000A}],
-        [{1, 1}, {1, 2}],
+        [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
+        [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
         <<"127.0.0.1">>,
         router,
         1
     ),
-    ok = hpr_routing_config_worker:insert(Route),
+    ok = hpr_config_db:insert_route(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
@@ -93,7 +94,7 @@ join_req_test(_Config) ->
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
 
     UplinkPacketUp = test_utils:uplink_packet_up(#{
-        gateway => Gateway, sig_fun => SigFun, devadrr => DevAddr
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
 

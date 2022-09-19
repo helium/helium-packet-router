@@ -1,216 +1,158 @@
 -module(hpr_routing_config_worker).
 
--behavior(gen_server).
-
-%% ------------------------------------------------------------------
-%% API Function Exports
-%% ------------------------------------------------------------------
 -export([
     start_link/1,
-    lookup_eui/2,
-    lookup_devaddr/1,
-    dev_only_add_route/6
+    init/1
 ]).
 
-%% ------------------------------------------------------------------
-%% gen_server Function Exports
-%% ------------------------------------------------------------------
--export([
-    init/1,
-    handle_continue/2,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
+-record(config_service, {
+    transport,
+    host,
+    port,
+    svcname,
+    rpcname,
+    retry_interval,
+    dets_backup_enabled,
+    dets_backup_path
+}).
 
--ifdef(TEST).
+-record(state, {
+    parent,
+    service,
+    connection,
+    stream,
+    dets
+}).
 
--export([insert/1]).
+start_link(#{enabled := false}) ->
+    ignore;
+start_link(
+    #{
+        transport := Transport,
+        host := Host,
+        port := Port,
+        svcname := SvcName,
+        rpcname := RpcName,
+        retry_interval := Interval
+    } = Args
+) ->
+    Service = #config_service{
+        transport = Transport,
+        host = Host,
+        port = Port,
+        svcname = SvcName,
+        rpcname = RpcName,
+        retry_interval = Interval,
+        dets_backup_enabled = maps:get(dets_backup_enabled, Args, false),
+        dets_backup_path = maps:get(dets_backup_path, Args, nil)
+    },
+    proc_lib:start_link(?MODULE, init, [#state{parent = self(), service = Service}]).
 
--endif.
+init(#state{parent = Parent} = State1) ->
+    lager:info("Starting hpr_routing_config_worker ~p.", [self()]),
+    State2 = maybe_init_dets(State1),
+    ok = maybe_load_from_dets(State2),
+    proc_lib:init_ack(Parent, {ok, self()}),
+    connect(State2).
 
--define(SERVER, ?MODULE).
--define(INIT_ASYNC, init_async).
--define(EUIS_ETS, hpr_routing_config_worker_euis_ets).
--define(DEVADDRS_ETS, hpr_routing_config_worker_devaddrs_ets).
--define(DETS, hpr_routing_config_worker_dets).
-
--record(state, {}).
-
-%% ------------------------------------------------------------------
-%% API Function Definitions
-%% ------------------------------------------------------------------
-
-start_link(Args) ->
-    gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
-
--spec lookup_eui(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
-    [hpr_route:route()].
-lookup_eui(AppEUI, DevEUI) ->
-    Routes0 = ets:lookup(?EUIS_ETS, {AppEUI, DevEUI}),
-    Routes1 = ets:lookup(?EUIS_ETS, {AppEUI, 0}),
-    [Route || {_, Route} <- Routes1 ++ Routes0].
-
--spec lookup_devaddr(DevAddr :: non_neg_integer()) -> [hpr_route:route()].
-lookup_devaddr(DevAddr) ->
-    case lora_subnet:parse_netid(DevAddr, big) of
-        {ok, NetID} ->
-            %% MS = ets:fun2ms(
-            %%     fun({{NetID0, Start, End}, Route}) when
-            %%             NetID0 == NetID andalso Start =< DevAddr andalso DevAddr =< End
-            %%     ->
-            %%             Route
-            %%     end
-            %% ),
-            MS = [
-                {
-                    {{'$1', '$2', '$3'}, '$4'},
-                    [
-                        {'andalso', {'==', '$1', NetID},
-                            {'andalso', {'=<', '$2', DevAddr}, {'=<', DevAddr, '$3'}}}
-                    ],
-                    ['$4']
-                }
-            ],
-            ets:select(?DEVADDRS_ETS, MS);
-        _Err ->
-            []
+connect(
+    #state{service = Service} = State
+) ->
+    #config_service{
+        transport = Transport,
+        host = Host,
+        port = Port,
+        retry_interval = Interval
+    } = Service,
+    lager:info("Connecting to config service."),
+    case grpc_client:connect(Transport, Host, Port) of
+        {ok, Connection} ->
+            init_stream(State#state{connection = Connection});
+        {error, E} ->
+            lager:error("Error connecting to config service: ~p.", [E]),
+            lager:warning("Sleeping ~p milliseconds.", [Interval]),
+            timer:sleep(Interval),
+            connect(State)
     end.
 
-%% ------------------------------------------------------------------
-%% gen_server Function Definitions
-%% ------------------------------------------------------------------
-
-init(#{base_dir := BaseDir} = _Args) ->
-    File = filename:join(BaseDir, erlang:atom_to_list(?DETS)),
-    ok = filelib:ensure_dir(File),
-    lager:info("init with dets=~s", [File]),
-    {ok, ?DETS} =
-        dets:open_file(?DETS, [{file, File}]),
-    _ = ets:new(?EUIS_ETS, [
-        public,
-        named_table,
-        bag,
-        {read_concurrency, true}
-    ]),
-    _ = ets:new(?DEVADDRS_ETS, [
-        public,
-        named_table,
-        bag,
-        {read_concurrency, true}
-    ]),
-    ok = init_ets(),
-    {ok, #state{}, {continue, ?INIT_ASYNC}}.
-
-handle_continue(?INIT_ASYNC, State) ->
-    %% TODO: Connect to Config Service to get updates
-    {noreply, State};
-handle_continue(_Msg, State) ->
-    {noreply, State}.
-
--spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
-handle_call(Msg, _From, State) ->
-    {stop, {unimplemented_call, Msg}, State}.
-
--spec handle_cast(Msg, #state{}) -> {stop, {unimplemented_cast, Msg}, #state{}}.
-handle_cast(Msg, State) ->
-    {stop, {unimplemented_cast, Msg}, State}.
-
--spec handle_info(_Msg, #state{}) -> {noreply, #state{}}.
-handle_info(_Msg, State) ->
-    {noreply, State}.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-terminate(_Reason, _State) ->
-    _ = dets:close(?DETS),
-    _ = ets:delete(?EUIS_ETS),
-    _ = ets:delete(?DEVADDRS_ETS),
-    ok.
-
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
-
--spec init_ets() -> ok.
-init_ets() ->
-    {EUIRoutes, DevAddrRoutes} = dets:foldl(
-        fun({_OUI, Route}, {EUIRoutesAcc, DevAddrRoutesAcc}) ->
-            EUIs = hpr_route:euis(Route),
-            EUIRoutes = [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs],
-            NetID = hpr_route:net_id(Route),
-            DevAddrRangesRoutes =
-                case hpr_route:devaddr_ranges(Route) of
-                    [] ->
-                        [{{NetID, 16#00000000, 16#FFFFFFFF}, Route}];
-                    DevAddrRanges ->
-                        [{{NetID, Start, End}, Route} || {Start, End} <- DevAddrRanges]
-                end,
-            {EUIRoutes ++ EUIRoutesAcc, DevAddrRangesRoutes ++ DevAddrRoutesAcc}
-        end,
-        {[], []},
-        ?DETS
-    ),
-    true = ets:insert(?EUIS_ETS, EUIRoutes),
-    true = ets:insert(?DEVADDRS_ETS, DevAddrRoutes),
-    ok.
-
--spec dev_only_add_route(
-    NetID :: list(),
-    DevAddrRanges :: [{non_neg_integer(), non_neg_integer()}],
-    EUIs :: [{list(), list()}],
-    LNS :: binary(),
-    Protocol :: gwmp,
-    OUI :: non_neg_integer()
-) -> RoutingConfigPid :: pid().
-dev_only_add_route(
-    NetIDString,
-    DevAddrRanges,
-    EUIStrings,
-    LNS,
-    Protocol,
-    OUI
+init_stream(
+    #state{
+        service = Service,
+        connection = Connection
+    } = State
 ) ->
-    %%    delete route from dets
-    ok = dets:delete(?DETS, OUI),
+    #config_service{
+        svcname = SvcName,
+        rpcname = RpcName,
+        retry_interval = Interval
+    } = Service,
+    case grpc_client:new_stream(Connection, SvcName, RpcName, config_pb) of
+        {ok, Stream} ->
+            send_routes_req(State#state{stream = Stream});
+        {error, E} ->
+            lager:error("Error creating routes stream: ~p.", [E]),
+            lager:warning("Sleeping ~p milliseconds.", [Interval]),
+            timer:sleep(Interval),
+            reconnect(State)
+    end.
 
-    EUIs = lists:map(
-        fun({AppEUIString, DevEUIString}) ->
-            {
-                erlang:list_to_integer(AppEUIString, 16),
-                erlang:list_to_integer(DevEUIString, 16)
-            }
-        end,
-        EUIStrings
-    ),
-    Route = hpr_route:new(
-        erlang:list_to_integer(NetIDString, 16),
-        DevAddrRanges,
-        EUIs,
-        LNS,
-        Protocol,
-        OUI
-    ),
+reconnect(#state{connection = Connection} = State) ->
+    case is_process_alive(Connection) of
+        true ->
+            grpc_client:stop_connection(Connection);
+        _ ->
+            ok
+    end,
+    connect(State#state{connection = nil, stream = nil}).
 
-    %%    add route to dets
-    ok = dets:insert(?DETS, {OUI, Route}),
+send_routes_req(#state{stream = Stream} = State) ->
+    ok = grpc_client:send_last(Stream, #{}),
+    receive_config_updates(State).
 
-    HPRSup = whereis(hpr_sup),
+receive_config_updates(#state{stream = Stream} = State) ->
+    case grpc_client:rcv(Stream) of
+        {headers, Headers} ->
+            lager:debug("Received headers: ~p", [Headers]),
+            receive_config_updates(State);
+        {data, RoutesResV1} ->
+            lager:info("Received a config update."),
+            lager:debug("Config update: ~p", [RoutesResV1]),
+            process_config_update(RoutesResV1, State);
+        eof ->
+            lager:info("Received eof from config service.", []),
+            reconnect(State);
+        {error, E} ->
+            lager:error("Error receiving config update: ~p.  Exiting.", [E]),
+            {error, E}
+    end.
 
-    %%    terminate hpr_routing_config_worker
-    ok = supervisor:terminate_child(HPRSup, hpr_routing_config_worker),
+process_config_update(RoutesResV1, State) ->
+    ok = hpr_config_db:update_routes(RoutesResV1),
+    maybe_cache_response(RoutesResV1, State),
+    lager:info("Config update complete."),
+    receive_config_updates(State).
 
-    %%    restart hpr_routing_config_worker
-    {ok, RoutingConfigPid} = supervisor:restart_child(HPRSup, hpr_routing_config_worker),
-    RoutingConfigPid.
+maybe_init_dets(
+    #state{
+        service = #config_service{dets_backup_enabled = false}
+    } = State
+) ->
+    State;
+maybe_init_dets(
+    #state{
+        service = #config_service{
+            dets_backup_enabled = true,
+            dets_backup_path = Path
+        }
+    } = State
+) ->
+    {ok, Dets} = dets:open_file(Path, [{type, set}]),
+    State#state{dets = Dets}.
 
-%% ------------------------------------------------------------------
-%% Tests Functions
-%% ------------------------------------------------------------------
--ifdef(TEST).
+maybe_cache_response(_RoutesResV1, #state{dets = nil}) ->
+    ok;
+maybe_cache_response(RoutesResV1, #state{dets = Dets}) ->
+    dets:insert(Dets, {last_update, RoutesResV1}).
 
 -spec insert(Route :: hpr_route:route()) -> ok.
 insert(Route) ->

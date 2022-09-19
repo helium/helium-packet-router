@@ -39,16 +39,15 @@ start_link() ->
 init([]) ->
     lager:info("sup init"),
 
-    BaseDir = application:get_env(?APP, base_dir, "/var/data"),
-    ok = filelib:ensure_dir(BaseDir),
-
     ok = hpr_routing:init(),
+    ok = hpr_config_db:init(),
 
     RedirectMap = application:get_env(hpr, redirect_by_region, #{}),
+    ConfigWorkerConfig = application:get_env(hpr, routing_config_worker, #{enabled => false}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
-        ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}]),
+        ?WORKER(hpr_routing_config_worker, [ConfigWorkerConfig]),
         ?SUP(hpr_gwmp_sup, []),
         ?WORKER(hpr_gwmp_redirect_worker, [RedirectMap]),
         ?WORKER(hpr_router_connection_manager, []),
