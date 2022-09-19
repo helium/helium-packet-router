@@ -1,29 +1,55 @@
 -module(hpr_routing_config_worker).
 
+-behaviour(gen_server).
+
 -export([
     start_link/1,
-    init/1
+    init/1,
+    handle_cast/2,
+    handle_call/3,
+    handle_info/2,
+    terminate/2
 ]).
 
 -record(config_service, {
-    transport,
-    host,
-    port,
-    svcname,
-    rpcname,
-    retry_interval,
-    dets_backup_enabled,
-    dets_backup_path
+    transport :: tcp | ssl,
+    host :: string(),
+    port :: integer(),
+    receive_timeout :: non_neg_integer(),
+    svcname :: atom(),
+    rpcname :: atom(),
+    retry_interval :: non_neg_integer(),
+    dets_backup_enabled :: boolean(),
+    dets_backup_path :: string()
 }).
 
 -record(state, {
-    parent,
-    service,
-    connection,
-    stream,
-    dets
+    service :: #config_service{},
+    connection :: pid() | nil,
+    stream :: pid() | nil,
+    dets :: reference() | nil
 }).
 
+-type transport() :: 'tcp' | 'ssl'.
+
+-type config_worker_opts() :: #{
+    enabled := boolean(),
+    transport := transport(),
+    host := string(),
+    port := integer(),
+    receive_timeout => non_neg_integer(),
+    svcname := atom(),
+    rpcname := atom(),
+    retry_interval => non_neg_integer(),
+    dets_backup_enabled => boolean(),
+    dets_backup_path => string()
+}.
+
+-type routes_req_v1_map() :: #{
+    routes := [map()]
+}.
+
+-spec start_link(config_worker_opts()) -> any().
 start_link(#{enabled := false}) ->
     ignore;
 start_link(
@@ -40,24 +66,44 @@ start_link(
         transport = Transport,
         host = Host,
         port = Port,
+        receive_timeout = maps:get(receive_timeout, Args, 2000),
         svcname = SvcName,
         rpcname = RpcName,
         retry_interval = Interval,
         dets_backup_enabled = maps:get(dets_backup_enabled, Args, false),
         dets_backup_path = maps:get(dets_backup_path, Args, nil)
     },
-    proc_lib:start_link(?MODULE, init, [#state{parent = self(), service = Service}]).
+    State = #state{
+        service = Service,
+        connection = nil,
+        stream = nil,
+        dets = nil
+    },
+    gen_server:start_link(?MODULE, [State], []).
 
-init(#state{parent = Parent} = State1) ->
+init([#state{} = State1]) ->
     lager:info("Starting hpr_routing_config_worker ~p.", [self()]),
     State2 = maybe_init_dets(State1),
     ok = maybe_load_from_dets(State2),
-    proc_lib:init_ack(Parent, {ok, self()}),
-    connect(State2).
+    connect(),
+    {ok, State2}.
 
-connect(
-    #state{service = Service} = State
-) ->
+connect() ->
+    gen_server:cast(self(), connect).
+
+reconnect() ->
+    gen_server:cast(self(), reconnect).
+
+init_stream() ->
+    gen_server:cast(self(), init_stream).
+
+send_routes_req() ->
+    gen_server:cast(self(), send_routes_req).
+
+receive_config_update() ->
+    gen_server:cast(self(), receive_config_update).
+
+handle_cast(connect, #state{service = Service} = State) ->
     #config_service{
         transport = Transport,
         host = Host,
@@ -67,15 +113,20 @@ connect(
     lager:info("Connecting to config service."),
     case grpc_client:connect(Transport, Host, Port) of
         {ok, Connection} ->
-            init_stream(State#state{connection = Connection});
+            init_stream(),
+            {noreply, State#state{connection = Connection}};
         {error, E} ->
             lager:error("Error connecting to config service: ~p.", [E]),
+
+            %% TODO:  Use a backoff strategy here.
             lager:warning("Sleeping ~p milliseconds.", [Interval]),
             timer:sleep(Interval),
-            connect(State)
-    end.
 
-init_stream(
+            connect(),
+            {noreply, State}
+    end;
+handle_cast(
+    init_stream,
     #state{
         service = Service,
         connection = Connection
@@ -88,49 +139,88 @@ init_stream(
     } = Service,
     case grpc_client:new_stream(Connection, SvcName, RpcName, config_pb) of
         {ok, Stream} ->
-            send_routes_req(State#state{stream = Stream});
+            send_routes_req(),
+            {noreply, State#state{stream = Stream}};
         {error, E} ->
             lager:error("Error creating routes stream: ~p.", [E]),
+
+            %% TODO:  Use a backoff strategry here.
             lager:warning("Sleeping ~p milliseconds.", [Interval]),
             timer:sleep(Interval),
-            reconnect(State)
-    end.
 
-reconnect(#state{connection = Connection} = State) ->
+            reconnect(),
+            {noreply, State}
+    end;
+handle_cast(reconnect, #state{connection = Connection} = State) ->
     case is_process_alive(Connection) of
         true ->
             grpc_client:stop_connection(Connection);
         _ ->
             ok
     end,
-    connect(State#state{connection = nil, stream = nil}).
+    connect(),
+    {noreply, State#state{connection = nil, stream = nil}};
+handle_cast(send_routes_req, #state{stream = Stream} = State) ->
+    %% We send a RoutesReqV1 to the server to start the stream of
+    %% config updates.  RoutesReqV1 is essentially an "empty envelope"
+    %% as it has no fields for us to fill in.  Thus, we send an empty
+    %% map.
 
-send_routes_req(#state{stream = Stream} = State) ->
+    %% Note that we must use grpc_client:send_last/2 to indicate to
+    %% the server that we are done talking.  If we use
+    %% grpc_client:send/2, the server will not respond.
+
     ok = grpc_client:send_last(Stream, #{}),
-    receive_config_updates(State).
-
-receive_config_updates(#state{stream = Stream} = State) ->
-    case grpc_client:rcv(Stream) of
+    receive_config_update(),
+    {noreply, State};
+handle_cast(receive_config_update, #state{stream = Stream, service = Service} = State) ->
+    #config_service{receive_timeout = RcvTimeout} = Service,
+    case grpc_client:rcv(Stream, RcvTimeout) of
         {headers, Headers} ->
             lager:debug("Received headers: ~p", [Headers]),
-            receive_config_updates(State);
+            receive_config_update(),
+            {noreply, State};
         {data, RoutesResV1} ->
             lager:info("Received a config update."),
             lager:debug("Config update: ~p", [RoutesResV1]),
-            process_config_update(RoutesResV1, State);
+            ok = process_config_update(RoutesResV1, State),
+            receive_config_update(),
+            {noreply, State};
         eof ->
             lager:info("Received eof from config service.", []),
-            reconnect(State);
+            reconnect(),
+            {noreply, State};
+        {error, timeout} ->
+            %% No update received.  Check for system messages and resume waiting.
+            receive_config_update(),
+            {noreply, State};
         {error, E} ->
             lager:error("Error receiving config update: ~p.  Exiting.", [E]),
-            {error, E}
+            {stop, {error, E}}
     end.
 
+handle_call(Msg, From, State) ->
+    lager:error("Received unexpected call: ~p from ~p.  This is a bug.", [Msg, From]),
+    {noreply, State}.
+
+handle_info({'EXIT', Pid, Reason}, State) ->
+    %% 'EXIT' messages are likely the result of disconnects from the config server.
+    lager:warning("Received EXIT from ~p with reason ~p.", [Pid, Reason]),
+    {noreply, State};
+handle_info(Msg, State) ->
+    lager:error("Unexpected info message: ~p.", [Msg]),
+    {noreply, State}.
+
+terminate(Reason, _State) ->
+    lager:info("hpr_routing_config_worker terminating with reason ~p.", [Reason]),
+    ok.
+
+-spec process_config_update(routes_req_v1_map(), #state{}) -> ok.
 process_config_update(RoutesResV1, State) ->
     ok = hpr_config_db:update_routes(RoutesResV1),
     maybe_cache_response(RoutesResV1, State),
     lager:info("Config update complete."),
-    receive_config_updates(State).
+    ok.
 
 maybe_init_dets(
     #state{
