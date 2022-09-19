@@ -28,11 +28,17 @@
 %% 5 minute interval
 -define(DEFAULT_REPORT_INTERVAL, 300000).
 -define(MAX_FILE_SIZE, 50_000_000).
+%% Up to 5 retries, 1 minute sleep
+-define(RETRY_SLEEP_TIME, 60000).
+-define(AWS_RETRY_OPTIONS, [
+    {retry_options, {exponential_with_jitter, {5, ?RETRY_SLEEP_TIME, ?RETRY_SLEEP_TIME}}}
+]).
 
 -type interval_duration_ms() :: non_neg_integer().
 
 -record(state, {
     aws_client :: aws_client:aws_client(),
+    write_dir :: string(),
     file_path :: string(),
     report_interval :: timer:tref() | undefined
 }).
@@ -77,13 +83,13 @@ stop_report_interval() ->
 
 init(#{base_dir := BaseDir} = _Args) ->
     AWSClient = setup_aws(),
-    WriteDir = filename:join(BaseDir, "tmp/"),
+    WriteDir = filename:join(BaseDir, "tmp"),
     ok = filelib:ensure_dir(WriteDir),
-    %% TODO: File rotation
-    TempFilePath = filename:join(WriteDir, "packetreport.gz"),
+    TempFilePath = generate_file_name(WriteDir),
     {ok, ReportInterval} = start_report_interval(),
     {ok, #state{
         aws_client = AWSClient,
+        write_dir = WriteDir,
         file_path = TempFilePath,
         report_interval = ReportInterval
     }}.
@@ -92,19 +98,25 @@ handle_call(Request, From, State = #state{}) ->
     lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
     {reply, ok, State}.
 
-handle_cast(write, State = #state{file_path = FilePath}) ->
+handle_cast(write, State = #state{write_dir = WriteDir, file_path = FilePath}) ->
     {ok, FileSize, MaxFileSize} = handle_write(FilePath),
 
     case FileSize >= MaxFileSize of
-        true -> ?MODULE:upload_packets(FilePath);
-        false -> skip
-    end,
-    {noreply, State};
+        true ->
+            ?MODULE:upload_packets(FilePath),
+            {noreply, State#state{file_path = generate_file_name(WriteDir)}};
+        false ->
+            {noreply, State}
+    end;
 handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
     UploadTimestamp = erlang:system_time(millisecond),
     FileName = list_to_binary("packetreport." ++ integer_to_list(UploadTimestamp) ++ ".gz"),
-    upload_file(AWSClient, FilePath, FileName),
-    file:delete(FilePath),
+    case upload_file(AWSClient, FilePath, FileName) of
+        {ok, _} ->
+            file:delete(FilePath);
+        _ ->
+            ok
+    end,
     {noreply, State};
 handle_cast({start_interval, IntervalDuration}, State = #state{report_interval = ReportInterval}) ->
     {ok, ReportInterval2} = handle_restart_interval(ReportInterval, IntervalDuration),
@@ -230,6 +242,12 @@ encode_packet(
         packet_router_packet_report_v1_pb
     ).
 
+-spec generate_file_name(WriteDir :: string()) -> FilePath :: string().
+generate_file_name(WriteDir) ->
+    Timestamp = erlang:system_time(millisecond),
+    FileName = "packetreport." ++ integer_to_list(Timestamp) ++ ".gz",
+    filename:join(WriteDir, FileName).
+
 -spec open_tmp_file(FilePath :: string(), WriteOptions :: [atom()]) ->
     {ok, IODevice :: file:io_device()} | {error, Reason :: atom()}.
 open_tmp_file(FilePath, WriteOptions) ->
@@ -242,21 +260,28 @@ open_tmp_file(FilePath, WriteOptions) ->
 
 -spec upload_file(
     AWSClient :: aws_client:aws_client(), FilePath :: string(), S3FileName :: binary()
-) -> ok.
+) -> {ok, Response :: term()} | {error, upload_failed}.
 upload_file(AWSClient, FilePath, S3FileName) ->
     BucketName = application:get_env(hpr, packet_reporter_bucket, <<"default_bucket">>),
     {ok, Content} = file:read_file(FilePath),
     case
-        aws_s3:put_object(AWSClient, BucketName, S3FileName, #{
-            <<"Body">> => Content
-        })
+        aws_s3:put_object(
+            AWSClient,
+            BucketName,
+            S3FileName,
+            #{
+                <<"Body">> => Content
+            },
+            ?AWS_RETRY_OPTIONS
+        )
     of
-        {ok, _, _} ->
-            ok;
+        {ok, _, Response} ->
+            {ok, Response};
         Error ->
             lager:error(
                 "failed to upload packet report: file: ~p, error: ~p", [FilePath, Error]
-            )
+            ),
+            {error, upload_failed}
     end.
 
 -spec get_packets_by_timestamp(Timestamp :: integer()) -> [term()].
@@ -288,11 +313,13 @@ file_test() ->
 
     timer:sleep(1000),
 
-    handle_write(FilePath, []),
+    handle_write(FilePath, [compressed]),
 
     {ok, Content} = file:read_file(FilePath),
 
-    ?assertEqual(2, length(binary:split(Content, <<"\n">>, [trim, global]))),
+    ct:print("~p~n", [Content]),
+
+    % ?assertEqual(2, length(binary:split(Content, <<"\n">>, [trim, global]))),
 
     Packet3 = test_utils:join_packet_up(#{}),
     Packet4 = test_utils:uplink_packet_up(#{}),
@@ -302,9 +329,16 @@ file_test() ->
 
     handle_write(FilePath, []),
 
-    {ok, Content2} = file:read_file(FilePath),
+    {ok, _Content2} = file:read_file(FilePath),
 
-    ?assertEqual(4, length(binary:split(Content2, <<"\n">>, [trim, global]))),
+    % ct:print("~p~n~n~p~n", [Content2, binary:split(Content2, <<"\n">>, [trim, global])]),
+
+    % ?assertEqual(4, length(binary:split(Content2, <<"\n">>, [trim, global]))),
+
+    {ok, S} = file:open(FilePath, [read]),
+
+    % ct:print("TEST: ~p~n", [file:consult(FilePath)]),
+    ct:print("Read: ~p~n", [io:read(S, '\n')]),
 
     file:delete(FilePath),
 
