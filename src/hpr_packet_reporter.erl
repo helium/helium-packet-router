@@ -74,6 +74,7 @@ upload_packets(FilePath) ->
 restart_report_interval(IntervalDuration) ->
     gen_server:cast(?SERVER, {start_interval, IntervalDuration}).
 
+-spec stop_report_interval() -> ok.
 stop_report_interval() ->
     gen_server:cast(?SERVER, stop_interval).
 
@@ -317,9 +318,7 @@ file_test() ->
 
     {ok, Content} = file:read_file(FilePath),
 
-    ct:print("~p~n", [Content]),
-
-    % ?assertEqual(2, length(binary:split(Content, <<"\n">>, [trim, global]))),
+    ?assertEqual(2, length(binary:split(Content, <<"\n">>, [trim, global]))),
 
     Packet3 = test_utils:join_packet_up(#{}),
     Packet4 = test_utils:uplink_packet_up(#{}),
@@ -331,14 +330,9 @@ file_test() ->
 
     {ok, _Content2} = file:read_file(FilePath),
 
-    % ct:print("~p~n~n~p~n", [Content2, binary:split(Content2, <<"\n">>, [trim, global])]),
-
-    % ?assertEqual(4, length(binary:split(Content2, <<"\n">>, [trim, global]))),
+    ?assertEqual(4, length(binary:split(Content2, <<"\n">>, [trim, global]))),
 
     {ok, S} = file:open(FilePath, [read]),
-
-    % ct:print("TEST: ~p~n", [file:consult(FilePath)]),
-    ct:print("Read: ~p~n", [io:read(S, '\n')]),
 
     file:delete(FilePath),
 
