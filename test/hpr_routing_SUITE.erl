@@ -10,7 +10,6 @@
     join_req_test/1
 ]).
 
--include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %%--------------------------------------------------------------------
