@@ -107,8 +107,7 @@ init_ets(Options) ->
 do_get_stream(GatewayStream, Lns, Service, Rpc, DecodeModule, StreamTab) ->
     case ets:lookup(StreamTab, {GatewayStream, Lns}) of
         [] ->
-            RouterStream =
-                grpc_stream_connect(Lns, Service, Rpc, DecodeModule),
+            RouterStream = grpc_stream_connect(Lns, Service, Rpc, DecodeModule),
             setup_stream(StreamTab, GatewayStream, Lns, RouterStream);
         [StreamRecord] ->
             {ok, StreamRecord#stream.router_stream}
@@ -144,8 +143,9 @@ setup_stream(_, _, _, {error, _} = Error) ->
     Error.
 
 -spec start_relay(gateway_stream(), grpc_client:client_stream()) -> ok.
-start_relay(GatewayStream, RouterStream) ->
-    {ok, _RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
+start_relay(_GatewayStream, _RouterStream) ->
+    %% FIXME: still need a way to receive downlinks
+    %% {ok, _RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
     ok.
 
 % ------------------------------------------------------------------------------
