@@ -39,7 +39,13 @@ docker-test:
 docker-run:
 	docker run --rm -it --init --network=host --name=helium_packet_router quay.io/team-helium/hpr:local
 
+<<<<<<< HEAD
 grpc: grpc_server grpc_client
+=======
+grpc:
+	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+>>>>>>> 3eb8938 (Add grpc_client to grpc target)
 
 grpc_server:
 	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen
