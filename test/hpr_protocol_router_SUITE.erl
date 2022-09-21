@@ -10,9 +10,11 @@
     grpc_test/1,
     grpc_connection_refused_test/1,
     grpc_full_flow_send_test/1,
-    grpc_full_flow_connection_refused_test/1
+    grpc_full_flow_connection_refused_test/1,
+    relay_test/1
 ]).
 
+-include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %%--------------------------------------------------------------------
@@ -30,7 +32,8 @@ all() ->
         grpc_test,
         grpc_connection_refused_test,
         grpc_full_flow_send_test,
-        grpc_full_flow_connection_refused_test
+        grpc_full_flow_connection_refused_test,
+        relay_test
     ].
 
 %%--------------------------------------------------------------------
@@ -43,6 +46,7 @@ init_per_testcase(TestCase, Config) ->
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
+    meck:unload(),
     test_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
@@ -169,7 +173,6 @@ grpc_full_flow_send_test(_Congig) ->
     ),
 
     ok = gen_server:stop(ServerPid),
-    ok = meck:unload(hpr_gateway_service),
 
     ok.
 
@@ -205,9 +208,27 @@ grpc_full_flow_connection_refused_test(_Config) ->
     ?assertEqual(1, meck:num_calls(hpr_gateway_service, send_packet, '_')),
 
     ok = gen_server:stop(ServerPid),
-    ok = meck:unload(hpr_gateway_service),
 
     ok.
+
+relay_test(_Config) ->
+    GatewayStream = self(),
+    RouterStream = self(),
+    FakeData = <<"fake data">>,
+
+    meck:expect(
+        grpc_client,
+        rcv,
+        [RouterStream],
+        {meck_seq, [{data, FakeData}, stop]}
+    ),
+
+    {ok, RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
+
+    Data = receive_next(),
+    ?assertEqual({router_reply, FakeData}, Data),
+    timer:sleep(50),
+    ?assertNot(erlang:is_process_alive(RelayPid)).
 
 %% ===================================================================
 %% Helpers
@@ -230,3 +251,12 @@ test_route() ->
         [{packet_router_route_devaddr_range_v1_pb, 0, 4294967295}],
         [{packet_router_route_eui_v1_pb, 802041902051071031, 8942655256770396549}],
         <<"127.0.0.1:8082">>, router, 4020}.
+
+receive_next() ->
+    receive
+        Msg ->
+            Msg
+    after 50 ->
+        no_data
+    end.
+
