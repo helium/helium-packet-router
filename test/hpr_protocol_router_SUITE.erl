@@ -259,4 +259,3 @@ receive_next() ->
     after 50 ->
         no_data
     end.
-
