@@ -47,7 +47,7 @@ start_link(Service, Rpc, DecodeModule) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Service, Rpc, DecodeModule], []).
 
 -spec get_stream(GatewayStream :: gateway_stream(), Lns :: lns()) ->
-    {ok, grpc_client:client_stream()}.
+    {ok, grpc_client:client_stream()} | {error, any()}.
 %% @doc Get a stream for GatewayStream to the Router at Lns or create a new
 %% stream if this one doesn't exist.
 get_stream(GatewayStream, Lns) ->
