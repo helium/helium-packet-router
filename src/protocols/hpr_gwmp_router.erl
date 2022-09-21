@@ -2,7 +2,7 @@
 
 -include("../grpc/autogen/server/packet_router_pb.hrl").
 
--export([send/3]).
+-export([send/4]).
 
 -export([
     packet_up_to_push_data/2,
@@ -13,9 +13,10 @@
 -spec send(
     Packet :: hpr_packet_up:packet(),
     Stream :: grpcbox_stream:t(),
-    Routes :: hpr_route:route()
+    Routes :: hpr_route:route(),
+    RoutingInfo :: hpr_routing:routing_info()
 ) -> ok | {error, any()}.
-send(PacketUp, Stream, Route) ->
+send(PacketUp, Stream, Route, _RoutingInfo) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
 
     case hpr_gwmp_udp_sup:maybe_start_worker(Gateway, #{}) of

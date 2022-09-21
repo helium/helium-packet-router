@@ -5,6 +5,14 @@
     handle_packet/2
 ]).
 
+-type routing_info() ::
+    {devaddr, DevAddr :: non_neg_integer()}
+    | {eui, DevEUI :: non_neg_integer(), AppEUI :: non_neg_integer()}.
+
+-export_type([
+    routing_info/0
+]).
+
 -define(GATEWAY_THROTTLE, hpr_routing_gateway_throttle).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
@@ -49,14 +57,16 @@ handle_packet(Packet, StreamHandler) ->
                         ],
                         "handling join"
                     ),
-                    ok = deliver_packet(Packet, StreamHandler, Routes);
+                    RoutingInfo = {eui, DevEUI, AppEUI},
+                    ok = deliver_packet(Packet, StreamHandler, Routes, RoutingInfo);
                 {uplink, DevAddr} ->
                     lager:debug(
                         [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
                         "handling uplink"
                     ),
                     Routes = hpr_routing_config_worker:lookup_devaddr(DevAddr),
-                    ok = deliver_packet(Packet, StreamHandler, Routes)
+                    RoutingInfo = {devaddr, DevAddr},
+                    ok = deliver_packet(Packet, StreamHandler, Routes, RoutingInfo)
             end
     end.
 
@@ -66,11 +76,12 @@ handle_packet(Packet, StreamHandler) ->
 -spec deliver_packet(
     Packet :: hpr_packet_up:packet(),
     StreamHandler :: grpcbox_stream:t(),
-    Routes :: [hpr_route:route()]
+    Routes :: [hpr_route:route()],
+    RoutingInfo :: routing_info()
 ) -> ok.
-deliver_packet(_Packet, _StreamHandler, []) ->
+deliver_packet(_Packet, _StreamHandler, [], _RoutingInfo) ->
     ok;
-deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
+deliver_packet(Packet, StreamHandler, [Route | Routes], RoutingInfo) ->
     lager:debug(
         [
             {oui, hpr_route:oui(Route)},
@@ -86,9 +97,11 @@ deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
     Resp =
         case Protocol of
             router ->
-                hpr_protocol_router:send(Packet, StreamHandler, Route);
+                hpr_protocol_router:send(Packet, StreamHandler, Route, RoutingInfo);
             gwmp ->
-                hpr_gwmp_router:send(Packet, StreamHandler, Route);
+                hpr_gwmp_router:send(Packet, StreamHandler, Route, RoutingInfo);
+            http ->
+                hpr_http_router:send(Packet, StreamHandler, Route, RoutingInfo);
             _OtherProtocol ->
                 lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
                 ok
@@ -104,7 +117,7 @@ deliver_packet(Packet, StreamHandler, [Route | Routes]) ->
             ),
             ok
     end,
-    deliver_packet(Packet, StreamHandler, Routes).
+    deliver_packet(Packet, StreamHandler, Routes, RoutingInfo).
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
 throttle_check(Packet) ->

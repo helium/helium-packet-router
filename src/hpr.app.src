@@ -16,6 +16,7 @@
         jsx,
         iso8601,
         xxhash,
+        elli,
         prometheus,
         recon
     ]},
