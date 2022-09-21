@@ -2,8 +2,6 @@
 
 -behaviour(gen_server).
 
--define(CONNECTION_TAB, connection).
-
 % API
 -export([
     start_link/0,
@@ -14,7 +12,8 @@
 -export([
     init/1,
     handle_call/3,
-    handle_cast/2
+    handle_cast/2,
+    handle_info/2
 ]).
 
 -type lns() :: binary().
@@ -69,6 +68,12 @@ handle_call({get_connection, Lns, Endpoint}, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
+-spec handle_info({{'DOWN', lns()}, reference(), process, pid(), any()}, #state{}) ->
+    {noreply, #state{}}.
+handle_info({{'DOWN', Lns}, _Mon, process, _Pid, _ExitReason}, State) ->
+    ets:delete(State#state.connection_table, Lns),
+    {noreply, State}.
+
 % ------------------------------------------------------------------------------
 % Private functions
 % ------------------------------------------------------------------------------
@@ -91,7 +96,9 @@ init_ets(Options) ->
 do_get_connection(Lns, Endpoint, ConnectionTab) ->
     case ets:lookup(ConnectionTab, Lns) of
         [] ->
-            insert_connection(ConnectionTab, Lns, grpc_client_connect(Endpoint));
+            GrpcConnection = grpc_client_connect(Endpoint),
+            monitor_grpc_client_connection(Lns, GrpcConnection),
+            insert_connection(ConnectionTab, Lns, GrpcConnection);
         [ConnectionRecord] ->
             %% TODO: Handle the connection being dead
             {ok, ConnectionRecord#connection.connection}
@@ -125,6 +132,18 @@ decode_lns_parts([Address, Port]) ->
 decode_lns_parts(_) ->
     error(invalid_lns).
 
+-spec monitor_grpc_client_connection
+    (lns(), {ok, grpc_client:connection()}) -> ok;
+    (lns(), {error, any()}) -> ok.
+% monitor the http process in the grpc_client connection. Include the Lns in
+% 'DOWN' message tag to make it easier to locate the connection in ets.
+monitor_grpc_client_connection(Lns, {ok, GrpcConnection}) ->
+    #{http_connection := HttpPid} = GrpcConnection,
+    erlang:monitor(process, HttpPid, [{tag, {'DOWN', Lns}}]),
+    ok;
+monitor_grpc_client_connection(_, {error, _}) ->
+    ok.
+
 % ------------------------------------------------------------------------------
 % Unit tests
 % ------------------------------------------------------------------------------
@@ -136,7 +155,8 @@ decode_lns_parts(_) ->
 all_test_() ->
     {setup, fun setup/0,
         {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
-            ?_test(test_get_connection())
+            ?_test(test_get_connection()),
+            ?_test(test_dead_http_connection())
         ]}}.
 
 setup() ->
@@ -144,6 +164,7 @@ setup() ->
 
 foreach_setup() ->
     meck:new(grpc_client),
+    reset_ets(),
     ok.
 
 foreach_cleanup(ok) ->
@@ -156,29 +177,77 @@ test_get_connection() ->
     Host = <<"1,2,3,4">>,
     Port = 1234,
     Endpoint = {Transport, Host, Port},
-    FakeGrcpConnection = #{fake => connection},
+    FakeGrpcConnection = fake_grpc_connection(),
 
     meck:expect(
         grpc_client,
         connect,
         [Transport, Host, Port, []],
-        {ok, FakeGrcpConnection}
+        {ok, FakeGrpcConnection}
     ),
 
-    % first get  makes connection
+    % first get makes connection
     {ok, GrpcConnection0} =
         do_get_connection(Lns, Endpoint, connection),
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)),
-    ?assertEqual(FakeGrcpConnection, GrpcConnection0),
+    ?assertEqual(FakeGrpcConnection, GrpcConnection0),
 
     % second reservation doesn't reconnect and returns the same connection
     {ok, GrpcConnection1} =
         do_get_connection(Lns, Endpoint, connection),
-    ?assertEqual(FakeGrcpConnection, GrpcConnection1),
+    ?assertEqual(FakeGrpcConnection, GrpcConnection1),
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)).
+
+test_dead_http_connection() ->
+    Lns = <<"lns">>,
+    Transport = tcp,
+    Host = <<"1,2,3,4">>,
+    Port = 1234,
+    Endpoint = {Transport, Host, Port},
+    FakeHttpConnectionPid = fake_http_connection_pid(),
+    FakeGrpcConnection = fake_grpc_connection(FakeHttpConnectionPid),
+
+    meck:expect(
+        grpc_client,
+        connect,
+        [Transport, Host, Port, []],
+        {ok, FakeGrpcConnection}
+    ),
+
+    {ok, _} =
+        do_get_connection(Lns, Endpoint, connection),
+    ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)),
+
+    % kill connection
+    FakeHttpConnectionPid ! stop,
+    Msg =
+        receive
+            M -> M
+        after 50 -> timeout
+        end,
+    ?assertMatch({{'DOWN', Lns}, _Mon, process, _Pid, _ExitReason}, Msg).
 
 % ------------------------------------------------------------------------------
 % Unit test utils
 % ------------------------------------------------------------------------------
+
+fake_grpc_connection() ->
+    fake_grpc_connection(self()).
+
+fake_grpc_connection(Pid) ->
+    #{http_connection => Pid}.
+
+fake_http_connection_pid() ->
+    spawn(
+        fun() ->
+            receive
+                stop ->
+                    ok
+            end
+        end
+    ).
+
+reset_ets() ->
+    ets:delete_all_objects(connection).
 
 -endif.
