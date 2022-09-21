@@ -72,9 +72,10 @@ handle_info({'EXIT', FromPid, Reason}, State) ->
 % Private functions
 % ------------------------------------------------------------------------------
 
--spec handle_rcv_response(grpc_client:rcv_response(), #state{}) ->
-    {noreply, #state{}, {continue, relay}}
-    | {stop, {error, any()}, #state{}}.
+-spec handle_rcv_response
+    (grpc_client:rcv_response(), #state{}) ->
+        {noreply, #state{}, {continue, relay}}
+        | {stop, {error, any()}, #state{}}.
 handle_rcv_response({data, Reply}, State) ->
     State#state.gateway_stream ! {router_reply, Reply},
     {noreply, State, {continue, relay}};
@@ -83,10 +84,7 @@ handle_rcv_response({headers, _}, State) ->
 handle_rcv_response(eof, State) ->
     {stop, {error, eof}, State};
 handle_rcv_response({error, _} = Error, State) ->
-    {stop, Error, State};
-handle_rcv_response(stop, State) ->
-    % only used for testing: see hpr_protocol_router_SUITE
-    {stop, normal, State}.
+    {stop, Error, State}.
 
 % ------------------------------------------------------------------------------
 % Unit tests
