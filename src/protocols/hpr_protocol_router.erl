@@ -2,9 +2,6 @@
 
 -include("../grpc/autogen/server/packet_router_pb.hrl").
 
-% TODO: should be in a common include file
--define(JOIN_REQUEST, 2#000).
-
 -export([send/3]).
 
 % ------------------------------------------------------------------------------
