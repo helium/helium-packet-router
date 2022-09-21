@@ -12,12 +12,16 @@
     Packet :: hpr_packet_up:packet(),
     GatewayStream :: pid(),
     Route :: hpr_route:route()
-) -> ok.
+) -> ok | {error, any()}.
 send(PacketUp, GatewayStream, Route) ->
-    LNS = Route#packet_router_route_v1_pb.lns,
-    PacketUpMap = hpr_packet_up:to_map(PacketUp),
-    {ok, RouterStream} = hpr_router_stream_manager:get_stream(GatewayStream, LNS),
-    ok = grpc_client:send(RouterStream, PacketUpMap).
+    LNS = hpr_route:lns(Route),
+    case hpr_router_stream_manager:get_stream(GatewayStream, LNS) of
+        {ok, RouterStream} ->
+            PacketUpMap = hpr_packet_up:to_map(PacketUp),
+            ok = grpc_client:send(RouterStream, PacketUpMap);
+        {error, _} = Err ->
+            Err
+    end.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
