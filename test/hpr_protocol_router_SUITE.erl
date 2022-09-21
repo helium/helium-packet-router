@@ -262,7 +262,8 @@ fake_gateway_stream(Receiver) ->
         fun() ->
             Receiver ! receive_next(),
             wait_for_stop()
-        end).
+        end
+    ).
 
 receive_next() ->
     receive
