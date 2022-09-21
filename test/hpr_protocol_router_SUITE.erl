@@ -14,7 +14,6 @@
     relay_test/1
 ]).
 
--include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %%--------------------------------------------------------------------
@@ -137,8 +136,9 @@ grpc_full_flow_send_test(_Congig) ->
     ok = hpr_routing_config_worker:insert(test_route()),
     meck:new(hpr_gateway_service, [passthrough]),
 
-    {ok, Stream} = helium_packet_router_gateway_client:send_packet(ctx:new()),
-    ok = grpcbox_client:send(Stream, PacketMap),
+    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
+    {ok, Stream} = grpc_client:new_stream(Connection, 'helium.packet_router.gateway', send_packet, client_packet_router_pb),
+    ok = grpc_client:send(Stream, PacketMap),
 
     ok =
         receive
@@ -159,7 +159,7 @@ grpc_full_flow_send_test(_Congig) ->
     ok = gen_server:stop(TestServerPid),
     ok = meck:reset(hpr_gateway_service),
 
-    ok = grpcbox_client:send(Stream, PacketMap),
+    ok = grpc_client:send(Stream, PacketMap),
     ok =
         receive
             {test_send_packet, _} -> ct:fail(expected_no_packet)
@@ -190,7 +190,10 @@ grpc_full_flow_connection_refused_test(_Config) ->
 
     %% Insert the matching route for the test packet
     ok = hpr_routing_config_worker:insert(test_route()),
-    {ok, Stream} = helium_packet_router_gateway_client:send_packet(ctx:new()),
+
+    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
+    {ok, Stream} = grpc_client:new_stream(Connection, 'helium.packet_router.gateway', send_packet, client_packet_router_pb),
+    ok = grpc_client:send(Stream, PacketMap),
 
     %% ===================================================================
     %% The test server is not started in this test. I'm not sure this test is
@@ -198,7 +201,7 @@ grpc_full_flow_connection_refused_test(_Config) ->
     %% grpcbox recalls its service handler when something fails.
 
     meck:new(hpr_gateway_service, [passthrough]),
-    ok = grpcbox_client:send(Stream, PacketMap),
+    ok = grpc_client:send(Stream, PacketMap),
     ok =
         receive
             {test_send_packet, _} -> ct:fail(expected_no_packet)
