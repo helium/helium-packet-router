@@ -163,15 +163,15 @@ setup() ->
     init_ets([named_table, public]).
 
 foreach_setup() ->
-    meck:new(grpc_client),
     reset_ets(),
     ok.
 
 foreach_cleanup(ok) ->
-    meck:unload(grpc_client),
+    meck:unload(),
     ok.
 
 test_get_connection() ->
+    meck:new(grpc_client),
     Lns = <<"lns">>,
     Transport = tcp,
     Host = <<"1,2,3,4">>,
@@ -199,6 +199,7 @@ test_get_connection() ->
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)).
 
 test_dead_http_connection() ->
+    meck:new(grpc_client),
     Lns = <<"lns">>,
     Transport = tcp,
     Host = <<"1,2,3,4">>,

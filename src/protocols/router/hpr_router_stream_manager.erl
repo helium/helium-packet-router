@@ -144,7 +144,6 @@ setup_stream(_, _, _, {error, _} = Error) ->
 
 -spec start_relay(gateway_stream(), grpc_client:client_stream()) -> ok.
 start_relay(GatewayStream, RouterStream) ->
-    %% FIXME: still need a way to receive downlinks
     {ok, _RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
     ok.
 
@@ -167,18 +166,16 @@ setup() ->
     ok.
 
 foreach_setup() ->
-    meck:new(grpc_client),
-    meck:new(hpr_router_connection_manager),
-    meck:new(hpr_router_relay),
     ok.
 
 foreach_cleanup(ok) ->
-    meck:unload(grpc_client),
-    meck:unload(hpr_router_connection_manager),
-    meck:unload(hpr_router_relay),
+    meck:unload(),
     ok.
 
 test_get_stream() ->
+    meck:new(grpc_client),
+    meck:new(hpr_router_connection_manager),
+    meck:new(hpr_router_relay),
     GatewayStream = self(),
     Lns1 = <<"1fakelns">>,
     Lns2 = <<"2fakelns">>,

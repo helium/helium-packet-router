@@ -11,8 +11,7 @@
     grpc_connection_refused_test/1,
     grpc_full_flow_send_test/1,
     grpc_full_flow_connection_refused_test/1,
-    grpc_full_flow_downlink_test/1,
-    relay_test/1
+    grpc_full_flow_downlink_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -34,7 +33,7 @@ all() ->
         grpc_full_flow_send_test,
         grpc_full_flow_connection_refused_test,
         grpc_full_flow_downlink_test,
-        relay_test
+        grpc_full_flow_connection_refused_test
     ].
 
 %%--------------------------------------------------------------------
@@ -300,27 +299,6 @@ grpc_full_flow_connection_refused_test(_Config) ->
 
     ok.
 
-relay_test(_Config) ->
-    GatewayStream = fake_gateway_stream(self()),
-    RouterStream = fake_router_stream(),
-    FakeData = <<"fake data">>,
-
-    meck:expect(
-        grpc_client,
-        rcv,
-        [RouterStream],
-        {meck_seq, [{data, FakeData}, eof]}
-    ),
-
-    {ok, RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
-
-    Data = receive_next(),
-    ?assertEqual({router_reply, FakeData}, Data),
-    timer:sleep(50),
-    ?assertNot(erlang:is_process_alive(RelayPid)),
-    ?assertNot(erlang:is_process_alive(GatewayStream)),
-    ?assertNot(erlang:is_process_alive(RouterStream)).
-
 %% ===================================================================
 %% Helpers
 %% ===================================================================
@@ -342,28 +320,3 @@ test_route() ->
         [{packet_router_route_devaddr_range_v1_pb, 0, 4294967295}],
         [{packet_router_route_eui_v1_pb, 802041902051071031, 8942655256770396549}],
         <<"127.0.0.1:8082">>, router, 4020}.
-
-fake_router_stream() ->
-    spawn(fun() -> wait_for_stop() end).
-
-fake_gateway_stream(Receiver) ->
-    spawn(
-        fun() ->
-            Receiver ! receive_next(),
-            wait_for_stop()
-        end
-    ).
-
-receive_next() ->
-    receive
-        Msg ->
-            Msg
-    after 50 ->
-        no_data
-    end.
-
-wait_for_stop() ->
-    receive
-        stop ->
-            ok
-    end.

@@ -16,6 +16,9 @@
     handle_info/2
 ]).
 
+-type stream_name() :: gateway_stream | router_stream.
+-type stream() :: hpr_router_stream_manager:gateway_stream() | grpc_client:client_stream().
+
 -record(state, {
     gateway_stream :: hpr_router_stream_manager:gateway_stream(),
     router_stream :: grpc_client:client_stream()
@@ -36,12 +39,14 @@ start(GatewayStream, RouterStream) ->
 
 -spec init(list()) -> {ok, #state{}, {continue, relay}}.
 init([GatewayStream, RouterStream]) ->
-    % link to GatewayStream and RouterStream to stop the communication
-    % stack if one of the components fails.
-    % XXX use monitor to handle 'normal' exits?
-    erlang:process_flag(trap_exit, true),
-    erlang:link(GatewayStream),
-    erlang:link(RouterStream),
+    % monitor GatewayStream and RouterStream to cleanup the communication
+    % stack if one end or the other exits.
+    % - If RouterStream exits, clean up the relay but leave the GatewayStream
+    %   intact. The GatewayStream is multiplexed to many RouterStreams.
+    % - If GatewayStream exits, clean up the RouterStream because it no longer
+    %   has a stream to reply to.
+    monitor_stream(gateway_stream, GatewayStream),
+    monitor_stream(router_stream, RouterStream),
     {
         ok,
         #state{
@@ -53,6 +58,7 @@ init([GatewayStream, RouterStream]) ->
 
 -spec handle_continue(relay, #state{}) -> {noreply, #state{}, {continue, relay}}.
 handle_continue(relay, State) ->
+io:format("rcv~n"),
     handle_rcv_response(grpc_client:rcv(State#state.router_stream), State).
 
 -spec handle_call(Msg, {pid(), any()}, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
@@ -63,14 +69,29 @@ handle_call(Msg, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
--spec handle_info({'EXIT', pid(), Reason}, #state{}) ->
+-spec handle_info({{'DOWN', stream_name()}, reference(), process, pid(), Reason}, #state{}) ->
     {stop, {stream_exit, pid(), Reason}, #state{}}.
-handle_info({'EXIT', FromPid, Reason}, State) ->
-    {stop, {stream_exit, FromPid, Reason}, State}.
+handle_info({{'DOWN', gateway_stream}, _, process, GatewayStream, Reason}, State) ->
+    grpc_client:stop_stream(State#state.router_stream),
+    {stop, stream_exit_status(gateway_stream, GatewayStream, Reason), State};
+handle_info({{'DOWN', router_stream}, _, process, RouterStream, Reason}, State) ->
+    {stop, stream_exit_status(router_stream, RouterStream, Reason), State}.
 
 % ------------------------------------------------------------------------------
 % Private functions
 % ------------------------------------------------------------------------------
+
+-spec stream_exit_status(stream_name(), stream(), any()) ->
+    normal | {stream_exit, stream_name(), stream(), any()}.
+stream_exit_status(_, _, normal) ->
+    normal;
+stream_exit_status(StreamName, Stream, Reason) ->
+    {stream_exit, StreamName, Stream, Reason}.
+
+-spec monitor_stream(stream_name(), stream()) -> ok.
+monitor_stream(StreamName, Stream) ->
+    erlang:monitor(process, Stream, [{tag, {'DOWN', StreamName}}]),
+    ok.
 
 -spec handle_rcv_response(grpc_client:rcv_response(), #state{}) ->
     {noreply, #state{}, {continue, relay}}
@@ -81,7 +102,8 @@ handle_rcv_response({data, Reply}, State) ->
 handle_rcv_response({headers, _}, State) ->
     {noreply, State, {continue, relay}};
 handle_rcv_response(eof, State) ->
-    {stop, {error, eof}, State};
+    grpc_client:stop_stream(State#state.router_stream),
+    {stop, normal, State};
 handle_rcv_response({error, _} = Error, State) ->
     {stop, Error, State}.
 
@@ -102,13 +124,13 @@ all_test_() ->
     ]}.
 
 foreach_setup() ->
-    meck:new(grpc_client),
     ok.
 
 foreach_cleanup(ok) ->
-    meck:unload(grpc_client).
+    meck:unload().
 
 test_relay_data() ->
+    meck:new(grpc_client),
     State = state(),
     meck:expect(grpc_client, rcv, [State#state.router_stream], {data, fake_data()}),
     Reply = handle_continue(relay, State),
@@ -118,6 +140,7 @@ test_relay_data() ->
     ?assertEqual(fake_data(), RelayMessage).
 
 test_relay_headers() ->
+    meck:new(grpc_client),
     State = state(),
     meck:expect(grpc_client, rcv, [State#state.router_stream], {headers, #{fake => headers}}),
     Reply = handle_continue(relay, State),
@@ -126,14 +149,16 @@ test_relay_headers() ->
     ?assertEqual(empty, check_messages()).
 
 test_relay_eof() ->
+    meck:new(grpc_client),
     State = state(),
     meck:expect(grpc_client, rcv, [State#state.router_stream], eof),
     Reply = handle_continue(relay, State),
-    ?assertEqual({stop, {error, eof}, State}, Reply),
+    ?assertEqual({stop, normal, State}, Reply),
     ?assertEqual(1, meck:num_calls(grpc_client, rcv, 1)),
     ?assertEqual(empty, check_messages()).
 
 test_relay_error() ->
+    meck:new(grpc_client),
     State = state(),
     Error = {error, fake_error},
     meck:expect(grpc_client, rcv, [State#state.router_stream], Error),
