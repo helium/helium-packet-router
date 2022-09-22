@@ -137,7 +137,12 @@ grpc_full_flow_send_test(_Congig) ->
     meck:new(hpr_gateway_service, [passthrough]),
 
     {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
-    {ok, Stream} = grpc_client:new_stream(Connection, 'helium.packet_router.gateway', send_packet, client_packet_router_pb),
+    {ok, Stream} = grpc_client:new_stream(
+        Connection,
+        'helium.packet_router.gateway',
+        send_packet,
+        client_packet_router_pb
+    ),
     ok = grpc_client:send(Stream, PacketMap),
 
     ok =
@@ -192,7 +197,12 @@ grpc_full_flow_connection_refused_test(_Config) ->
     ok = hpr_routing_config_worker:insert(test_route()),
 
     {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
-    {ok, Stream} = grpc_client:new_stream(Connection, 'helium.packet_router.gateway', send_packet, client_packet_router_pb),
+    {ok, Stream} = grpc_client:new_stream(
+        Connection,
+        'helium.packet_router.gateway',
+        send_packet,
+        client_packet_router_pb
+    ),
     ok = grpc_client:send(Stream, PacketMap),
 
     %% ===================================================================
