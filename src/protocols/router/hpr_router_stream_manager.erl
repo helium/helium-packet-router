@@ -143,9 +143,9 @@ setup_stream(_, _, _, {error, _} = Error) ->
     Error.
 
 -spec start_relay(gateway_stream(), grpc_client:client_stream()) -> ok.
-start_relay(_GatewayStream, _RouterStream) ->
+start_relay(GatewayStream, RouterStream) ->
     %% FIXME: still need a way to receive downlinks
-    %% {ok, _RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
+    {ok, _RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
     ok.
 
 % ------------------------------------------------------------------------------

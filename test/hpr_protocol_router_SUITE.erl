@@ -11,6 +11,7 @@
     grpc_connection_refused_test/1,
     grpc_full_flow_send_test/1,
     grpc_full_flow_connection_refused_test/1,
+    grpc_full_flow_downlink_test/1,
     relay_test/1
 ]).
 
@@ -32,6 +33,7 @@ all() ->
         grpc_connection_refused_test,
         grpc_full_flow_send_test,
         grpc_full_flow_connection_refused_test,
+        grpc_full_flow_downlink_test,
         relay_test
     ].
 
@@ -100,7 +102,81 @@ grpc_connection_refused_test(_Config) ->
 
     ok.
 
-grpc_full_flow_send_test(_Congig) ->
+grpc_full_flow_downlink_test(_Config) ->
+    %% Startup our server
+    {ok, ServerPid} = grpcbox:start_server(#{
+        grpc_opts => #{
+            service_protos => [packet_router_pb],
+            services => #{'helium.packet_router.gateway' => hpr_gateway_service}
+        },
+        listen_opts => #{port => 8080, ip => {0, 0, 0, 0}}
+    }),
+    %% Startup test server for receiving
+    {ok, TestServerPid} = grpcbox:start_server(#{
+        grpc_opts => #{
+            service_protos => [packet_router_pb],
+            services => #{'helium.packet_router.gateway' => test_hpr_gateway_service}
+        },
+        listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
+    }),
+    ok = hpr_routing_config_worker:insert(test_route()),
+
+    %% Queue up a downlink from the testing server
+    Payload = base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
+    Timestamp = erlang:system_time(millisecond) band 16#FFFF_FFFF,
+    DataRate = 'SF11BW125',
+    Down = hpr_packet_down:to_record(#{
+        payload => Payload,
+        rx1 => #{
+            timestamp => Timestamp,
+            frequency => 904.1,
+            datarate => DataRate
+        }
+    }),
+    application:set_env(
+        hpr,
+        gateway_service_send_packet_fun,
+        fun(_PacketUp, Socket) -> {ok, Down, Socket} end
+    ),
+
+    %% Connect to our server
+    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
+    {ok, Stream} = grpc_client:new_stream(
+        Connection,
+        'helium.packet_router.gateway',
+        send_packet,
+        client_packet_router_pb
+    ),
+    %% Send a packet that expects a downlink
+    ok = grpc_client:send(Stream, hpr_packet_up:to_map(test_packet())),
+
+    %% Throw away the headers
+    ?assertMatch({headers, _}, grpc_client:rcv(Stream, 500)),
+
+    %% Make sure the downlink received is relatively the same.
+    %% floats will be floats.
+    %% NOTE: future change to proto will be changing frequency from mhz -> hz
+    {data, Response} = grpc_client:rcv(Stream, 500),
+    ?assert(
+        test_utils:match_map(
+            #{
+                payload => Payload,
+                rx1 => #{
+                    timestamp => Timestamp,
+                    frequency => fun erlang:is_float/1,
+                    datarate => DataRate
+                }
+            },
+            Response
+        )
+    ),
+
+    ok = gen_server:stop(ServerPid),
+    ok = gen_server:stop(TestServerPid),
+
+    ok.
+
+grpc_full_flow_send_test(_Config) ->
     Packet = test_packet(),
     PacketMap = hpr_packet_up:to_map(Packet),
     %% Startup our server
