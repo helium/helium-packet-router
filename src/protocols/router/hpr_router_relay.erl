@@ -12,14 +12,11 @@
     init/1,
     handle_continue/2,
     handle_call/3,
-    handle_cast/2,
-    handle_info/2
+    handle_cast/2
 ]).
 
--type stream_name() :: gateway_stream | router_stream.
--type stream() :: hpr_router_stream_manager:gateway_stream() | grpc_client:client_stream().
-
 -record(state, {
+    monitor_process :: pid(),
     gateway_stream :: hpr_router_stream_manager:gateway_stream(),
     router_stream :: grpc_client:client_stream()
 }).
@@ -28,7 +25,10 @@
 % API
 % ------------------------------------------------------------------------------
 
--spec start(hpr_router_stream_manager:gateway_stream(), grpc_client:client_stream()) -> {ok, pid()}.
+-spec start(
+    hpr_router_stream_manager:gateway_stream(),
+    grpc_client:client_stream()
+) -> {ok, pid()}.
 %% @doc Start this service.
 start(GatewayStream, RouterStream) ->
     gen_server:start(?MODULE, [GatewayStream, RouterStream], []).
@@ -39,17 +39,14 @@ start(GatewayStream, RouterStream) ->
 
 -spec init(list()) -> {ok, #state{}, {continue, relay}}.
 init([GatewayStream, RouterStream]) ->
-    % monitor GatewayStream and RouterStream to cleanup the communication
-    % stack if one end or the other exits.
-    % - If RouterStream exits, clean up the relay but leave the GatewayStream
-    %   intact. The GatewayStream is multiplexed to many RouterStreams.
-    % - If GatewayStream exits, clean up the RouterStream because it no longer
-    %   has a stream to reply to.
-    monitor_stream(gateway_stream, GatewayStream),
-    monitor_stream(router_stream, RouterStream),
+    {ok, MonitorPid} =
+        hpr_router_relay_monitor:start(
+            self(), GatewayStream, RouterStream
+        ),
     {
         ok,
         #state{
+            monitor_process = MonitorPid,
             gateway_stream = GatewayStream,
             router_stream = RouterStream
         },
@@ -68,29 +65,9 @@ handle_call(Msg, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
--spec handle_info({{'DOWN', stream_name()}, reference(), process, pid(), Reason}, #state{}) ->
-    {stop, {stream_exit, pid(), Reason}, #state{}}.
-handle_info({{'DOWN', gateway_stream}, _, process, GatewayStream, Reason}, State) ->
-    grpc_client:stop_stream(State#state.router_stream),
-    {stop, stream_exit_status(gateway_stream, GatewayStream, Reason), State};
-handle_info({{'DOWN', router_stream}, _, process, RouterStream, Reason}, State) ->
-    {stop, stream_exit_status(router_stream, RouterStream, Reason), State}.
-
 % ------------------------------------------------------------------------------
 % Private functions
 % ------------------------------------------------------------------------------
-
--spec stream_exit_status(stream_name(), stream(), any()) ->
-    normal | {stream_exit, stream_name(), stream(), any()}.
-stream_exit_status(_, _, normal) ->
-    normal;
-stream_exit_status(StreamName, Stream, Reason) ->
-    {stream_exit, StreamName, Stream, Reason}.
-
--spec monitor_stream(stream_name(), stream()) -> ok.
-monitor_stream(StreamName, Stream) ->
-    erlang:monitor(process, Stream, [{tag, {'DOWN', StreamName}}]),
-    ok.
 
 -spec handle_rcv_response(grpc_client:rcv_response(), #state{}) ->
     {noreply, #state{}, {continue, relay}}
@@ -101,7 +78,6 @@ handle_rcv_response({data, Reply}, State) ->
 handle_rcv_response({headers, _}, State) ->
     {noreply, State, {continue, relay}};
 handle_rcv_response(eof, State) ->
-    grpc_client:stop_stream(State#state.router_stream),
     {stop, normal, State};
 handle_rcv_response({error, _} = Error, State) ->
     {stop, Error, State}.
@@ -191,6 +167,15 @@ fake_stream() ->
         end
     ).
 
+fake_monitor() ->
+    spawn(
+        fun() ->
+            receive
+                stop -> ok
+            end
+        end
+    ).
+
 receive_relay() ->
     receive
         {router_reply, Message} ->
@@ -208,6 +193,7 @@ check_messages() ->
 
 state() ->
     #state{
+        monitor_process = fake_monitor(),
         gateway_stream = fake_stream(),
         router_stream = fake_stream()
     }.
