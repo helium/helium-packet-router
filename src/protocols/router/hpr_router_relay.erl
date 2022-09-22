@@ -58,7 +58,6 @@ init([GatewayStream, RouterStream]) ->
 
 -spec handle_continue(relay, #state{}) -> {noreply, #state{}, {continue, relay}}.
 handle_continue(relay, State) ->
-io:format("rcv~n"),
     handle_rcv_response(grpc_client:rcv(State#state.router_stream), State).
 
 -spec handle_call(Msg, {pid(), any()}, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
