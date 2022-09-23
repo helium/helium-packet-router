@@ -23,6 +23,8 @@
     | grpc_client:client_stream().
 -type monitor_exit(Reason) ::
     normal
+    | shutdown
+    | {shutdown, any()}
     | {unexpected_exit, process_name(), process_type(), Reason}.
 
 -record(state, {
@@ -114,8 +116,12 @@ handle_info({{'DOWN', relay}, _, process, RouterStream, Reason}, State) ->
     process_name(), process_type(), Reason
 ) ->
     monitor_exit(Reason).
-process_exit_status(_, _, normal) ->
-    normal;
+process_exit_status(_, _, normal = Status) ->
+    Status;
+process_exit_status(_, _, shutdown = Status) ->
+    Status;
+process_exit_status(_, _, {shutdown, _} = Status) ->
+    Status;
 process_exit_status(ProcessName, ProcessType, Reason) ->
     {unexpected_exit, ProcessName, ProcessType, Reason}.
 
