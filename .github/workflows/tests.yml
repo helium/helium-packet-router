@@ -1,4 +1,4 @@
-name: Tests-localstack
+name: Tests
 
 on:
   push:
@@ -146,7 +146,7 @@ jobs:
         ports: ["4566:4566"]
     steps:
       - name: Configure localstack
-        run: awslocal mb s3://test-bucket --endpoint-url=http://localhost:4566
+        run: aws mb s3://test-bucket --endpoint-url=http://localhost:4566
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
