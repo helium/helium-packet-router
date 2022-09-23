@@ -100,7 +100,7 @@ handle_call(Request, From, State = #state{}) ->
     {reply, ok, State}.
 
 handle_cast(write, State = #state{write_dir = WriteDir, file_path = FilePath}) ->
-    {ok, FileSize, MaxFileSize} = handle_write(FilePath),
+    {ok, FileSize, MaxFileSize} = handle_write(FilePath, [write, raw, binary, compressed]),
 
     case FileSize >= MaxFileSize of
         true ->
@@ -112,11 +112,13 @@ handle_cast(write, State = #state{write_dir = WriteDir, file_path = FilePath}) -
 handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
     UploadTimestamp = erlang:system_time(millisecond),
     FileName = list_to_binary("packetreport." ++ integer_to_list(UploadTimestamp) ++ ".gz"),
-    case upload_file(AWSClient, FilePath, FileName) of
+
+    case upload_file(AWSClient, list_to_binary(FilePath), FileName) of
         {ok, _} ->
             file:delete(FilePath);
-        _ ->
-            ok
+        Error ->
+            lager:warning("packet reporter failed to upload: ~p~n", [Error]),
+            error
     end,
     {noreply, State};
 handle_cast({start_interval, IntervalDuration}, State = #state{report_interval = ReportInterval}) ->
@@ -133,7 +135,7 @@ handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
 terminate(Reason, _State = #state{file_path = FilePath, report_interval = ReportInterval}) ->
-    handle_write(FilePath),
+    handle_write(FilePath, [write, raw, binary, compressed]),
     handle_stop_interval(ReportInterval),
     lager:warning("packet reporter process terminated: ~s", [Reason]),
     ok.
@@ -145,10 +147,9 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec handle_write(FilePath :: string()) -> {ok, integer(), integer()}.
--spec handle_write(FilePath :: string(), WriteOptions :: [atom()]) -> {ok, integer(), integer()}.
+-spec handle_write(FilePath :: string(), WriteOptions :: [atom()]) ->
+    {ok, FileSize :: integer(), MaxFileSize :: integer()}.
 
-handle_write(FilePath) -> handle_write(FilePath, [compressed]).
 handle_write(FilePath, WriteOptions) ->
     WriteTimestamp = erlang:system_time(millisecond),
     {ok, S} = open_tmp_file(FilePath, WriteOptions),
@@ -156,7 +157,9 @@ handle_write(FilePath, WriteOptions) ->
 
     lists:foreach(
         fun(Packet) ->
-            io:fwrite(S, "~w~n", [Packet])
+            PacketSize = encode_packet_size(Packet),
+            file:write(S, PacketSize),
+            file:write(S, Packet)
         end,
         Data
     ),
@@ -184,7 +187,14 @@ setup_aws() ->
         secret_access_key := Secret,
         aws_region := Region
     } = maps:from_list(application:get_env(hpr, aws_config, [])),
-    aws_client:make_client(AccessKey, Secret, Region).
+    case Region of
+        <<"local">> ->
+            aws_client:make_local_client(
+                AccessKey, Secret, application:get_env(hpr, localstack_port, <<"4566">>)
+            );
+        _ ->
+            aws_client:make_client(AccessKey, Secret, Region)
+    end.
 
 -spec start_report_interval() -> {ok, timer:tref()}.
 -spec start_report_interval(IntervalDuration :: interval_duration_ms()) -> {ok, timer:tref()}.
@@ -243,16 +253,26 @@ encode_packet(
         packet_router_packet_report_v1_pb
     ).
 
+-spec encode_packet_size(EncodedPacket :: binary()) -> PacketSize :: binary().
+encode_packet_size(EncodedPacket) ->
+    PacketSize = size(EncodedPacket),
+    EncodedValue = binary:encode_unsigned(PacketSize),
+    pad_u32(EncodedValue).
+
+-spec pad_u32(binary()) -> binary().
+pad_u32(Bin) ->
+    <<0:((4 - size(Bin)) * 8), Bin/binary>>.
+
 -spec generate_file_name(WriteDir :: string()) -> FilePath :: string().
 generate_file_name(WriteDir) ->
     Timestamp = erlang:system_time(millisecond),
-    FileName = "packetreport." ++ integer_to_list(Timestamp) ++ ".gz",
+    FileName = "packetreport." ++ integer_to_list(Timestamp),
     filename:join(WriteDir, FileName).
 
 -spec open_tmp_file(FilePath :: string(), WriteOptions :: [atom()]) ->
     {ok, IODevice :: file:io_device()} | {error, Reason :: atom()}.
 open_tmp_file(FilePath, WriteOptions) ->
-    case file:open(FilePath, [append] ++ WriteOptions) of
+    case file:open(FilePath, WriteOptions) of
         {error, Error} ->
             lager:error("failed to open tmp write file: ~p", [Error]);
         IODevice ->
@@ -263,7 +283,7 @@ open_tmp_file(FilePath, WriteOptions) ->
     AWSClient :: aws_client:aws_client(), FilePath :: string(), S3FileName :: binary()
 ) -> {ok, Response :: term()} | {error, upload_failed}.
 upload_file(AWSClient, FilePath, S3FileName) ->
-    BucketName = application:get_env(hpr, packet_reporter_bucket, <<"default_bucket">>),
+    BucketName = application:get_env(hpr, packet_reporter_bucket, <<"test-bucket">>),
     {ok, Content} = file:read_file(FilePath),
     case
         aws_s3:put_object(
@@ -303,7 +323,7 @@ delete_packets_by_timestamp(Timestamp) ->
 file_test() ->
     ?ETS = ets:new(?ETS, [named_table, bag, public, {write_concurrency, true}]),
     Timestamp = erlang:system_time(millisecond),
-    FilePath = "./packetreport." ++ integer_to_list(Timestamp) ++ ".txt",
+    FilePath = "./packetreport." ++ integer_to_list(Timestamp),
 
     Packet = test_utils:join_packet_up(#{}),
     Packet2 = test_utils:uplink_packet_up(#{}),
@@ -312,30 +332,32 @@ file_test() ->
     report_packet(Packet, Route),
     report_packet(Packet2, Route),
 
-    timer:sleep(1000),
+    handle_write(FilePath, [write, raw, binary, compressed]),
 
-    handle_write(FilePath, [compressed]),
+    {ok, S} = file:open(FilePath, [read, raw, binary, compressed]),
 
-    {ok, Content} = file:read_file(FilePath),
+    %% Read length-delimited protobufs
+    {ok, EncodedPacketSize} = file:read(S, 4),
+    {ok, EncodedPacket} = file:read(S, binary:decode_unsigned(EncodedPacketSize)),
 
-    ?assertEqual(2, length(binary:split(Content, <<"\n">>, [trim, global]))),
+    {ok, EncodedPacketSize2} = file:read(S, 4),
+    {ok, EncodedPacket2} = file:read(S, binary:decode_unsigned(EncodedPacketSize2)),
 
-    Packet3 = test_utils:join_packet_up(#{}),
-    Packet4 = test_utils:uplink_packet_up(#{}),
+    ?assertEqual(eof, file:read(S, 4)),
 
-    report_packet(Packet3, Route),
-    report_packet(Packet4, Route),
+    file:close(S),
 
-    handle_write(FilePath, []),
-
-    {ok, _Content2} = file:read_file(FilePath),
-
-    ?assertEqual(4, length(binary:split(Content2, <<"\n">>, [trim, global]))),
-
-    {ok, S} = file:open(FilePath, [read]),
+    ?assertEqual(encode_packet(Packet, Route), EncodedPacket),
+    ?assertEqual(encode_packet(Packet2, Route), EncodedPacket2),
 
     file:delete(FilePath),
 
     ok.
+
+pad_u32_test() ->
+    ?assertEqual(<<0, 0, 0, 0>>, pad_u32(binary:encode_unsigned(0))),
+    ?assertEqual(<<0, 0, 0, 1>>, pad_u32(binary:encode_unsigned(1))),
+    ?assertEqual(<<0, 0, 3, 232>>, pad_u32(binary:encode_unsigned(1000))),
+    ?assertEqual(<<5, 245, 225, 0>>, pad_u32(binary:encode_unsigned(100000000))).
 
 -endif.

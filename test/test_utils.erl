@@ -24,7 +24,7 @@ init_per_testcase(TestCase, Config) ->
     %% Start HPR
     application:ensure_all_started(?APP),
 
-    Config.
+    Config ++ [{base_dir, BaseDir}].
 
 end_per_testcase(_TestCase, Config) ->
     application:stop(?APP),
