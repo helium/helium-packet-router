@@ -14,8 +14,7 @@
     multi_gw_single_lns_test/1,
     shutdown_idle_worker_test/1,
     pull_data_test/1,
-    gateway_dest_redirect/1,
-    bad_route_test/1
+    gateway_dest_redirect_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -43,14 +42,13 @@ all() ->
         multi_gw_single_lns_test,
         shutdown_idle_worker_test,
         pull_data_test,
-        gateway_dest_redirect,
-        bad_route_test
+        gateway_dest_redirect_test
     ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
-init_per_testcase(gateway_dest_redirect = TestCase, Config) ->
+init_per_testcase(gateway_dest_redirect_test = TestCase, Config) ->
     application:set_env(hpr, redirect_by_region, #{
         port => ?REDIRECT_WORKER_PORT,
         remap => #{
@@ -344,7 +342,7 @@ pull_data_test(_Config) ->
 
     ok.
 
-gateway_dest_redirect(_Config) ->
+gateway_dest_redirect_test(_Config) ->
     Route = hpr_route:new(1337, [], [], ?REDIRECT_WORKER_ENDPOINT, gwmp, 42),
 
     {ok, USSocket} = gen_udp:open(1778, [binary, {active, true}]),
@@ -357,6 +355,11 @@ gateway_dest_redirect(_Config) ->
     USPacketUp = fake_join_up_packet(),
     EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = PubKeyBin, region = 'EU868'},
 
+    %% Start before sending the packet so we can reduce the pull_data_timer from default
+    {ok, _Pid} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{
+        pull_data_timer => 250
+    }),
+
     %% US send packet
     hpr_gwmp_router:send(USPacketUp, unused_test_stream_handler, Route),
     {ok, _, _} = expect_pull_data(USSocket, us_redirected_pull_data),
@@ -366,6 +369,22 @@ gateway_dest_redirect(_Config) ->
     hpr_gwmp_router:send(EUPacketUp, unused_test_stream_handler, Route),
     {ok, _, _} = expect_pull_data(EUSocket, eu_redirected_pull_data),
     {ok, _} = expect_push_data(EUSocket, eu_redirected_push_data),
+
+    %% Meck the redirect worker _after_ it redirects the UDP workers, they
+    %% should not chat with this worker any longer.
+    Self = self(),
+    meck:new(hpr_gwmp_redirect_worker),
+    meck:expect(hpr_gwmp_redirect_worker, handle_info, fun({udp, _, _, _, _} = _A, _B) ->
+        Self ! {fail, no_more_udp},
+        meck:exception(error, no_more_udp)
+    end),
+
+    receive
+        {fail, no_more_udp} -> ct:fail(please_no_more_push_data)
+    after timer:seconds(1) -> ok
+    end,
+
+    meck:unload(hpr_gwmp_redirect_worker),
 
     %% cleanup
     ok = gen_udp:close(USSocket),

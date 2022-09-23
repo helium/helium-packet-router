@@ -160,27 +160,34 @@ handle_info(
         pubkeybin = PubKeyBin,
         socket = Socket,
         pull_data_timer = PullDataTimer,
-        pull_data = PullDataMap0
+        pull_data = PullDataMap0,
+        dest_remap = Remap
     } =
         State
 ) ->
-    case
-        send_pull_data(#{
-            pubkeybin => PubKeyBin,
-            socket => Socket,
-            dest => SocketDest,
-            pull_data_timer => PullDataTimer
-        })
-    of
-        {ok, RefAndToken} ->
-            PullDataMap1 = maps:put(SocketDest, RefAndToken, PullDataMap0),
-            {noreply, State#state{pull_data = PullDataMap1}};
-        {error, Reason} ->
-            lager:warning(
-                [{error, Reason}, {lns, SocketDest}],
-                "could not send pull_data"
-            ),
-            {noreply, State}
+    case maps:is_key(SocketDest, Remap) of
+        true ->
+            lager:debug([{dest, SocketDest}], "not resending pull_data to remapped destination"),
+            {noreply, State};
+        false ->
+            case
+                send_pull_data(#{
+                    pubkeybin => PubKeyBin,
+                    socket => Socket,
+                    dest => SocketDest,
+                    pull_data_timer => PullDataTimer
+                })
+            of
+                {ok, RefAndToken} ->
+                    PullDataMap1 = maps:put(SocketDest, RefAndToken, PullDataMap0),
+                    {noreply, State#state{pull_data = PullDataMap1}};
+                {error, Reason} ->
+                    lager:warning(
+                        [{error, Reason}, {lns, SocketDest}],
+                        "could not send pull_data"
+                    ),
+                    {noreply, State}
+            end
     end;
 handle_info(
     {?PULL_DATA_TIMEOUT_TICK, SocketDest},
