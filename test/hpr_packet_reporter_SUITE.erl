@@ -43,6 +43,7 @@ all() ->
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
     Config1 = test_utils:init_per_testcase(TestCase, Config),
+    meck:new(aws_s3, [passthrough]),
     BaseDir = proplists:get_value(base_dir, Config1),
     file:make_dir(BaseDir),
     file:make_dir(BaseDir ++ "/tmp"),
@@ -53,6 +54,7 @@ init_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
     ets:delete_all_objects(hpr_packet_report_ets),
+    meck:unload(aws_s3),
     BaseDir = proplists:get_value(base_dir, Config),
     file:del_dir(BaseDir),
     test_utils:end_per_testcase(TestCase, Config).

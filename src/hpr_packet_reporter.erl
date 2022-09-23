@@ -280,7 +280,7 @@ open_tmp_file(FilePath, WriteOptions) ->
     end.
 
 -spec upload_file(
-    AWSClient :: aws_client:aws_client(), FilePath :: string(), S3FileName :: binary()
+    AWSClient :: aws_client:aws_client(), FilePath :: binary(), S3FileName :: binary()
 ) -> {ok, Response :: term()} | {error, upload_failed}.
 upload_file(AWSClient, FilePath, S3FileName) ->
     BucketName = application:get_env(hpr, packet_reporter_bucket, <<"test-bucket">>),
