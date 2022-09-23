@@ -8,6 +8,7 @@
         {packet_reporter_bucket, <<"${PACKET_REPORTER_BUCKET_NAME}">>},
         {packet_reporter_report_interval, 300000},
         {packet_reporter_max_file_size, 50_000_000},
+        {packet_reporter_upload_window, 900000},
         {base_dir, "/var/data"}
     ]},
     {grpcbox, [

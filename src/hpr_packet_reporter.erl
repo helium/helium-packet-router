@@ -28,20 +28,24 @@
 %% 5 minute interval
 -define(DEFAULT_REPORT_INTERVAL, 300000).
 -define(MAX_FILE_SIZE, 50_000_000).
+%% 15 minute maximum upload window
+-define(DEFAULT_UPLOAD_WINDOW, 900000).
 %% Up to 5 retries, 1 minute sleep
 -define(RETRY_SLEEP_TIME, 60000).
 -define(AWS_RETRY_OPTIONS, [
     {retry_options, {exponential_with_jitter, {5, ?RETRY_SLEEP_TIME, ?RETRY_SLEEP_TIME}}}
 ]).
 
--type interval_duration_ms() :: non_neg_integer().
-
 -record(state, {
     aws_client :: aws_client:aws_client(),
     write_dir :: string(),
     file_path :: string(),
-    report_interval :: timer:tref() | undefined
+    report_interval :: timer:tref() | undefined,
+    upload_window_start_time :: non_neg_integer()
 }).
+
+-type interval_duration_ms() :: non_neg_integer().
+-type timestamp_ms() :: non_neg_integer().
 
 %%%===================================================================
 %%% API Functions
@@ -92,17 +96,23 @@ init(#{base_dir := BaseDir} = _Args) ->
         aws_client = AWSClient,
         write_dir = WriteDir,
         file_path = TempFilePath,
-        report_interval = ReportInterval
+        report_interval = ReportInterval,
+        upload_window_start_time = erlang:system_time(millisecond)
     }}.
 
 handle_call(Request, From, State = #state{}) ->
     lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
     {reply, ok, State}.
 
-handle_cast(write, State = #state{write_dir = WriteDir, file_path = FilePath}) ->
+handle_cast(
+    write,
+    State = #state{
+        write_dir = WriteDir, file_path = FilePath, upload_window_start_time = WindowStartTime
+    }
+) ->
     {ok, FileSize, MaxFileSize} = handle_write(FilePath, [write, raw, binary, compressed]),
 
-    case FileSize >= MaxFileSize of
+    case FileSize >= MaxFileSize orelse upload_window_elapsed(WindowStartTime) of
         true ->
             ?MODULE:upload_packets(FilePath),
             {noreply, State#state{file_path = generate_file_name(WriteDir)}};
@@ -120,7 +130,7 @@ handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
             lager:warning("packet reporter failed to upload: ~p~n", [Error]),
             error
     end,
-    {noreply, State};
+    {noreply, State#state{upload_window_start_time = UploadTimestamp}};
 handle_cast({start_interval, IntervalDuration}, State = #state{report_interval = ReportInterval}) ->
     {ok, ReportInterval2} = handle_restart_interval(ReportInterval, IntervalDuration),
     {noreply, State#state{report_interval = ReportInterval2}};
@@ -305,11 +315,17 @@ upload_file(AWSClient, FilePath, S3FileName) ->
             {error, upload_failed}
     end.
 
--spec get_packets_by_timestamp(Timestamp :: integer()) -> [term()].
+-spec upload_window_elapsed(StartTime :: timestamp_ms()) -> boolean().
+upload_window_elapsed(StartTime) ->
+    Timestamp = erlang:system_time(millisecond),
+    UploadWindow = application:get_env(hpr, packet_reporter_upload_window, ?DEFAULT_UPLOAD_WINDOW),
+    Timestamp - StartTime >= UploadWindow.
+
+-spec get_packets_by_timestamp(Timestamp :: timestamp_ms()) -> [term()].
 get_packets_by_timestamp(Timestamp) ->
     ets:select(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], ['$2']}]).
 
--spec delete_packets_by_timestamp(Timestamp :: integer()) -> integer().
+-spec delete_packets_by_timestamp(Timestamp :: timestamp_ms()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
     ets:select_delete(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], [true]}]).
 
@@ -359,5 +375,12 @@ pad_u32_test() ->
     ?assertEqual(<<0, 0, 0, 1>>, pad_u32(binary:encode_unsigned(1))),
     ?assertEqual(<<0, 0, 3, 232>>, pad_u32(binary:encode_unsigned(1000))),
     ?assertEqual(<<5, 245, 225, 0>>, pad_u32(binary:encode_unsigned(100000000))).
+
+upload_window_elapsed_test() ->
+    Timestamp = erlang:system_time(millisecond),
+    UploadWindow = application:get_env(hpr, packet_reporter_upload_window, ?DEFAULT_UPLOAD_WINDOW),
+
+    ?assertEqual(false, upload_window_elapsed(Timestamp)),
+    ?assertEqual(true, upload_window_elapsed(Timestamp - UploadWindow)).
 
 -endif.
