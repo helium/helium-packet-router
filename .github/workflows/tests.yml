@@ -146,6 +146,9 @@ jobs:
         ports: ["4566:4566"]
     steps:
       - name: Configure localstack
+        uses: actions/setup-python@v4
+          with:
+            python-version: '3.10' 
         run: | 
           pip install awscli-local[ver1]
           awslocal s3 mb s3://test
