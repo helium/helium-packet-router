@@ -147,8 +147,8 @@ jobs:
     steps:
       - name: Configure localstack
         run: | 
-        pip install awscli-local[ver1]
-        awslocal s3 mb s3://test
+          pip install awscli-local[ver1]
+          awslocal s3 mb s3://test
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
