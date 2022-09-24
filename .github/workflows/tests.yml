@@ -146,7 +146,9 @@ jobs:
         ports: ["4566:4566"]
     steps:
       - name: Configure localstack
-        run: aws mb s3://test-bucket --endpoint-url=http://localhost:4566
+        run: | 
+        pip install awscli-local[ver1]
+        awslocal s3 mb s3://test
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
