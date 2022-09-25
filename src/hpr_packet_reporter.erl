@@ -188,6 +188,12 @@ handle_write(FilePath, WriteOptions) ->
         ],
         "packet reporter processing"
     ),
+    lager:info(
+        [
+            {state, sys:get_state(hpr_packet_reporter)}
+        ],
+        "packet reporter state"
+    ),
     {ok, FileSize, MaxFileSize}.
 
 -spec setup_aws() -> aws_client:aws_client().

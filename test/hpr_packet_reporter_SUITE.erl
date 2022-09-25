@@ -96,8 +96,6 @@ upload_report_test(_Config) ->
     %% Encoded packets are written to a tmp write file
     hpr_packet_reporter:handle_cast(write, State),
 
-    ct:print("Packet Reporter State: ~p~n", [State]),
-
     %% Contents of tmp file are uploaded to S3 (localstack)
     hpr_packet_reporter:handle_cast({upload, FilePath}, State),
 
