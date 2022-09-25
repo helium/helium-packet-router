@@ -147,7 +147,7 @@ jobs:
         volumes:
           - "/tmp/localstack:/tmp/localstack"
           - "/var/run/docker.sock:/var/run/docker.sock"
-          - "./test/scripts:/docker-entrypoint-initaws.d"
+          - "/$(pwd)/test/scripts:/docker-entrypoint-initaws.d"
     steps:
       - name: checkout
         uses: actions/checkout@v2
