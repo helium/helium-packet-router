@@ -138,22 +138,24 @@ jobs:
     concurrency: 
       group: ${{ github.workflow }}-${{ github.ref }}-ct
       cancel-in-progress: true
-    services:
-      localstack:
-        image: localstack/localstack
-        env:
-          SERVICES: s3
-        ports: 
-          - "4566:4566"
-        volumes:
-          - "/var/lib/localstack:/var/lib/localstack"
-          - "/var/run/docker.sock:/var/run/docker.sock"
-          - "/$(pwd)/test/scripts:/docker-entrypoint-initaws.d"
+    # services:
+    #   localstack:
+    #     image: localstack/localstack
+    #     env:
+    #       SERVICES: s3
+    #     ports: 
+    #       - "4566:4566"
+    #     volumes:
+    #       - "/var/lib/localstack:/var/lib/localstack"
+    #       - "/var/run/docker.sock:/var/run/docker.sock"
+    #       - "/$(pwd)/test/scripts:/docker-entrypoint-initaws.d"
     steps:
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
-        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim docker
+      - name: initialize localstack
+        run: docker compose -f docker-compose-local.yaml up -d
       - name: health check
         run: curl 'http://localhost:4566/health'
       - name: rust
