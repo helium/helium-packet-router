@@ -143,7 +143,8 @@ jobs:
         image: localstack/localstack
         env:
           SERVICES: s3
-        ports: ["4566:4566"]
+        ports: 
+          - "4566:4566"
         volumes:
           - "/tmp/localstack:/tmp/localstack"
           - "/var/run/docker.sock:/var/run/docker.sock"
@@ -153,11 +154,8 @@ jobs:
         uses: actions/checkout@v2
       - name: deps
         run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
-      - name: debug
-        run: |
-          curl 'http://localhost:4566/health'
-          ping -c 4 localstack
-          lsof -i -P | grep LISTEN
+      - name: health check
+        run: curl 'http://localhost:4566/health'
       - name: rust
         uses: actions-rs/toolchain@v1
         with:
