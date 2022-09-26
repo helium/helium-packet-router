@@ -146,7 +146,7 @@ jobs:
         ports: 
           - "4566:4566"
         volumes:
-          - "/tmp/localstack:/tmp/localstack"
+          - "/var/lib/localstack:/var/lib/localstack"
           - "/var/run/docker.sock:/var/run/docker.sock"
           - "/$(pwd)/test/scripts:/docker-entrypoint-initaws.d"
     steps:
