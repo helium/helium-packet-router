@@ -151,9 +151,9 @@ jobs:
     steps:
       - name: debug
         run: |
-          echo lsof -i -P | grep LISTEN
-          ping -c 4 localstack
           curl 'http://localhost:4566/health'
+          ping -c 4 localstack
+          lsof -i -P | grep LISTEN
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
