@@ -149,6 +149,11 @@ jobs:
           - "/var/run/docker.sock:/var/run/docker.sock"
           - "/$(pwd)/test/scripts:/docker-entrypoint-initaws.d"
     steps:
+      - name: debug
+        run: |
+          echo lsof -i -P | grep LISTEN
+          ping -c 4 localstack
+          curl 'http://localhost:4566/health'
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
