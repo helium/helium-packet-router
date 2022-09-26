@@ -155,7 +155,9 @@ jobs:
       - name: deps
         run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim docker docker-compose
       - name: initialize localstack
-        run: docker-compose -f docker-compose-local.yaml up
+        run: |
+          cp .env-template .env
+          docker-compose -f docker-compose-local.yaml up
       - name: health check
         run: curl 'http://localhost:4566/health'
       - name: rust
