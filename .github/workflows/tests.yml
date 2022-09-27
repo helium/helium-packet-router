@@ -150,8 +150,9 @@ jobs:
           install-awslocal: 'true'
       - name: localstack
         run: | 
+          localstack status services
           awslocal s3 mb s3://test-bucket
-          aws s3 ls
+          awslocal s3 ls
           curl 'http://localhost:4566/health'
       - name: rust
         uses: actions-rs/toolchain@v1
