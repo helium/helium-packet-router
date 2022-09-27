@@ -91,9 +91,9 @@ deliver_packet(Packet, [Route | Routes]) ->
     %% Protocol:send(...) errors out.
     Resp =
         case Protocol of
-            router ->
+            {router, _} ->
                 hpr_protocol_router:send(Packet, self(), Route);
-            gwmp ->
+            {gwmp, _} ->
                 hpr_protocol_gwmp:send(Packet, self(), Route);
             _OtherProtocol ->
                 lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
