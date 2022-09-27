@@ -82,6 +82,10 @@ handle_call(Msg, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
+%% ------------------------------------------------------------------
+% EUnit tests
+%% ------------------------------------------------------------------
+
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -139,7 +143,7 @@ test_relay_error() ->
     ?assertEqual(empty, check_messages()).
 
 % ------------------------------------------------------------------------------
-% Unit test utils
+% EUnit test utils
 % ------------------------------------------------------------------------------
 
 fake_data() ->

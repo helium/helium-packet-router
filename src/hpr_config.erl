@@ -87,6 +87,10 @@ route_to_devaddr_rows(#route{net_id = NetID, devaddr_ranges = Ranges} = Route) -
 route_to_eui_rows(#route{euis = EUIs} = Route) ->
     [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs].
 
+%% ------------------------------------------------------------------
+% EUnit tests
+%% ------------------------------------------------------------------
+
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").

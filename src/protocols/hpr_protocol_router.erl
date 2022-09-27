@@ -17,6 +17,10 @@ send(PacketUp, GatewayStream, Route) ->
             Err
     end.
 
+%% ------------------------------------------------------------------
+% EUnit tests
+%% ------------------------------------------------------------------
+
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -55,7 +59,7 @@ test_send() ->
     ?assertEqual(1, meck:num_calls(grpc_client, send, 2)).
 
 %% ------------------------------------------------------------------
-%% Private Test Functions
+% EUnit private functions
 %% ------------------------------------------------------------------
 
 host() -> "example-lns.com".

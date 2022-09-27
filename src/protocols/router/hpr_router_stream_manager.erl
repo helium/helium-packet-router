@@ -153,6 +153,10 @@ start_relay(GatewayStream, RouterStream) ->
     {ok, _RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
     ok.
 
+%% ------------------------------------------------------------------
+% EUnit tests
+%% ------------------------------------------------------------------
+
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -225,9 +229,5 @@ test_get_stream() ->
     ),
     ?assertEqual(2, meck:num_calls(hpr_router_connection_manager, get_connection, 1)),
     ?assertEqual(2, meck:num_calls(grpc_client, new_stream, 4)).
-
-% ------------------------------------------------------------------------------
-% Unit test utils
-% ------------------------------------------------------------------------------
 
 -endif.
