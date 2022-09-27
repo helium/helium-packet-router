@@ -124,11 +124,12 @@ grpc_full_flow_downlink_test(_Config) ->
     Payload = base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
     Timestamp = erlang:system_time(millisecond) band 16#FFFF_FFFF,
     DataRate = 'SF11BW125',
+    Frequency = 904_100_000,
     Down = hpr_packet_down:to_record(#{
         payload => Payload,
         rx1 => #{
             timestamp => Timestamp,
-            frequency => 904.1,
+            frequency => Frequency,
             datarate => DataRate
         }
     }),
@@ -152,9 +153,6 @@ grpc_full_flow_downlink_test(_Config) ->
     %% Throw away the headers
     ?assertMatch({headers, _}, grpc_client:rcv(Stream, 500)),
 
-    %% Make sure the downlink received is relatively the same.
-    %% floats will be floats.
-    %% NOTE: future change to proto will be changing frequency from mhz -> hz
     {data, Response} = grpc_client:rcv(Stream, 500),
     ?assert(
         test_utils:match_map(
@@ -162,7 +160,7 @@ grpc_full_flow_downlink_test(_Config) ->
                 payload => Payload,
                 rx1 => #{
                     timestamp => Timestamp,
-                    frequency => fun erlang:is_float/1,
+                    frequency => Frequency,
                     datarate => DataRate
                 }
             },
