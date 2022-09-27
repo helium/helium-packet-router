@@ -37,12 +37,16 @@
 
 -include("semtech_udp.hrl").
 
-%% API
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 -export([
     start_link/1
 ]).
 
-%% gen_server callbacks
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
 -export([
     init/1,
     handle_call/3,
@@ -57,30 +61,36 @@
     socket :: gen_udp:socket()
 }).
 
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
+
 start_link(Args) ->
     case maps:size(Args) of
         0 -> ignore;
         _ -> gen_server:start_link({local, ?MODULE}, ?MODULE, Args, [])
     end.
 
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
+
 init(Args) ->
     #{port := Port, remap := Map} = Args,
-
     {ok, Socket} = gen_udp:open(Port, [binary, {active, true}]),
-
     {ok, #state{
         port = Port,
         remap = Map,
         socket = Socket
     }}.
 
-handle_call(Request, From, State) ->
-    lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
-    {reply, ok, State}.
+-spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
+handle_call(Msg, _From, State) ->
+    {stop, {unimplemented_call, Msg}, State}.
 
-handle_cast(Request, State) ->
-    lager:warning("rcvd unknown cast msg: ~p", [Request]),
-    {noreply, State}.
+-spec handle_cast(Msg, #state{}) -> {stop, {unimplemented_cast, Msg}, #state{}}.
+handle_cast(Msg, State) ->
+    {stop, {unimplemented_cast, Msg}, State}.
 
 handle_info(
     {udp, Socket, Address, Port, IncomingData},
@@ -117,7 +127,6 @@ handle_info(
     end,
     {noreply, State};
 handle_info(_Msg, State) ->
-    lager:info("rcvd unknown info msg: ~p, ~p", [_Msg, State]),
     {noreply, State}.
 
 terminate(_Reason, _State = #state{socket = Socket}) ->

@@ -2,12 +2,16 @@
 
 -behaviour(gen_server).
 
-% API
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 -export([
     start/2
 ]).
 
-% gen_server callbacks
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
 -export([
     init/1,
     handle_continue/2,
@@ -21,9 +25,9 @@
     router_stream :: grpc_client:client_stream()
 }).
 
-% ------------------------------------------------------------------------------
-% API
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
 
 -spec start(
     hpr_router_stream_manager:gateway_stream(),
@@ -33,9 +37,9 @@
 start(GatewayStream, RouterStream) ->
     gen_server:start(?MODULE, [GatewayStream, RouterStream], []).
 
-% ------------------------------------------------------------------------------
-% gen_server callbacks
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
 
 -spec init(list()) -> {ok, #state{}, {continue, relay}}.
 init([GatewayStream, RouterStream]) ->
@@ -77,10 +81,6 @@ handle_call(Msg, _From, State) ->
 -spec handle_cast(Msg, #state{}) -> {stop, {unimplemented_cast, Msg}, #state{}}.
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
-
-% ------------------------------------------------------------------------------
-% Unit tests
-% ------------------------------------------------------------------------------
 
 -ifdef(TEST).
 

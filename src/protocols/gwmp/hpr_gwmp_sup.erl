@@ -4,7 +4,7 @@
 %%% @doc
 %%% @end
 %%%-------------------------------------------------------------------
--module(hpr_gwmp_udp_sup).
+-module(hpr_gwmp_sup).
 
 -behaviour(supervisor).
 
@@ -16,7 +16,7 @@
 ]).
 
 -define(UDP_WORKER, hpr_gwmp_worker).
--define(ETS, hpr_gwmp_udp_sup_ets).
+-define(ETS, hpr_gwmp_sup_ets).
 
 -define(WORKER(I), #{
     id => I,
@@ -75,9 +75,9 @@ init([]) ->
     ?ETS = ets:new(?ETS, [public, named_table, set]),
     {ok, {?FLAGS, [?WORKER(?UDP_WORKER)]}}.
 
-%%====================================================================
-%% Internal Functions
-%%====================================================================
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
 -spec start_worker(PubKeyBin :: binary(), Args :: map()) ->
     {ok, pid()} | {error, any()}.

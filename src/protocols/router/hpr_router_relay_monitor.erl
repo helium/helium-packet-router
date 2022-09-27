@@ -2,12 +2,16 @@
 
 -behaviour(gen_server).
 
-% API
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 -export([
     start/3
 ]).
 
-% gen_server callbacks
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
 -export([
     init/1,
     handle_call/3,
@@ -33,9 +37,9 @@
     router_stream :: grpc_client:client_stream()
 }).
 
-% ------------------------------------------------------------------------------
-% API
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
 
 -spec start(
     relay(),
@@ -46,9 +50,9 @@
 start(RelayPid, GatewayStream, RouterStream) ->
     gen_server:start(?MODULE, [RelayPid, GatewayStream, RouterStream], []).
 
-% ------------------------------------------------------------------------------
-% gen_server callbacks
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
 
 -spec init(list()) -> {ok, #state{}}.
 init([Relay, GatewayStream, RouterStream]) ->
@@ -108,9 +112,9 @@ handle_info({{'DOWN', relay}, _, process, RouterStream, Reason}, State) ->
     grpc_client:stop_stream(State#state.router_stream),
     {stop, process_exit_status(router_stream, RouterStream, Reason), State}.
 
-% ------------------------------------------------------------------------------
-% Private functions
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
 -spec process_exit_status(
     process_name(), process_type(), Reason
@@ -135,10 +139,6 @@ stop_relay(Relay) ->
     % brutal kill relay it is blocked waiting for data from the router.
     exit(Relay, kill),
     ok.
-
-% ------------------------------------------------------------------------------
-% Unit tests
-% ------------------------------------------------------------------------------
 
 -ifdef(TEST).
 

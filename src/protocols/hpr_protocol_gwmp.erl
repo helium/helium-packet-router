@@ -1,6 +1,4 @@
--module(hpr_gwmp_router).
-
--include("../grpc/autogen/server/packet_router_pb.hrl").
+-module(hpr_protocol_gwmp).
 
 -export([send/3]).
 
@@ -18,7 +16,7 @@
 send(PacketUp, Stream, Route) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
 
-    case hpr_gwmp_udp_sup:maybe_start_worker(Gateway, #{}) of
+    case hpr_gwmp_sup:maybe_start_worker(Gateway, #{}) of
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
@@ -37,23 +35,21 @@ send(PacketUp, Stream, Route) ->
 %% Internal
 %% ===================================================================
 
--spec txpk_to_packet_down(TxPkBin :: binary()) -> #packet_router_packet_down_v1_pb{}.
+-spec txpk_to_packet_down(TxPkBin :: binary()) -> hpr_packet_down:packet().
 txpk_to_packet_down(TxPkBin) ->
     TxPk = semtech_udp:json_data(TxPkBin),
     Map = maps:get(<<"txpk">>, TxPk),
     JSONData0 = base64:decode(maps:get(<<"data">>, Map)),
-
-    Down = #packet_router_packet_down_v1_pb{
-        payload = JSONData0,
-        rx1 = #window_v1_pb{
-            timestamp = maps:get(<<"tmst">>, Map),
-            frequency = maps:get(<<"freq">>, Map),
-            datarate = maps:get(<<"datr">>, Map)
+    hpr_packet_down:to_record(#{
+        payload => JSONData0,
+        rx1 => #{
+            timestamp => maps:get(<<"tmst">>, Map),
+            frequency => maps:get(<<"freq">>, Map),
+            datarate => maps:get(<<"datr">>, Map)
         },
         %% TODO: rx2 windows
-        rx2 = undefined
-    },
-    Down.
+        rx2 => undefined
+    }).
 
 -spec packet_up_to_push_data(
     PacketUp :: hpr_packet_up:packet(),

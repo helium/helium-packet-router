@@ -82,6 +82,7 @@ lookup_devaddr(DevAddr) ->
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
+
 init(#{base_dir := BaseDir} = _Args) ->
     File = filename:join(BaseDir, erlang:atom_to_list(?DETS)),
     ok = filelib:ensure_dir(File),
@@ -109,12 +110,15 @@ handle_continue(?INIT_ASYNC, State) ->
 handle_continue(_Msg, State) ->
     {noreply, State}.
 
-handle_call(_Msg, _From, State) ->
-    {reply, ok, State}.
+-spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
+handle_call(Msg, _From, State) ->
+    {stop, {unimplemented_call, Msg}, State}.
 
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+-spec handle_cast(Msg, #state{}) -> {stop, {unimplemented_cast, Msg}, #state{}}.
+handle_cast(Msg, State) ->
+    {stop, {unimplemented_cast, Msg}, State}.
 
+-spec handle_info(_Msg, #state{}) -> {noreply, #state{}}.
 handle_info(_Msg, State) ->
     {noreply, State}.
 

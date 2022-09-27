@@ -2,13 +2,17 @@
 
 -behaviour(gen_server).
 
-% API
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 -export([
     start_link/0,
     get_connection/1
 ]).
 
-% gen_server callbacks
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
 -export([
     init/1,
     handle_call/3,
@@ -31,25 +35,24 @@
 
 -define(CONNECTION_TAB, hpr_router_connection_manager_tab).
 
-% ------------------------------------------------------------------------------
-% API
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
 
 -spec start_link() -> {ok, pid()}.
-%% @doc Start this service.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--spec get_connection(Lns :: lns()) -> {ok, grpc_client:connection()} | {error, any()}.
 %% @doc Return an existing connection to the Router at Lns, or create a
 %% new connection if one doesn't exist.
+-spec get_connection(Lns :: lns()) -> {ok, grpc_client:connection()} | {error, any()}.
 get_connection(Lns) ->
     DecodedLns = decode_lns(Lns),
     gen_server:call(?MODULE, {get_connection, Lns, DecodedLns}).
 
-% ------------------------------------------------------------------------------
-% gen_server callbacks
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
 
 -spec init([]) -> {ok, #state{}}.
 init([]) ->
@@ -76,9 +79,9 @@ handle_info({{'DOWN', Lns}, _Mon, process, _Pid, _ExitReason}, State) ->
     ets:delete(State#state.connection_table, Lns),
     {noreply, State}.
 
-% ------------------------------------------------------------------------------
-% Private functions
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
 -spec init_ets() -> ets:tab().
 init_ets() ->
