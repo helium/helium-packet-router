@@ -57,11 +57,10 @@ new(NetID, DevAddrRanges, EUIs, LNS, ProtocolType, OUI) ->
 
 lns_to_ip_and_port(LNS) ->
     case binary:split(LNS, <<":">>) of
+        [Address] ->
+            {Address, 80};
         [Address, Port] ->
-            {
-                erlang:binary_to_list(Address),
-                erlang:binary_to_integer(Port)
-            };
+            {Address, erlang:binary_to_integer(Port)};
         Err ->
             throw({route_to_dest_err, Err})
     end.
@@ -95,7 +94,7 @@ lns(Route) ->
             {gwmp, #config_protocol_gwmp_pb{ip = I, port = P}} -> {I, P};
             {http_roaming, #config_protocol_http_roaming_pb{ip = I, port = P}} -> {I, P}
         end,
-    <<IP/binary, (erlang:integer_to_binary(Port))/binary>>.
+    <<IP/binary, $:, (erlang:integer_to_binary(Port))/binary>>.
 
 -spec protocol(Route :: route()) -> protocol().
 protocol(Route) ->
