@@ -14,8 +14,9 @@
 %% ------------------------------------------------------------------
 -export([
     init/1,
-    handle_cast/2,
+    handle_continue/2,
     handle_call/3,
+    handle_cast/2,
     handle_info/2,
     terminate/2
 ]).
@@ -38,6 +39,8 @@
     stream :: grpc_client:stream() | undefined,
     dets :: reference() | undefined
 }).
+
+-define(RCV_CFG_UPDATE, receive_config_update).
 
 -type transport() :: 'tcp' | 'ssl'.
 
@@ -99,35 +102,28 @@ start_link(
 %% ------------------------------------------------------------------
 
 init([#state{} = State1]) ->
-    lager:info("Starting hpr_config_worker ~p.", [self()]),
+    lager:info("starting hpr_config_worker"),
     State2 = maybe_init_dets(State1),
     ok = maybe_load_from_dets(State2),
-    connect(),
-    {ok, State2}.
+    {ok, State2, {continue, connect}}.
 
-handle_cast(connect, #state{service = Service} = State) ->
+handle_continue(connect, #state{service = Service} = State) ->
     #config_service{
         transport = Transport,
         host = Host,
         port = Port,
         retry_interval = Interval
     } = Service,
-    lager:info("Connecting to config service."),
+    lager:info("connecting to config service= ~p ~p", [Host, Port]),
     case grpc_client:connect(Transport, Host, Port) of
         {ok, Connection} ->
-            init_stream(),
-            {noreply, State#state{connection = Connection}};
+            {noreply, State#state{connection = Connection}, {continue, init_stream}};
         {error, E} ->
-            lager:error("Error connecting to config service: ~p.", [E]),
-
-            %% TODO:  Use a backoff strategy here.
-            lager:warning("Sleeping ~p milliseconds.", [Interval]),
+            lager:error("error connecting to config service: ~p, sleeping", [E, Interval]),
             timer:sleep(Interval),
-
-            connect(),
-            {noreply, State}
+            {noreply, State, {continue, connect}}
     end;
-handle_cast(
+handle_continue(
     init_stream,
     #state{
         service = Service,
@@ -137,104 +133,54 @@ handle_cast(
     #config_service{
         svcname = SvcName,
         rpcname = RpcName
-        % retry_interval = Interval
     } = Service,
-    case grpc_client:new_stream(Connection, SvcName, RpcName, config_pb) of
-        {ok, Stream} ->
-            send_routes_req(),
-            {noreply, State#state{stream = Stream}}
-        % _E ->
-        %     lager:error("Error creating routes stream: ~p.", [_E]),
-
-        %     %% TODO:  Use a backoff strategry here.
-        %     lager:warning("Sleeping ~p milliseconds.", [Interval]),
-        %     timer:sleep(Interval),
-
-        %     reconnect(),
-        %     {noreply, State}
-    end;
-handle_cast(reconnect, #state{connection = Connection} = State) ->
-    _ = grpc_client:stop_connection(Connection),
-    connect(),
-    {noreply, State#state{connection = undefined, stream = undefined}};
-handle_cast(send_routes_req, #state{stream = Stream} = State) ->
-    %% We send a RoutesReqV1 to the server to start the stream of
-    %% config updates.  RoutesReqV1 is essentially an "empty envelope"
-    %% as it has no fields for us to fill in.  Thus, we send an empty
-    %% map.
-
-    %% Note that we must use grpc_client:send_last/2 to indicate to
-    %% the server that we are done talking.  If we use
-    %% grpc_client:send/2, the server will not respond.
-
+    {ok, Stream} = grpc_client:new_stream(Connection, SvcName, RpcName, config_pb),
     ok = grpc_client:send_last(Stream, #{}),
-    receive_config_update(),
-    {noreply, State};
-handle_cast(receive_config_update, #state{stream = Stream, service = Service} = State) ->
+    self() ! ?RCV_CFG_UPDATE,
+    {noreply, State#state{stream = Stream}}.
+
+handle_call(Msg, _From, State) ->
+    {stop, {unimplemented_call, Msg}, State}.
+
+handle_cast(Msg, State) ->
+    {stop, {unimplemented_cast, Msg}, State}.
+
+handle_info(
+    ?RCV_CFG_UPDATE, #state{connection = Connection, stream = Stream, service = Service} = State
+) ->
     #config_service{receive_timeout = RcvTimeout} = Service,
     case grpc_client:rcv(Stream, RcvTimeout) of
-        {headers, Headers} ->
-            lager:debug("Received headers: ~p", [Headers]),
-            receive_config_update(),
+        {headers, _Headers} ->
+            self() ! ?RCV_CFG_UPDATE,
             {noreply, State};
         {data, RoutesResV1} ->
-            lager:info("Received a config update."),
-            lager:debug("Config update: ~p", [RoutesResV1]),
+            lager:debug("config update: ~p", [RoutesResV1]),
             ok = process_config_update(RoutesResV1, State),
-            receive_config_update(),
+            self() ! ?RCV_CFG_UPDATE,
             {noreply, State};
         eof ->
-            lager:info("Received eof from config service.", []),
-            reconnect(),
-            {noreply, State};
+            lager:info("received eof from config service.", []),
+            _ = grpc_client:stop_connection(Connection),
+            {noreply, State, {continue, connect}};
         {error, timeout} ->
-            %% No update received.  Check for system messages and resume waiting.
-            receive_config_update(),
+            self() ! ?RCV_CFG_UPDATE,
             {noreply, State};
         {error, E} ->
-            lager:error("Error receiving config update: ~p.  Exiting.", [E]),
+            lager:error("error receiving config update: ~p.  Exiting.", [E]),
             {stop, {error, E}}
-    end.
-
-handle_call(Msg, From, State) ->
-    lager:error("Received unexpected call: ~p from ~p.  This is a bug.", [Msg, From]),
-    {noreply, State}.
-
-handle_info({'EXIT', Pid, Reason}, State) ->
-    %% 'EXIT' messages are likely the result of disconnects from the config server.
-    lager:warning("Received EXIT from ~p with reason ~p.", [Pid, Reason]),
-    {noreply, State};
+    end;
 handle_info(Msg, State) ->
-    lager:error("Unexpected info message: ~p.", [Msg]),
+    lager:warning("unexpected info message: ~p.", [Msg]),
     {noreply, State}.
 
-terminate(Reason, _State) ->
+terminate(Reason, #state{connection = Connection}) ->
+    _ = grpc_client:stop_connection(Connection),
     lager:info("hpr_config_worker terminating with reason ~p.", [Reason]),
     ok.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
--spec connect() -> ok.
-connect() ->
-    gen_server:cast(self(), connect).
-
--spec reconnect() -> ok.
-reconnect() ->
-    gen_server:cast(self(), reconnect).
-
--spec init_stream() -> ok.
-init_stream() ->
-    gen_server:cast(self(), init_stream).
-
--spec send_routes_req() -> ok.
-send_routes_req() ->
-    gen_server:cast(self(), send_routes_req).
-
--spec receive_config_update() -> ok.
-receive_config_update() ->
-    gen_server:cast(self(), receive_config_update).
 
 -spec process_config_update(routes_req_v1_map(), #state{}) -> ok.
 process_config_update(RoutesResV1, State) ->
