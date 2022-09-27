@@ -142,11 +142,17 @@ jobs:
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
-        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim docker docker-compose
-      - name: initialize localstack
-        run: docker-compose -f docker-compose-ct.yaml up -d
-      - name: health check
-        run: curl 'http://localhost:4566/health'
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
+      - name: start localstack
+        uses: HarshCasper/setup-localstack@v0.1.1
+        with:
+          image-tag: 'latest'
+          install-awslocal: 'true'
+      - name: localstack
+        run: | 
+          awslocal s3 mb s3://test-bucket
+          aws s3 ls
+          curl 'http://localhost:4566/health'
       - name: rust
         uses: actions-rs/toolchain@v1
         with:
