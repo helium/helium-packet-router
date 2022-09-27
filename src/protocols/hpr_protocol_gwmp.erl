@@ -47,7 +47,7 @@ txpk_to_packet_down(TxPkBin) ->
             frequency => maps:get(<<"freq">>, Map),
             datarate => maps:get(<<"datr">>, Map)
         },
-        %% TODO: rx2 windows
+        %% No rx2 windows for udp
         rx2 => undefined
     }).
 
