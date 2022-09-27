@@ -365,7 +365,7 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
     ok.
 handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream) ->
     %% Send downlink to grpc handler
-    PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
+    PacketDown = hpr_protocol_gwmp:txpk_to_packet_down(Data),
     Stream ! {reply, PacketDown},
 
     %% Ack the downlink
@@ -406,7 +406,7 @@ maybe_remap_dest(Map, {{A, B, C, D}, Port}, <<"REMAP: ", Data/binary>>) ->
     Packet = erlang:list_to_binary(Packet0),
     Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
     Token = semtech_udp:token(Packet),
-    {Map#{Key => hpr_gwmp_router:route_to_dest(New)}, {Token, Packet}};
+    {Map#{Key => hpr_protocol_gwmp:route_to_dest(New)}, {Token, Packet}};
 maybe_remap_dest(_, _, _) ->
     noop.
 

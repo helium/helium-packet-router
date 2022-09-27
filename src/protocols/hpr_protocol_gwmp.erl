@@ -1,4 +1,4 @@
--module(hpr_gwmp_router).
+-module(hpr_protocol_gwmp).
 
 -include("../grpc/autogen/server/packet_router_pb.hrl").
 
