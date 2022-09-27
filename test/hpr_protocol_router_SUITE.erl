@@ -118,7 +118,7 @@ grpc_full_flow_downlink_test(_Config) ->
         },
         listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
     }),
-    ok = hpr_routing_config_worker:insert(test_route()),
+    ok = hpr_config:insert_route(test_route()),
 
     %% Queue up a downlink from the testing server
     Payload = base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
@@ -206,7 +206,7 @@ grpc_full_flow_send_test(_Config) ->
     ),
 
     %% Insert the matching route for the test packet
-    ok = hpr_routing_config_worker:insert(test_route()),
+    ok = hpr_config:insert_route(test_route()),
     meck:new(hpr_gateway_service, [passthrough]),
 
     {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
@@ -267,7 +267,7 @@ grpc_full_flow_connection_refused_test(_Config) ->
     }),
 
     %% Insert the matching route for the test packet
-    ok = hpr_routing_config_worker:insert(test_route()),
+    ok = hpr_config:insert_route(test_route()),
 
     {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
     {ok, Stream} = grpc_client:new_stream(

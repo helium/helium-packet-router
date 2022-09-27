@@ -40,14 +40,14 @@ init([]) ->
     lager:info("sup init"),
 
     ok = hpr_routing:init(),
-    ok = hpr_config_db:init(),
+    ok = hpr_config:init(),
 
     RedirectMap = application:get_env(hpr, redirect_by_region, #{}),
     ConfigWorkerConfig = application:get_env(hpr, routing_config_worker, #{enabled => false}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
-        ?WORKER(hpr_routing_config_worker, [ConfigWorkerConfig]),
+        ?WORKER(hpr_config_worker, [ConfigWorkerConfig]),
         ?SUP(hpr_gwmp_sup, []),
         ?WORKER(hpr_gwmp_redirect_worker, [RedirectMap]),
         ?WORKER(hpr_router_connection_manager, []),

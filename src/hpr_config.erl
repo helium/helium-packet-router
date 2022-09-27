@@ -1,4 +1,4 @@
--module(hpr_config_db).
+-module(hpr_config).
 
 -export([
     init/0,
@@ -14,16 +14,19 @@
 -define(DEVADDRS_ETS, hpr_config_routes_by_devaddr).
 -define(EUIS_ETS, hpr_config_routes_by_eui).
 
+-spec init() -> ok.
 init() ->
     ?DEVADDRS_ETS = ets:new(?DEVADDRS_ETS, [public, named_table, bag, {read_concurrency, true}]),
     ?EUIS_ETS = ets:new(?EUIS_ETS, [public, named_table, bag, {read_concurrency, true}]),
     ok.
 
+-spec stop() -> ok.
 stop() ->
     true = ets:delete(?DEVADDRS_ETS),
     true = ets:delete(?EUIS_ETS),
     ok.
 
+-spec update_routes(map()) -> ok.
 update_routes(#{routes := Routes}) ->
     {NewDevaddrRows, NewEUIRows} = lists:foldl(
         fun(RouteConfig, {DevaddrRowsAcc, EUIRowsAcc}) ->
@@ -41,19 +44,15 @@ update_routes(#{routes := Routes}) ->
     true = ets:insert(?EUIS_ETS, NewEUIRows),
     ok.
 
-insert_route(Route = #route{}) ->
+-spec insert_route(Route :: route()) -> ok.
+insert_route(#route{} = Route) ->
     DevaddrRecords = route_to_devaddr_rows(Route),
     EUIRecords = route_to_eui_rows(Route),
     true = ets:insert(?DEVADDRS_ETS, DevaddrRecords),
     true = ets:insert(?EUIS_ETS, EUIRecords),
     ok.
 
-route_to_devaddr_rows(#route{net_id = NetID, devaddr_ranges = Ranges} = Route) ->
-    [{{NetID, Start, End}, Route} || {Start, End} <- Ranges].
-
-route_to_eui_rows(#route{euis = EUIs} = Route) ->
-    [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs].
-
+-spec lookup_devaddr(Devaddr :: non_neg_integer()) -> list(route()).
 lookup_devaddr(Devaddr) ->
     {ok, NetID} = lora_subnet:parse_netid(Devaddr, big),
     MS = [
@@ -68,12 +67,25 @@ lookup_devaddr(Devaddr) ->
     ],
     ets:select(?DEVADDRS_ETS, MS).
 
+-spec lookup_eui(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) -> list(route()).
 lookup_eui(AppEUI, 0) ->
     Routes = ets:lookup(?EUIS_ETS, {AppEUI, 0}),
     [Route || {_, Route} <- Routes];
 lookup_eui(AppEUI, DevEUI) ->
     Routes = ets:lookup(?EUIS_ETS, {AppEUI, DevEUI}),
     [Route || {_, Route} <- Routes] ++ lookup_eui(AppEUI, 0).
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
+-spec route_to_devaddr_rows(Route :: route()) -> list().
+route_to_devaddr_rows(#route{net_id = NetID, devaddr_ranges = Ranges} = Route) ->
+    [{{NetID, Start, End}, Route} || {Start, End} <- Ranges].
+
+-spec route_to_eui_rows(Route :: route()) -> list().
+route_to_eui_rows(#route{euis = EUIs} = Route) ->
+    [{{AppEUI, DevEUI}, Route} || {AppEUI, DevEUI} <- EUIs].
 
 -ifdef(TEST).
 

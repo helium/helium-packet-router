@@ -76,7 +76,7 @@ join_req_test(_Config) ->
         router,
         1
     ),
-    ok = hpr_config_db:insert_route(Route),
+    ok = hpr_config:insert_route(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
