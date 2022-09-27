@@ -29,6 +29,8 @@
     connection :: grpc_client:connection()
 }).
 
+-define(CONNECTION_TAB, hpr_router_connection_manager_tab).
+
 % ------------------------------------------------------------------------------
 % API
 % ------------------------------------------------------------------------------
@@ -86,7 +88,7 @@ init_ets() ->
 init_ets(Options) ->
     % [#connection{}]
     ets:new(
-        connection,
+        ?CONNECTION_TAB,
         Options ++ [set, {keypos, #connection.lns}]
     ).
 
@@ -188,13 +190,13 @@ test_get_connection() ->
 
     % first get makes connection
     {ok, GrpcConnection0} =
-        do_get_connection(Lns, Endpoint, connection),
+        do_get_connection(Lns, Endpoint, ?CONNECTION_TAB),
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)),
     ?assertEqual(FakeGrpcConnection, GrpcConnection0),
 
     % second reservation doesn't reconnect and returns the same connection
     {ok, GrpcConnection1} =
-        do_get_connection(Lns, Endpoint, connection),
+        do_get_connection(Lns, Endpoint, ?CONNECTION_TAB),
     ?assertEqual(FakeGrpcConnection, GrpcConnection1),
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)).
 
@@ -216,7 +218,7 @@ test_dead_http_connection() ->
     ),
 
     {ok, _} =
-        do_get_connection(Lns, Endpoint, connection),
+        do_get_connection(Lns, Endpoint, ?CONNECTION_TAB),
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)),
 
     % kill connection
@@ -249,6 +251,6 @@ fake_http_connection_pid() ->
     ).
 
 reset_ets() ->
-    ets:delete_all_objects(connection).
+    ets:delete_all_objects(?CONNECTION_TAB).
 
 -endif.

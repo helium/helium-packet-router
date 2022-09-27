@@ -1,7 +1,5 @@
 -module(hpr_protocol_router).
 
--include("../grpc/autogen/server/packet_router_pb.hrl").
-
 -export([send/3]).
 
 % ------------------------------------------------------------------------------

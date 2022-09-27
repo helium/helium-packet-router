@@ -37,6 +37,8 @@
     router_stream :: grpc_client:client_stream()
 }).
 
+-define(STREAM_TAB, hpr_router_stream_manager_tab).
+
 % ------------------------------------------------------------------------------
 % API
 % ------------------------------------------------------------------------------
@@ -97,7 +99,7 @@ init_ets() ->
 init_ets(Options) ->
     % [#stream{}]
     ets:new(
-        stream_table,
+        ?STREAM_TAB,
         Options ++ [set, {keypos, #stream.gateway_router_map}]
     ).
 
@@ -203,7 +205,7 @@ test_get_stream() ->
 
     % First get_stream opens connection and stream.
     {ok, GrpcStream0} = do_get_stream(
-        GatewayStream, Lns1, Service, Rpc, DecodeModule, stream_table
+        GatewayStream, Lns1, Service, Rpc, DecodeModule, ?STREAM_TAB
     ),
 
     ?assertEqual(FakeGrpcStream, GrpcStream0),
@@ -212,14 +214,14 @@ test_get_stream() ->
 
     % second get_stream doesn't reconnect
     {ok, _GrpcStream1} = do_get_stream(
-        GatewayStream, Lns1, Service, Rpc, DecodeModule, stream_table
+        GatewayStream, Lns1, Service, Rpc, DecodeModule, ?STREAM_TAB
     ),
     ?assertEqual(1, meck:num_calls(hpr_router_connection_manager, get_connection, 1)),
     ?assertEqual(1, meck:num_calls(grpc_client, new_stream, 4)),
 
     % different Lns with the same gateway connects again
     {ok, _GrpcStream2} = do_get_stream(
-        GatewayStream, Lns2, Service, Rpc, DecodeModule, stream_table
+        GatewayStream, Lns2, Service, Rpc, DecodeModule, ?STREAM_TAB
     ),
     ?assertEqual(2, meck:num_calls(hpr_router_connection_manager, get_connection, 1)),
     ?assertEqual(2, meck:num_calls(grpc_client, new_stream, 4)).

@@ -53,9 +53,22 @@ init([GatewayStream, RouterStream]) ->
         {continue, relay}
     }.
 
--spec handle_continue(relay, #state{}) -> {noreply, #state{}, {continue, relay}}.
+-spec handle_continue(relay, #state{}) ->
+    {noreply, #state{}, {continue, relay}}
+    | {stop, normal, #state{}}
+    | {stop, {error, any()}, #state{}}.
 handle_continue(relay, State) ->
-    handle_rcv_response(grpc_client:rcv(State#state.router_stream), State).
+    case grpc_client:rcv(State#state.router_stream) of
+        {data, Reply} ->
+            State#state.gateway_stream ! {router_reply, Reply},
+            {noreply, State, {continue, relay}};
+        {headers, _} ->
+            {noreply, State, {continue, relay}};
+        eof ->
+            {stop, normal, State};
+        {error, _} = Error ->
+            {stop, Error, State}
+    end.
 
 -spec handle_call(Msg, {pid(), any()}, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
 handle_call(Msg, _From, State) ->
@@ -64,23 +77,6 @@ handle_call(Msg, _From, State) ->
 -spec handle_cast(Msg, #state{}) -> {stop, {unimplemented_cast, Msg}, #state{}}.
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
-
-% ------------------------------------------------------------------------------
-% Private functions
-% ------------------------------------------------------------------------------
-
--spec handle_rcv_response(grpc_client:rcv_response(), #state{}) ->
-    {noreply, #state{}, {continue, relay}}
-    | {stop, {error, any()}, #state{}}.
-handle_rcv_response({data, Reply}, State) ->
-    State#state.gateway_stream ! {router_reply, Reply},
-    {noreply, State, {continue, relay}};
-handle_rcv_response({headers, _}, State) ->
-    {noreply, State, {continue, relay}};
-handle_rcv_response(eof, State) ->
-    {stop, normal, State};
-handle_rcv_response({error, _} = Error, State) ->
-    {stop, Error, State}.
 
 % ------------------------------------------------------------------------------
 % Unit tests
