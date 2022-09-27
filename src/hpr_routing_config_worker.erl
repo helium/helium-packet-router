@@ -304,7 +304,7 @@ init_dets(BaseDir) ->
         1
     ),
     Route2 = hpr_route:new(
-        NetID, [], [{2, 1}, {3, 0}], <<"lsn.lora.com>">>, http, 2
+        NetID, [], [{2, 1}, {3, 0}], <<"lsn.lora.com>">>, http_roaming, 2
     ),
     ok = dets:insert(?DETS, [{1, Route1}, {2, Route2}]),
     ok = dets:close(?DETS),

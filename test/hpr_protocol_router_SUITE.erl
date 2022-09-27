@@ -124,11 +124,12 @@ grpc_full_flow_downlink_test(_Config) ->
     Payload = base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
     Timestamp = erlang:system_time(millisecond) band 16#FFFF_FFFF,
     DataRate = 'SF11BW125',
+    Frequency = 904_100_000,
     Down = hpr_packet_down:to_record(#{
         payload => Payload,
         rx1 => #{
             timestamp => Timestamp,
-            frequency => 904.1,
+            frequency => Frequency,
             datarate => DataRate
         }
     }),
@@ -152,9 +153,6 @@ grpc_full_flow_downlink_test(_Config) ->
     %% Throw away the headers
     ?assertMatch({headers, _}, grpc_client:rcv(Stream, 500)),
 
-    %% Make sure the downlink received is relatively the same.
-    %% floats will be floats.
-    %% NOTE: future change to proto will be changing frequency from mhz -> hz
     {data, Response} = grpc_client:rcv(Stream, 500),
     ?assert(
         test_utils:match_map(
@@ -162,7 +160,7 @@ grpc_full_flow_downlink_test(_Config) ->
                 payload => Payload,
                 rx1 => #{
                     timestamp => Timestamp,
-                    frequency => fun erlang:is_float/1,
+                    frequency => Frequency,
                     datarate => DataRate
                 }
             },
@@ -304,19 +302,31 @@ grpc_full_flow_connection_refused_test(_Config) ->
 %% ===================================================================
 
 test_packet() ->
-    {packet_router_packet_up_v1_pb,
+    {
+        packet_router_packet_up_v1_pb,
         <<0, 55, 148, 187, 74, 220, 108, 33, 11, 133, 65, 148, 104, 147, 177, 26, 124, 43, 169, 155,
             182, 228, 95>>,
-        552140, 0, 904.7000122070312, 'SF10BW125', 5.5, 'US915', 0,
-        <<1, 131, 45, 83, 233, 204, 91, 71, 221, 213, 157, 129, 213, 219, 31, 62, 233, 186, 49, 28,
-            183, 141, 0, 52, 52, 175, 168, 41, 37, 8, 230, 89, 83>>,
-        <<192, 249, 98, 190, 86, 74, 255, 124, 33, 190, 95, 141, 9, 173, 111, 180, 97, 42, 203, 136,
-            11, 36, 144, 4, 128, 6, 190, 253, 153, 99, 3, 180, 161, 76, 88, 90, 106, 200, 160, 115,
-            22, 81, 211, 37, 134, 14, 8, 99, 226, 1, 172, 157, 67, 170, 203, 246, 21, 250, 191, 236,
-            93, 230, 221, 9>>}.
+        1664302882470,
+        0,
+        904700012,
+        'SF10BW125',
+        5.5,
+        'US915',
+        0,
+        <<0, 106, 152, 166, 157, 156, 48, 101, 22, 212, 221, 120, 200, 146, 186, 112, 220, 64, 11,
+            194, 219, 213, 8, 12, 240, 111, 23, 167, 28, 57, 242, 244, 222>>,
+        <<48, 70, 2, 33, 0, 138, 89, 109, 110, 139, 188, 36, 99, 176, 239, 254, 141, 73, 13, 204,
+            110, 139, 248, 200, 250, 209, 218, 168, 183, 92, 190, 212, 202, 17, 78, 250, 95, 2, 33,
+            0, 142, 149, 198, 0, 113, 83, 115, 99, 67, 245, 98, 243, 147, 71, 12, 112, 78, 181, 25,
+            153, 65, 66, 240, 124, 85, 151, 38, 207, 172, 107, 9, 218>>
+    }.
 
 test_route() ->
-    {packet_router_route_v1_pb, 12582995,
-        [{packet_router_route_devaddr_range_v1_pb, 0, 4294967295}],
-        [{packet_router_route_eui_v1_pb, 802041902051071031, 8942655256770396549}],
-        <<"127.0.0.1:8082">>, router, 4020}.
+    hpr_route:new(
+        12582995,
+        [{0, 4294967295}],
+        [{802041902051071031, 8942655256770396549}],
+        <<"127.0.0.1:8082">>,
+        router,
+        4020
+    ).

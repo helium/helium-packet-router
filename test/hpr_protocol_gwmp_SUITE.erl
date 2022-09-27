@@ -414,7 +414,7 @@ fake_join_up_packet() ->
                 110, 239, 137, 95>>,
         timestamp = 620124,
         rssi = 112,
-        frequency_mhz = 903.9000244140625,
+        frequency = 903_900_024,
         datarate = 'SF10BW125',
         snr = 5.5,
         region = 'US915',
