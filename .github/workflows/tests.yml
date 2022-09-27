@@ -155,8 +155,8 @@ jobs:
           cat /etc/hosts
           netstat -ltp
           lsof -i@localhost
-          ping 127.0.0.1:4665 -w 2
-          localstack status services
+          ping 127.0.0.1:4566 -w 2
+          curl 'http://127.0.0.1:4566/health'
           awslocal s3 mb s3://test-bucket
           awslocal s3 ls
       - name: rust
