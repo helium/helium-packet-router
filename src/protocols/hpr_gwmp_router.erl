@@ -12,7 +12,7 @@
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    Stream :: grpcbox_stream:t(),
+    Stream :: pid(),
     Routes :: hpr_route:route()
 ) -> ok | {error, any()}.
 send(PacketUp, Stream, Route) ->

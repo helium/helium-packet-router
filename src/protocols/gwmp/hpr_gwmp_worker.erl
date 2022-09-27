@@ -43,7 +43,7 @@
     pubkeybin :: libp2p_crypto:pubkey_bin(),
     socket :: gen_udp:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
-    response_stream :: undefined | tuple(),
+    response_stream :: undefined | pid(),
     pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
     shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()},
@@ -60,11 +60,11 @@ start_link(Args) ->
 -spec push_data(
     WorkerPid :: pid(),
     Data :: {Token :: binary(), Payload :: binary()},
-    StreamHandler :: grpcbox_stream:t(),
+    Stream :: pid(),
     SocketDest :: socket_dest()
 ) -> ok | {error, any()}.
-push_data(WorkerPid, Data, StreamHandler, SocketDest) ->
-    gen_server:cast(WorkerPid, {push_data, Data, StreamHandler, SocketDest}).
+push_data(WorkerPid, Data, Stream, SocketDest) ->
+    gen_server:cast(WorkerPid, {push_data, Data, Stream, SocketDest}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -104,7 +104,7 @@ handle_call(Request, From, State) ->
     {reply, ok, State}.
 
 handle_cast(
-    {push_data, _Data = {Token, Payload}, StreamHandler, SocketDest0},
+    {push_data, _Data = {Token, Payload}, Stream, SocketDest0},
     #state{
         push_data = PushData,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
@@ -125,7 +125,7 @@ handle_cast(
 
     {noreply, State#state{
         push_data = NewPushData,
-        response_stream = StreamHandler,
+        response_stream = Stream,
         shutdown_timer = NewShutdownTimer
     }};
 handle_cast(Request, State) ->
@@ -222,7 +222,7 @@ handle_udp(
         pull_data_timer = PullDataTimer,
         pull_data = PullDataMap0,
         socket = Socket,
-        response_stream = StreamHandler,
+        response_stream = Stream,
         pubkeybin = PubKeyBin,
         dest_remap = DestMap0
     } = State0
@@ -236,7 +236,7 @@ handle_udp(
                     {DestMap1, Resend} ->
                         {{A, B, C, D}, Port} = DataSrc,
                         Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
-                        ?MODULE:push_data(self(), Resend, StreamHandler, maps:get(Key, DestMap1)),
+                        ?MODULE:push_data(self(), Resend, Stream, maps:get(Key, DestMap1)),
                         State0#state{dest_remap = DestMap1}
                 end;
             _ ->
@@ -248,7 +248,7 @@ handle_udp(
                         PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
                         State0#state{pull_data = PullDataMap1};
                     ?PULL_RESP ->
-                        ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler),
+                        ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream),
                         State0;
                     _Id ->
                         lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
@@ -360,13 +360,13 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
     DataSrc :: socket_dest(),
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     Socket :: gen_udp:socket(),
-    StreamHandler :: tuple()
+    Stream :: pid()
 ) ->
     ok.
-handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler) ->
+handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream) ->
     %% Send downlink to grpc handler
     PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
-    grpcbox_stream:send(false, PacketDown, StreamHandler),
+    Stream ! {reply, PacketDown},
 
     %% Ack the downlink
     Token = semtech_udp:token(Data),

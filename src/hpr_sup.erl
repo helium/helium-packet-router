@@ -50,6 +50,10 @@ init([]) ->
         ?WORKER(hpr_metrics, [#{}]),
         ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}]),
         ?WORKER(hpr_gwmp_redirect_worker, [RedirectMap]),
+        ?WORKER(hpr_router_connection_manager, []),
+        ?WORKER(hpr_router_stream_manager, [
+            'helium.packet_router.gateway', send_packet, client_packet_router_pb
+        ]),
         ?SUP(hpr_gwmp_udp_sup, [])
     ],
     {ok, {
