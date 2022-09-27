@@ -150,6 +150,9 @@ jobs:
           install-awslocal: 'true'
       - name: localstack
         run: | 
+          localstack status
+          localstack start -d
+          localstack status
           localstack status services
           awslocal s3 mb s3://test-bucket
           awslocal s3 ls
