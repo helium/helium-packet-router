@@ -12,7 +12,7 @@
     packet/0
 ]).
 
--spec to_record(packet_map()) -> packet().
+-spec to_record(packet_map() | map()) -> packet().
 to_record(PacketMap) ->
     Template = #packet_router_packet_down_v1_pb{},
     #packet_router_packet_down_v1_pb{
@@ -27,7 +27,7 @@ to_record(PacketMap) ->
 
 -spec window
     (undefined) -> undefined;
-    (client_packet_router_pb:window_v1_pb()) -> packet_router_pb:window_v1_pb().
+    (client_packet_router_pb:window_v1_pb() | map()) -> packet_router_pb:window_v1_pb().
 window(undefined) ->
     undefined;
 window(WindowMap) ->

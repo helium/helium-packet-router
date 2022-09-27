@@ -13,14 +13,18 @@
 
 -include("semtech_udp.hrl").
 
-%% API
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 -export([
     start_link/1,
     push_data/4,
     pubkeybin_to_mac/1
 ]).
 
-%% gen_server callbacks
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
 -export([
     init/1,
     handle_call/3,
@@ -50,9 +54,9 @@
     dest_remap = #{} :: #{socket_dest() => socket_dest()}
 }).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
 
 start_link(Args) ->
     gen_server:start_link(?MODULE, Args, []).
@@ -66,9 +70,9 @@ start_link(Args) ->
 push_data(WorkerPid, Data, Stream, SocketDest) ->
     gen_server:cast(WorkerPid, {push_data, Data, Stream, SocketDest}).
 
-%%%===================================================================
-%%% gen_server callbacks
-%%%===================================================================
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
 
 init(Args) ->
     process_flag(trap_exit, true),
@@ -99,9 +103,9 @@ init(Args) ->
         shutdown_timer = {ShutdownTimeout, ShutdownRef}
     }}.
 
-handle_call(Request, From, State) ->
-    lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
-    {reply, ok, State}.
+-spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
+handle_call(Msg, _From, State) ->
+    {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(
     {push_data, _Data = {Token, Payload}, Stream, SocketDest0},
@@ -128,8 +132,7 @@ handle_cast(
         response_stream = Stream,
         shutdown_timer = NewShutdownTimer
     }};
-handle_cast(Request, State) ->
-    lager:warning("rcvd unknown cast msg: ~p", [Request]),
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(
@@ -199,15 +202,14 @@ handle_info(?SHUTDOWN_TICK, #state{shutdown_timer = {ShutdownTimeout, _}} = Stat
     lager:info("shutting down, haven't sent data in ~p", [ShutdownTimeout]),
     {stop, normal, State};
 handle_info(_Msg, State) ->
-    lager:warning("rcvd unknown info msg: ~p, ~p", [_Msg, State]),
     {noreply, State}.
 
 terminate(_Reason, _State = #state{socket = Socket}) ->
     ok = gen_udp:close(Socket).
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
 -spec handle_udp(
     Data :: binary(),

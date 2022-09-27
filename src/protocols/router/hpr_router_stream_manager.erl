@@ -2,13 +2,17 @@
 
 -behaviour(gen_server).
 
-% API
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 -export([
     get_stream/2,
     start_link/3
 ]).
 
-% gen_server callbacks
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
 -export([
     init/1,
     handle_call/3,
@@ -39,9 +43,9 @@
 
 -define(STREAM_TAB, hpr_router_stream_manager_tab).
 
-% ------------------------------------------------------------------------------
-% API
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
 
 -spec start_link(service(), rpc(), module()) -> {ok, pid()}.
 %% @doc Start this service.
@@ -55,9 +59,9 @@ start_link(Service, Rpc, DecodeModule) ->
 get_stream(GatewayStream, Lns) ->
     gen_server:call(?MODULE, {get_stream, GatewayStream, Lns}).
 
-% ------------------------------------------------------------------------------
-% gen_server callbacks
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
 
 -spec init(list()) -> {ok, #state{}}.
 init([Service, Rpc, DecodeModule]) ->
@@ -87,9 +91,9 @@ handle_call({get_stream, GatewayStream, Lns}, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
-% ------------------------------------------------------------------------------
-% Private functions
-% ------------------------------------------------------------------------------
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
 -spec init_ets() -> ets:tab().
 init_ets() ->
@@ -103,9 +107,9 @@ init_ets(Options) ->
         Options ++ [set, {keypos, #stream.gateway_router_map}]
     ).
 
+%% @doc Return exising stream. Create a new stream if there isn't one.
 -spec do_get_stream(gateway_stream(), lns(), service(), rpc(), module(), ets:tab()) ->
     {ok, grpc_client:client_stream()} | {error, any()}.
-% Return exising stream. Create a new stream if there isn't one.
 do_get_stream(GatewayStream, Lns, Service, Rpc, DecodeModule, StreamTab) ->
     case ets:lookup(StreamTab, {GatewayStream, Lns}) of
         [] ->
@@ -148,10 +152,6 @@ setup_stream(_, _, _, {error, _} = Error) ->
 start_relay(GatewayStream, RouterStream) ->
     {ok, _RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
     ok.
-
-% ------------------------------------------------------------------------------
-% Unit tests
-% ------------------------------------------------------------------------------
 
 -ifdef(TEST).
 
