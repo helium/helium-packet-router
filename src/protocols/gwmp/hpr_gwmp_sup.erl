@@ -4,7 +4,7 @@
 %%% @doc
 %%% @end
 %%%-------------------------------------------------------------------
--module(hpr_gwmp_udp_sup).
+-module(hpr_gwmp_sup).
 
 -behaviour(supervisor).
 
@@ -16,7 +16,7 @@
 ]).
 
 -define(UDP_WORKER, hpr_gwmp_worker).
--define(ETS, hpr_gwmp_udp_sup_ets).
+-define(ETS, hpr_gwmp_sup_ets).
 
 -define(WORKER(I), #{
     id => I,

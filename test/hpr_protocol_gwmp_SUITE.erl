@@ -280,7 +280,7 @@ shutdown_idle_worker_test(_Config) ->
 
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     %%    start worker
-    {ok, WorkerPid1} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
+    {ok, WorkerPid1} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
     ?assert(erlang:is_process_alive(WorkerPid1)),
 
     %%    wait for shutdown timer to expire
@@ -288,7 +288,7 @@ shutdown_idle_worker_test(_Config) ->
     ?assertNot(erlang:is_process_alive(WorkerPid1)),
 
     %%    start worker
-    {ok, WorkerPid2} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
+    {ok, WorkerPid2} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
     ?assert(erlang:is_process_alive(WorkerPid2)),
     timer:sleep(50),
 
@@ -338,7 +338,7 @@ gateway_dest_redirect_test(_Config) ->
     EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = PubKeyBin, region = 'EU868'},
 
     %% Start before sending the packet so we can reduce the pull_data_timer from default
-    {ok, _Pid} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{
+    {ok, _Pid} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{
         pull_data_timer => 250
     }),
 

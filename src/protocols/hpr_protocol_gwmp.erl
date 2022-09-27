@@ -18,7 +18,7 @@
 send(PacketUp, Stream, Route) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
 
-    case hpr_gwmp_udp_sup:maybe_start_worker(Gateway, #{}) of
+    case hpr_gwmp_sup:maybe_start_worker(Gateway, #{}) of
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
