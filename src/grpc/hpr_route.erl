@@ -123,8 +123,8 @@ new_test() ->
             #config_eui_v1_pb{app_eui = 1, dev_eui = 1},
             #config_eui_v1_pb{app_eui = 2, dev_eui = 0}
         ],
-        lns = <<"lsn.lora.com>">>,
-        protocol = gwmp,
+
+        protocol = {gwmp, #config_protocol_gwmp_pb{ip = <<"lsn.lora.com>">>, port = 80}},
         oui = 10
     },
     ?assertEqual(
@@ -149,12 +149,15 @@ euis_test() ->
 
 lns_test() ->
     Route = new(1, [{1, 10}, {11, 20}], [{1, 1}, {2, 0}], <<"lsn.lora.com>">>, gwmp, 10),
-    ?assertEqual(<<"lsn.lora.com>">>, lns(Route)),
+    %% If no port is in the Endpoint, 80 is assumed.
+    ?assertEqual(<<"lsn.lora.com>:80">>, lns(Route)),
     ok.
 
 protocol_test() ->
     Route = new(1, [{1, 10}, {11, 20}], [{1, 1}, {2, 0}], <<"lsn.lora.com>">>, gwmp, 10),
-    ?assertEqual(gwmp, protocol(Route)),
+    ?assertEqual(
+        {gwmp, #config_protocol_gwmp_pb{ip = <<"lsn.lora.com>">>, port = 80}}, protocol(Route)
+    ),
     ok.
 
 oui_test() ->
