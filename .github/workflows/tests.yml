@@ -151,12 +151,12 @@ jobs:
       - name: localstack
         run: | 
           localstack status
-          localstack start -d
-          localstack status
+          docker ps -a
+          netstat -ltp
+          lsof -i@localhost
           localstack status services
           awslocal s3 mb s3://test-bucket
           awslocal s3 ls
-          curl 'http://localhost:4566/health'
       - name: rust
         uses: actions-rs/toolchain@v1
         with:
