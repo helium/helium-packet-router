@@ -227,7 +227,16 @@ to_map_test() ->
     HprPacketUp = test_utils:join_packet_up(#{}),
     HprPacketUpMap = to_map(HprPacketUp),
     ?assertEqual(
-        ok, client_packet_router_pb:verify_msg(HprPacketUpMap, packet_router_packet_up_v1_pb)
+        ok,
+        client_packet_router_pb:verify_msg(HprPacketUpMap, packet_router_packet_up_v1_pb),
+        "to_map/1 produces a valid packet map"
+    ),
+    ?assertEqual(
+        HprPacketUpMap,
+        client_packet_router_pb:decode_msg(
+            packet_router_pb:encode_msg(HprPacketUp), packet_router_packet_up_v1_pb
+        ),
+        "to_map/1 is equivalent to encoding a packet record and decoding it to a map"
     ).
 
 -endif.
