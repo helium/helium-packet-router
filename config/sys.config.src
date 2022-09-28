@@ -43,7 +43,6 @@
         {log_root, "/var/log/hpr"},
         {crash_log, "crash.log"},
         {handlers, [
-            %% {lager_console_backend, [{level, debug}]},
             {lager_file_backend, [
                 {file, "info.log"},
                 {level, info},
