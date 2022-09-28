@@ -11,7 +11,6 @@
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
--include("hpr_route.hrl").
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -70,8 +69,8 @@ join_req_test(_Config) ->
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
     Route = hpr_route:new(
         NetID,
-        [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
-        [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
+        [{16#00000000, 16#0000000A}],
+        [{1, 1}, {1, 2}],
         <<"127.0.0.1">>,
         router,
         1
