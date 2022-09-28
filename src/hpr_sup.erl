@@ -37,13 +37,11 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    lager:info("sup init"),
-
     ok = hpr_routing:init(),
     ok = hpr_config:init(),
 
     RedirectMap = application:get_env(hpr, redirect_by_region, #{}),
-    ConfigWorkerConfig = application:get_env(hpr, routing_config_worker, #{enabled => false}),
+    ConfigWorkerConfig = application:get_env(hpr, config_worker, #{}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),

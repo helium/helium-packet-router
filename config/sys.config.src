@@ -1,14 +1,8 @@
 [
     {hpr, [
-        {routing_config_worker, #{
-            enabled => true,
-            transport => tcp,
+        {config_worker, #{
             host => "localhost",
             port => 50051,
-            svcname => 'helium.config.config_service',
-            rpcname => 'route_updates',
-            retry_interval => 2000,
-            dets_backup_enabled => true,
             dets_backup_path => "/var/data/hpr/backup.dets"
         }}
     ]},
