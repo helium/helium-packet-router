@@ -3,7 +3,7 @@
         {config_worker, #{
             host => "localhost",
             port => 50051,
-            dets_backup_path => "/var/data/hpr/backup.dets"
+            dets_backup_path => "/var/data/hpr/config_worker.dets"
         }}
     ]},
     {grpcbox, [

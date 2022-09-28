@@ -100,11 +100,13 @@ route_to_eui_rows(Route) ->
 route_v1() ->
     hpr_route:new(#{
         net_id => 0,
+        devaddr_ranges => [
+            #{start_addr => 16#00000001, end_addr => 16#0000000A},
+            #{start_addr => 16#00000010, end_addr => 16#0000001A}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 2}, #{app_eui => 3, dev_eui => 4}],
         oui => 1,
-        protocol => http_roaming,
-        lns => <<"lns1.testdomain.com">>,
-        devaddr_ranges => [{16#00000001, 16#0000000A}, {16#00000010, 16#0000001A}],
-        euis => [{1, 2}, {3, 4}]
+        protocol => {http_roaming, #{ip => <<"lns1.testdomain.com">>, port => 80}}
     }).
 
 route_to_devaddr_rows_test() ->
@@ -149,19 +151,23 @@ eui_lookup_test() ->
     ok = init(),
     Route1 = hpr_route:new(#{
         net_id => 0,
+        devaddr_ranges => [
+            #{start_addr => 16#00000001, end_addr => 16#0000000A},
+            #{start_addr => 16#00000010, end_addr => 16#0000001A}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 2}, #{app_eui => 3, dev_eui => 4}],
         oui => 1,
-        protocol => http_roaming,
-        lns => <<"lns1.testdomain.com">>,
-        devaddr_ranges => [{16#00000001, 16#0000000A}, {16#00000010, 16#0000001A}],
-        euis => [{1, 2}, {3, 4}]
+        protocol => {http_roaming, #{ip => <<"lns1.testdomain.com">>, port => 80}}
     }),
     Route2 = hpr_route:new(#{
         net_id => 0,
+        devaddr_ranges => [
+            #{start_addr => 16#00000001, end_addr => 16#0000000A},
+            #{start_addr => 16#00000010, end_addr => 16#0000001A}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 0}, #{app_eui => 5, dev_eui => 6}],
         oui => 1,
-        protocol => http_roaming,
-        lns => <<"lns2.testdomain.com">>,
-        devaddr_ranges => [{16#00000001, 16#0000000A}, {16#00000010, 16#0000001A}],
-        euis => [{1, 0}, {5, 6}]
+        protocol => {http_roaming, #{ip => <<"lns2.testdomain.com">>, port => 80}}
     }),
 
     ok = insert_route(Route1),

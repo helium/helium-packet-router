@@ -47,9 +47,16 @@ test_send() ->
     HprPacketUpMap = hpr_packet_up:to_map(HprPacketUp),
     Stream = self(),
     GatewayStream = self(),
-    Route = hpr_route:new(1, [], [], lns(), router, 1),
+    Host = <<"example-lns.com">>,
+    Port = 4321,
+    Route = hpr_route:new(1, [], [], 1, {router, #{ip => Host, port => Port}}),
 
-    meck:expect(hpr_router_stream_manager, get_stream, [GatewayStream, lns()], {ok, Stream}),
+    meck:expect(
+        hpr_router_stream_manager,
+        get_stream,
+        [GatewayStream, <<Host/binary, ":", (integer_to_binary(Port))/binary>>],
+        {ok, Stream}
+    ),
     meck:expect(grpc_client, send, [Stream, HprPacketUpMap], ok),
 
     ResponseValue = send(HprPacketUp, Stream, Route),
@@ -57,14 +64,5 @@ test_send() ->
     ?assertEqual(ok, ResponseValue),
     ?assertEqual(1, meck:num_calls(hpr_router_stream_manager, get_stream, 2)),
     ?assertEqual(1, meck:num_calls(grpc_client, send, 2)).
-
-%% ------------------------------------------------------------------
-% EUnit private functions
-%% ------------------------------------------------------------------
-
-host() -> "example-lns.com".
-port() -> 4321.
-lns() ->
-    <<(list_to_binary(host()))/binary, $:, (integer_to_binary(port()))/binary>>.
 
 -endif.

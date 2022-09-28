@@ -60,21 +60,25 @@ start_link(_) ->
 %% ------------------------------------------------------------------
 
 init(#{host := Host, port := Port} = Args) ->
+    Path = maps:get(dets_backup_path, Args, undefined),
     State = #state{
         host = Host,
         port = Port,
         connection = undefined,
         stream = undefined,
-        dets_backup_path = maps:get(dets_backup_path, Args, undefined),
+        dets_backup_path = Path,
         dets = undefined
     },
+    lager:info("starting config worker ~s:~p dets=~s", [Host, Port, Path]),
     {ok, maybe_init_dets(State), {continue, connect}}.
 
 handle_continue(connect, #state{host = Host, port = Port} = State) ->
     case grpc_client:connect(tcp, Host, Port) of
         {ok, Connection} ->
+            lager:info("connected"),
             {noreply, State#state{connection = Connection}, {continue, init_stream}};
         {error, _E} ->
+            lager:error("failed to connect ~p", [_E]),
             timer:sleep(timer:seconds(1)),
             {noreply, State, {continue, connect}}
     end;
@@ -85,9 +89,12 @@ handle_continue(
     } = State
 ) ->
     {ok, Stream} = grpc_client:new_stream(
-        Connection, 'helium.config.config_service', route_updates, config_pb
+        Connection, 'helium.config.config_service', route_updates, client_config_pb
     ),
-    ok = grpc_client:send_last(Stream, #{}),
+    %% Sending Route Request
+    RouteReq = #{},
+    ok = grpc_client:send(Stream, RouteReq),
+    lager:info("stream initialized"),
     ok = cfg_update(),
     {noreply, State#state{stream = Stream}}.
 
@@ -103,22 +110,26 @@ handle_info(?RCV_CFG_UPDATE, #state{connection = Connection, stream = Stream} = 
             ok = cfg_update(),
             {noreply, State};
         {data, RoutesResV1} ->
-            ok = process_config_update(RoutesResV1, State),
+            lager:info("got router update"),
+            ok = process_routes_update(RoutesResV1, State),
             ok = cfg_update(),
             {noreply, State};
         eof ->
+            lager:warning("got eof"),
             _ = grpc_client:stop_connection(Connection),
             {noreply, State, {continue, connect}};
         {error, timeout} ->
             ok = cfg_update(),
             {noreply, State};
         {error, E} ->
+            lager:error("failed to rcv ~p", [E]),
             {stop, {error, E}}
     end;
 handle_info(_Msg, State) ->
     {noreply, State}.
 
 terminate(_Reason, #state{connection = Connection}) ->
+    lager:error("terminate ~p", [_Reason]),
     _ = grpc_client:stop_connection(Connection),
     ok.
 
@@ -146,8 +157,8 @@ cfg_update() ->
     self() ! ?RCV_CFG_UPDATE,
     ok.
 
--spec process_config_update(routes_req_v1_map(), #state{}) -> ok.
-process_config_update(RoutesResV1, State) ->
+-spec process_routes_update(routes_req_v1_map(), #state{}) -> ok.
+process_routes_update(RoutesResV1, State) ->
     ok = hpr_config:update_routes(RoutesResV1),
     maybe_cache_response(RoutesResV1, State),
     ok.
