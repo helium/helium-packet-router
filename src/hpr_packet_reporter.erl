@@ -206,7 +206,10 @@ setup_aws() ->
     case Region of
         <<"local">> ->
             aws_client:make_local_client(
-                AccessKey, Secret, application:get_env(hpr, localstack_port, <<"4566">>)
+                AccessKey,
+                Secret,
+                application:get_env(hpr, localstack_port, <<"4566">>),
+                application:get_env(hpr, localstack_host, <<"localhost">>)
             );
         _ ->
             aws_client:make_client(AccessKey, Secret, Region)
