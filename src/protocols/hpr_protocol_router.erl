@@ -49,7 +49,15 @@ test_send() ->
     GatewayStream = self(),
     Host = <<"example-lns.com">>,
     Port = 4321,
-    Route = hpr_route:new(1, [], [], 1, {router, #{ip => Host, port => Port}}),
+    Route = hpr_route:new(
+        #{
+            net_id => 1,
+            devaddr_ranges => [],
+            euis => [],
+            oui => 1,
+            protocol => {router, #{ip => Host, port => Port}}
+        }
+    ),
 
     meck:expect(
         hpr_router_stream_manager,

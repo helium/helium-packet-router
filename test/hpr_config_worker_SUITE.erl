@@ -46,13 +46,16 @@ init_per_testcase(TestCase, Config) ->
 
     %% Setup config worker
     BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
+    FilePath = filename:join(BaseDir, "config_worker.backup"),
     application:set_env(hpr, config_worker, #{
         host => "localhost",
         port => ?PORT,
-        dets_backup_path => filename:join(BaseDir, "config_worker.dets")
+        file_backup_path => FilePath
     }),
 
-    test_utils:init_per_testcase(TestCase, [{server_pid, ServerPid} | Config]).
+    test_utils:init_per_testcase(TestCase, [
+        {server_pid, ServerPid}, {file_backup_path, FilePath} | Config
+    ]).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
@@ -68,7 +71,7 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-full_test(_Config) ->
+full_test(Config) ->
     %% Let it startup
     timer:sleep(100),
 
@@ -99,12 +102,14 @@ full_test(_Config) ->
     timer:sleep(100),
 
     %% Check Dets
-    {state, _Host, _Port, _Conn, _Stream, _Path, Dets} = sys:get_state(hpr_config_worker),
-    case dets:lookup(Dets, last_update) of
-        [{last_update, #{routes := DetsRoutes}}] ->
+    FilePath = proplists:get_value(file_backup_path, Config),
+
+    case file:read_file(FilePath) of
+        {ok, Binary} ->
+            #{routes := DetsRoutes} = erlang:binary_to_term(Binary),
             ?assertEqual(Routes, [hpr_route:new(R) || R <- DetsRoutes]);
-        [] ->
-            ct:fail(dets_not_saved)
+        {error, Reason} ->
+            ct:fail(Reason)
     end,
 
     %% Check that we can query route via config

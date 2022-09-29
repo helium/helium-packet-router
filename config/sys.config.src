@@ -1,9 +1,9 @@
 [
     {hpr, [
         {config_worker, #{
-            host => "localhost",
-            port => 50051,
-            dets_backup_path => "/var/data/hpr/config_worker.dets"
+            host => "${HPR_CONFIG_WORKER_HOST}",
+            port => ${HPR_CONFIG_WORKER_PORT},
+            file_backup_path => "/var/data/hpr/config_worker.backup"
         }}
     ]},
     {grpcbox, [

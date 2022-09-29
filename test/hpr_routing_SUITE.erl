@@ -67,13 +67,13 @@ join_req_test(_Config) ->
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
-    Route = hpr_route:new(
-        NetID,
-        [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
-        [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
-        1,
-        {router, #{ip => <<"127.0.0.1">>, port => 80}}
-    ),
+    Route = hpr_route:new(#{
+        net_id => NetID,
+        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
+        oui => 1,
+        protocol => {router, #{ip => <<"127.0.0.1">>, port => 80}}
+    }),
     ok = hpr_config:insert_route(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{

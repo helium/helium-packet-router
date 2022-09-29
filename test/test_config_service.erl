@@ -16,7 +16,7 @@
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
     Self = self(),
-    ok = persistent_term:put(?MODULE, self()),
+    true = erlang:register(?MODULE, self()),
     ct:pal("init ~p @ ~p", [?MODULE, Self]),
     StreamState.
 
@@ -39,7 +39,6 @@ route_updates(#config_routes_req_v1_pb{}, StreamState) ->
 
 -spec config_route_res_v1(ConfigRouteResV1 :: #config_routes_res_v1_pb{}) -> ok.
 config_route_res_v1(ConfigRouteResV1) ->
-    Pid = persistent_term:get(?MODULE),
-    ct:pal("config_route_res_v1 ~p  @ ~p", [ConfigRouteResV1, Pid]),
-    Pid ! {config_route_res_v1, ConfigRouteResV1},
+    ct:pal("config_route_res_v1 ~p  @ ~p", [ConfigRouteResV1, erlang:whereis(?MODULE)]),
+    ?MODULE ! {config_route_res_v1, ConfigRouteResV1},
     ok.

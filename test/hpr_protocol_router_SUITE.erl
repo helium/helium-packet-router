@@ -322,10 +322,10 @@ test_packet() ->
     }.
 
 test_route() ->
-    hpr_route:new(
-        12582995,
-        [#{start_addr => 0, end_addr => 4294967295}],
-        [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
-        4020,
-        {router, #{ip => <<"127.0.0.1">>, port => 8082}}
-    ).
+    hpr_route:new(#{
+        net_id => 12582995,
+        devaddr_ranges => [#{start_addr => 0, end_addr => 4294967295}],
+        euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
+        oui => 4020,
+        protocol => {router, #{ip => <<"127.0.0.1">>, port => 8082}}
+    }).

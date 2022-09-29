@@ -24,11 +24,11 @@ stop() ->
     true = ets:delete(?EUIS_ETS),
     ok.
 
--spec update_routes(map()) -> ok.
+-spec update_routes(client_config_pb:routes_res_v1_pb()) -> ok.
 update_routes(#{routes := Routes}) ->
     {NewDevaddrRows, NewEUIRows} = lists:foldl(
-        fun(RouteConfig, {DevaddrRowsAcc, EUIRowsAcc}) ->
-            Route = hpr_route:new(RouteConfig),
+        fun(RouteConfigMap, {DevaddrRowsAcc, EUIRowsAcc}) ->
+            Route = hpr_route:new(RouteConfigMap),
             DevaddrRowsAcc2 = DevaddrRowsAcc ++ route_to_devaddr_rows(Route),
             EUIRowsAcc2 = EUIRowsAcc ++ route_to_eui_rows(Route),
             {DevaddrRowsAcc2, EUIRowsAcc2}
@@ -52,18 +52,22 @@ insert_route(Route) ->
 
 -spec lookup_devaddr(Devaddr :: non_neg_integer()) -> list(hpr_route:route()).
 lookup_devaddr(Devaddr) ->
-    {ok, NetID} = lora_subnet:parse_netid(Devaddr, big),
-    MS = [
-        {
-            {{'$1', '$2', '$3'}, '$4'},
-            [
-                {'andalso', {'==', '$1', NetID},
-                    {'andalso', {'=<', '$2', Devaddr}, {'=<', Devaddr, '$3'}}}
+    case lora_subnet:parse_netid(Devaddr, big) of
+        {error, invalid_netid_type} ->
+            lager:debug("invalid devaddr ~p", [Devaddr]),
+            [];
+        {ok, NetID} ->
+            MS = [
+                {
+                    {{NetID, '$2', '$3'}, '$4'},
+                    [
+                        {'andalso', {'=<', '$2', Devaddr}, {'=<', Devaddr, '$3'}}
+                    ],
+                    ['$4']
+                }
             ],
-            ['$4']
-        }
-    ],
-    ets:select(?DEVADDRS_ETS, MS).
+            ets:select(?DEVADDRS_ETS, MS)
+    end.
 
 -spec lookup_eui(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
     list(hpr_route:route()).
@@ -97,31 +101,39 @@ route_to_eui_rows(Route) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-route_v1() ->
-    hpr_route:new(#{
-        net_id => 0,
-        devaddr_ranges => [
-            #{start_addr => 16#00000001, end_addr => 16#0000000A},
-            #{start_addr => 16#00000010, end_addr => 16#0000001A}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 2}, #{app_eui => 3, dev_eui => 4}],
-        oui => 1,
-        protocol => {http_roaming, #{ip => <<"lns1.testdomain.com">>, port => 80}}
-    }).
+all_test_() ->
+    {setup, fun setup/0,
+        {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
+            ?_test(test_route_to_devaddr_rows()),
+            ?_test(test_route_to_eui_rows()),
+            ?_test(test_route_insert()),
+            ?_test(test_devaddr_lookup()),
+            ?_test(test_eui_lookup())
+        ]}}.
 
-route_to_devaddr_rows_test() ->
+setup() ->
+    ok.
+
+foreach_setup() ->
+    init(),
+    ok.
+
+foreach_cleanup(ok) ->
+    stop(),
+    ok.
+
+test_route_to_devaddr_rows() ->
     Route = route_v1(),
     ?assertEqual(
         [{{0, 16#00000001, 16#0000000A}, Route}, {{0, 16#00000010, 16#0000001A}, Route}],
         route_to_devaddr_rows(Route)
     ).
 
-route_to_eui_rows_test() ->
+test_route_to_eui_rows() ->
     Route = route_v1(),
     ?assertEqual([{{1, 2}, Route}, {{3, 4}, Route}], route_to_eui_rows(Route)).
 
-route_insert_test() ->
-    ok = init(),
+test_route_insert() ->
     Route = route_v1(),
     ok = insert_route(Route),
 
@@ -133,22 +145,18 @@ route_insert_test() ->
 
     ?assertEqual(ExpectedDevaddrRows, GotDevaddrRows),
     ?assertEqual(ExpectedEUIRows, GotEUIRows),
-    ok = stop(),
     ok.
 
-devaddr_lookup_test() ->
-    ok = init(),
+test_devaddr_lookup() ->
     Route = route_v1(),
     ok = insert_route(Route),
 
     ?assertEqual([Route], lookup_devaddr(16#00000005)),
     ?assertEqual([], lookup_devaddr(16#0000000B)),
     ?assertEqual([], lookup_devaddr(16#00000000)),
-    ok = stop(),
     ok.
 
-eui_lookup_test() ->
-    ok = init(),
+test_eui_lookup() ->
     Route1 = hpr_route:new(#{
         net_id => 0,
         devaddr_ranges => [
@@ -178,7 +186,18 @@ eui_lookup_test() ->
     ?assertEqual(lists:sort([Route1, Route2]), lists:sort(lookup_eui(1, 2))),
     ?assertEqual([Route2], lookup_eui(1, 0)),
 
-    ok = stop(),
     ok.
+
+route_v1() ->
+    hpr_route:new(#{
+        net_id => 0,
+        devaddr_ranges => [
+            #{start_addr => 16#00000001, end_addr => 16#0000000A},
+            #{start_addr => 16#00000010, end_addr => 16#0000001A}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 2}, #{app_eui => 3, dev_eui => 4}],
+        oui => 1,
+        protocol => {http_roaming, #{ip => <<"lns1.testdomain.com">>, port => 80}}
+    }).
 
 -endif.

@@ -26,22 +26,18 @@
     port :: integer(),
     connection :: grpc_client:connection() | undefined,
     stream :: grpc_client:stream() | undefined,
-    dets_backup_path :: string() | undefined,
-    dets :: reference() | undefined
+    file_backup_path :: string() | undefined
 }).
 
 -type config_worker_opts() :: #{
-    enabled := boolean(),
     host := string(),
-    port := integer(),
-    dets_backup_path => string()
-}.
-
--type routes_req_v1_map() :: #{
-    routes := [map()]
+    port := integer() | string(),
+    file_backup_path => string()
 }.
 
 -define(SERVER, ?MODULE).
+-define(CONNECT, connect).
+-define(INIT_STREAM, init_stream).
 -define(RCV_CFG_UPDATE, receive_config_update).
 -define(RCV_TIMEOUT, timer:seconds(1)).
 
@@ -52,6 +48,10 @@
 -spec start_link(config_worker_opts()) -> any().
 start_link(#{host := Host, port := Port} = Args) when is_list(Host) andalso is_number(Port) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []);
+start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso is_list(PortStr) ->
+    gen_server:start_link(
+        {local, ?SERVER}, ?SERVER, Args#{port := erlang:list_to_integer(PortStr)}, []
+    );
 start_link(_) ->
     ignore.
 
@@ -60,30 +60,30 @@ start_link(_) ->
 %% ------------------------------------------------------------------
 
 init(#{host := Host, port := Port} = Args) ->
-    Path = maps:get(dets_backup_path, Args, undefined),
+    Path = maps:get(file_backup_path, Args, undefined),
     State = #state{
         host = Host,
         port = Port,
         connection = undefined,
         stream = undefined,
-        dets_backup_path = Path,
-        dets = undefined
+        file_backup_path = Path
     },
-    lager:info("starting config worker ~s:~p dets=~s", [Host, Port, Path]),
-    {ok, maybe_init_dets(State), {continue, connect}}.
+    lager:info("starting config worker ~s:~w file=~s", [Host, Port, Path]),
+    ok = maybe_init_from_file(State),
+    {ok, State, {continue, ?CONNECT}}.
 
-handle_continue(connect, #state{host = Host, port = Port} = State) ->
+handle_continue(?CONNECT, #state{host = Host, port = Port} = State) ->
     case grpc_client:connect(tcp, Host, Port) of
         {ok, Connection} ->
             lager:info("connected"),
-            {noreply, State#state{connection = Connection}, {continue, init_stream}};
+            {noreply, State#state{connection = Connection}, {continue, ?INIT_STREAM}};
         {error, _E} ->
             lager:error("failed to connect ~p", [_E]),
             timer:sleep(timer:seconds(1)),
-            {noreply, State, {continue, connect}}
+            {noreply, State, {continue, ?CONNECT}}
     end;
 handle_continue(
-    init_stream,
+    ?INIT_STREAM,
     #state{
         connection = Connection
     } = State
@@ -95,8 +95,25 @@ handle_continue(
     RouteReq = #{},
     ok = grpc_client:send(Stream, RouteReq),
     lager:info("stream initialized"),
-    ok = cfg_update(),
-    {noreply, State#state{stream = Stream}}.
+    {noreply, State#state{stream = Stream}, {continue, ?RCV_CFG_UPDATE}};
+handle_continue(?RCV_CFG_UPDATE, #state{connection = Connection, stream = Stream} = State) ->
+    case grpc_client:rcv(Stream, ?RCV_TIMEOUT) of
+        {headers, _Headers} ->
+            {noreply, State, {continue, ?RCV_CFG_UPDATE}};
+        {data, RoutesResV1} ->
+            lager:info("got router update"),
+            ok = process_routes_update(RoutesResV1, State),
+            {noreply, State, {continue, ?RCV_CFG_UPDATE}};
+        eof ->
+            lager:warning("got eof"),
+            _ = grpc_client:stop_connection(Connection),
+            {noreply, State, {continue, ?CONNECT}};
+        {error, timeout} ->
+            {noreply, State, {continue, ?RCV_CFG_UPDATE}};
+        {error, E} ->
+            lager:error("failed to rcv ~p", [E]),
+            {stop, {error, E}}
+    end.
 
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
@@ -104,27 +121,6 @@ handle_call(Msg, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
-handle_info(?RCV_CFG_UPDATE, #state{connection = Connection, stream = Stream} = State) ->
-    case grpc_client:rcv(Stream, ?RCV_TIMEOUT) of
-        {headers, _Headers} ->
-            ok = cfg_update(),
-            {noreply, State};
-        {data, RoutesResV1} ->
-            lager:info("got router update"),
-            ok = process_routes_update(RoutesResV1, State),
-            ok = cfg_update(),
-            {noreply, State};
-        eof ->
-            lager:warning("got eof"),
-            _ = grpc_client:stop_connection(Connection),
-            {noreply, State, {continue, connect}};
-        {error, timeout} ->
-            ok = cfg_update(),
-            {noreply, State};
-        {error, E} ->
-            lager:error("failed to rcv ~p", [E]),
-            {stop, {error, E}}
-    end;
 handle_info(_Msg, State) ->
     {noreply, State}.
 
@@ -137,34 +133,33 @@ terminate(_Reason, #state{connection = Connection}) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec maybe_init_dets(#state{}) -> #state{}.
-maybe_init_dets(#state{dets_backup_path = undefined} = State) ->
+-spec maybe_init_from_file(#state{}) -> ok.
+maybe_init_from_file(#state{file_backup_path = undefined} = State) ->
     State;
-maybe_init_dets(#state{dets_backup_path = Path} = State) ->
+maybe_init_from_file(#state{file_backup_path = Path}) ->
     ok = filelib:ensure_dir(Path),
-    {ok, Dets} = dets:open_file(Path, [{type, set}]),
-    case dets:lookup(Dets, last_update) of
-        [{last_update, LastRoutesResV1}] ->
+    case file:read_file(Path) of
+        {ok, Binary} ->
+            LastRoutesResV1 = erlang:binary_to_term(Binary),
             ok = hpr_config:update_routes(LastRoutesResV1),
             ok;
-        [] ->
+        {error, Reason} ->
+            lager:warning("failed to read to file ~p", [Reason]),
             ok
-    end,
-    State#state{dets = Dets}.
+    end.
 
--spec cfg_update() -> ok.
-cfg_update() ->
-    self() ! ?RCV_CFG_UPDATE,
-    ok.
-
--spec process_routes_update(routes_req_v1_map(), #state{}) -> ok.
+-spec process_routes_update(client_config_pb:routes_res_v1_pb(), #state{}) -> ok.
 process_routes_update(RoutesResV1, State) ->
     ok = hpr_config:update_routes(RoutesResV1),
-    maybe_cache_response(RoutesResV1, State),
-    ok.
+    case maybe_cache_response(RoutesResV1, State) of
+        ok -> ok;
+        {error, Reason} -> lager:error("failed to write to file ~p", [Reason])
+    end.
 
--spec maybe_cache_response(RoutesResV1 :: routes_req_v1_map(), #state{}) -> ok.
-maybe_cache_response(_RoutesResV1, #state{dets = undefined}) ->
+-spec maybe_cache_response(RoutesResV1 :: client_config_pb:routes_res_v1_pb(), #state{}) ->
+    ok | {error, any()}.
+maybe_cache_response(_RoutesResV1, #state{file_backup_path = undefined}) ->
     ok;
-maybe_cache_response(RoutesResV1, #state{dets = Dets}) ->
-    dets:insert(Dets, {last_update, RoutesResV1}).
+maybe_cache_response(RoutesResV1, #state{file_backup_path = Path}) ->
+    Binary = erlang:term_to_binary(RoutesResV1),
+    file:write_file(Path, Binary).
