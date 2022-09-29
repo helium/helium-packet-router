@@ -46,6 +46,8 @@
 %% ------------------------------------------------------------------
 
 -spec start_link(config_worker_opts()) -> any().
+start_link(#{host := ""}) ->
+    ignore;
 start_link(#{host := Host, port := Port} = Args) when is_list(Host) andalso is_number(Port) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []);
 start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso is_list(PortStr) ->
