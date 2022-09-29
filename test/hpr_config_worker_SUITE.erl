@@ -105,8 +105,8 @@ full_test(Config) ->
     FilePath = proplists:get_value(file_backup_path, Config),
     case file:read_file(FilePath) of
         {ok, Binary} ->
-            #{routes := DetsRoutes} = erlang:binary_to_term(Binary),
-            ?assertEqual(Routes, [hpr_route:new(R) || R <- DetsRoutes]);
+            #{routes := BackupRoutes} = erlang:binary_to_term(Binary),
+            ?assertEqual(Routes, [hpr_route:new(R) || R <-BackupRoutes]);
         {error, Reason} ->
             ct:fail(Reason)
     end,
