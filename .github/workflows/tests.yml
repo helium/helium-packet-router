@@ -158,10 +158,12 @@ jobs:
           aws configure set access_key testkey
           aws configure set secret_key testsecret
           aws configure set region us-east-1
+          aws configure list
       - name: localstack
         run: | 
+          ls -al /$(pwd)/test/scripts
+          cat /$(pwd)/test/scripts/localstack_init.sh
           curl 'http://localstack:4566/health'
-          aws --endpoint-url=http://localstack:4566 s3 mb s3://test-bucket
           aws --endpoint-url=http://localstack:4566 s3 ls
       - name: rust
         uses: actions-rs/toolchain@v1
