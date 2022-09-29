@@ -1,4 +1,4 @@
-FROM erlang:24.3-alpine AS builder
+FROM erlang:24.3-alpine
 
 RUN apk add --no-cache --update \
     autoconf automake bison build-base bzip2 cmake curl \
@@ -37,26 +37,8 @@ RUN make compile
 # Build release
 RUN make release
 
-CMD ["make", "run"]
-
-FROM builder AS tester
-
-COPY --from=builder /opt/hpr .
-# Bring over exe like make
-COPY --from=builder /usr/bin /usr/bin
-
 # Add tests
 COPY test/ test/
 RUN ./rebar3 compile as test
-
-CMD ["make", "run"]
-
-FROM builder AS runner
-WORKDIR /opt/hpr
-
-# Copy the built release
-COPY --from=builder /opt/hpr .
-# Bring over exe like make
-COPY --from=builder /usr/bin /usr/bin
 
 CMD ["make", "run"]
