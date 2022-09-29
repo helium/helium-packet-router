@@ -14,14 +14,9 @@
 -define(UNCONFIRMED_UP, 2#010).
 -define(CONFIRMED_UP, 2#100).
 
-init_per_testcase(TestCase, Config) ->
-    %% Setup base directory
-    BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
-    ok = application:set_env(?APP, base_dir, BaseDir),
-
+init_per_testcase(_TestCase, Config) ->
     %% Start HPR
     application:ensure_all_started(?APP),
-
     Config.
 
 end_per_testcase(_TestCase, Config) ->

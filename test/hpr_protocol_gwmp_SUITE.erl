@@ -21,7 +21,6 @@
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
 
 -define(REDIRECT_WORKER_PORT, 2777).
--define(REDIRECT_WORKER_ENDPOINT, <<"127.0.0.1:2777">>).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -73,7 +72,7 @@ end_per_testcase(TestCase, Config) ->
 single_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
-    Route = test_route_1777(),
+    Route = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
@@ -88,21 +87,11 @@ single_lns_test(_Config) ->
 
     ok.
 
-test_route_1777() ->
-    hpr_route:new(
-        1337,
-        [],
-        [],
-        <<"127.0.0.1:1777">>,
-        gwmp,
-        42
-    ).
-
 multi_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
-    Route1 = hpr_route:new(1337, [], [], <<"127.0.0.1:1777">>, gwmp, 42),
-    Route2 = hpr_route:new(1337, [], [], <<"127.0.0.1:1778">>, gwmp, 42),
+    Route1 = test_route(1777),
+    Route2 = test_route(1778),
 
     {ok, RcvSocket1} = gen_udp:open(1777, [binary, {active, true}]),
     {ok, RcvSocket2} = gen_udp:open(1778, [binary, {active, true}]),
@@ -131,7 +120,7 @@ single_lns_downlink_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
     %% Sending a packet up, to get a packet down.
-    Route1 = hpr_route:new(1337, [], [], <<"127.0.0.1:1777">>, gwmp, 42),
+    Route1 = test_route(1777),
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
@@ -195,8 +184,8 @@ multi_lns_downlink_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
     %% Sending a packet up, to get a packet down.
-    Route1 = hpr_route:new(1337, [], [], <<"127.0.0.1:1777">>, gwmp, 42),
-    Route2 = hpr_route:new(1337, [], [], <<"127.0.0.1:1778">>, gwmp, 42),
+    Route1 = test_route(1777),
+    Route2 = test_route(1778),
 
     {ok, LNSSocket1} = gen_udp:open(1777, [binary, {active, true}]),
     {ok, LNSSocket2} = gen_udp:open(1778, [binary, {active, true}]),
@@ -249,14 +238,7 @@ multi_gw_single_lns_test(_Config) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{gateway = PubKeyBin},
 
-    Route = hpr_route:new(
-        1337,
-        [],
-        [],
-        <<"127.0.0.1:1777">>,
-        gwmp,
-        42
-    ),
+    Route = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
@@ -293,7 +275,7 @@ shutdown_idle_worker_test(_Config) ->
     timer:sleep(50),
 
     %%    before timer expires, send push_data
-    Route = test_route_1777(),
+    Route = test_route(1777),
     ok = hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
 
     %%    check that timer restarted when the push_data occurred
@@ -311,7 +293,7 @@ pull_data_test(_Config) ->
     PacketUp = fake_join_up_packet(),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
 
-    Route = test_route_1777(),
+    Route = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
@@ -325,7 +307,7 @@ pull_data_test(_Config) ->
     ok.
 
 gateway_dest_redirect_test(_Config) ->
-    Route = hpr_route:new(1337, [], [], ?REDIRECT_WORKER_ENDPOINT, gwmp, 42),
+    Route = test_route(?REDIRECT_WORKER_PORT),
 
     {ok, USSocket} = gen_udp:open(1778, [binary, {active, true}]),
     {ok, EUSocket} = gen_udp:open(1779, [binary, {active, true}]),
@@ -377,6 +359,15 @@ gateway_dest_redirect_test(_Config) ->
 %% ===================================================================
 %% Helpers
 %% ===================================================================
+
+test_route(Port) ->
+    hpr_route:new(#{
+        net_id => 1337,
+        devaddr_ranges => [],
+        euis => [],
+        oui => 42,
+        protocol => {gwmp, #{ip => <<"127.0.0.1">>, port => Port}}
+    }).
 
 expect_pull_data(Socket, Reason) ->
     receive

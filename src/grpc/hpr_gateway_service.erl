@@ -30,5 +30,3 @@ handle_info({router_reply, ReplyMap}, StreamState) ->
     grpcbox_stream:send(false, Reply, StreamState);
 handle_info(_Msg, StreamState) ->
     StreamState.
-
-%% ===================================================================
