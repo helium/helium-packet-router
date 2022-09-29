@@ -11,6 +11,10 @@
         helium_proto,
         grpcbox,
         grpc_client,
+        %% TODO: Remove me once grpc_client fixed
+        grpc_lib,
+        %% TODO: Remove me once grpc_client fixed
+        http2_client,
         erlang_lorawan,
         libp2p_crypto,
         erl_angry_purple_tiger,
