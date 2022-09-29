@@ -106,7 +106,7 @@ full_test(Config) ->
     case file:read_file(FilePath) of
         {ok, Binary} ->
             #{routes := BackupRoutes} = erlang:binary_to_term(Binary),
-            ?assertEqual(Routes, [hpr_route:new(R) || R <-BackupRoutes]);
+            ?assertEqual(Routes, [hpr_route:new(R) || R <- BackupRoutes]);
         {error, Reason} ->
             ct:fail(Reason)
     end,
