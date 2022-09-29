@@ -26,21 +26,16 @@ stop() ->
 
 -spec update_routes(client_config_pb:routes_res_v1_pb()) -> ok.
 update_routes(#{routes := Routes}) ->
-    {NewDevaddrRows, NewEUIRows} = lists:foldl(
-        fun(RouteConfigMap, {DevaddrRowsAcc, EUIRowsAcc}) ->
-            Route = hpr_route:new(RouteConfigMap),
-            DevaddrRowsAcc2 = DevaddrRowsAcc ++ route_to_devaddr_rows(Route),
-            EUIRowsAcc2 = EUIRowsAcc ++ route_to_eui_rows(Route),
-            {DevaddrRowsAcc2, EUIRowsAcc2}
-        end,
-        {[], []},
-        Routes
-    ),
     true = ets:delete_all_objects(?DEVADDRS_ETS),
     true = ets:delete_all_objects(?EUIS_ETS),
-    true = ets:insert(?DEVADDRS_ETS, NewDevaddrRows),
-    true = ets:insert(?EUIS_ETS, NewEUIRows),
-    ok.
+    lists:foreach(
+        fun(RouteConfigMap) ->
+            Route = hpr_route:new(RouteConfigMap),
+            true = ets:insert(?DEVADDRS_ETS, route_to_devaddr_rows(Route)),
+            true = ets:insert(?EUIS_ETS, route_to_eui_rows(Route))
+        end,
+        Routes
+    ).
 
 -spec insert_route(Route :: hpr_route:route()) -> ok.
 insert_route(Route) ->
