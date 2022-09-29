@@ -101,9 +101,8 @@ full_test(Config) ->
     %% Let  process new routes
     timer:sleep(100),
 
-    %% Check Dets
+    %% Check backup file
     FilePath = proplists:get_value(file_backup_path, Config),
-
     case file:read_file(FilePath) of
         {ok, Binary} ->
             #{routes := DetsRoutes} = erlang:binary_to_term(Binary),
