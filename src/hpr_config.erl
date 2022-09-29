@@ -2,7 +2,6 @@
 
 -export([
     init/0,
-    stop/0,
     update_routes/1,
     insert_route/1,
     lookup_devaddr/1,
@@ -16,12 +15,6 @@
 init() ->
     ?DEVADDRS_ETS = ets:new(?DEVADDRS_ETS, [public, named_table, bag, {read_concurrency, true}]),
     ?EUIS_ETS = ets:new(?EUIS_ETS, [public, named_table, bag, {read_concurrency, true}]),
-    ok.
-
--spec stop() -> ok.
-stop() ->
-    true = ets:delete(?DEVADDRS_ETS),
-    true = ets:delete(?EUIS_ETS),
     ok.
 
 -spec update_routes(client_config_pb:routes_res_v1_pb()) -> ok.
@@ -114,7 +107,8 @@ foreach_setup() ->
     ok.
 
 foreach_cleanup(ok) ->
-    stop(),
+    true = ets:delete(?DEVADDRS_ETS),
+    true = ets:delete(?EUIS_ETS),
     ok.
 
 test_route_to_devaddr_rows() ->
