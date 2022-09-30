@@ -23,6 +23,7 @@ test: | $(grpc_services_directory)
 	$(REBAR) eunit -v
 	$(REBAR) ct --readable=true
 	$(REBAR) dialyzer
+	$(REBAR) release
 
 rel: | $(grpc_services_directory)
 	$(REBAR) release
