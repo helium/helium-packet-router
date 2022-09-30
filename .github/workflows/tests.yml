@@ -158,7 +158,7 @@ jobs:
       - name: localstack
         run: | 
           curl 'http://localstack:4566/health'
-          curl 'http://localhost:4566/_localstack/init'
+          curl 'http://localstack:4566/_localstack/init'
       - name: rust
         uses: actions-rs/toolchain@v1
         with:
