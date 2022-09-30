@@ -34,7 +34,7 @@
     ]},
     {lager, [
         {suppress_supervisor_start_stop, true},
-        {log_root, "/var/log/hpr"},
+        {log_root, "log"},
         {crash_log, "crash.log"},
         {handlers, [
             {lager_file_backend, [
@@ -70,5 +70,6 @@
             prometheus_vm_system_info_collector
         ]},
         {vm_system_info_collector_metrics, [process_count]}
-    ]}
+    ]},
+    "etc/local.conf"
 ].
