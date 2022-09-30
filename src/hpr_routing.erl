@@ -53,7 +53,7 @@ dispatch_packet(undefined, _Packet) ->
     lager:error("invalid packet type"),
     {error, invalid_packet_type};
 dispatch_packet({join_req, AppEUI, DevEUI}, Packet) ->
-    Routes = hpr_routing_config_worker:lookup_eui(AppEUI, DevEUI),
+    Routes = hpr_config:lookup_eui(AppEUI, DevEUI),
     lager:debug(
         [
             {app_eui, hpr_utils:int_to_hex(AppEUI)},
@@ -67,7 +67,7 @@ dispatch_packet({uplink, DevAddr}, Packet) ->
         [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
         "handling uplink"
     ),
-    Routes = hpr_routing_config_worker:lookup_devaddr(DevAddr),
+    Routes = hpr_config:lookup_devaddr(DevAddr),
     deliver_packet(Packet, Routes).
 
 -spec deliver_packet(

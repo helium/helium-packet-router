@@ -23,6 +23,7 @@ test: | $(grpc_services_directory)
 	$(REBAR) eunit -v
 	$(REBAR) ct --readable=true
 	$(REBAR) dialyzer
+	$(REBAR) release
 
 rel: | $(grpc_services_directory)
 	$(REBAR) release
@@ -31,13 +32,13 @@ run: | $(grpc_services_directory)
 	_build/default/rel/hpr/bin/hpr foreground
 
 docker-build:
-	docker build --force-rm --target tester -t quay.io/team-helium/hpr:local .
+	docker build --force-rm -t quay.io/team-helium/hpr:local .
 
 docker-test:
 	docker run --rm -it --init --name=helium_packet_router_test quay.io/team-helium/hpr:local make test
 
 docker-run:
-	docker run --rm -it --init --network=host --name=helium_packet_router quay.io/team-helium/hpr:local
+	docker run --rm -it --init --name=helium_packet_router quay.io/team-helium/hpr:local
 
 grpc: grpc_server grpc_client
 

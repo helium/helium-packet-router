@@ -67,15 +67,14 @@ join_req_test(_Config) ->
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
-    Route = hpr_route:new(
-        NetID,
-        [{16#00000000, 16#0000000A}],
-        [{1, 1}, {1, 2}],
-        <<"127.0.0.1">>,
-        router,
-        1
-    ),
-    ok = hpr_routing_config_worker:insert(Route),
+    Route = hpr_route:new(#{
+        net_id => NetID,
+        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
+        oui => 1,
+        protocol => {router, #{ip => <<"127.0.0.1">>, port => 80}}
+    }),
+    ok = hpr_config:insert_route(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
@@ -93,7 +92,7 @@ join_req_test(_Config) ->
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
 
     UplinkPacketUp = test_utils:uplink_packet_up(#{
-        gateway => Gateway, sig_fun => SigFun, devadrr => DevAddr
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
 
@@ -105,7 +104,6 @@ join_req_test(_Config) ->
                 Route
             ]},
             ok},
-
     ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),
 
     ?assert(meck:validate(hpr_protocol_router)),

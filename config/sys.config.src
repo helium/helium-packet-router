@@ -1,5 +1,10 @@
 [
     {hpr, [
+        {config_worker, #{
+            host => "${HPR_CONFIG_WORKER_HOST}",
+            port => "${HPR_CONFIG_WORKER_PORT:-8080}",
+            file_backup_path => "/var/data/hpr/config_worker.backup"
+        }}
     ]},
     {grpcbox, [
         {servers, [
