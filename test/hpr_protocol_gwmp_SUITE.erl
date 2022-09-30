@@ -160,8 +160,8 @@ single_lns_downlink_test(_Config) ->
         }} ->
             ?assert(erlang:is_integer(Timestamp)),
             ?assertEqual(Data, base64:encode(Payload)),
-            ?assertEqual(Freq, Frequency),
-            ?assertEqual(Datr, Datarate),
+            ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
+            ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
             ok;
         {reply, Other} ->
             ct:fail({rcvd_bad_packet_down, Other})
