@@ -148,7 +148,7 @@ jobs:
         volumes:
           - "/var/lib/localstack:/var/lib/localstack" 
           - "/var/run/docker.sock:/var/run/docker.sock"
-          - "/$(pwd)/test/scripts:/docker-entrypoint-initaws.d"
+          - "/$(pwd)/test/scripts/localstack_init.sh:/etc/localstack/init/ready.d/init-aws.sh"
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -156,7 +156,9 @@ jobs:
         run: | 
           apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
       - name: localstack
-        run: curl 'http://localstack:4566/health'
+        run: | 
+          curl 'http://localstack:4566/health'
+          curl 'http://localhost:4566/_localstack/init'
       - name: rust
         uses: actions-rs/toolchain@v1
         with:
