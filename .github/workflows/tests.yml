@@ -165,7 +165,7 @@ jobs:
     container:
       image: erlang:24.3-alpine
     concurrency: 
-      group: ${{ github.workflow }}-${{ github.ref }}-ct
+      group: ${{ github.workflow }}-${{ github.ref }}-release
       cancel-in-progress: true
     steps:
       - name: checkout
