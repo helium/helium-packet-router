@@ -83,7 +83,7 @@ init(Args) ->
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
     lager:md([
-        {gateway_mac, binary:encode_hex(pubkeybin_to_mac(PubKeyBin))},
+        {gateway_mac, erlang:binary_to_list(binary:encode_hex(pubkeybin_to_mac(PubKeyBin)))},
         {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
 
