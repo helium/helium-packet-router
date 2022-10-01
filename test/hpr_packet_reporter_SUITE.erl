@@ -100,7 +100,8 @@ upload_report_test(_Config) ->
     hpr_packet_reporter:handle_cast({upload, FilePath}, State),
 
     UploadedFile = meck:capture(first, aws_s3, put_object, '_', 3),
-    BucketName = application:get_env(hpr, packet_reporter_bucket, <<"test-bucket">>),
+    Env = application:get_env(?APP, packet_reporter, #{}),
+    BucketName = maps:get(bucket, Env, <<"test-bucket">>),
     {ok, #{<<"Body">> := ResponseBody}, _} = aws_s3:get_object(AWSClient, BucketName, UploadedFile),
 
     [EncodedPacket, EncodedPacket2] = parse_packet_report(ResponseBody),
@@ -113,7 +114,8 @@ upload_report_test(_Config) ->
     ok.
 
 upload_window_test(_Config) ->
-    UploadWindow = application:get_env(hpr, packet_reporter_upload_window, 900000),
+    Env = application:get_env(?APP, packet_reporter, #{}),
+    UploadWindow = maps:get(upload_window, Env, 900000),
     State = sys:get_state(hpr_packet_reporter),
     #state{upload_window_start_time = WindowStartTime} = State,
 

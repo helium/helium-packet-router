@@ -2,6 +2,7 @@
 
 -behaviour(gen_server).
 
+-include("./include/hpr.hrl").
 -include("./grpc/autogen/server/packet_router_pb.hrl").
 
 -export([
@@ -177,7 +178,7 @@ handle_write(FilePath, WriteOptions) ->
 
     NumDeleted = delete_packets_by_timestamp(WriteTimestamp),
     FileSize = filelib:file_size(FilePath),
-    MaxFileSize = application:get_env(hpr, packet_reporter_max_file_size, ?MAX_FILE_SIZE),
+    MaxFileSize = get_value(max_file_size, ?MAX_FILE_SIZE),
 
     lager:info(
         [
@@ -188,12 +189,7 @@ handle_write(FilePath, WriteOptions) ->
         ],
         "packet reporter processing"
     ),
-    lager:info(
-        [
-            {state, sys:get_state(hpr_packet_reporter)}
-        ],
-        "packet reporter state"
-    ),
+
     {ok, FileSize, MaxFileSize}.
 
 -spec setup_aws() -> aws_client:aws_client().
@@ -201,15 +197,15 @@ setup_aws() ->
     #{
         access_key_id := AccessKey,
         secret_access_key := Secret,
-        aws_region := Region
-    } = maps:from_list(application:get_env(hpr, aws_config, [])),
+        region := Region
+    } = Config = application:get_env(?APP, packet_reporter, #{}),
     case Region of
         <<"local">> ->
             aws_client:make_local_client(
                 AccessKey,
                 Secret,
-                application:get_env(hpr, localstack_port, <<"4566">>),
-                application:get_env(hpr, localstack_host, <<"localhost">>)
+                maps:get(localstack_port, Config, <<"4566">>),
+                maps:get(localstack_host, Config, <<"localhost">>)
             );
         _ ->
             aws_client:make_client(AccessKey, Secret, Region)
@@ -219,9 +215,7 @@ setup_aws() ->
 -spec start_report_interval(IntervalDuration :: interval_duration_ms()) -> {ok, timer:tref()}.
 
 start_report_interval() ->
-    IntervalDuration = application:get_env(
-        hpr, packet_reporter_report_interval, ?DEFAULT_REPORT_INTERVAL
-    ),
+    IntervalDuration = get_value(report_interval, ?DEFAULT_REPORT_INTERVAL),
     start_report_interval(IntervalDuration).
 start_report_interval(IntervalDuration) ->
     timer:apply_interval(IntervalDuration, ?MODULE, write_packets, []).
@@ -302,8 +296,9 @@ open_tmp_file(FilePath, WriteOptions) ->
     AWSClient :: aws_client:aws_client(), FilePath :: binary(), S3FileName :: binary()
 ) -> {ok, Response :: term()} | {error, upload_failed}.
 upload_file(AWSClient, FilePath, S3FileName) ->
-    BucketName = application:get_env(hpr, packet_reporter_bucket, <<"test-bucket">>),
+    BucketName = get_value(bucket, <<"test-bucket">>),
     {ok, Content} = file:read_file(FilePath),
+
     case
         aws_s3:put_object(
             AWSClient,
@@ -327,7 +322,7 @@ upload_file(AWSClient, FilePath, S3FileName) ->
 -spec upload_window_elapsed(StartTime :: timestamp_ms()) -> boolean().
 upload_window_elapsed(StartTime) ->
     Timestamp = erlang:system_time(millisecond),
-    UploadWindow = application:get_env(hpr, packet_reporter_upload_window, ?DEFAULT_UPLOAD_WINDOW),
+    UploadWindow = get_value(upload_window, ?DEFAULT_UPLOAD_WINDOW),
     Timestamp - StartTime >= UploadWindow.
 
 -spec get_packets_by_timestamp(Timestamp :: timestamp_ms()) -> [term()].
@@ -337,6 +332,11 @@ get_packets_by_timestamp(Timestamp) ->
 -spec delete_packets_by_timestamp(Timestamp :: timestamp_ms()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
     ets:select_delete(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], [true]}]).
+
+-spec get_value(Key :: term(), Default :: term()) -> ConfigValue :: term().
+get_value(Key, Default) ->
+    Config = application:get_env(?APP, packet_reporter, #{}),
+    maps:get(Key, Config, Default).
 
 % ------------------------------------------------------------------
 % EUNIT Tests
@@ -387,7 +387,7 @@ pad_u32_test() ->
 
 upload_window_elapsed_test() ->
     Timestamp = erlang:system_time(millisecond),
-    UploadWindow = application:get_env(hpr, packet_reporter_upload_window, ?DEFAULT_UPLOAD_WINDOW),
+    UploadWindow = get_value(upload_window, ?DEFAULT_UPLOAD_WINDOW),
 
     ?assertEqual(false, upload_window_elapsed(Timestamp)),
     ?assertEqual(true, upload_window_elapsed(Timestamp - UploadWindow)).
