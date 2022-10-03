@@ -118,7 +118,9 @@ declare_metrics() ->
                         {name, Metric},
                         {help, Description},
                         {labels, Meta},
-                        {buckets, [50, 100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000]}
+                        {buckets, [
+                            10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000
+                        ]}
                     ]);
                 _ ->
                     _ = Module:declare([
