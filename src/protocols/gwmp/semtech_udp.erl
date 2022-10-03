@@ -31,9 +31,9 @@
 %% @end
 %%%-------------------------------------------------------------------
 -spec push_data(
-    binary(),
-    binary(),
-    map()
+    Token :: binary(),
+    MAC :: binary(),
+    RXPK :: map()
 ) -> binary().
 push_data(Token, MAC, RXPK) ->
     RoundedFloats = round_to_fourth_decimal_all_float_values(RXPK),
@@ -42,10 +42,10 @@ push_data(Token, MAC, RXPK) ->
         BinJSX/binary>>.
 
 -spec push_data(
-    binary(),
-    binary(),
-    map(),
-    map()
+    Token :: binary(),
+    MAC :: binary(),
+    RXPK :: map(),
+    Stat :: map()
 ) -> binary().
 push_data(Token, MAC, RXPK, Stat) ->
     RoundedFloats = round_to_fourth_decimal_all_float_values(RXPK),
@@ -60,7 +60,7 @@ push_data(Token, MAC, RXPK, Stat) ->
 %% PUSH_DATA packets received.
 %% @end
 %%%-------------------------------------------------------------------
--spec push_ack(binary()) -> binary().
+-spec push_ack(Token :: binary()) -> binary().
 push_ack(Token) ->
     <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PUSH_ACK:8/integer-unsigned>>.
 
@@ -69,7 +69,7 @@ push_ack(Token) ->
 %% That packet type is used by the gateway to poll data from the server.
 %% @end
 %%%-------------------------------------------------------------------
--spec pull_data(binary(), binary()) -> binary().
+-spec pull_data(Token :: binary(), MAC :: binary()) -> binary().
 pull_data(Token, MAC) ->
     <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_DATA:8/integer-unsigned, MAC:8/binary>>.
 
@@ -79,7 +79,7 @@ pull_data(Token, MAC) ->
 %% open and that the server can send PULL_RESP packets at any time.
 %% @end
 %%%-------------------------------------------------------------------
--spec pull_ack(binary()) -> binary().
+-spec pull_ack(Token :: binary()) -> binary().
 pull_ack(Token) ->
     <<?PROTOCOL_2:8/integer-unsigned, Token:2/binary, ?PULL_ACK:8/integer-unsigned>>.
 
@@ -90,9 +90,11 @@ pull_ack(Token) ->
 %% which makes things easier for the LNS
 %% @end
 %%%-------------------------------------------------------------------
+-spec round_to_fourth_decimal(Float :: float()) -> any().
 round_to_fourth_decimal(Float) ->
     io_lib:format("~.4f", [Float]).
 
+-spec round_to_fourth_decimal_all_float_values(MapOrList :: map() | list()) -> map() | list().
 round_to_fourth_decimal_all_float_values(MapOrList) when
     is_map(MapOrList); is_list(MapOrList)
 ->
@@ -126,8 +128,8 @@ round_to_fourth_decimal_all_float_values(Other) ->
 %% @end
 %%%-------------------------------------------------------------------
 -spec pull_resp(
-    binary(),
-    map()
+    Token :: binary(),
+    Map :: map()
 ) -> binary().
 pull_resp(Token, Map) ->
     RoundedFloats = round_to_fourth_decimal_all_float_values(Map),
@@ -144,16 +146,16 @@ pull_resp(Token, Map) ->
 %% @end
 %%%-------------------------------------------------------------------
 -spec tx_ack(
-    binary(),
-    binary()
+    Token :: binary(),
+    MAC :: binary()
 ) -> binary().
 tx_ack(Token, MAC) ->
     tx_ack(Token, MAC, ?TX_ACK_ERROR_NONE).
 
 -spec tx_ack(
-    binary(),
-    binary(),
-    binary()
+    Token :: binary(),
+    MAC :: binary(),
+    Error :: binary()
 ) -> binary().
 tx_ack(Token, MAC, Error) ->
     Map = #{error => Error},
@@ -214,12 +216,8 @@ json_data(
 ) ->
     jsx:decode(BinJSX, [return_maps]).
 
-%%====================================================================
-%% Internal functions
-%%====================================================================
-
 %% ------------------------------------------------------------------
-%% EUNIT Tests
+% EUnit tests
 %% ------------------------------------------------------------------
 -ifdef(TEST).
 

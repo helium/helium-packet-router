@@ -1,0 +1,45 @@
+name: packaging
+
+on:
+  push:
+    tags: [ '*' ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: cancel previous runs
+        uses: styfle/cancel-workflow_action@0.5.0
+        with:
+          access_token: ${{ github.token }}
+
+      - name: deps
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim rpm zip ruby
+
+      - name: fpm install
+        run: gem install fpm
+
+      - name: rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: build
+        run: make rel
+        env:
+          CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
+
+      - name: package
+        run: |
+          ./.github/scripts/make_deb.sh
+
+      - name: PackagecloudUpload
+        env:
+          PACKAGECLOUD_API_KEY: ${{ secrets.PACKAGECLOUD_API_KEY }}
+        run: |
+          ./.github/scripts/packagecloud_upload.sh

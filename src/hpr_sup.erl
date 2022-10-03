@@ -37,24 +37,25 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    lager:info("sup init"),
-
-    BaseDir = application:get_env(?APP, base_dir, "/var/data"),
-    ok = filelib:ensure_dir(BaseDir),
-
     ok = hpr_routing:init(),
+    ok = hpr_config:init(),
 
     RedirectMap = application:get_env(hpr, redirect_by_region, #{}),
+    ConfigWorkerConfig = application:get_env(hpr, config_worker, #{}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
-        ?WORKER(hpr_routing_config_worker, [#{base_dir => BaseDir}]),
+        ?WORKER(hpr_config_worker, [ConfigWorkerConfig]),
+        ?SUP(hpr_gwmp_sup, []),
         ?WORKER(hpr_gwmp_redirect_worker, [RedirectMap]),
-        ?SUP(hpr_gwmp_udp_sup, [])
+        ?WORKER(hpr_router_connection_manager, []),
+        ?WORKER(hpr_router_stream_manager, [
+            'helium.packet_router.gateway', send_packet, client_packet_router_pb
+        ])
     ],
     {ok, {
         #{
-            strategy => rest_for_one,
+            strategy => one_for_one,
             intensity => 1,
             period => 5
         },

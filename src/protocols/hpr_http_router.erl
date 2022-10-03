@@ -9,6 +9,7 @@
 -module(hpr_http_router).
 -author("jonathanruttenberg").
 
+-include("../grpc/autogen/server/config_pb.hrl").
 -include("../grpc/autogen/server/packet_router_pb.hrl").
 
 -include("hpr_roaming.hrl").
@@ -27,9 +28,13 @@ send(PacketUp, ResponseStream, Route, RoutingInfo) ->
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
 
-%%    start worker
-    case hpr_http_sup:maybe_start_worker(WorkerKey,
-        #{protocol => Protocol}) of
+    %%    start worker
+    case
+        hpr_http_sup:maybe_start_worker(
+            WorkerKey,
+            #{protocol => Protocol}
+        )
+    of
         {error, worker_not_started, _} = Err ->
             lager:error(
                 [{packet_type, PacketType}],
@@ -46,34 +51,39 @@ send(PacketUp, ResponseStream, Route, RoutingInfo) ->
                 "~s: [routing_info: ~p]",
                 [PacketType, RoutingInfo]
             ),
-            hpr_http_worker:handle_packet(WorkerPid, PacketUp, GatewayTime, ResponseStream, RoutingInfo)
+            hpr_http_worker:handle_packet(
+                WorkerPid, PacketUp, erlang:system_time(millisecond), ResponseStream, RoutingInfo
+            )
     end,
 
     todo,
     ok.
 
--spec worker_key_from(hpr_packet_up:binary(), hpr_route:route()) -> worker_key().
+-spec worker_key_from(hpr_packet_up:binary(), hpr_route:route()) -> hpr_http_sup:worker_key().
 worker_key_from(PacketUp, Route) ->
-%%    get phash
+    %%    get phash
     Phash = packet_hash(PacketUp),
 
-%%    get protocol
+    %%    get protocol
     Protocol = protocol_from(Route),
     {Phash, Protocol}.
 
 -spec protocol_from(hpr_route:route()) -> hpr_http_sup:http_protocol().
-protocol_from(#packet_router_route_v1_pb{
-    protocol = http,
-    lns = LNS
-} = _Route) ->
-%%    return hard-coded values until the route protobuf is updated
+protocol_from(
+    #config_route_v1_pb{
+        protocol = Protocol
+    } = _Route
+) ->
+    #config_protocol_http_roaming_pb{ip = IP, port = Port} = Protocol,
+
+    %%    return hard-coded values until the route protobuf is updated
     #http_protocol{
         protocol_version = pv_1_1,
         flow_type = async,
-        endpoint = LNS,
+        endpoint = <<IP/binary, <<":">>/binary, (integer_to_binary(Port))/binary>>,
         dedupe_timeout = 250,
         auth_header = null
-        }.
+    }.
 
 -spec packet_hash(hpr_packet_up:packet()) -> binary().
 packet_hash(PacketUp) ->

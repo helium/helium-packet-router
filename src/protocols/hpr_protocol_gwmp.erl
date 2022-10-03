@@ -1,6 +1,4 @@
--module(hpr_gwmp_router).
-
--include("../grpc/autogen/server/packet_router_pb.hrl").
+-module(hpr_protocol_gwmp).
 
 -export([send/4]).
 
@@ -13,13 +11,13 @@
 -spec send(
     Packet :: hpr_packet_up:packet(),
     Stream :: grpcbox_stream:t(),
-    Routes :: hpr_route:route(),
+    Route :: hpr_route:route(),
     RoutingInfo :: hpr_routing:routing_info()
 ) -> ok | {error, any()}.
 send(PacketUp, Stream, Route, _RoutingInfo) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
 
-    case hpr_gwmp_udp_sup:maybe_start_worker(Gateway, #{}) of
+    case hpr_gwmp_sup:maybe_start_worker(Gateway, #{}) of
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
@@ -34,27 +32,25 @@ send(PacketUp, Stream, Route, _RoutingInfo) ->
             end
     end.
 
-%% ===================================================================
-%% Internal
-%% ===================================================================
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
--spec txpk_to_packet_down(TxPkBin :: binary()) -> #packet_router_packet_down_v1_pb{}.
+-spec txpk_to_packet_down(TxPkBin :: binary()) -> hpr_packet_down:packet().
 txpk_to_packet_down(TxPkBin) ->
     TxPk = semtech_udp:json_data(TxPkBin),
     Map = maps:get(<<"txpk">>, TxPk),
     JSONData0 = base64:decode(maps:get(<<"data">>, Map)),
-
-    Down = #packet_router_packet_down_v1_pb{
-        payload = JSONData0,
-        rx1 = #window_v1_pb{
-            timestamp = maps:get(<<"tmst">>, Map),
-            frequency = maps:get(<<"freq">>, Map),
-            datarate = maps:get(<<"datr">>, Map)
+    hpr_packet_down:to_record(#{
+        payload => JSONData0,
+        rx1 => #{
+            timestamp => maps:get(<<"tmst">>, Map),
+            frequency => erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
+            datarate => erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
         },
-        %% TODO: rx2 windows
-        rx2 = undefined
-    },
-    Down.
+        %% No rx2 windows for udp
+        rx2 => undefined
+    }).
 
 -spec packet_up_to_push_data(
     PacketUp :: hpr_packet_up:packet(),
@@ -117,3 +113,33 @@ route_to_dest(Route) when erlang:is_binary(Route) ->
 route_to_dest(Route) ->
     Lns = hpr_route:lns(Route),
     route_to_dest(Lns).
+
+%% ------------------------------------------------------------------
+% EUnit tests
+%% ------------------------------------------------------------------
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+verify_downlink_test() ->
+    %% Taken from actual gwmp reply
+    TxPkBin =
+        <<2, 211, 238, 3, 123, 34, 116, 120, 112, 107, 34, 58, 123, 34, 105, 109, 109, 101, 34, 58,
+            102, 97, 108, 115, 101, 44, 34, 114, 102, 99, 104, 34, 58, 48, 44, 34, 112, 111, 119,
+            101, 34, 58, 50, 48, 44, 34, 97, 110, 116, 34, 58, 48, 44, 34, 98, 114, 100, 34, 58, 48,
+            44, 34, 116, 109, 115, 116, 34, 58, 53, 54, 54, 53, 53, 56, 51, 44, 34, 102, 114, 101,
+            113, 34, 58, 57, 50, 55, 46, 53, 44, 34, 109, 111, 100, 117, 34, 58, 34, 76, 79, 82, 65,
+            34, 44, 34, 100, 97, 116, 114, 34, 58, 34, 83, 70, 49, 48, 66, 87, 53, 48, 48, 34, 44,
+            34, 99, 111, 100, 114, 34, 58, 34, 52, 47, 53, 34, 44, 34, 105, 112, 111, 108, 34, 58,
+            116, 114, 117, 101, 44, 34, 115, 105, 122, 101, 34, 58, 51, 51, 44, 34, 100, 97, 116,
+            97, 34, 58, 34, 73, 77, 97, 69, 53, 90, 98, 71, 121, 65, 79, 75, 117, 110, 68, 101, 49,
+            50, 85, 85, 48, 89, 100, 57, 54, 72, 78, 106, 85, 115, 114, 121, 115, 82, 55, 86, 107,
+            69, 118, 75, 70, 86, 88, 79, 34, 125, 125>>,
+
+    Downlink = ?MODULE:txpk_to_packet_down(TxPkBin),
+    ?assertEqual(ok, packet_router_pb:verify_msg(Downlink)),
+
+    ok.
+
+-endif.

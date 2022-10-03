@@ -51,7 +51,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(?METRICS_TICK, State) ->
-    lager:info("running metrics"),
+    lager:debug("running metrics"),
     _ = schedule_next_tick(),
     {noreply, State};
 handle_info(_Msg, State) ->

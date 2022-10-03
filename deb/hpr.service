@@ -1,0 +1,20 @@
+[Unit]
+Description=hpr instance
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/hpr/bin/hpr foreground
+ExecStop=/opt/hpr/bin/hpr stop
+User=helium
+PIDFile=/var/run/hpr.pid
+Environment=HOME="/opt/hpr"
+Environment=RUNNER_LOG_DIR="/opt/hpr/log"
+Environment=ERL_CRASH_DUMP="/opt/hpr/log"
+Environment=RELX_OUT_FILE_PATH="/tmp"
+LimitNOFILE=128000
+LimitNPROC=128000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
