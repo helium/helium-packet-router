@@ -67,7 +67,7 @@ start_link(Args) ->
 -spec handle_packet(
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
-    GatewayTime :: pp_roaming_protocol:gateway_time(),
+    GatewayTime :: hpr_roaming_protocol:gateway_time(),
     ResponseStream :: grpcbox_stream:t(),
     RoutingInfo :: hpr_routing:routing_info()
 ) -> ok | {error, any()}.

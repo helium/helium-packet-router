@@ -11,14 +11,70 @@
 
 -include("../grpc/autogen/server/packet_router_pb.hrl").
 
+-include("hpr_roaming.hrl").
+
 -export([send/4]).
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    Stream :: grpcbox_stream:t(),
-    Routes :: hpr_route:route(),
+    ResponseStream :: grpcbox_stream:t(),
+    Route :: hpr_route:route(),
     RoutingInfo :: hpr_routing:routing_info()
 ) -> ok | {error, any()}.
-send(_PacketUp, _Stream, _Route, _RoutingInfo) ->
+send(PacketUp, ResponseStream, Route, RoutingInfo) ->
+    WorkerKey = worker_key_from(PacketUp, Route),
+    PacketType = hpr_routing:routing_info_type(RoutingInfo),
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
+    Protocol = protocol_from(Route),
+
+%%    start worker
+    case hpr_http_sup:maybe_start_worker(WorkerKey,
+        #{protocol => Protocol}) of
+        {error, worker_not_started, _} = Err ->
+            lager:error(
+                [{packet_type, PacketType}],
+                "failed to start http connector for ~p: ~p",
+                [hpr_utils:gateway_name(PubKeyBin), Err]
+            ),
+            Err;
+        {ok, WorkerPid} ->
+            lager:debug(
+                [
+                    {packet_type, PacketType},
+                    {protocol, http}
+                ],
+                "~s: [routing_info: ~p]",
+                [PacketType, RoutingInfo]
+            ),
+            hpr_http_worker:handle_packet(WorkerPid, PacketUp, GatewayTime, ResponseStream, RoutingInfo)
+    end,
+
     todo,
     ok.
+
+-spec worker_key_from(hpr_packet_up:binary(), hpr_route:route()) -> worker_key().
+worker_key_from(PacketUp, Route) ->
+%%    get phash
+    Phash = packet_hash(PacketUp),
+
+%%    get protocol
+    Protocol = protocol_from(Route),
+    {Phash, Protocol}.
+
+-spec protocol_from(hpr_route:route()) -> hpr_http_sup:http_protocol().
+protocol_from(#packet_router_route_v1_pb{
+    protocol = http,
+    lns = LNS
+} = _Route) ->
+%%    return hard-coded values until the route protobuf is updated
+    #http_protocol{
+        protocol_version = pv_1_1,
+        flow_type = async,
+        endpoint = LNS,
+        dedupe_timeout = 250,
+        auth_header = null
+        }.
+
+-spec packet_hash(hpr_packet_up:packet()) -> binary().
+packet_hash(PacketUp) ->
+    crypto:hash(sha256, hpr_packet_up:payload(PacketUp)).

@@ -3,7 +3,7 @@
 -export([
     init/0,
     handle_packet/2
-]).
+    , routing_info_type/1]).
 
 -type routing_info() ::
     {devaddr, DevAddr :: non_neg_integer()}
@@ -69,6 +69,9 @@ handle_packet(Packet, StreamHandler) ->
                     ok = deliver_packet(Packet, StreamHandler, Routes, RoutingInfo)
             end
     end.
+
+routing_info_type({eui, _DevEUI, _AppEUI}) -> eui;
+routing_info_type({devaddr, _DevAddr}) -> devaddr.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
