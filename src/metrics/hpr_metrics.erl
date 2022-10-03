@@ -8,7 +8,8 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/1
+    start_link/1,
+    observe_packet_up/4
 ]).
 
 %% ------------------------------------------------------------------
@@ -34,6 +35,23 @@
 start_link(Args) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
 
+-spec observe_packet_up(
+    PacketType :: hpr_packet_up:type(),
+    Status :: hpr_routing:hpr_routing_response(),
+    NumberOfRoutes :: non_neg_integer(),
+    Start :: non_neg_integer()
+) -> ok.
+observe_packet_up({Type, _}, RoutingStatus, NumberOfRoutes, Start) ->
+    Status =
+        case RoutingStatus of
+            ok -> ok;
+            {error, _} -> error
+        end,
+    prometheus_histogram:observe(
+        ?METRICS_PACKET_UP_HISTOGRAM,
+        [Type, Status, NumberOfRoutes],
+        erlang:system_time(millisecond) - Start
+    ).
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
@@ -52,6 +70,15 @@ handle_cast(_Msg, State) ->
 
 handle_info(?METRICS_TICK, State) ->
     lager:debug("running metrics"),
+    _ = erlang:spawn_opt(
+        fun() ->
+            ok = record_grpc_connections()
+        end,
+        [
+            {fullsweep_after, 0},
+            {priority, high}
+        ]
+    ),
     _ = schedule_next_tick(),
     {noreply, State};
 handle_info(_Msg, State) ->
@@ -101,3 +128,20 @@ declare_metrics() ->
 -spec schedule_next_tick() -> reference().
 schedule_next_tick() ->
     erlang:send_after(?METRICS_TICK_INTERVAL, self(), ?METRICS_TICK).
+
+-spec record_grpc_connections() -> ok.
+record_grpc_connections() ->
+    Opts = application:get_env(grpcbox, listen_opts, #{}),
+    PoolName = grpcbox_services_sup:pool_name(Opts),
+    try
+        Counts = acceptor_pool:count_children(PoolName),
+        proplists:get_value(active, Counts)
+    of
+        Count ->
+            _ = prometheus_gauge:set(?METRICS_GRPC_CONNECTION_GAUGE, Count)
+    catch
+        _:_ ->
+            lager:warning("no grpcbox acceptor named ~p", [PoolName]),
+            _ = prometheus_gauge:set(?METRICS_GRPC_CONNECTION_GAUGE, 0)
+    end,
+    ok.
