@@ -58,6 +58,12 @@ observe_packet_up({Type, _}, RoutingStatus, NumberOfRoutes, Start) ->
 init(_Args) ->
     erlang:process_flag(trap_exit, true),
     lager:info("init"),
+    ElliOpts = [
+        {callback, hpr_metrics_handler},
+        {callback_args, #{}},
+        {port, 3000}
+    ],
+    {ok, _Pid} = elli:start_link(ElliOpts),
     ok = declare_metrics(),
     _ = schedule_next_tick(),
     {ok, #state{}}.
