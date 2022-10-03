@@ -516,7 +516,8 @@ encode_deveui(Num) ->
 encode_devaddr(Num) ->
     hpr_roaming_utils:hexstring(Num, 8).
 
--spec window(non_neg_integer(), float(), atom()) -> packet_router_pb:window_v1_pb().
+-spec window(non_neg_integer(), 'undefined' | non_neg_integer(), atom()) ->
+    packet_router_pb:window_v1_pb().
 window(TS, Freq, DataRate) ->
     #window_v1_pb{timestamp = TS, frequency = Freq, datarate = DataRate}.
 

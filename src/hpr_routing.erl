@@ -35,7 +35,7 @@ init() ->
 
 -spec handle_packet(
     Packet :: hpr_packet_up:packet(),
-    StreamHandler :: grpcbox_stream:t()
+    StreamHandler :: grpcbox_stream:t() | hpr_router_stream_manager:gateway_stream()
 ) -> hpr_routing_response().
 handle_packet(Packet, StreamHandler) ->
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
@@ -62,7 +62,9 @@ routing_info_type({devaddr, _DevAddr}) -> devaddr.
 %% ------------------------------------------------------------------
 
 -spec dispatch_packet(
-    uplink_packet_type(), hpr_packet_up:packet(), StreamHandler :: grpcbox_stream:t()
+    uplink_packet_type(),
+    hpr_packet_up:packet(),
+    StreamHandler :: grpcbox_stream:t() | hpr_router_stream_manager:gateway_stream()
 ) -> hpr_routing_response().
 dispatch_packet(undefined, _Packet, _StreamHandler) ->
     lager:error("invalid packet type"),
@@ -110,11 +112,11 @@ deliver_packet(Packet, StreamHandler, [Route | Routes], RoutingInfo) ->
     %% Protocol:send(...) errors out.
     Resp =
         case Protocol of
-            router ->
+            {router, _} ->
                 hpr_protocol_router:send(Packet, StreamHandler, Route, RoutingInfo);
-            gwmp ->
+            {gwmp, _} ->
                 hpr_protocol_gwmp:send(Packet, StreamHandler, Route, RoutingInfo);
-            http ->
+            {http_roaming, _} ->
                 hpr_http_router:send(Packet, StreamHandler, Route, RoutingInfo);
             _OtherProtocol ->
                 lager:warning([{protocol, _OtherProtocol}], "unimplemented"),

@@ -71,7 +71,7 @@ worker_key_from(PacketUp, Route) ->
 -spec protocol_from(hpr_route:route()) -> hpr_http_sup:http_protocol().
 protocol_from(
     #config_route_v1_pb{
-        protocol = Protocol
+        protocol = {http_roaming, Protocol}
     } = _Route
 ) ->
     #config_protocol_http_roaming_pb{ip = IP, port = Port} = Protocol,
