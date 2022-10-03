@@ -68,7 +68,7 @@ test_send() ->
     ),
     meck:expect(grpc_client, send, [Stream, HprPacketUpMap], ok),
 
-    ResponseValue = send(HprPacketUp, Stream, Route),
+    ResponseValue = send(HprPacketUp, Stream, Route, ignore),
 
     ?assertEqual(ok, ResponseValue),
     ?assertEqual(1, meck:num_calls(hpr_router_stream_manager, get_stream, 2)),
