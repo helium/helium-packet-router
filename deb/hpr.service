@@ -9,8 +9,8 @@ ExecStop=/opt/hpr/bin/hpr stop
 User=helium
 PIDFile=/var/run/hpr.pid
 Environment=HOME="/opt/hpr"
-Environment=RUNNER_LOG_DIR="/opt/hpr/log"
-Environment=ERL_CRASH_DUMP="/opt/hpr/log"
+Environment=RUNNER_LOG_DIR="/var/log/hpr"
+Environment=ERL_CRASH_DUMP="/var/log/hpr"
 Environment=RELX_OUT_FILE_PATH="/tmp"
 LimitNOFILE=128000
 LimitNPROC=128000
