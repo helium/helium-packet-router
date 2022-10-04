@@ -16,7 +16,8 @@
     phash/1,
     verify/1,
     encode/1,
-    decode/1
+    decode/1,
+    to_map/1
 ]).
 
 -ifdef(TEST).
@@ -29,8 +30,9 @@
 -endif.
 
 -type packet() :: #packet_router_packet_up_v1_pb{}.
+-type packet_map() :: client_packet_router_pb:packet_router_packet_up_v1_pb().
 
--export_type([packet/0]).
+-export_type([packet/0, packet_map/0]).
 
 -spec payload(Packet :: packet()) -> binary().
 payload(Packet) ->
@@ -47,7 +49,7 @@ rssi(Packet) ->
 -spec frequency_mhz(Packet :: packet()) ->
     float() | integer() | infinity | '-infinity' | nan | undefined.
 frequency_mhz(Packet) ->
-    Packet#packet_router_packet_up_v1_pb.frequency_mhz.
+    Packet#packet_router_packet_up_v1_pb.frequency / 1_000_000.
 
 -spec datarate(Packet :: packet()) -> atom().
 datarate(Packet) ->
@@ -102,6 +104,21 @@ encode(#packet_router_packet_up_v1_pb{} = Packet) ->
 decode(BinaryPacket) ->
     packet_router_pb:decode_msg(BinaryPacket, packet_router_packet_up_v1_pb).
 
+-spec to_map(packet()) -> packet_map().
+to_map(PacketRecord) ->
+    #{
+        payload => PacketRecord#packet_router_packet_up_v1_pb.payload,
+        timestamp => PacketRecord#packet_router_packet_up_v1_pb.timestamp,
+        rssi => PacketRecord#packet_router_packet_up_v1_pb.rssi,
+        frequency => PacketRecord#packet_router_packet_up_v1_pb.frequency,
+        datarate => PacketRecord#packet_router_packet_up_v1_pb.datarate,
+        snr => PacketRecord#packet_router_packet_up_v1_pb.snr,
+        region => PacketRecord#packet_router_packet_up_v1_pb.region,
+        hold_time => PacketRecord#packet_router_packet_up_v1_pb.hold_time,
+        gateway => PacketRecord#packet_router_packet_up_v1_pb.gateway,
+        signature => PacketRecord#packet_router_packet_up_v1_pb.signature
+    }.
+
 %% ------------------------------------------------------------------
 %% Tests Functions
 %% ------------------------------------------------------------------
@@ -113,7 +130,7 @@ new(Opts) ->
         payload = maps:get(payload, Opts, <<"payload">>),
         timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond)),
         rssi = maps:get(rssi, Opts, 35),
-        frequency_mhz = maps:get(frequency_mhz, Opts, 904.30),
+        frequency = maps:get(frequency, Opts, 904_300_000),
         datarate = maps:get(datarate, Opts, 'SF7BW125'),
         snr = maps:get(snr, Opts, 7.0),
         region = maps:get(region, Opts, 'US915'),
@@ -134,7 +151,7 @@ sign(Packet, SigFun) ->
 -endif.
 
 %% ------------------------------------------------------------------
-%% EUNIT Tests
+% EUnit tests
 %% ------------------------------------------------------------------
 -ifdef(TEST).
 
@@ -202,8 +219,24 @@ verify_test() ->
     ok.
 
 encode_decode_test() ->
-    PacketUp = ?MODULE:new(#{frequency_mhz => 904.0}),
+    PacketUp = ?MODULE:new(#{frequency => 904_000_000}),
     ?assertEqual(PacketUp, decode(encode(PacketUp))),
     ok.
+
+to_map_test() ->
+    HprPacketUp = test_utils:join_packet_up(#{}),
+    HprPacketUpMap = to_map(HprPacketUp),
+    ?assertEqual(
+        ok,
+        client_packet_router_pb:verify_msg(HprPacketUpMap, packet_router_packet_up_v1_pb),
+        "to_map/1 produces a valid packet map"
+    ),
+    ?assertEqual(
+        HprPacketUpMap,
+        client_packet_router_pb:decode_msg(
+            packet_router_pb:encode_msg(HprPacketUp), packet_router_packet_up_v1_pb
+        ),
+        "to_map/1 is equivalent to encoding a packet record and decoding it to a map"
+    ).
 
 -endif.

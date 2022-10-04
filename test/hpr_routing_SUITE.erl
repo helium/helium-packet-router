@@ -10,7 +10,6 @@
     join_req_test/1
 ]).
 
--include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %%--------------------------------------------------------------------
@@ -54,13 +53,13 @@ join_req_test(_Config) ->
     JoinPacketBadSig = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, Self)),
+    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
 
     JoinPacketUpInvalid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid, Self)
+        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid)
     ),
 
     meck:new(hpr_protocol_router, [passthrough]),
@@ -68,20 +67,19 @@ join_req_test(_Config) ->
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
-    Route = hpr_route:new(
-        NetID,
-        [{16#00000000, 16#0000000A}],
-        [{1, 1}, {1, 2}],
-        <<"127.0.0.1">>,
-        router,
-        1
-    ),
-    ok = hpr_routing_config_worker:insert(Route),
+    Route = hpr_route:new(#{
+        net_id => NetID,
+        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
+        oui => 1,
+        protocol => {router, #{ip => <<"127.0.0.1">>, port => 80}}
+    }),
+    ok = hpr_config:insert_route(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, Self)),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
     Received1 =
         {Self,
@@ -94,9 +92,9 @@ join_req_test(_Config) ->
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
 
     UplinkPacketUp = test_utils:uplink_packet_up(#{
-        gateway => Gateway, sig_fun => SigFun, devadrr => DevAddr
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, Self)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
 
     Received2 =
         {Self,
@@ -106,7 +104,6 @@ join_req_test(_Config) ->
                 Route
             ]},
             ok},
-
     ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),
 
     ?assert(meck:validate(hpr_protocol_router)),

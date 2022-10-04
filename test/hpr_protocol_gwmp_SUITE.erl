@@ -1,4 +1,4 @@
--module(hpr_gwmp_router_SUITE).
+-module(hpr_protocol_gwmp_SUITE).
 
 -export([
     all/0,
@@ -21,7 +21,6 @@
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
 
 -define(REDIRECT_WORKER_PORT, 2777).
--define(REDIRECT_WORKER_ENDPOINT, <<"127.0.0.1:2777">>).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -73,11 +72,11 @@ end_per_testcase(TestCase, Config) ->
 single_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
-    Route = test_route_1777(),
+    Route = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(PacketUp, self(), Route),
     %% Initial PULL_DATA
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
     %% PUSH_DATA
@@ -88,37 +87,27 @@ single_lns_test(_Config) ->
 
     ok.
 
-test_route_1777() ->
-    hpr_route:new(
-        1337,
-        [],
-        [],
-        <<"127.0.0.1:1777">>,
-        gwmp,
-        42
-    ).
-
 multi_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
-    Route1 = hpr_route:new(1337, [], [], <<"127.0.0.1:1777">>, gwmp, 42),
-    Route2 = hpr_route:new(1337, [], [], <<"127.0.0.1:1778">>, gwmp, 42),
+    Route1 = test_route(1777),
+    Route2 = test_route(1778),
 
     {ok, RcvSocket1} = gen_udp:open(1777, [binary, {active, true}]),
     {ok, RcvSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to route 1
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
+    hpr_protocol_gwmp:send(PacketUp, self(), Route1),
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket1, route1_pull_data),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data),
 
     %% Same packet to route 2
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route2),
+    hpr_protocol_gwmp:send(PacketUp, self(), Route2),
     {ok, _Token2, _MAC2} = expect_pull_data(RcvSocket2, route2_pull_data),
     {ok, _} = expect_push_data(RcvSocket2, route2_push_data),
 
     %% Another packet to route 1
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
+    hpr_protocol_gwmp:send(PacketUp, self(), Route1),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data_repeat),
     ok = no_more_messages(),
 
@@ -131,11 +120,11 @@ single_lns_downlink_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
     %% Sending a packet up, to get a packet down.
-    Route1 = hpr_route:new(1337, [], [], <<"127.0.0.1:1777">>, gwmp, 42),
+    Route1 = test_route(1777),
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
-    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
+    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route1),
 
     %% Eat the pull_data
     {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
@@ -148,14 +137,6 @@ single_lns_downlink_test(_Config) ->
         after timer:seconds(2) -> ct:fail(no_push_data)
         end,
 
-    %% Mock out the return path for the downlink (grpc)
-    Self = self(),
-    meck:new(grpcbox_stream, [passthrough, no_history]),
-    meck:expect(grpcbox_stream, send, fun(Eos, PacketDown, _StreamHandler) ->
-        ?assertEqual(false, Eos, "we don't want to be ending the stream"),
-        Self ! {packet_down, PacketDown}
-    end),
-
     %% Send a downlink to the worker
     {DownToken, DownPullResp} = fake_down_packet(),
 
@@ -167,9 +148,9 @@ single_lns_downlink_test(_Config) ->
     } = fake_down_map(),
     ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
 
-    %% receive the PacketRouterPacketDownV1 as the grpc stream.
+    %% receive the PacketRouterPacketDownV1 sent to grcp_stream
     receive
-        {packet_down, #packet_router_packet_down_v1_pb{
+        {reply, #packet_router_packet_down_v1_pb{
             payload = Payload,
             rx1 = #window_v1_pb{
                 timestamp = Timestamp,
@@ -179,10 +160,10 @@ single_lns_downlink_test(_Config) ->
         }} ->
             ?assert(erlang:is_integer(Timestamp)),
             ?assertEqual(Data, base64:encode(Payload)),
-            ?assertEqual(Freq, Frequency),
-            ?assertEqual(Datr, Datarate),
+            ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
+            ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
             ok;
-        {packet_down, Other} ->
+        {reply, Other} ->
             ct:fail({rcvd_bad_packet_down, Other})
     after timer:seconds(2) -> ct:fail(no_packet_down)
     end,
@@ -195,8 +176,6 @@ single_lns_downlink_test(_Config) ->
     after timer:seconds(2) -> ct:fail(no_tx_ack_for_downlink)
     end,
 
-    meck:unload(grpcbox_stream),
-
     ok.
 
 multi_lns_downlink_test(_Config) ->
@@ -205,14 +184,14 @@ multi_lns_downlink_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
     %% Sending a packet up, to get a packet down.
-    Route1 = hpr_route:new(1337, [], [], <<"127.0.0.1:1777">>, gwmp, 42),
-    Route2 = hpr_route:new(1337, [], [], <<"127.0.0.1:1778">>, gwmp, 42),
+    Route1 = test_route(1777),
+    Route2 = test_route(1778),
 
     {ok, LNSSocket1} = gen_udp:open(1777, [binary, {active, true}]),
     {ok, LNSSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to LNS 1
-    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route1),
+    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route1),
     {ok, _Token, _Data} = expect_pull_data(LNSSocket1, downlink_test_initiate_connection_lns1),
     %% Receive the uplink from LNS 1 (mostly to get the return address)
     {ok, UDPWorkerAddress} =
@@ -224,7 +203,7 @@ multi_lns_downlink_test(_Config) ->
         end,
 
     %% Send packet to LNS 2
-    _ = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route2),
+    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route2),
     {ok, _Token2, _Data2} = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
     {ok, _} = expect_push_data(LNSSocket2, route2_push_data),
 
@@ -232,18 +211,12 @@ multi_lns_downlink_test(_Config) ->
     %% Regardless, sending a PULL_RESP, the UDP worker should ack the sender,
     %% not the most recent.
 
-    %% Mock out the return path for the downlink (grpc)
-    Self = self(),
-    meck:new(grpcbox_stream, [passthrough, no_history]),
-    meck:expect(grpcbox_stream, send, fun(Eos, PacketDown, _StreamHandler) ->
-        ?assertEqual(false, Eos, "we don't want to be ending the stream"),
-        Self ! {packet_down, PacketDown}
-    end),
-
     %% Send a downlink to the worker from LNS 1
     %% we don't care about the contents
     {DownToken, DownPullResp} = fake_down_packet(),
     ok = gen_udp:send(LNSSocket1, UDPWorkerAddress, DownPullResp),
+
+    %% XXX: Why don't we expect a grcp reply here?
 
     %% expect the ack for our downlink
     receive
@@ -256,8 +229,6 @@ multi_lns_downlink_test(_Config) ->
     after timer:seconds(2) -> ct:fail(no_tx_ack_for_downlink)
     end,
 
-    meck:unload(grpcbox_stream),
-
     ok.
 
 multi_gw_single_lns_test(_Config) ->
@@ -267,24 +238,17 @@ multi_gw_single_lns_test(_Config) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{gateway = PubKeyBin},
 
-    Route = hpr_route:new(
-        1337,
-        [],
-        [],
-        <<"127.0.0.1:1777">>,
-        gwmp,
-        42
-    ),
+    Route = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    %% Send the packet from the first gateway
-    hpr_gwmp_router:send(PacketUp1, unused_test_stream_handler, Route),
+    %% Send the packet from the first hotspot
+    hpr_protocol_gwmp:send(PacketUp1, self(), Route),
     {ok, _Token, _Data} = expect_pull_data(RcvSocket, first_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, first_gw_push_data),
 
-    %% Send the same packet from the second gateway
-    hpr_gwmp_router:send(PacketUp2, unused_test_stream_handler, Route),
+    %% Send the same packet from the second hotspot
+    hpr_protocol_gwmp:send(PacketUp2, self(), Route),
     {ok, _Token2, _Data2} = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
 
@@ -298,7 +262,7 @@ shutdown_idle_worker_test(_Config) ->
 
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     %%    start worker
-    {ok, WorkerPid1} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
+    {ok, WorkerPid1} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
     ?assert(erlang:is_process_alive(WorkerPid1)),
 
     %%    wait for shutdown timer to expire
@@ -306,13 +270,13 @@ shutdown_idle_worker_test(_Config) ->
     ?assertNot(erlang:is_process_alive(WorkerPid1)),
 
     %%    start worker
-    {ok, WorkerPid2} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
+    {ok, WorkerPid2} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
     ?assert(erlang:is_process_alive(WorkerPid2)),
     timer:sleep(50),
 
     %%    before timer expires, send push_data
-    Route = test_route_1777(),
-    ok = hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
+    Route = test_route(1777),
+    ok = hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
 
     %%    check that timer restarted when the push_data occurred
     timer:sleep(50),
@@ -329,11 +293,11 @@ pull_data_test(_Config) ->
     PacketUp = fake_join_up_packet(),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
 
-    Route = test_route_1777(),
+    Route = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_gwmp_router:send(PacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
 
     %% Initial PULL_DATA
     {ok, Token, MAC} = expect_pull_data(RcvSocket, route_pull_data),
@@ -343,7 +307,7 @@ pull_data_test(_Config) ->
     ok.
 
 gateway_dest_redirect_test(_Config) ->
-    Route = hpr_route:new(1337, [], [], ?REDIRECT_WORKER_ENDPOINT, gwmp, 42),
+    Route = test_route(?REDIRECT_WORKER_PORT),
 
     {ok, USSocket} = gen_udp:open(1778, [binary, {active, true}]),
     {ok, EUSocket} = gen_udp:open(1779, [binary, {active, true}]),
@@ -356,17 +320,17 @@ gateway_dest_redirect_test(_Config) ->
     EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = PubKeyBin, region = 'EU868'},
 
     %% Start before sending the packet so we can reduce the pull_data_timer from default
-    {ok, _Pid} = hpr_gwmp_udp_sup:maybe_start_worker(PubKeyBin, #{
+    {ok, _Pid} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{
         pull_data_timer => 250
     }),
 
     %% US send packet
-    hpr_gwmp_router:send(USPacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(USPacketUp, unused_test_stream_handler, Route),
     {ok, _, _} = expect_pull_data(USSocket, us_redirected_pull_data),
     {ok, _} = expect_push_data(USSocket, us_redirected_push_data),
 
     %% EU send packet
-    hpr_gwmp_router:send(EUPacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(EUPacketUp, unused_test_stream_handler, Route),
     {ok, _, _} = expect_pull_data(EUSocket, eu_redirected_pull_data),
     {ok, _} = expect_push_data(EUSocket, eu_redirected_push_data),
 
@@ -395,6 +359,15 @@ gateway_dest_redirect_test(_Config) ->
 %% ===================================================================
 %% Helpers
 %% ===================================================================
+
+test_route(Port) ->
+    hpr_route:new(#{
+        net_id => 1337,
+        devaddr_ranges => [],
+        euis => [],
+        oui => 42,
+        protocol => {gwmp, #{ip => <<"127.0.0.1">>, port => Port}}
+    }).
 
 expect_pull_data(Socket, Reason) ->
     receive
@@ -432,7 +405,7 @@ fake_join_up_packet() ->
                 110, 239, 137, 95>>,
         timestamp = 620124,
         rssi = 112,
-        frequency_mhz = 903.9000244140625,
+        frequency = 903_900_024,
         datarate = 'SF10BW125',
         snr = 5.5,
         region = 'US915',

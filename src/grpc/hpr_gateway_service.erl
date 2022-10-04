@@ -2,32 +2,31 @@
 
 -behaviour(helium_packet_router_gateway_bhvr).
 
--include("../grpc/autogen/server/packet_router_pb.hrl").
-
 -export([
-    init/1,
+    init/2,
     send_packet/2,
-    send_downlink/2,
     handle_info/2
 ]).
 
--spec init(Stream :: grpcbox_stream:t()) -> grpcbox_stream:t().
-init(Stream) ->
-    Stream.
+-spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
+init(_RPC, StreamState) ->
+    StreamState.
 
 -spec send_packet(hpr_packet_up:packet(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-send_packet(PacketUp, Stream) ->
-    _ = proc_lib:spawn(hpr_routing, handle_packet, [PacketUp, Stream]),
-    {ok, Stream}.
+send_packet(PacketUp, StreamState) ->
+    case hpr_routing:handle_packet(PacketUp) of
+        ok ->
+            {ok, StreamState};
+        {error, Err} ->
+            {grpc_error, {2, erlang:iolist_to_binary(io_lib:print(Err))}}
+    end.
 
--spec send_downlink(#packet_router_packet_down_v1_pb{}, grpcbox_stream:t()) ->
-    grpcbox_stream:t().
-send_downlink(PacketDown, Stream) ->
-    grpcbox_stream:send(false, PacketDown, Stream).
-
--spec handle_info(Msg :: any(), Stream :: grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info(_Msg, Stream) ->
-    Stream.
-
-%% ===================================================================
+-spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
+handle_info({reply, Reply}, StreamState) ->
+    grpcbox_stream:send(false, Reply, StreamState);
+handle_info({router_reply, ReplyMap}, StreamState) ->
+    Reply = hpr_packet_down:to_record(ReplyMap),
+    grpcbox_stream:send(false, Reply, StreamState);
+handle_info(_Msg, StreamState) ->
+    StreamState.

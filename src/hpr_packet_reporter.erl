@@ -4,7 +4,11 @@
 
 -include("./include/hpr.hrl").
 -include("./grpc/autogen/server/packet_router_pb.hrl").
+-include("./grpc/autogen/server/config_pb.hrl").
 
+% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 -export([
     start_link/1,
     init_ets/0,
@@ -14,6 +18,10 @@
     restart_report_interval/1,
     stop_report_interval/0
 ]).
+
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
 -export([
     init/1,
     handle_call/3,
@@ -26,11 +34,7 @@
 -define(SERVER, ?MODULE).
 -define(ETS, hpr_packet_report_ets).
 
-%% 5 minute interval
--define(DEFAULT_REPORT_INTERVAL, 300000).
--define(MAX_FILE_SIZE, 50_000_000).
-%% 15 minute maximum upload window
--define(DEFAULT_UPLOAD_WINDOW, 900000).
+-define(FILE_WRITE_OPTIONS, [write, raw, binary, compressed]).
 %% Up to 5 retries, 1 minute sleep
 -define(RETRY_SLEEP_TIME, 60000).
 -define(AWS_RETRY_OPTIONS, [
@@ -41,17 +45,35 @@
     aws_client :: aws_client:aws_client(),
     write_dir :: string(),
     file_path :: string(),
+    max_file_size :: non_neg_integer(),
     report_interval :: timer:tref() | undefined,
-    upload_window_start_time :: non_neg_integer()
+    interval_duration :: non_neg_integer() | undefined,
+    upload_window :: non_neg_integer(),
+    upload_window_start_time :: non_neg_integer(),
+    bucket :: binary()
 }).
 
 -type interval_duration_ms() :: non_neg_integer().
 -type timestamp_ms() :: non_neg_integer().
 
+-type packet_reporter_opts() :: #{
+    access_key_id => binary(),
+    secret_access_key => binary(),
+    region => binary(),
+    bucket => binary(),
+    interval_duration => timestamp_ms(),
+    write_dir => string(),
+    max_file_size => integer(),
+    upload_window => timestamp_ms(),
+    localstack_host => binary(),
+    localstack_port => binary()
+}.
+
 %%%===================================================================
-%%% API Functions
+%%% API Function Definitions
 %%%===================================================================
 
+-spec start_link(packet_reporter_opts()) -> any().
 start_link(Args) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
 
@@ -84,47 +106,61 @@ stop_report_interval() ->
     gen_server:cast(?SERVER, stop_interval).
 
 %%%===================================================================
-%%% Spawning and gen_server implementation
+%%% gen_server Function Definitions
 %%%===================================================================
 
-init(#{base_dir := BaseDir} = _Args) ->
-    AWSClient = setup_aws(),
-    WriteDir = filename:join(BaseDir, "tmp"),
+init(
+    #{
+        write_dir := WriteDir,
+        max_file_size := MaxFileSize,
+        interval_duration := IntervalDuration,
+        upload_window := UploadWindow,
+        bucket := Bucket
+    } = Args
+) ->
+    AWSClient = setup_aws(Args),
     ok = filelib:ensure_dir(WriteDir),
     TempFilePath = generate_file_name(WriteDir),
-    {ok, ReportInterval} = start_report_interval(),
+    {ok, ReportInterval} = start_report_interval(IntervalDuration),
     {ok, #state{
         aws_client = AWSClient,
         write_dir = WriteDir,
         file_path = TempFilePath,
+        max_file_size = MaxFileSize,
         report_interval = ReportInterval,
-        upload_window_start_time = erlang:system_time(millisecond)
+        interval_duration = IntervalDuration,
+        upload_window = UploadWindow,
+        upload_window_start_time = erlang:system_time(millisecond),
+        bucket = Bucket
     }}.
 
-handle_call(Request, From, State = #state{}) ->
-    lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
-    {reply, ok, State}.
+handle_call(Msg, _From, State = #state{}) ->
+    {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(
     write,
     State = #state{
-        write_dir = WriteDir, file_path = FilePath, upload_window_start_time = WindowStartTime
+        write_dir = WriteDir,
+        file_path = FilePath,
+        max_file_size = MaxFileSize,
+        upload_window_start_time = WindowStartTime,
+        upload_window = UploadWindow
     }
 ) ->
-    {ok, FileSize, MaxFileSize} = handle_write(FilePath, [write, raw, binary, compressed]),
+    {ok, FileSize} = handle_write(FilePath, MaxFileSize, ?FILE_WRITE_OPTIONS),
 
-    case FileSize >= MaxFileSize orelse upload_window_elapsed(WindowStartTime) of
+    case FileSize >= MaxFileSize orelse upload_window_elapsed(WindowStartTime, UploadWindow) of
         true ->
             ?MODULE:upload_packets(FilePath),
             {noreply, State#state{file_path = generate_file_name(WriteDir)}};
         false ->
             {noreply, State}
     end;
-handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
+handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient, bucket = Bucket}) ->
     UploadTimestamp = erlang:system_time(millisecond),
     FileName = list_to_binary("packetreport." ++ integer_to_list(UploadTimestamp) ++ ".gz"),
 
-    case upload_file(AWSClient, list_to_binary(FilePath), FileName) of
+    case upload_file(AWSClient, list_to_binary(FilePath), FileName, Bucket) of
         {ok, _} ->
             file:delete(FilePath);
         Error ->
@@ -134,19 +170,25 @@ handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient}) ->
     {noreply, State#state{upload_window_start_time = UploadTimestamp}};
 handle_cast({start_interval, IntervalDuration}, State = #state{report_interval = ReportInterval}) ->
     {ok, ReportInterval2} = handle_restart_interval(ReportInterval, IntervalDuration),
-    {noreply, State#state{report_interval = ReportInterval2}};
+    {noreply, State#state{report_interval = ReportInterval2, interval_duration = IntervalDuration}};
 handle_cast(stop_interval, State = #state{report_interval = ReportInterval}) ->
     handle_stop_interval(ReportInterval),
-    {noreply, State#state{report_interval = undefined}};
-handle_cast(Request, State = #state{}) ->
-    lager:warning("rcvd unknown cast msg: ~p", [Request]),
+    {noreply, State#state{report_interval = undefined, interval_duration = undefined}};
+handle_cast(_Msg, State = #state{}) ->
     {noreply, State}.
 
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
-terminate(Reason, _State = #state{file_path = FilePath, report_interval = ReportInterval}) ->
-    handle_write(FilePath, [write, raw, binary, compressed]),
+terminate(
+    Reason,
+    #state{
+        file_path = FilePath,
+        report_interval = ReportInterval,
+        max_file_size = MaxFileSize
+    }
+) ->
+    handle_write(FilePath, MaxFileSize, ?FILE_WRITE_OPTIONS),
     handle_stop_interval(ReportInterval),
     lager:warning("packet reporter process terminated: ~s", [Reason]),
     ok.
@@ -155,13 +197,13 @@ code_change(_OldVsn, State = #state{}, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
-%%% Internal functions
+%%% Internal Function Definitions
 %%%===================================================================
 
--spec handle_write(FilePath :: string(), WriteOptions :: [atom()]) ->
-    {ok, FileSize :: integer(), MaxFileSize :: integer()}.
+-spec handle_write(FilePath :: string(), MaxFileSize :: integer(), WriteOptions :: [atom()]) ->
+    {ok, FileSize :: integer()}.
 
-handle_write(FilePath, WriteOptions) ->
+handle_write(FilePath, MaxFileSize, WriteOptions) ->
     WriteTimestamp = erlang:system_time(millisecond),
     {ok, S} = open_tmp_file(FilePath, WriteOptions),
     Data = get_packets_by_timestamp(WriteTimestamp),
@@ -178,7 +220,6 @@ handle_write(FilePath, WriteOptions) ->
 
     NumDeleted = delete_packets_by_timestamp(WriteTimestamp),
     FileSize = filelib:file_size(FilePath),
-    MaxFileSize = get_value(max_file_size, ?MAX_FILE_SIZE),
 
     lager:info(
         [
@@ -190,33 +231,30 @@ handle_write(FilePath, WriteOptions) ->
         "packet reporter processing"
     ),
 
-    {ok, FileSize, MaxFileSize}.
+    {ok, FileSize}.
 
--spec setup_aws() -> aws_client:aws_client().
-setup_aws() ->
-    #{
-        access_key_id := AccessKey,
-        secret_access_key := Secret,
-        region := Region
-    } = Config = application:get_env(?APP, packet_reporter, #{}),
+-spec setup_aws(packet_reporter_opts()) -> aws_client:aws_client().
+setup_aws(#{
+    access_key_id := AccessKey,
+    secret_access_key := Secret,
+    region := Region,
+    localstack_port := LocalstackPort,
+    localstack_host := LocalstackHost
+}) ->
     case Region of
         <<"local">> ->
             aws_client:make_local_client(
                 AccessKey,
                 Secret,
-                maps:get(localstack_port, Config, <<"4566">>),
-                maps:get(localstack_host, Config, <<"localhost">>)
+                LocalstackPort,
+                LocalstackHost
             );
         _ ->
             aws_client:make_client(AccessKey, Secret, Region)
     end.
 
--spec start_report_interval() -> {ok, timer:tref()}.
 -spec start_report_interval(IntervalDuration :: interval_duration_ms()) -> {ok, timer:tref()}.
 
-start_report_interval() ->
-    IntervalDuration = get_value(report_interval, ?DEFAULT_REPORT_INTERVAL),
-    start_report_interval(IntervalDuration).
 start_report_interval(IntervalDuration) ->
     timer:apply_interval(IntervalDuration, ?MODULE, write_packets, []).
 
@@ -239,13 +277,13 @@ encode_packet(
         payload = Payload,
         timestamp = GatewayTimestamp,
         rssi = RSSI,
-        frequency_mhz = FrequencyMhz,
+        frequency = FrequencyMhz,
         datarate = Datarate,
         snr = SNR,
         region = Region,
         gateway = Gateway
     },
-    #packet_router_route_v1_pb{
+    #config_route_v1_pb{
         oui = OUI,
         net_id = NetID
     }
@@ -256,7 +294,7 @@ encode_packet(
             oui = OUI,
             net_id = NetID,
             rssi = RSSI,
-            frequency_mhz = FrequencyMhz,
+            frequency = FrequencyMhz,
             datarate = Datarate,
             snr = SNR,
             region = Region,
@@ -293,10 +331,12 @@ open_tmp_file(FilePath, WriteOptions) ->
     end.
 
 -spec upload_file(
-    AWSClient :: aws_client:aws_client(), FilePath :: binary(), S3FileName :: binary()
+    AWSClient :: aws_client:aws_client(),
+    FilePath :: binary(),
+    S3FileName :: binary(),
+    BucketName :: binary()
 ) -> {ok, Response :: term()} | {error, upload_failed}.
-upload_file(AWSClient, FilePath, S3FileName) ->
-    BucketName = get_value(bucket, <<"test-bucket">>),
+upload_file(AWSClient, FilePath, S3FileName, BucketName) ->
     {ok, Content} = file:read_file(FilePath),
 
     case
@@ -319,10 +359,10 @@ upload_file(AWSClient, FilePath, S3FileName) ->
             {error, upload_failed}
     end.
 
--spec upload_window_elapsed(StartTime :: timestamp_ms()) -> boolean().
-upload_window_elapsed(StartTime) ->
+-spec upload_window_elapsed(StartTime :: timestamp_ms(), UploadWindow :: timestamp_ms()) ->
+    WindowElapsed :: boolean().
+upload_window_elapsed(StartTime, UploadWindow) ->
     Timestamp = erlang:system_time(millisecond),
-    UploadWindow = get_value(upload_window, ?DEFAULT_UPLOAD_WINDOW),
     Timestamp - StartTime >= UploadWindow.
 
 -spec get_packets_by_timestamp(Timestamp :: timestamp_ms()) -> [term()].
@@ -332,11 +372,6 @@ get_packets_by_timestamp(Timestamp) ->
 -spec delete_packets_by_timestamp(Timestamp :: timestamp_ms()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
     ets:select_delete(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], [true]}]).
-
--spec get_value(Key :: term(), Default :: term()) -> ConfigValue :: term().
-get_value(Key, Default) ->
-    Config = application:get_env(?APP, packet_reporter, #{}),
-    maps:get(Key, Config, Default).
 
 % ------------------------------------------------------------------
 % EUNIT Tests
@@ -349,6 +384,7 @@ file_test() ->
     ?ETS = ets:new(?ETS, [named_table, bag, public, {write_concurrency, true}]),
     Timestamp = erlang:system_time(millisecond),
     FilePath = "./packetreport." ++ integer_to_list(Timestamp),
+    MaxFileSize = 50_000_000,
 
     Packet = test_utils:join_packet_up(#{}),
     Packet2 = test_utils:uplink_packet_up(#{}),
@@ -357,9 +393,9 @@ file_test() ->
     report_packet(Packet, Route),
     report_packet(Packet2, Route),
 
-    handle_write(FilePath, [write, raw, binary, compressed]),
+    handle_write(FilePath, MaxFileSize, ?FILE_WRITE_OPTIONS),
 
-    {ok, S} = file:open(FilePath, [read, raw, binary, compressed]),
+    {ok, S} = file:open(FilePath, ?FILE_WRITE_OPTIONS),
 
     %% Read length-delimited protobufs
     {ok, EncodedPacketSize} = file:read(S, 4),
@@ -387,9 +423,10 @@ pad_u32_test() ->
 
 upload_window_elapsed_test() ->
     Timestamp = erlang:system_time(millisecond),
-    UploadWindow = get_value(upload_window, ?DEFAULT_UPLOAD_WINDOW),
+    Config = application:get_env(?APP, packet_reporter, #{}),
+    UploadWindow = maps:get(upload_window, Config, 900000),
 
-    ?assertEqual(false, upload_window_elapsed(Timestamp)),
-    ?assertEqual(true, upload_window_elapsed(Timestamp - UploadWindow)).
+    ?assertEqual(false, upload_window_elapsed(Timestamp, UploadWindow)),
+    ?assertEqual(true, upload_window_elapsed(Timestamp - UploadWindow, UploadWindow)).
 
 -endif.

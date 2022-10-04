@@ -13,6 +13,7 @@
 
 -include("hpr.hrl").
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
+-include("../src/grpc/autogen/server/config_pb.hrl").
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -21,8 +22,12 @@
     aws_client :: aws_client:aws_client(),
     write_dir :: string(),
     file_path :: string(),
+    max_file_size :: non_neg_integer(),
     report_interval :: timer:tref() | undefined,
-    upload_window_start_time :: non_neg_integer()
+    interval_duration :: non_neg_integer() | undefined,
+    upload_window :: non_neg_integer(),
+    upload_window_start_time :: non_neg_integer(),
+    bucket :: binary()
 }).
 
 %%--------------------------------------------------------------------
@@ -49,9 +54,6 @@ init_per_testcase(TestCase, Config) ->
     meck:new(aws_s3, [passthrough]),
     meck:new(hpr_packet_reporter, [passthrough]),
 
-    BaseDir = proplists:get_value(base_dir, Config1),
-    file:make_dir(BaseDir),
-    file:make_dir(BaseDir ++ "/tmp"),
     Config1.
 
 %%--------------------------------------------------------------------
@@ -62,8 +64,6 @@ end_per_testcase(TestCase, Config) ->
     meck:unload(aws_s3),
     meck:unload(hpr_packet_reporter),
 
-    BaseDir = proplists:get_value(base_dir, Config),
-    file:del_dir(BaseDir),
     test_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
@@ -72,7 +72,7 @@ end_per_testcase(TestCase, Config) ->
 
 upload_report_test(_Config) ->
     State = sys:get_state(hpr_packet_reporter),
-    #state{file_path = FilePath, aws_client = AWSClient} = State,
+    #state{file_path = FilePath, aws_client = AWSClient, bucket = Bucket} = State,
 
     Packet = test_utils:join_packet_up(#{}),
     Packet2 = test_utils:uplink_packet_up(#{}),
@@ -100,9 +100,7 @@ upload_report_test(_Config) ->
     hpr_packet_reporter:handle_cast({upload, FilePath}, State),
 
     UploadedFile = meck:capture(first, aws_s3, put_object, '_', 3),
-    Env = application:get_env(?APP, packet_reporter, #{}),
-    BucketName = maps:get(bucket, Env, <<"test-bucket">>),
-    {ok, #{<<"Body">> := ResponseBody}, _} = aws_s3:get_object(AWSClient, BucketName, UploadedFile),
+    {ok, #{<<"Body">> := ResponseBody}, _} = aws_s3:get_object(AWSClient, Bucket, UploadedFile),
 
     [EncodedPacket, EncodedPacket2] = parse_packet_report(ResponseBody),
     verify_packet(Packet, Route, EncodedPacket),
@@ -140,7 +138,7 @@ upload_window_test(_Config) ->
     ok.
 
 %% ------------------------------------------------------------------
-%% Helper functions
+%% Helpers
 %% ------------------------------------------------------------------
 
 verify_packet(
@@ -148,13 +146,13 @@ verify_packet(
         payload = Payload,
         timestamp = GatewayTimestamp,
         rssi = RSSI,
-        frequency_mhz = FrequencyMhz,
+        frequency = FrequencyMhz,
         datarate = Datarate,
         snr = SNR,
         region = Region,
         gateway = Gateway
     },
-    #packet_router_route_v1_pb{
+    #config_route_v1_pb{
         oui = OUI,
         net_id = NetID
     },
@@ -167,11 +165,7 @@ verify_packet(
     ?assertEqual(OUI, PacketReport#packet_router_packet_report_v1_pb.oui),
     ?assertEqual(NetID, PacketReport#packet_router_packet_report_v1_pb.net_id),
     ?assertEqual(RSSI, PacketReport#packet_router_packet_report_v1_pb.rssi),
-    %% Decoding the protobuf produces a float precision error (e.g. 904.3 vs 904.2999877929688)
-    ?assertEqual(
-        io_lib:format("~.1f", [FrequencyMhz]),
-        io_lib:format("~.1f", [PacketReport#packet_router_packet_report_v1_pb.frequency_mhz])
-    ),
+    ?assertEqual(FrequencyMhz, PacketReport#packet_router_packet_report_v1_pb.frequency),
     ?assertEqual(SNR, PacketReport#packet_router_packet_report_v1_pb.snr),
     ?assertEqual(Datarate, PacketReport#packet_router_packet_report_v1_pb.datarate),
     ?assertEqual(Region, PacketReport#packet_router_packet_report_v1_pb.region),

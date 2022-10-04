@@ -5,11 +5,16 @@
             secret_access_key => <<"${AWS_SECRET_ACCESS_KEY}">>,
             region => <<"${AWS_DEFAULT_REGION}">>,
             bucket => <<"${PACKET_REPORTER_BUCKET_NAME}">>,
-            report_interval => 300000,
+            interval_duration => 300000,
+            write_dir => "/var/data/hpr/tmp/",
             max_file_size => 50_000_000,
             upload_window => 900000
         }},
-        {base_dir, "./data"}
+        {config_worker, #{
+            host => "${HPR_CONFIG_WORKER_HOST}",
+            port => "${HPR_CONFIG_WORKER_PORT}",
+            file_backup_path => "/var/data/hpr/config_worker.backup"
+        }}
     ]},
     {grpcbox, [
         {servers, [
@@ -39,7 +44,7 @@
     ]},
     {lager, [
         {suppress_supervisor_start_stop, true},
-        {log_root, "/var/log/hpr"},
+        {log_root, "log"},
         {crash_log, "crash.log"},
         {handlers, [
             {lager_file_backend, [
@@ -75,5 +80,6 @@
             prometheus_vm_system_info_collector
         ]},
         {vm_system_info_collector_metrics, [process_count]}
-    ]}
+    ]},
+    "etc/local.conf"
 ].

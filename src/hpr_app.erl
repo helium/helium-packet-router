@@ -16,5 +16,3 @@ start(_StartType, _StartArgs) ->
 stop(_State) ->
     lager:info("stopping app"),
     ok.
-
-%% internal functions

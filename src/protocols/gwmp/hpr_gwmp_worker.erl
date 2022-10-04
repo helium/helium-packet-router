@@ -13,14 +13,18 @@
 
 -include("semtech_udp.hrl").
 
-%% API
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 -export([
     start_link/1,
     push_data/4,
     pubkeybin_to_mac/1
 ]).
 
-%% gen_server callbacks
+%% ------------------------------------------------------------------
+%% gen_server Function Exports
+%% ------------------------------------------------------------------
 -export([
     init/1,
     handle_call/3,
@@ -43,16 +47,16 @@
     pubkeybin :: libp2p_crypto:pubkey_bin(),
     socket :: gen_udp:socket(),
     push_data = #{} :: #{binary() => {binary(), reference()}},
-    response_stream :: undefined | tuple(),
+    response_stream :: undefined | pid(),
     pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
     shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()},
     dest_remap = #{} :: #{socket_dest() => socket_dest()}
 }).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
 
 start_link(Args) ->
     gen_server:start_link(?MODULE, Args, []).
@@ -60,15 +64,15 @@ start_link(Args) ->
 -spec push_data(
     WorkerPid :: pid(),
     Data :: {Token :: binary(), Payload :: binary()},
-    StreamHandler :: grpcbox_stream:t(),
+    Stream :: pid(),
     SocketDest :: socket_dest()
 ) -> ok | {error, any()}.
-push_data(WorkerPid, Data, StreamHandler, SocketDest) ->
-    gen_server:cast(WorkerPid, {push_data, Data, StreamHandler, SocketDest}).
+push_data(WorkerPid, Data, Stream, SocketDest) ->
+    gen_server:cast(WorkerPid, {push_data, Data, Stream, SocketDest}).
 
-%%%===================================================================
-%%% gen_server callbacks
-%%%===================================================================
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
 
 init(Args) ->
     process_flag(trap_exit, true),
@@ -99,12 +103,12 @@ init(Args) ->
         shutdown_timer = {ShutdownTimeout, ShutdownRef}
     }}.
 
-handle_call(Request, From, State) ->
-    lager:warning("rcvd unknown call msg: ~p from: ~p", [Request, From]),
-    {reply, ok, State}.
+-spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
+handle_call(Msg, _From, State) ->
+    {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(
-    {push_data, _Data = {Token, Payload}, StreamHandler, SocketDest0},
+    {push_data, _Data = {Token, Payload}, Stream, SocketDest0},
     #state{
         push_data = PushData,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
@@ -125,11 +129,10 @@ handle_cast(
 
     {noreply, State#state{
         push_data = NewPushData,
-        response_stream = StreamHandler,
+        response_stream = Stream,
         shutdown_timer = NewShutdownTimer
     }};
-handle_cast(Request, State) ->
-    lager:warning("rcvd unknown cast msg: ~p", [Request]),
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(
@@ -199,15 +202,14 @@ handle_info(?SHUTDOWN_TICK, #state{shutdown_timer = {ShutdownTimeout, _}} = Stat
     lager:info("shutting down, haven't sent data in ~p", [ShutdownTimeout]),
     {stop, normal, State};
 handle_info(_Msg, State) ->
-    lager:warning("rcvd unknown info msg: ~p, ~p", [_Msg, State]),
     {noreply, State}.
 
 terminate(_Reason, _State = #state{socket = Socket}) ->
     ok = gen_udp:close(Socket).
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
 -spec handle_udp(
     Data :: binary(),
@@ -222,7 +224,7 @@ handle_udp(
         pull_data_timer = PullDataTimer,
         pull_data = PullDataMap0,
         socket = Socket,
-        response_stream = StreamHandler,
+        response_stream = Stream,
         pubkeybin = PubKeyBin,
         dest_remap = DestMap0
     } = State0
@@ -236,7 +238,7 @@ handle_udp(
                     {DestMap1, Resend} ->
                         {{A, B, C, D}, Port} = DataSrc,
                         Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
-                        ?MODULE:push_data(self(), Resend, StreamHandler, maps:get(Key, DestMap1)),
+                        ?MODULE:push_data(self(), Resend, Stream, maps:get(Key, DestMap1)),
                         State0#state{dest_remap = DestMap1}
                 end;
             _ ->
@@ -248,7 +250,7 @@ handle_udp(
                         PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
                         State0#state{pull_data = PullDataMap1};
                     ?PULL_RESP ->
-                        ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler),
+                        ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream),
                         State0;
                     _Id ->
                         lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
@@ -360,13 +362,13 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
     DataSrc :: socket_dest(),
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     Socket :: gen_udp:socket(),
-    StreamHandler :: tuple()
+    Stream :: pid()
 ) ->
     ok.
-handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, StreamHandler) ->
+handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream) ->
     %% Send downlink to grpc handler
-    PacketDown = hpr_gwmp_router:txpk_to_packet_down(Data),
-    hpr_gateway_service:send_downlink(PacketDown, StreamHandler),
+    PacketDown = hpr_protocol_gwmp:txpk_to_packet_down(Data),
+    Stream ! {reply, PacketDown},
 
     %% Ack the downlink
     Token = semtech_udp:token(Data),
@@ -406,7 +408,7 @@ maybe_remap_dest(Map, {{A, B, C, D}, Port}, <<"REMAP: ", Data/binary>>) ->
     Packet = erlang:list_to_binary(Packet0),
     Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
     Token = semtech_udp:token(Packet),
-    {Map#{Key => hpr_gwmp_router:route_to_dest(New)}, {Token, Packet}};
+    {Map#{Key => hpr_protocol_gwmp:route_to_dest(New)}, {Token, Packet}};
 maybe_remap_dest(_, _, _) ->
     noop.
 

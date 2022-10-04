@@ -11,20 +11,16 @@
 
 -include("hpr.hrl").
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
+-include("../src/grpc/autogen/server/config_pb.hrl").
 
 -define(JOIN_REQUEST, 2#000).
 -define(UNCONFIRMED_UP, 2#010).
 -define(CONFIRMED_UP, 2#100).
 
-init_per_testcase(TestCase, Config) ->
-    %% Setup base directory
-    BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
-    ok = application:set_env(?APP, base_dir, BaseDir),
-
+init_per_testcase(_TestCase, Config) ->
     %% Start HPR
     application:ensure_all_started(?APP),
-
-    Config ++ [{base_dir, BaseDir}].
+    Config.
 
 end_per_testcase(_TestCase, Config) ->
     application:stop(?APP),
@@ -78,14 +74,23 @@ uplink_packet_up(Opts0) ->
     hpr_packet_up:sign(PacketUp, SigFun).
 
 -spec packet_route(Opts :: map()) -> hpr_packet_route:route().
-packet_route(Opts0) ->
-    NetID = maps:get(net_id, Opts0, 0),
-    DevAddrRanges = maps:get(devaddr_ranges, Opts0, [{1, 10}]),
-    EUIs = maps:get(euis, Opts0, [{1, 1}]),
-    LNS = maps:get(lns, Opts0, <<"lsn.lora.com>">>),
-    Protocol = maps:get(protocol, Opts0, gwmp),
-    OUI = maps:get(oui, Opts0, 10),
-    hpr_route:new(NetID, DevAddrRanges, EUIs, LNS, Protocol, OUI).
+packet_route(Opts) ->
+    NetID = maps:get(net_id, Opts, 0),
+    DevAddrRanges = maps:get(devaddr_ranges, Opts, [
+        #{start_addr => 16#00000000, end_addr => 16#0000000A}
+    ]),
+    EUIs = maps:get(euis, Opts, [#{app_eui => 1, dev_eui => 1}]),
+    Protocol = maps:get(
+        protocol, Opts, {router, #{ip => <<"127.0.0.1">>, port => 80}}
+    ),
+    OUI = maps:get(oui, Opts, 1),
+    hpr_route:new(#{
+        net_id => NetID,
+        devaddr_ranges => DevAddrRanges,
+        euis => EUIs,
+        oui => OUI,
+        protocol => Protocol
+    }).
 
 -spec match_map(map(), any()) -> true | {false, term()}.
 match_map(Expected, Got) when is_map(Got) ->
