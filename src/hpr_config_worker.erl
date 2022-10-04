@@ -95,7 +95,7 @@ handle_continue(
     ),
     %% Sending Route Request
     RouteReq = #{},
-    ok = grpc_client:send(Stream, RouteReq),
+    ok = grpc_client:send_last(Stream, RouteReq),
     lager:info("stream initialized"),
     {noreply, State#state{stream = Stream}, {continue, ?RCV_CFG_UPDATE}};
 handle_continue(?RCV_CFG_UPDATE, #state{connection = Connection, stream = Stream} = State) ->
