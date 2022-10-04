@@ -152,8 +152,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
-        run: | 
-          apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim python3 python3-dev py3-pip
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim python3 python3-dev py3-pip
       - name: localstack
         run: | 
           curl 'http://localstack:4566/health'
