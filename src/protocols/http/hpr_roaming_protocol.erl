@@ -66,7 +66,7 @@
 -record(packet, {
     packet_up :: hpr_packet_up:packet(),
     gateway_time :: gateway_time(),
-    response_stream :: grpcbox_stream:t()
+    response_stream :: hpr_router_stream_manager:gateway_stream()
 }).
 -type packet() :: #packet{}.
 
@@ -87,20 +87,20 @@
 -spec new_packet(
     PacketUp :: hpr_packet_up:packet(),
     GatewayTime :: gateway_time(),
-    ResponseStream :: grpcbox_stream:t()
+    GatewayStream :: hpr_router_stream_manager:gateway_stream()
 ) -> #packet{}.
-new_packet(PacketUp, GatewayTime, ResponseStream) ->
+new_packet(PacketUp, GatewayTime, GatewayStream) ->
     #packet{
         packet_up = PacketUp,
         gateway_time = GatewayTime,
-        response_stream = ResponseStream
+        response_stream = GatewayStream
     }.
 
 -spec gateway_time(#packet{}) -> gateway_time().
 gateway_time(#packet{gateway_time = GWTime}) ->
     GWTime.
 
--spec response_stream(#packet{}) -> grpcbox_stream:t().
+-spec response_stream(#packet{}) -> hpr_router_stream_manager:gateway_stream().
 response_stream(#packet{response_stream = ResponseStream}) ->
     ResponseStream.
 

@@ -18,11 +18,11 @@
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    ResponseStream :: grpcbox_stream:t(),
+    GatewayStream :: hpr_router_stream_manager:gateway_stream(),
     Route :: hpr_route:route(),
     RoutingInfo :: hpr_routing:routing_info()
 ) -> ok | {error, any()}.
-send(PacketUp, ResponseStream, Route, RoutingInfo) ->
+send(PacketUp, GatewayStream, Route, RoutingInfo) ->
     WorkerKey = worker_key_from(PacketUp, Route),
     PacketType = hpr_routing:routing_info_type(RoutingInfo),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
@@ -52,7 +52,7 @@ send(PacketUp, ResponseStream, Route, RoutingInfo) ->
                 [PacketType, RoutingInfo]
             ),
             hpr_http_worker:handle_packet(
-                WorkerPid, PacketUp, erlang:system_time(millisecond), ResponseStream, RoutingInfo
+                WorkerPid, PacketUp, erlang:system_time(millisecond), GatewayStream, RoutingInfo
             )
     end,
 

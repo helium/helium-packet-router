@@ -10,11 +10,11 @@
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    Stream :: pid(),
+    GatewayStream :: pid(),
     Route :: hpr_route:route(),
     RoutingInfo :: hpr_routing:routing_info()
 ) -> ok | {error, any()}.
-send(PacketUp, Stream, Route, _RoutingInfo) ->
+send(PacketUp, GatewayStream, Route, _RoutingInfo) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
 
     case hpr_gwmp_sup:maybe_start_worker(Gateway, #{}) of
@@ -23,7 +23,7 @@ send(PacketUp, Stream, Route, _RoutingInfo) ->
         {ok, Pid} ->
             PushData = ?MODULE:packet_up_to_push_data(PacketUp, erlang:system_time(millisecond)),
             Dest = ?MODULE:route_to_dest(Route),
-            try hpr_gwmp_worker:push_data(Pid, PushData, Stream, Dest) of
+            try hpr_gwmp_worker:push_data(Pid, PushData, GatewayStream, Dest) of
                 _ -> ok
             catch
                 Type:Err:Stack ->

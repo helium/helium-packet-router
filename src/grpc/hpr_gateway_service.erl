@@ -15,7 +15,7 @@ init(_RPC, StreamState) ->
 -spec send_packet(hpr_packet_up:packet(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 send_packet(PacketUp, StreamState) ->
-    case hpr_routing:handle_packet(PacketUp, StreamState) of
+    case hpr_routing:handle_packet(PacketUp) of
         ok ->
             {ok, StreamState};
         {error, Err} ->

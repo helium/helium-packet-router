@@ -2,7 +2,7 @@
 
 -export([
     init/0,
-    handle_packet/2,
+    handle_packet/1,
     routing_info_type/1
 ]).
 
@@ -34,10 +34,9 @@ init() ->
     ok.
 
 -spec handle_packet(
-    Packet :: hpr_packet_up:packet(),
-    StreamHandler :: grpcbox_stream:t() | hpr_router_stream_manager:gateway_stream()
+    Packet :: hpr_packet_up:packet()
 ) -> hpr_routing_response().
-handle_packet(Packet, StreamHandler) ->
+handle_packet(Packet) ->
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
     lager:md([{gateway, GatewayName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
     %% TODO: log some identifying information?
@@ -51,7 +50,7 @@ handle_packet(Packet, StreamHandler) ->
             lager:error("packet failed verification: ~p", [_Reason]),
             Error;
         ok ->
-            dispatch_packet(packet_type(Packet), Packet, StreamHandler)
+            dispatch_packet(packet_type(Packet), Packet)
     end.
 
 routing_info_type({eui, _DevEUI, _AppEUI}) -> eui;
@@ -63,13 +62,12 @@ routing_info_type({devaddr, _DevAddr}) -> devaddr.
 
 -spec dispatch_packet(
     uplink_packet_type(),
-    hpr_packet_up:packet(),
-    StreamHandler :: grpcbox_stream:t() | hpr_router_stream_manager:gateway_stream()
+    hpr_packet_up:packet()
 ) -> hpr_routing_response().
-dispatch_packet(undefined, _Packet, _StreamHandler) ->
+dispatch_packet(undefined, _Packet) ->
     lager:error("invalid packet type"),
     {error, invalid_packet_type};
-dispatch_packet({join_req, AppEUI, DevEUI}, Packet, StreamHandler) ->
+dispatch_packet({join_req, AppEUI, DevEUI}, Packet) ->
     Routes = hpr_config:lookup_eui(AppEUI, DevEUI),
     lager:debug(
         [
@@ -79,25 +77,24 @@ dispatch_packet({join_req, AppEUI, DevEUI}, Packet, StreamHandler) ->
         "handling join"
     ),
     RoutingInfo = {eui, DevEUI, AppEUI},
-    deliver_packet(Packet, StreamHandler, Routes, RoutingInfo);
-dispatch_packet({uplink, DevAddr}, Packet, StreamHandler) ->
+    deliver_packet(Packet, Routes, RoutingInfo);
+dispatch_packet({uplink, DevAddr}, Packet) ->
     lager:debug(
         [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
         "handling uplink"
     ),
     Routes = hpr_config:lookup_devaddr(DevAddr),
     RoutingInfo = {devaddr, DevAddr},
-    deliver_packet(Packet, StreamHandler, Routes, RoutingInfo).
+    deliver_packet(Packet, Routes, RoutingInfo).
 
 -spec deliver_packet(
     Packet :: hpr_packet_up:packet(),
-    StreamHandler :: grpcbox_stream:t() | hpr_router_stream_manager:gateway_stream(),
     Routes :: [hpr_route:route()],
     RoutingInfo :: routing_info()
 ) -> ok.
-deliver_packet(_Packet, _StreamHandler, [], _RoutingInfo) ->
+deliver_packet(_Packet, [], _RoutingInfo) ->
     ok;
-deliver_packet(Packet, StreamHandler, [Route | Routes], RoutingInfo) ->
+deliver_packet(Packet, [Route | Routes], RoutingInfo) ->
     lager:debug(
         [
             {oui, hpr_route:oui(Route)},
@@ -117,7 +114,7 @@ deliver_packet(Packet, StreamHandler, [Route | Routes], RoutingInfo) ->
             {gwmp, _} ->
                 hpr_protocol_gwmp:send(Packet, self(), Route, RoutingInfo);
             {http_roaming, _} ->
-                hpr_http_router:send(Packet, StreamHandler, Route, RoutingInfo);
+                hpr_http_router:send(Packet, self(), Route, RoutingInfo);
             _OtherProtocol ->
                 lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
                 ok
@@ -132,7 +129,7 @@ deliver_packet(Packet, StreamHandler, [Route | Routes], RoutingInfo) ->
                 "error sending"
             )
     end,
-    deliver_packet(Packet, StreamHandler, Routes, RoutingInfo).
+    deliver_packet(Packet, Routes, RoutingInfo).
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
 throttle_check(Packet) ->

@@ -107,7 +107,9 @@ init_ets() ->
     ]),
     ok.
 
--spec insert_handler(TransactionID :: integer(), ResponseStream :: grpcbox_stream:t()) -> ok.
+-spec insert_handler(
+    TransactionID :: integer(), ResponseStream :: hpr_router_stream_manager:gateway_stream()
+) -> ok.
 insert_handler(TransactionID, ResponseStream) ->
     true = ets:insert(?RESPONSE_STREAM_ETS, {TransactionID, ResponseStream}),
     ok.
