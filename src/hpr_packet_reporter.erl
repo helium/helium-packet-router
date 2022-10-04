@@ -395,7 +395,7 @@ file_test() ->
 
     handle_write(FilePath, MaxFileSize, ?FILE_WRITE_OPTIONS),
 
-    {ok, S} = file:open(FilePath, ?FILE_WRITE_OPTIONS),
+    {ok, S} = file:open(FilePath, [raw, binary, compressed]),
 
     %% Read length-delimited protobufs
     {ok, EncodedPacketSize} = file:read(S, 4),
