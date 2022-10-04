@@ -10,7 +10,7 @@
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    Stream :: grpcbox_stream:t(),
+    Stream :: pid(),
     Route :: hpr_route:route(),
     RoutingInfo :: hpr_routing:routing_info()
 ) -> ok | {error, any()}.

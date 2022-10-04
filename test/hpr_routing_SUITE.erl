@@ -53,17 +53,17 @@ join_req_test(_Config) ->
     JoinPacketBadSig = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
+    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, ignore)),
 
     JoinPacketUpInvalid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid)
+        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid, ignore)
     ),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -79,14 +79,15 @@ join_req_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, ignore)),
 
     Received1 =
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
                 Self,
-                Route
+                Route,
+                {eui, 1, 1}
             ]},
             ok},
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
@@ -94,14 +95,15 @@ join_req_test(_Config) ->
     UplinkPacketUp = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, ignore)),
 
     Received2 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
                 Self,
-                Route
+                Route,
+                {devaddr, 0}
             ]},
             ok},
     ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),

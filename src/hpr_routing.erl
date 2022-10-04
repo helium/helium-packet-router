@@ -113,9 +113,9 @@ deliver_packet(Packet, StreamHandler, [Route | Routes], RoutingInfo) ->
     Resp =
         case Protocol of
             {router, _} ->
-                hpr_protocol_router:send(Packet, StreamHandler, Route, RoutingInfo);
+                hpr_protocol_router:send(Packet, self(), Route, RoutingInfo);
             {gwmp, _} ->
-                hpr_protocol_gwmp:send(Packet, StreamHandler, Route, RoutingInfo);
+                hpr_protocol_gwmp:send(Packet, self(), Route, RoutingInfo);
             {http_roaming, _} ->
                 hpr_http_router:send(Packet, StreamHandler, Route, RoutingInfo);
             _OtherProtocol ->
@@ -127,7 +127,6 @@ deliver_packet(Packet, StreamHandler, [Route | Routes], RoutingInfo) ->
             ok;
         {error, Err} ->
             %% FIXME: might be dangerous to log full `Err` tuple right now
-
             lager:warning(
                 [{protocol, Protocol}, {error, Err}],
                 "error sending"

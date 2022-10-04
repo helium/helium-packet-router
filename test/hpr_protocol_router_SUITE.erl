@@ -10,8 +10,8 @@
     grpc_test/1,
     grpc_connection_refused_test/1,
     grpc_full_flow_send_test/1,
-    grpc_full_flow_connection_refused_test/1
-    , grpc_full_flow_downlink_test/1
+    grpc_full_flow_connection_refused_test/1,
+    grpc_full_flow_downlink_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -29,10 +29,10 @@
 all() ->
     [
         grpc_test,
-        grpc_connection_refused_test
-%%        , grpc_full_flow_send_test
-%%        , grpc_full_flow_downlink_test
-%%        , grpc_full_flow_connection_refused_test
+        grpc_connection_refused_test,
+        grpc_full_flow_send_test,
+        grpc_full_flow_downlink_test,
+        grpc_full_flow_connection_refused_test
     ].
 
 %%--------------------------------------------------------------------
