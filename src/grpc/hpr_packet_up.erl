@@ -153,7 +153,7 @@ type(Packet) ->
                 _ ->
                     {uplink, DevAddr}
             end;
-        <<FType:3, _/binary>> ->
+        <<FType:3, _/bitstring>> ->
             {undefined, FType};
         _ ->
             {undefined, 0}
