@@ -166,8 +166,7 @@ make_uplink_payload(
         'PHYPayload' => hpr_roaming_utils:binary_to_hexstring(Payload),
         'ULMetaData' => #{
             RoutingKey => RoutingValue,
-            %%      'DataRate' => hpr_lorawan:datarate_to_index(Region, DataRate),
-            'DataRate' => fixed_datarate_to_index(Region, DataRate),
+            'DataRate' => hpr_lorawan:datarate_to_index(Region, DataRate),
             'ULFreq' => Frequency,
             'RecvTime' => hpr_roaming_utils:format_time(GatewayTime),
             'RFRegion' => Region,
@@ -176,10 +175,6 @@ make_uplink_payload(
             'GWInfo' => lists:map(fun gw_info/1, Uplinks)
         }
     }.
-
-%%  TODO  use this to keep dialyzer quiet
-fixed_datarate_to_index(_Region, _DataRate) ->
-    1.
 
 %% ------------------------------------------------------------------
 %% Downlink
@@ -220,9 +215,7 @@ handle_prstart_ans(#{
         hpr_roaming_utils:hexstring_to_binary(Payload),
         hpr_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
         Frequency,
-        temporary_fixed_datarate(
-            hpr_lorawan:index_to_datarate(Region, DR)
-        ),
+        hpr_lorawan:index_to_datarate(Region, DR),
         rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
     ),
 
@@ -253,7 +246,7 @@ handle_prstart_ans(#{
                 hpr_roaming_utils:hexstring_to_binary(Payload),
                 hpr_roaming_utils:uint32(PacketTime + ?JOIN2_DELAY),
                 Frequency,
-                temporary_fixed_datarate(DataRate),
+                DataRate,
                 undefined
             ),
 
@@ -336,7 +329,7 @@ handle_xmitdata_req(#{
                 hpr_roaming_utils:hexstring_to_binary(Payload),
                 hpr_roaming_utils:uint32(PacketTime + (Delay1 * ?RX1_DELAY)),
                 Frequency1,
-                temporary_fixed_datarate(DataRate1),
+                DataRate1,
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?RX2_DELAY)
             ),
 
@@ -397,7 +390,7 @@ handle_xmitdata_req(#{
                 hpr_roaming_utils:hexstring_to_binary(Payload),
                 Timeout,
                 Frequency,
-                temporary_fixed_datarate(DataRate),
+                DataRate,
                 undefined
             ),
 
@@ -421,12 +414,10 @@ rx2_from_dlmetadata(
 ) ->
     try hpr_lorawan:index_to_datarate(Region, DR) of
         DataRate ->
-            %%      TODO  resolve type difference between hpr_lorawan datarate and #window_v1_pb datarate
-            FixedDataRate = temporary_fixed_datarate(DataRate),
             window(
                 hpr_roaming_utils:uint32(PacketTime + Timeout),
                 Frequency,
-                FixedDataRate
+                DataRate
             )
     catch
         Err ->
@@ -436,10 +427,6 @@ rx2_from_dlmetadata(
 rx2_from_dlmetadata(_, _, _, _) ->
     lager:debug("skipping rx2, no details"),
     undefined.
-
-%%  TODO  makes dialyzer happy until the datarate type conflict is resolved
-temporary_fixed_datarate(_DataRate) ->
-    'SF12BW125'.
 
 %% ------------------------------------------------------------------
 %% Tokens
