@@ -73,6 +73,5 @@
             prometheus_vm_system_info_collector
         ]},
         {vm_system_info_collector_metrics, [process_count]}
-    ]},
-    "etc/local.conf"
+    ]}
 ].
