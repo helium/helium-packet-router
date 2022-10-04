@@ -34,7 +34,7 @@
     ]},
     {lager, [
         {suppress_supervisor_start_stop, true},
-        {log_root, "log"},
+        {log_root, "/var/log/hpr"},
         {crash_log, "crash.log"},
         {handlers, [
             {lager_file_backend, [
