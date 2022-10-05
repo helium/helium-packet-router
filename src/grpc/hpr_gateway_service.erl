@@ -25,6 +25,8 @@ send_packet(PacketUp, StreamState) ->
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({reply, Reply}, StreamState) ->
     grpcbox_stream:send(false, Reply, StreamState);
+handle_info({http_reply, Reply}, StreamState) ->
+    grpcbox_stream:send(false, Reply, StreamState);
 handle_info({router_reply, ReplyMap}, StreamState) ->
     Reply = hpr_packet_down:to_record(ReplyMap),
     grpcbox_stream:send(false, Reply, StreamState);

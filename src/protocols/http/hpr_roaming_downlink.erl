@@ -120,7 +120,7 @@ delete_handler(TransactionID) ->
     ok.
 
 -spec lookup_handler(TransactionID :: integer()) ->
-    {ok, ResponseStream :: grpcbox_stream:t()} | {error, any()}.
+    {ok, ResponseStream :: hpr_router_stream_manager:gateway_stream()} | {error, any()}.
 lookup_handler(TransactionID) ->
     case ets:lookup(?RESPONSE_STREAM_ETS, TransactionID) of
         [{_, ResponseStream}] -> {ok, ResponseStream};
@@ -128,9 +128,10 @@ lookup_handler(TransactionID) ->
     end.
 
 -spec send_response(
-    ResponseStream :: grpcbox_stream:t(), DownlinkPacket :: hpr_roaming_protocol:downlink_packet()
+    ResponseStream :: hpr_router_stream_manager:gateway_stream(),
+    DownlinkPacket :: hpr_roaming_protocol:downlink_packet()
 ) -> ok.
 send_response(ResponseStream, DownlinkPacket) ->
     lager:debug("sending response: ~p, pid: ~p", [DownlinkPacket, ResponseStream]),
-    grpcbox_stream:send(false, DownlinkPacket, ResponseStream),
+    ResponseStream ! {http_reply, DownlinkPacket},
     ok.
