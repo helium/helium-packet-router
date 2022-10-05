@@ -50,7 +50,7 @@ init([]) ->
         ?WORKER(hpr_gwmp_redirect_worker, [RedirectMap]),
         ?WORKER(hpr_router_connection_manager, []),
         ?WORKER(hpr_router_stream_manager, [
-            'helium.packet_router.gateway', send_packet, client_packet_router_pb
+            'helium.packet_router.packet', route, client_packet_router_pb
         ])
     ],
     {ok, {

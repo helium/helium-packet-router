@@ -83,7 +83,11 @@ full_test(Config) ->
         ],
         euis = [#config_eui_v1_pb{app_eui = 1, dev_eui = 0}],
         oui = 1,
-        protocol = {router, #config_protocol_router_pb{ip = <<"localhost">>, port = 8080}}
+        server = #config_server_v1_pb{
+            host = <<"llocalhost">>,
+            port = 8080,
+            protocol = {packet_router, #config_protocol_packet_router_v1_pb{}}
+        }
     },
     Route2 = #config_route_v1_pb{
         net_id = 0,
@@ -92,7 +96,11 @@ full_test(Config) ->
         ],
         euis = [#config_eui_v1_pb{app_eui = 2, dev_eui = 2}],
         oui = 2,
-        protocol = {gwmp, #config_protocol_gwmp_pb{ip = <<"localhost">>, port = 8088}}
+        server = #config_server_v1_pb{
+            host = <<"llocalhost">>,
+            port = 8080,
+            protocol = {gwmp, #config_protocol_gwmp_v1_pb{}}
+        }
     },
     Routes = [Route1, Route2],
     ConfigRouteResV1 = #config_routes_res_v1_pb{routes = Routes},
