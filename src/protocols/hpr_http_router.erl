@@ -73,7 +73,7 @@ protocol_from(Route) ->
     Server = hpr_route:server(Route),
     #config_server_v1_pb{host = IP, port = Port} = Server,
     Protocol = hpr_route:protocol(Server),
-    #config_protocol_http_roaming_v1_pb{} = Protocol,
+    {http_roaming, #config_protocol_http_roaming_v1_pb{}} = Protocol,
 
     %%    return hard-coded values until the roaming protocol is updated
     #http_protocol{

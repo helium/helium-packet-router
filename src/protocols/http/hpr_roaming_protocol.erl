@@ -51,7 +51,7 @@
 -type gateway_time() :: non_neg_integer().
 
 -type downlink() :: {
-    ResponseStream :: grpcbox_stream:t(),
+    ResponseStream :: hpr_router_stream_manager:gateway_stream(),
     Response :: any()
 }.
 
