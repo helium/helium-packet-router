@@ -18,6 +18,16 @@ init() ->
     ok.
 
 -spec update_routes(client_config_pb:routes_res_v1_pb()) -> ok.
+update_routes(#{routes := []}) ->
+    case application:get_env(hpr, hpr_config_empty_routes_delete_all, false) of
+        true ->
+            lager:info("applying empty routes update"),
+            true = ets:delete_all_objects(?DEVADDRS_ETS),
+            true = ets:delete_all_objects(?EUIS_ETS);
+        false ->
+            lager:info("ignoring empty routes update"),
+            ok
+    end;
 update_routes(#{routes := Routes}) ->
     true = ets:delete_all_objects(?DEVADDRS_ETS),
     true = ets:delete_all_objects(?EUIS_ETS),
@@ -154,8 +164,13 @@ test_eui_lookup() ->
         ],
         euis => [#{app_eui => 1, dev_eui => 2}, #{app_eui => 3, dev_eui => 4}],
         oui => 1,
-        protocol => {http_roaming, #{ip => <<"lns1.testdomain.com">>, port => 80}}
+        server => #{
+            host => <<"lns1.testdomain.com">>,
+            port => 80,
+            protocol => {http_roaming, #{}}
+        }
     }),
+
     Route2 = hpr_route:new(#{
         net_id => 0,
         devaddr_ranges => [
@@ -164,7 +179,11 @@ test_eui_lookup() ->
         ],
         euis => [#{app_eui => 1, dev_eui => 0}, #{app_eui => 5, dev_eui => 6}],
         oui => 1,
-        protocol => {http_roaming, #{ip => <<"lns2.testdomain.com">>, port => 80}}
+        server => #{
+            host => <<"lns2.testdomain.com">>,
+            port => 80,
+            protocol => {http_roaming, #{}}
+        }
     }),
 
     ok = insert_route(Route1),
@@ -186,7 +205,11 @@ route_v1() ->
         ],
         euis => [#{app_eui => 1, dev_eui => 2}, #{app_eui => 3, dev_eui => 4}],
         oui => 1,
-        protocol => {http_roaming, #{ip => <<"lns1.testdomain.com">>, port => 80}}
+        server => #{
+            host => <<"lns1.testdomain.com">>,
+            port => 80,
+            protocol => {http_roaming, #{}}
+        }
     }).
 
 -endif.
