@@ -72,7 +72,11 @@ join_req_test(_Config) ->
         devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
         oui => 1,
-        protocol => {router, #{ip => <<"127.0.0.1">>, port => 80}}
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 80,
+            protocol => {packet_router, #{}}
+        }
     }),
     ok = hpr_config:insert_route(Route),
 
