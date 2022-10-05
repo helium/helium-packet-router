@@ -18,6 +18,16 @@ init() ->
     ok.
 
 -spec update_routes(client_config_pb:routes_res_v1_pb()) -> ok.
+update_routes(#{routes := []}) ->
+    case application:get_env(hpr, hpr_config_empty_routes_delete_all, false) of
+        true ->
+            lager:info("applying empty routes update"),
+            true = ets:delete_all_objects(?DEVADDRS_ETS),
+            true = ets:delete_all_objects(?EUIS_ETS);
+        false ->
+            lager:info("ignoring empty routes update"),
+            ok
+    end;
 update_routes(#{routes := Routes}) ->
     true = ets:delete_all_objects(?DEVADDRS_ETS),
     true = ets:delete_all_objects(?EUIS_ETS),
