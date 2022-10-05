@@ -41,7 +41,7 @@ all() ->
         %%    rx1_downlink_test,
         %%    rx2_downlink_test,
         %%    chirpstack_join_accept_test,
-%%        class_c_downlink_test
+        %%        class_c_downlink_test
     ].
 
 %%--------------------------------------------------------------------

@@ -56,7 +56,11 @@ test_send() ->
             devaddr_ranges => [],
             euis => [],
             oui => 1,
-            protocol => {router, #{ip => Host, port => Port}}
+            server => #{
+                host => Host,
+                port => Port,
+                protocol => {packet_router, #{}}
+            }
         }
     ),
 

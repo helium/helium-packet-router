@@ -95,21 +95,22 @@ dispatch_packet({uplink, DevAddr}, Packet) ->
 deliver_packet(_Packet, [], _RoutingInfo) ->
     ok;
 deliver_packet(Packet, [Route | Routes], RoutingInfo) ->
+    Server = hpr_route:server(Route),
+    Protocol = hpr_route:protocol(Server),
     lager:debug(
         [
             {oui, hpr_route:oui(Route)},
-            {protocol, hpr_route:protocol(Route)},
+            {protocol, Protocol},
             {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))}
         ],
         "delivering packet to ~s",
         [hpr_route:lns(Route)]
     ),
-    Protocol = hpr_route:protocol(Route),
     %% FIXME: delivery could be halted to multiple routes if one of the earlier
     %% Protocol:send(...) errors out.
     Resp =
         case Protocol of
-            {router, _} ->
+            {packet_router, _} ->
                 hpr_protocol_router:send(Packet, self(), Route, RoutingInfo);
             {gwmp, _} ->
                 hpr_protocol_gwmp:send(Packet, self(), Route, RoutingInfo);

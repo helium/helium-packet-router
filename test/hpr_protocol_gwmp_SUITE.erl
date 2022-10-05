@@ -366,7 +366,11 @@ test_route(Port) ->
         devaddr_ranges => [],
         euis => [],
         oui => 42,
-        protocol => {gwmp, #{ip => <<"127.0.0.1">>, port => Port}}
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => Port,
+            protocol => {gwmp, #{mapping => []}}
+        }
     }).
 
 expect_pull_data(Socket, Reason) ->

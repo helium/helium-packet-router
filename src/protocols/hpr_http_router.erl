@@ -69,14 +69,13 @@ worker_key_from(PacketUp, Route) ->
     {Phash, Protocol}.
 
 -spec protocol_from(hpr_route:route()) -> hpr_http_sup:http_protocol().
-protocol_from(
-    #config_route_v1_pb{
-        protocol = {http_roaming, Protocol}
-    } = _Route
-) ->
-    #config_protocol_http_roaming_pb{ip = IP, port = Port} = Protocol,
+protocol_from(Route) ->
+    Server = hpr_route:server(Route),
+    #config_server_v1_pb{host = IP, port = Port} = Server,
+    Protocol = hpr_route:protocol(Server),
+    #config_protocol_http_roaming_v1_pb{} = Protocol,
 
-    %%    return hard-coded values until the route protobuf is updated
+    %%    return hard-coded values until the roaming protocol is updated
     #http_protocol{
         protocol_version = pv_1_1,
         flow_type = async,

@@ -1,10 +1,10 @@
--module(hpr_gateway_service).
+-module(hpr_packet_service).
 
--behaviour(helium_packet_router_gateway_bhvr).
+-behaviour(helium_packet_router_packet_bhvr).
 
 -export([
     init/2,
-    send_packet/2,
+    route/2,
     handle_info/2
 ]).
 
@@ -12,9 +12,9 @@
 init(_RPC, StreamState) ->
     StreamState.
 
--spec send_packet(hpr_packet_up:packet(), grpcbox_stream:t()) ->
+-spec route(hpr_packet_up:packet(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-send_packet(PacketUp, StreamState) ->
+route(PacketUp, StreamState) ->
     case hpr_routing:handle_packet(PacketUp) of
         ok ->
             {ok, StreamState};
