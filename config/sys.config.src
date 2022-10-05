@@ -22,7 +22,7 @@
                 grpc_opts => #{
                     service_protos => [packet_router_pb],
                     services => #{
-                        'helium.packet_router.gateway' => hpr_gateway_service
+                        'helium.packet_router.packet' => hpr_packet_service
                     }
                 },
                 transport_opts => #{ssl => false},
@@ -44,9 +44,12 @@
     ]},
     {lager, [
         {suppress_supervisor_start_stop, true},
-        {log_root, "log"},
+        {log_root, "/var/log/hpr"},
         {crash_log, "crash.log"},
         {handlers, [
+            {lager_console_backend, [
+                {level, info}
+            ]},
             {lager_file_backend, [
                 {file, "info.log"},
                 {level, info},
@@ -80,6 +83,5 @@
             prometheus_vm_system_info_collector
         ]},
         {vm_system_info_collector_metrics, [process_count]}
-    ]},
-    "etc/local.conf"
+    ]}
 ].

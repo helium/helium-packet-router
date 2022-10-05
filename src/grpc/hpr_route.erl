@@ -7,18 +7,28 @@
     net_id/1,
     devaddr_ranges/1,
     euis/1,
-    lns/1,
-    protocol/1,
-    oui/1
+    server/1,
+    oui/1,
+    lns/1
+]).
+
+-export([
+    host/1,
+    port/1,
+    protocol/1
 ]).
 
 -type route() :: #config_route_v1_pb{}.
 
+-type server() :: #config_server_v1_pb{}.
+
 -type protocol() ::
-    {router, config_pb:config_protocol_router_pb()}
-    | {gwmp, config_pb:config_protocol_gwmp_pb()}
-    | {http_roaming, config_pb:config_protocol_http_roaming_pb()}
+    {packet_router, #config_protocol_packet_router_v1_pb{}}
+    | {gwmp, #config_protocol_gwmp_v1_pb{}}
+    | {http_roaming, #config_protocol_http_roaming_v1_pb{}}
     | undefined.
+
+-export_type([route/0, server/0, protocol/0]).
 
 -spec new(RouteMap :: client_config_pb:route_v1_pb()) -> route().
 new(RouteMap) ->
@@ -47,24 +57,32 @@ euis(Route) ->
             Route#config_route_v1_pb.euis
     ].
 
--spec lns(Route :: route()) -> binary().
-lns(Route) ->
-    {IP, Port} =
-        case ?MODULE:protocol(Route) of
-            undefined -> throw(misconfigured_route);
-            {router, #config_protocol_router_pb{ip = I, port = P}} -> {I, P};
-            {gwmp, #config_protocol_gwmp_pb{ip = I, port = P}} -> {I, P};
-            {http_roaming, #config_protocol_http_roaming_pb{ip = I, port = P}} -> {I, P}
-        end,
-    <<IP/binary, $:, (erlang:integer_to_binary(Port))/binary>>.
-
--spec protocol(Route :: route()) -> protocol().
-protocol(Route) ->
-    Route#config_route_v1_pb.protocol.
+-spec server(Route :: route()) -> server().
+server(Route) ->
+    Route#config_route_v1_pb.server.
 
 -spec oui(Route :: route()) -> non_neg_integer().
 oui(Route) ->
     Route#config_route_v1_pb.oui.
+
+-spec lns(Route :: route()) -> binary().
+lns(Route) ->
+    Server = ?MODULE:server(Route),
+    Host = ?MODULE:host(Server),
+    Port = ?MODULE:port(Server),
+    <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary>>.
+
+-spec host(Server :: server()) -> binary().
+host(Server) ->
+    Server#config_server_v1_pb.host.
+
+-spec port(Server :: server()) -> non_neg_integer().
+port(Server) ->
+    Server#config_server_v1_pb.port.
+
+-spec protocol(Server :: server()) -> protocol().
+protocol(Server) ->
+    Server#config_server_v1_pb.protocol.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -84,104 +102,193 @@ new_test() ->
             #config_eui_v1_pb{app_eui = 1, dev_eui = 1},
             #config_eui_v1_pb{app_eui = 2, dev_eui = 0}
         ],
-
-        protocol = {gwmp, #config_protocol_gwmp_pb{ip = <<"lsn.lora.com>">>, port = 80}},
-        oui = 10
+        oui = 10,
+        server = #config_server_v1_pb{
+            host = <<"lsn.lora.com">>,
+            port = 80,
+            protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
+        }
     },
     ?assertEqual(
         Route,
-        new(#{
+        ?MODULE:new(#{
             net_id => 1,
             devaddr_ranges => [
                 #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
             ],
             euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
             oui => 10,
-            protocol => {gwmp, #{ip => <<"lsn.lora.com>">>, port => 80}}
+            server => #{
+                host => <<"lsn.lora.com">>,
+                port => 80,
+                protocol => {gwmp, #{mapping => []}}
+            }
         })
     ),
     ok.
 
 net_id_test() ->
-    Route = new(#{
+    Route = ?MODULE:new(#{
         net_id => 1,
         devaddr_ranges => [
             #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
         ],
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
         oui => 10,
-        protocol => {gwmp, #{ip => <<"lsn.lora.com>">>, port => 80}}
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
     }),
-    ?assertEqual(1, net_id(Route)),
+    ?assertEqual(1, ?MODULE:net_id(Route)),
     ok.
 
 devaddr_ranges_test() ->
-    Route = new(#{
+    Route = ?MODULE:new(#{
         net_id => 1,
         devaddr_ranges => [
             #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
         ],
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
         oui => 10,
-        protocol => {gwmp, #{ip => <<"lsn.lora.com>">>, port => 80}}
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
     }),
-    ?assertEqual([{1, 10}, {11, 20}], devaddr_ranges(Route)),
+    ?assertEqual([{1, 10}, {11, 20}], ?MODULE:devaddr_ranges(Route)),
     ok.
 
 euis_test() ->
-    Route = new(#{
+    Route = ?MODULE:new(#{
         net_id => 1,
         devaddr_ranges => [
             #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
         ],
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
         oui => 10,
-        protocol => {gwmp, #{ip => <<"lsn.lora.com>">>, port => 80}}
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
     }),
     ?assertEqual(
-        [{1, 1}, {2, 0}], euis(Route)
+        [{1, 1}, {2, 0}], ?MODULE:euis(Route)
+    ),
+    ok.
+
+server_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
+    }),
+    ?assertEqual(
+        #config_server_v1_pb{
+            host = <<"lsn.lora.com">>,
+            port = 80,
+            protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
+        },
+        ?MODULE:server(Route)
     ),
     ok.
 
 lns_test() ->
-    Route = new(#{
+    Route = ?MODULE:new(#{
         net_id => 1,
         devaddr_ranges => [
             #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
         ],
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
         oui => 10,
-        protocol => {gwmp, #{ip => <<"lsn.lora.com>">>, port => 80}}
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
     }),
-    ?assertEqual(<<"lsn.lora.com>:80">>, lns(Route)),
-    ok.
-
-protocol_test() ->
-    Route = new(#{
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        protocol => {gwmp, #{ip => <<"lsn.lora.com>">>, port => 80}}
-    }),
-    ?assertEqual(
-        {gwmp, #config_protocol_gwmp_pb{ip = <<"lsn.lora.com>">>, port = 80}}, protocol(Route)
-    ),
+    ?assertEqual(<<"lsn.lora.com:80">>, ?MODULE:lns(Route)),
     ok.
 
 oui_test() ->
-    Route = new(#{
+    Route = ?MODULE:new(#{
         net_id => 1,
         devaddr_ranges => [
             #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
         ],
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
         oui => 10,
-        protocol => {gwmp, #{ip => <<"lsn.lora.com>">>, port => 80}}
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
     }),
-    ?assertEqual(10, oui(Route)),
+    ?assertEqual(10, ?MODULE:oui(Route)),
+    ok.
+
+host_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
+    }),
+    ?assertEqual(<<"lsn.lora.com">>, ?MODULE:host(?MODULE:server(Route))),
+    ok.
+
+port_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
+    }),
+    ?assertEqual(80, ?MODULE:port(?MODULE:server(Route))),
+    ok.
+
+protocol_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
+    }),
+    ?assertEqual(
+        {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}, ?MODULE:protocol(?MODULE:server(Route))
+    ),
     ok.
 
 -endif.

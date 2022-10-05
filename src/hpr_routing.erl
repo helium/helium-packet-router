@@ -77,22 +77,22 @@ dispatch_packet({uplink, DevAddr}, Packet) ->
 deliver_packet(_Packet, []) ->
     ok;
 deliver_packet(Packet, [Route | Routes]) ->
+    Server = hpr_route:server(Route),
+    Protocol = hpr_route:protocol(Server),
     lager:debug(
         [
             {oui, hpr_route:oui(Route)},
-            {protocol, hpr_route:protocol(Route)},
+            {protocol, Protocol},
             {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))}
         ],
         "delivering packet to ~s",
         [hpr_route:lns(Route)]
     ),
     hpr_packet_reporter:report_packet(Packet, Route),
-    Protocol = hpr_route:protocol(Route),
-
     Resp =
         try
             case Protocol of
-                {router, _} ->
+                {packet_router, _} ->
                     hpr_protocol_router:send(Packet, self(), Route);
                 {gwmp, _} ->
                     hpr_protocol_gwmp:send(Packet, self(), Route);
