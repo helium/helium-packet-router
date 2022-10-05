@@ -24,10 +24,14 @@ init() ->
 handle_packet(Packet) ->
     Start = erlang:system_time(millisecond),
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
-    lager:md([{gateway, GatewayName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
     PacketType = hpr_packet_up:type(Packet),
     {Type, _} = PacketType,
-    lager:debug("received ~p packet", [Type]),
+    lager:md([
+        {gateway, GatewayName},
+        {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))},
+        {packet_type, Type}
+    ]),
+    lager:debug("received packet"),
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
         {fun throttle_check/1, gateway_limit_exceeded}

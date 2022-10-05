@@ -56,16 +56,9 @@ observe_packet_up({Type, _}, RoutingStatus, NumberOfRoutes, Start) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(_Args) ->
-    erlang:process_flag(trap_exit, true),
-    lager:info("init"),
-    ElliOpts = [
-        {callback, hpr_metrics_handler},
-        {callback_args, #{}},
-        {port, 3000}
-    ],
-    {ok, _Pid} = elli:start_link(ElliOpts),
     ok = declare_metrics(),
     _ = schedule_next_tick(),
+    lager:info("init"),
     {ok, #state{}}.
 
 handle_call(_Msg, _From, State) ->
@@ -76,14 +69,10 @@ handle_cast(_Msg, State) ->
 
 handle_info(?METRICS_TICK, State) ->
     lager:debug("running metrics"),
-    _ = erlang:spawn_opt(
+    _ = erlang:spawn(
         fun() ->
             ok = record_grpc_connections()
-        end,
-        [
-            {fullsweep_after, 0},
-            {priority, high}
-        ]
+        end
     ),
     _ = schedule_next_tick(),
     {noreply, State};
