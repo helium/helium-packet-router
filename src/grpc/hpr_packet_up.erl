@@ -17,7 +17,8 @@
     verify/1,
     encode/1,
     decode/1,
-    to_map/1
+    to_map/1,
+    type/1
 ]).
 
 -ifdef(TEST).
@@ -29,10 +30,18 @@
 
 -endif.
 
+-define(JOIN_REQUEST, 2#000).
+-define(UNCONFIRMED_UP, 2#010).
+-define(CONFIRMED_UP, 2#100).
+
 -type packet() :: #packet_router_packet_up_v1_pb{}.
 -type packet_map() :: client_packet_router_pb:packet_router_packet_up_v1_pb().
+-type packet_type() ::
+    {join_req, {non_neg_integer(), non_neg_integer()}}
+    | {uplink, non_neg_integer()}
+    | {undefined, any()}.
 
--export_type([packet/0, packet_map/0]).
+-export_type([packet/0, packet_map/0, packet_type/0]).
 
 -spec payload(Packet :: packet()) -> binary().
 payload(Packet) ->
@@ -118,6 +127,37 @@ to_map(PacketRecord) ->
         gateway => PacketRecord#packet_router_packet_up_v1_pb.gateway,
         signature => PacketRecord#packet_router_packet_up_v1_pb.signature
     }.
+
+-spec type(Packet :: packet()) -> packet_type().
+type(Packet) ->
+    case ?MODULE:payload(Packet) of
+        <<?JOIN_REQUEST:3, _:5, AppEUI:64/integer-unsigned-little,
+            DevEUI:64/integer-unsigned-little, _DevNonce:2/binary, _MIC:4/binary>> ->
+            {join_req, {AppEUI, DevEUI}};
+        (<<FType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1,
+            FOptsLen:4, _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary,
+            PayloadAndMIC/binary>>) when
+            (FType == ?UNCONFIRMED_UP orelse FType == ?CONFIRMED_UP) andalso
+                %% MIC is 4 bytes, so the binary must be at least that long
+                erlang:byte_size(PayloadAndMIC) >= 4
+        ->
+            Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) - 4}),
+            FPort =
+                case Body of
+                    <<>> -> undefined;
+                    <<Port:8, _Payload/binary>> -> Port
+                end,
+            case FPort of
+                0 when FOptsLen /= 0 ->
+                    {undefined, FType};
+                _ ->
+                    {uplink, DevAddr}
+            end;
+        <<FType:3, _/bitstring>> ->
+            {undefined, FType};
+        _ ->
+            {undefined, 0}
+    end.
 
 %% ------------------------------------------------------------------
 %% Tests Functions
@@ -238,5 +278,42 @@ to_map_test() ->
         ),
         "to_map/1 is equivalent to encoding a packet record and decoding it to a map"
     ).
+
+type_test() ->
+    ?assertEqual(
+        {join_req, {1, 1}},
+        ?MODULE:type(
+            ?MODULE:new(#{
+                payload =>
+                    <<
+                        (?JOIN_REQUEST):3,
+                        0:3,
+                        1:2,
+                        1:64/integer-unsigned-little,
+                        1:64/integer-unsigned-little,
+                        (crypto:strong_rand_bytes(2))/binary,
+                        (crypto:strong_rand_bytes(4))/binary
+                    >>
+            })
+        )
+    ),
+    ?assertEqual(
+        {uplink, 1},
+        ?MODULE:type(
+            ?MODULE:new(#{
+                payload =>
+                    <<?UNCONFIRMED_UP:3, 0:3, 1:2, 16#00000001:32/integer-unsigned-little, 0:1, 0:1,
+                        0:1, 0:1, 1:4, 2:16/little-unsigned-integer,
+                        (crypto:strong_rand_bytes(1))/binary, 2:8/integer,
+                        (crypto:strong_rand_bytes(20))/binary>>
+            })
+        )
+    ),
+    ?assertEqual(
+        {undefined, 7},
+        ?MODULE:type(?MODULE:new(#{payload => <<2#111:3, (crypto:strong_rand_bytes(20))/binary>>}))
+    ),
+    ?assertEqual({undefined, 0}, ?MODULE:type(?MODULE:new(#{payload => <<>>}))),
+    ok.
 
 -endif.

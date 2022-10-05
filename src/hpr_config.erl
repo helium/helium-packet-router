@@ -29,6 +29,7 @@ update_routes(#{routes := []}) ->
             ok
     end;
 update_routes(#{routes := Routes}) ->
+    lager:info("got update  with ~w routes", [erlang:length(Routes)]),
     true = ets:delete_all_objects(?DEVADDRS_ETS),
     true = ets:delete_all_objects(?EUIS_ETS),
     lists:foreach(
