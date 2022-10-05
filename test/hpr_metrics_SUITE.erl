@@ -62,29 +62,9 @@ packet_up_histogram_test(_Config) ->
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUp)),
 
-    ?assertEqual(
-        [
-            {
-                [{"type", join_req}, {"status", ok}, {"routes", 0}],
-                [
-                    {10, 1},
-                    {25, 0},
-                    {50, 0},
-                    {100, 0},
-                    {250, 0},
-                    {500, 0},
-                    {1000, 0},
-                    {2500, 0},
-                    {5000, 0},
-                    {10000, 0},
-                    {30000, 0},
-                    {60000, 0},
-                    {infinity, 0}
-                ],
-                0
-            }
-        ],
-        prometheus_histogram:values(default, ?METRICS_PACKET_UP_HISTOGRAM)
+    ?assertNotEqual(
+        undefined,
+        prometheus_histogram:value(default, ?METRICS_PACKET_UP_HISTOGRAM, [join_req, ok, 0])
     ),
 
     ok.
