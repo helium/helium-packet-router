@@ -19,6 +19,7 @@ init() ->
 
 -spec update_routes(client_config_pb:routes_res_v1_pb()) -> ok.
 update_routes(#{routes := Routes}) ->
+    lager:info("got update  with ~w routes", [erlang:length(Routes)]),
     true = ets:delete_all_objects(?DEVADDRS_ETS),
     true = ets:delete_all_objects(?EUIS_ETS),
     lists:foreach(
