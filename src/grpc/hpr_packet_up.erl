@@ -6,6 +6,7 @@
     payload/1,
     timestamp/1,
     rssi/1,
+    frequency/1,
     frequency_mhz/1,
     datarate/1,
     snr/1,
@@ -45,6 +46,10 @@ timestamp(Packet) ->
 -spec rssi(Packet :: packet()) -> non_neg_integer() | undefined.
 rssi(Packet) ->
     Packet#packet_router_packet_up_v1_pb.rssi.
+
+-spec frequency(Packet :: packet()) -> non_neg_integer() | undefined.
+frequency(Packet) ->
+    Packet#packet_router_packet_up_v1_pb.frequency.
 
 -spec frequency_mhz(Packet :: packet()) ->
     float() | integer() | infinity | '-infinity' | nan | undefined.

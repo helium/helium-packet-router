@@ -12,8 +12,6 @@
 ]).
 
 -include("hpr.hrl").
--include("../src/grpc/autogen/server/packet_router_pb.hrl").
--include("../src/grpc/autogen/server/config_pb.hrl").
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -140,38 +138,20 @@ upload_window_test(_Config) ->
 %% Helpers
 %% ------------------------------------------------------------------
 
-verify_packet(
-    #packet_router_packet_up_v1_pb{
-        payload = Payload,
-        timestamp = GatewayTimestamp,
-        rssi = RSSI,
-        frequency = FrequencyMhz,
-        datarate = Datarate,
-        snr = SNR,
-        region = Region,
-        gateway = Gateway
-    },
-    #config_route_v1_pb{
-        oui = OUI,
-        net_id = NetID
-    },
-    EncodedPacket
-) ->
-    PacketReport = packet_router_pb:decode_msg(EncodedPacket, packet_router_packet_report_v1_pb),
+verify_packet(Packet, PacketRoute, EncodedPacket) ->
+    PacketReport = hpr_packet_report:decode(EncodedPacket),
     ?assertEqual(
-        GatewayTimestamp, PacketReport#packet_router_packet_report_v1_pb.gateway_timestamp_ms
+        hpr_packet_up:timestamp(Packet), hpr_packet_report:gateway_timestamp_ms(PacketReport)
     ),
-    ?assertEqual(OUI, PacketReport#packet_router_packet_report_v1_pb.oui),
-    ?assertEqual(NetID, PacketReport#packet_router_packet_report_v1_pb.net_id),
-    ?assertEqual(RSSI, PacketReport#packet_router_packet_report_v1_pb.rssi),
-    ?assertEqual(FrequencyMhz, PacketReport#packet_router_packet_report_v1_pb.frequency),
-    ?assertEqual(SNR, PacketReport#packet_router_packet_report_v1_pb.snr),
-    ?assertEqual(Datarate, PacketReport#packet_router_packet_report_v1_pb.datarate),
-    ?assertEqual(Region, PacketReport#packet_router_packet_report_v1_pb.region),
-    ?assertEqual(Gateway, PacketReport#packet_router_packet_report_v1_pb.gateway),
-    ?assertEqual(
-        crypto:hash(sha256, Payload), PacketReport#packet_router_packet_report_v1_pb.payload_hash
-    ).
+    ?assertEqual(hpr_route:oui(PacketRoute), hpr_packet_report:oui(PacketReport)),
+    ?assertEqual(hpr_route:net_id(PacketRoute), hpr_packet_report:net_id(PacketReport)),
+    ?assertEqual(hpr_packet_up:rssi(Packet), hpr_packet_report:rssi(PacketReport)),
+    ?assertEqual(hpr_packet_up:frequency(Packet), hpr_packet_report:frequency(PacketReport)),
+    ?assertEqual(hpr_packet_up:snr(Packet), hpr_packet_report:snr(PacketReport)),
+    ?assertEqual(hpr_packet_up:datarate(Packet), hpr_packet_report:datarate(PacketReport)),
+    ?assertEqual(hpr_packet_up:region(Packet), hpr_packet_report:region(PacketReport)),
+    ?assertEqual(hpr_packet_up:gateway(Packet), hpr_packet_report:gateway(PacketReport)),
+    ?assertEqual(hpr_packet_up:phash(Packet), hpr_packet_report:payload_hash(PacketReport)).
 
 %% Parse length-delimited protobufs
 parse_packet_report(Report) ->
