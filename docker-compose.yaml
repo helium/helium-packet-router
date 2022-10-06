@@ -5,7 +5,7 @@ services:
       context: .
     image: quay.io/team-helium/hpr:local
     container_name: helium_packet_router
-    restart: always
+    restart: unless-stopped
     env_file: .env
     ports:
       - 8080:8080
@@ -14,7 +14,16 @@ services:
       - /var/log/hpr:/var/log/hpr
   promtail:
     image: grafana/promtail
+    container_name: hpr_promtail
+    restart: unless-stopped
     volumes:
       - /var/log:/var/log
       - /var/data/hpr/promtail-config.yaml:/etc/promtail/promtail-config.yaml
     command: -config.file=/etc/promtail/promtail-config.yaml
+  prometheus:
+      image: prom/prometheus
+      container_name: hpr_prometheus
+      restart: unless-stopped
+      volumes:
+          - /var/data/hpr/prometheus.yml:/etc/prometheus/prometheus.yml
+    

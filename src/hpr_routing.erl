@@ -17,15 +17,9 @@
 -define(GATEWAY_THROTTLE, hpr_routing_gateway_throttle).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
--export_type([hpr_routing_response/0]).
-
--type uplink_packet_type() ::
-    {join_req, non_neg_integer(), non_neg_integer()} | {uplink, non_neg_integer()} | undefined.
 -type hpr_routing_response() :: ok | {error, any()}.
 
--define(JOIN_REQUEST, 2#000).
--define(UNCONFIRMED_UP, 2#010).
--define(CONFIRMED_UP, 2#100).
+-export_type([hpr_routing_response/0]).
 
 -spec init() -> ok.
 init() ->
@@ -37,21 +31,30 @@ init() ->
     Packet :: hpr_packet_up:packet()
 ) -> hpr_routing_response().
 handle_packet(Packet) ->
+    Start = erlang:system_time(millisecond),
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
-    lager:md([{gateway, GatewayName}, {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))}]),
-    %% TODO: log some identifying information?
+    PacketType = hpr_packet_up:type(Packet),
+    {Type, _} = PacketType,
+    lager:md([
+        {gateway, GatewayName},
+        {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))},
+        {packet_type, Type}
+    ]),
     lager:debug("received packet"),
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
         {fun throttle_check/1, gateway_limit_exceeded}
     ],
-    case execute_checks(Packet, Checks) of
-        {error, _Reason} = Error ->
-            lager:error("packet failed verification: ~p", [_Reason]),
-            Error;
-        ok ->
-            dispatch_packet(packet_type(Packet), Packet)
-    end.
+    {Res, NumberOfRoutes} =
+        case execute_checks(Packet, Checks) of
+            {error, _Reason} = Error ->
+                lager:error("packet failed verification: ~p", [_Reason]),
+                {Error, 0};
+            ok ->
+                dispatch_packet(PacketType, Packet)
+        end,
+    ok = hpr_metrics:observe_packet_up(PacketType, Res, NumberOfRoutes, Start),
+    Res.
 
 routing_info_type({eui, _DevEUI, _AppEUI}) -> eui;
 routing_info_type({devaddr, _DevAddr}) -> devaddr.
@@ -60,14 +63,12 @@ routing_info_type({devaddr, _DevAddr}) -> devaddr.
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec dispatch_packet(
-    uplink_packet_type(),
-    hpr_packet_up:packet()
-) -> hpr_routing_response().
-dispatch_packet(undefined, _Packet) ->
-    lager:error("invalid packet type"),
-    {error, invalid_packet_type};
-dispatch_packet({join_req, AppEUI, DevEUI}, Packet) ->
+-spec dispatch_packet(hpr_packet_up:type(), hpr_packet_up:packet()) ->
+    {hpr_routing_response(), non_neg_integer()}.
+dispatch_packet({undefined, FType}, _Packet) ->
+    lager:warning("invalid packet type ~w", [FType]),
+    {{error, invalid_packet_type}, 0};
+dispatch_packet({join_req, {AppEUI, DevEUI}}, Packet) ->
     Routes = hpr_config:lookup_eui(AppEUI, DevEUI),
     lager:debug(
         [
@@ -77,7 +78,7 @@ dispatch_packet({join_req, AppEUI, DevEUI}, Packet) ->
         "handling join"
     ),
     RoutingInfo = {eui, DevEUI, AppEUI},
-    deliver_packet(Packet, Routes, RoutingInfo);
+    {deliver_packet(Packet, Routes, RoutingInfo), erlang:length(Routes)};
 dispatch_packet({uplink, DevAddr}, Packet) ->
     lager:debug(
         [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
@@ -85,7 +86,7 @@ dispatch_packet({uplink, DevAddr}, Packet) ->
     ),
     Routes = hpr_config:lookup_devaddr(DevAddr),
     RoutingInfo = {devaddr, DevAddr},
-    deliver_packet(Packet, Routes, RoutingInfo).
+    {deliver_packet(Packet, Routes, RoutingInfo), erlang:length(Routes)}.
 
 -spec deliver_packet(
     Packet :: hpr_packet_up:packet(),
@@ -124,11 +125,7 @@ deliver_packet(Packet, [Route | Routes], RoutingInfo) ->
         ok ->
             ok;
         {error, Err} ->
-            %% FIXME: might be dangerous to log full `Err` tuple right now
-            lager:warning(
-                [{protocol, Protocol}, {error, Err}],
-                "error sending"
-            )
+            lager:warning([{protocol, Protocol}], "error ~p", [Err])
     end,
     deliver_packet(Packet, Routes, RoutingInfo).
 
@@ -149,33 +146,4 @@ execute_checks(Packet, [{Fun, ErrorReason} | Rest]) ->
             {error, ErrorReason};
         true ->
             execute_checks(Packet, Rest)
-    end.
-
--spec packet_type(Packet :: hpr_packet_up:packet()) -> uplink_packet_type().
-packet_type(Packet) ->
-    case hpr_packet_up:payload(Packet) of
-        <<?JOIN_REQUEST:3, _:5, AppEUI:64/integer-unsigned-little,
-            DevEUI:64/integer-unsigned-little, _DevNonce:2/binary, _MIC:4/binary>> ->
-            {join_req, AppEUI, DevEUI};
-        (<<FType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1,
-            FOptsLen:4, _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary,
-            PayloadAndMIC/binary>>) when
-            (FType == ?UNCONFIRMED_UP orelse FType == ?CONFIRMED_UP) andalso
-                %% MIC is 4 bytes, so the binary must be at least that long
-                erlang:byte_size(PayloadAndMIC) >= 4
-        ->
-            Body = binary:part(PayloadAndMIC, {0, byte_size(PayloadAndMIC) - 4}),
-            {FPort, _FRMPayload} =
-                case Body of
-                    <<>> -> {undefined, <<>>};
-                    <<Port:8, Payload/binary>> -> {Port, Payload}
-                end,
-            case FPort of
-                0 when FOptsLen /= 0 ->
-                    undefined;
-                _ ->
-                    {uplink, DevAddr}
-            end;
-        _ ->
-            undefined
     end.

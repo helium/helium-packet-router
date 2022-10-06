@@ -19,7 +19,8 @@
         xxhash,
         elli,
         prometheus,
-        recon
+        recon,
+        observer_cli
     ]},
     {env, []},
     {modules, []},
