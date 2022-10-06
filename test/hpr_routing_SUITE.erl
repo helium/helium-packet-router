@@ -90,7 +90,7 @@ join_req_test(_Config) ->
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
                 Self,
-                Route
+                hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
@@ -105,10 +105,16 @@ join_req_test(_Config) ->
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
                 Self,
-                Route
+                hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
-    ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),
+    ?assertEqual(
+        [
+            Received1,
+            Received2
+        ],
+        meck:history(hpr_protocol_router)
+    ),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),

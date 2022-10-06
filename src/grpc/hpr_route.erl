@@ -5,8 +5,8 @@
 -export([
     new/1,
     net_id/1,
-    devaddr_ranges/1,
-    euis/1,
+    devaddr_ranges/1, devaddr_ranges/2,
+    euis/1, euis/2,
     server/1,
     oui/1,
     lns/1
@@ -49,6 +49,10 @@ devaddr_ranges(Route) ->
             Route#config_route_v1_pb.devaddr_ranges
     ].
 
+-spec devaddr_ranges(Route :: route(), DevRanges :: [#config_devaddr_range_v1_pb{}]) -> route().
+devaddr_ranges(Route, DevRanges) ->
+    Route#config_route_v1_pb{devaddr_ranges = DevRanges}.
+
 -spec euis(Route :: route()) -> [{non_neg_integer(), non_neg_integer()}].
 euis(Route) ->
     [
@@ -56,6 +60,10 @@ euis(Route) ->
      || #config_eui_v1_pb{app_eui = AppEUI, dev_eui = DevEUI} <-
             Route#config_route_v1_pb.euis
     ].
+
+-spec euis(Route :: route(), EUIs :: [#config_eui_v1_pb{}]) -> route().
+euis(Route, EUIs) ->
+    Route#config_route_v1_pb{euis = EUIs}.
 
 -spec server(Route :: route()) -> server().
 server(Route) ->
