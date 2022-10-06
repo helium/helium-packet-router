@@ -66,7 +66,7 @@ start_link(_) ->
 tmp_load() ->
     ConfigWorkerConf = application:get_env(hpr, config_worker, #{}),
     BackupFilePath = maps:get(file_backup_path, ConfigWorkerConf),
-    maybe_init_from_file(#state{file_backup_path = BackupFilePath}),
+    maybe_init_from_file(#state{host = "", file_backup_path = BackupFilePath}),
     ok.
 
 %% TODO: Remove once HCS running
