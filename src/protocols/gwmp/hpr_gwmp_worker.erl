@@ -12,6 +12,7 @@
 -behaviour(gen_server).
 
 -include("semtech_udp.hrl").
+-include_lib("kernel/include/inet.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -441,7 +442,11 @@ maybe_send_pull_data(SocketDest, #state{pull_data = PullDataMap} = State) ->
             of
                 {ok, RefAndToken} ->
                     State#state{
-                        pull_data = maps:put(SocketDest, RefAndToken, PullDataMap)
+                        pull_data = maps:put(
+                            maybe_resolve_ip(SocketDest),
+                            RefAndToken,
+                            PullDataMap
+                        )
                     };
                 {error, Reason} ->
                     lager:warning(
@@ -457,3 +462,31 @@ maybe_send_pull_data(SocketDest, #state{pull_data = PullDataMap} = State) ->
 -spec udp_send(gen_udp:socket(), socket_dest(), binary()) -> ok | {error, any()}.
 udp_send(Socket, {Address, Port}, Data) ->
     gen_udp:send(Socket, Address, Port, Data).
+
+%%%-------------------------------------------------------------------
+%% @doc
+%% We get Addresses as strings, but they handled as `inet:ip_address()'
+%% which is a tuple of numbers.
+%%
+%% So we attempt to clean provided Addresses. If we received a hostname, we will
+%% try to resolve it 1 time into the IP Address.
+%%
+%% Otherwise we carry on with the string form, and there will be warnings in the
+%% logs.
+%% @end
+%%%-------------------------------------------------------------------
+-spec maybe_resolve_ip({string(), inet:port_number()}) ->
+    {string() | inet:ip_address(), inet:port_number()}.
+maybe_resolve_ip({Addr, Port}) ->
+    case inet:parse_address(Addr) of
+        {ok, IPAddr} ->
+            {IPAddr, Port};
+        {error, _} ->
+            case inet:gethostbyaddr(Addr) of
+                {ok, #hostent{h_addr_list = [IPAddr]}} ->
+                    {IPAddr, Port};
+                {error, Err} ->
+                    lager:warning([{err, Err}, {addr, Addr}], "could not resolve hostname"),
+                    {Addr, Port}
+            end
+    end.

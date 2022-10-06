@@ -14,6 +14,7 @@
     multi_gw_single_lns_test/1,
     shutdown_idle_worker_test/1,
     pull_data_test/1,
+    pull_ack_test/1,
     gateway_dest_redirect_test/1
 ]).
 
@@ -41,6 +42,7 @@ all() ->
         multi_gw_single_lns_test,
         shutdown_idle_worker_test,
         pull_data_test,
+        pull_ack_test,
         gateway_dest_redirect_test
     ].
 
@@ -289,7 +291,7 @@ shutdown_idle_worker_test(_Config) ->
     ok.
 
 pull_data_test(_Config) ->
-    %%    send push_data to start sending of pull_data
+    %% send push_data to start sending of pull_data
     PacketUp = fake_join_up_packet(),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
 
@@ -303,6 +305,46 @@ pull_data_test(_Config) ->
     {ok, Token, MAC} = expect_pull_data(RcvSocket, route_pull_data),
     ?assert(erlang:is_binary(Token)),
     ?assertEqual(MAC, hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin)),
+
+    ok.
+
+pull_ack_test(_Config) ->
+    PacketUp = fake_join_up_packet(),
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
+
+    Route = test_route(1777),
+
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+
+    %% Initial PULL_DATA, grab the address and port for responding
+    {ok, Token, Address, Port} =
+        receive
+            {udp, RcvSocket, A, P, Data} ->
+                ?assertEqual(pull_data, semtech_id_atom(Data)),
+                T = semtech_udp:token(Data),
+                {ok, T, A, P}
+        after timer:seconds(2) -> ct:fail({no_pull_data})
+        end,
+    ?assert(erlang:is_binary(Token)),
+
+    %% There is an outstanding pull_data
+    {ok, WorkerPid} = hpr_gwmp_sup:lookup_worker(PubKeyBin),
+    ?assertEqual(
+        1,
+        maps:size(element(6, sys:get_state(WorkerPid))),
+        "1 outstanding pull_data"
+    ),
+
+    %% send pull ack from server
+    PullAck = semtech_udp:pull_ack(Token),
+    ok = gen_udp:send(RcvSocket, Address, Port, PullAck),
+
+    %% pull_data has been acked
+    ok = test_utils:wait_until(fun() ->
+        0 == maps:size(element(6, sys:get_state(WorkerPid)))
+    end),
 
     ok.
 
