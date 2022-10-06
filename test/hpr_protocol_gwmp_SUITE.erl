@@ -380,13 +380,18 @@ gateway_dest_redirect_test(_Config) ->
     %% should not chat with this worker any longer.
     Self = self(),
     meck:new(hpr_gwmp_redirect_worker),
-    meck:expect(hpr_gwmp_redirect_worker, handle_info, fun({udp, _, _, _, _} = _A, _B) ->
-        Self ! {fail, no_more_udp},
-        meck:exception(error, no_more_udp)
-    end),
+
+    meck:expect(
+        hpr_gwmp_redirect_worker,
+        handle_info,
+        fun({udp, _Socket, _Address, _Port, IncomingData} = _A, State) ->
+            Self ! {fail, {no_more_udp, semtech_id_atom(IncomingData)}},
+            {noreply, State}
+        end
+    ),
 
     receive
-        {fail, no_more_udp} -> ct:fail(please_no_more_push_data)
+        {fail, X} -> ct:fail({please_no_more_push_data, X})
     after timer:seconds(1) -> ok
     end,
 
