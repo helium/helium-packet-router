@@ -61,8 +61,7 @@ init_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
     ets:delete_all_objects(hpr_packet_report_ets),
-    meck:unload(aws_s3),
-    meck:unload(hpr_packet_reporter),
+    meck:unload(),
 
     test_utils:end_per_testcase(TestCase, Config).
 
@@ -94,10 +93,10 @@ upload_report_test(_Config) ->
     verify_packet(Packet2, Route, P2),
 
     %% Encoded packets are written to a tmp write file
-    hpr_packet_reporter:handle_cast(write, State),
+    hpr_packet_reporter:handle_cast(write_packets, State),
 
     %% Contents of tmp file are uploaded to S3 (localstack)
-    hpr_packet_reporter:handle_cast({upload, FilePath}, State),
+    hpr_packet_reporter:handle_cast({upload_packets, FilePath}, State),
 
     UploadedFile = meck:capture(first, aws_s3, put_object, '_', 3),
     {ok, #{<<"Body">> := ResponseBody}, _} = aws_s3:get_object(AWSClient, Bucket, UploadedFile),
@@ -124,12 +123,12 @@ upload_window_test(_Config) ->
     hpr_packet_reporter:report_packet(Packet, Route),
 
     %% Encoded packets are written to a tmp write file
-    hpr_packet_reporter:handle_cast(write, State),
+    hpr_packet_reporter:handle_cast(write_packets, State),
 
     ?assertEqual(false, meck:called(hpr_packet_reporter, upload_packets, '_')),
 
     %% Write packets after upload window has elapsed
-    hpr_packet_reporter:handle_cast(write, State#state{
+    hpr_packet_reporter:handle_cast(write_packets, State#state{
         upload_window_start_time = (WindowStartTime - UploadWindow - 1000)
     }),
 

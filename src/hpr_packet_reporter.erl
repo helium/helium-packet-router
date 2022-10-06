@@ -27,8 +27,7 @@
     handle_call/3,
     handle_cast/2,
     handle_info/2,
-    terminate/2,
-    code_change/3
+    terminate/2
 ]).
 
 -define(SERVER, ?MODULE).
@@ -91,11 +90,11 @@ report_packet(Packet, PacketRoute) ->
 
 -spec write_packets() -> ok.
 write_packets() ->
-    gen_server:cast(?SERVER, write).
+    gen_server:cast(?SERVER, write_packets).
 
 -spec upload_packets(FilePath :: string()) -> ok.
 upload_packets(FilePath) ->
-    gen_server:cast(?SERVER, {upload, FilePath}).
+    gen_server:cast(?SERVER, {upload_packets, FilePath}).
 
 -spec restart_report_interval(IntervalDuration :: interval_duration_ms()) -> ok.
 restart_report_interval(IntervalDuration) ->
@@ -138,7 +137,7 @@ handle_call(Msg, _From, State = #state{}) ->
     {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(
-    write,
+    write_packets,
     State = #state{
         write_dir = WriteDir,
         file_path = FilePath,
@@ -156,7 +155,7 @@ handle_cast(
         false ->
             {noreply, State}
     end;
-handle_cast({upload, FilePath}, State = #state{aws_client = AWSClient, bucket = Bucket}) ->
+handle_cast({upload_packets, FilePath}, State = #state{aws_client = AWSClient, bucket = Bucket}) ->
     UploadTimestamp = erlang:system_time(millisecond),
     FileName = list_to_binary("packetreport." ++ integer_to_list(UploadTimestamp) ++ ".gz"),
 
@@ -193,9 +192,6 @@ terminate(
     lager:warning("packet reporter process terminated: ~s", [Reason]),
     ok.
 
-code_change(_OldVsn, State = #state{}, _Extra) ->
-    {ok, State}.
-
 %%%===================================================================
 %%% Internal Function Definitions
 %%%===================================================================
@@ -211,8 +207,7 @@ handle_write(FilePath, MaxFileSize, WriteOptions) ->
     lists:foreach(
         fun(Packet) ->
             PacketSize = encode_packet_size(Packet),
-            file:write(S, PacketSize),
-            file:write(S, Packet)
+            file:write(S, [PacketSize, Packet])
         end,
         Data
     ),
@@ -267,7 +262,8 @@ handle_restart_interval(IntervalRef, IntervalDuration) ->
     timer:cancel(IntervalRef),
     start_report_interval(IntervalDuration).
 
--spec handle_stop_interval(IntervalRef :: timer:tref()) -> {ok, cancel} | {error, term()}.
+-spec handle_stop_interval(IntervalRef :: timer:tref()) ->
+    {ok, no_interval} | {ok, cancel} | {error, term()}.
 handle_stop_interval(undefined) -> {ok, no_interval};
 handle_stop_interval(IntervalRef) -> timer:cancel(IntervalRef).
 
@@ -307,12 +303,7 @@ encode_packet(
 -spec encode_packet_size(EncodedPacket :: binary()) -> PacketSize :: binary().
 encode_packet_size(EncodedPacket) ->
     PacketSize = size(EncodedPacket),
-    EncodedValue = binary:encode_unsigned(PacketSize),
-    pad_u32(EncodedValue).
-
--spec pad_u32(binary()) -> binary().
-pad_u32(Bin) ->
-    <<0:((4 - size(Bin)) * 8), Bin/binary>>.
+    <<PacketSize:32/big-integer-unsigned>>.
 
 -spec generate_file_name(WriteDir :: string()) -> FilePath :: string().
 generate_file_name(WriteDir) ->
@@ -374,14 +365,14 @@ delete_packets_by_timestamp(Timestamp) ->
     ets:select_delete(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], [true]}]).
 
 % ------------------------------------------------------------------
-% EUNIT Tests
+% EUnit Tests
 % ------------------------------------------------------------------
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 
 file_test() ->
-    ?ETS = ets:new(?ETS, [named_table, bag, public, {write_concurrency, true}]),
+    init_ets(),
     Timestamp = erlang:system_time(millisecond),
     FilePath = "./packetreport." ++ integer_to_list(Timestamp),
     MaxFileSize = 50_000_000,
@@ -414,12 +405,6 @@ file_test() ->
     file:delete(FilePath),
 
     ok.
-
-pad_u32_test() ->
-    ?assertEqual(<<0, 0, 0, 0>>, pad_u32(binary:encode_unsigned(0))),
-    ?assertEqual(<<0, 0, 0, 1>>, pad_u32(binary:encode_unsigned(1))),
-    ?assertEqual(<<0, 0, 3, 232>>, pad_u32(binary:encode_unsigned(1000))),
-    ?assertEqual(<<5, 245, 225, 0>>, pad_u32(binary:encode_unsigned(100000000))).
 
 upload_window_elapsed_test() ->
     Timestamp = erlang:system_time(millisecond),

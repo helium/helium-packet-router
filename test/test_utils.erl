@@ -10,8 +10,6 @@
 ]).
 
 -include("hpr.hrl").
--include("../src/grpc/autogen/server/packet_router_pb.hrl").
--include("../src/grpc/autogen/server/config_pb.hrl").
 
 -define(JOIN_REQUEST, 2#000).
 -define(UNCONFIRMED_UP, 2#010).
