@@ -9,14 +9,6 @@
 -module(hpr_lorawan).
 -author("jonathanruttenberg").
 
-%%%-------------------------------------------------------------------
-%% @doc
-%% Copyright (c) 2016-2019 Petr &lt;Gotthard petr.gotthard@@centrum.cz&gt;
-%% All rights reserved.
-%% Distributed under the terms of the MIT License. See the LICENSE file.
-%% @end
-%%%-------------------------------------------------------------------
-
 %% Functions that map Region -> Top Level Region
 -export([
     index_to_datarate/2,
