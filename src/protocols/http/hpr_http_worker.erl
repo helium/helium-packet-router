@@ -18,7 +18,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    handle_packet/5
+    handle_packet/4
 ]).
 
 %% ------------------------------------------------------------------
@@ -29,8 +29,7 @@
     handle_call/3,
     handle_cast/2,
     handle_info/2,
-    terminate/2,
-    code_change/3
+    terminate/2
 ]).
 
 -define(SERVER, ?MODULE).
@@ -68,11 +67,10 @@ start_link(Args) ->
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
     GatewayTime :: hpr_roaming_protocol:gateway_time(),
-    GatewayStream :: hpr_router_stream_manager:gateway_stream(),
-    RoutingInfo :: hpr_routing:routing_info()
+    GatewayStream :: hpr_router_stream_manager:gateway_stream()
 ) -> ok | {error, any()}.
-handle_packet(Pid, PacketUp, GatewayTime, GatewayStream, RoutingInfo) ->
-    gen_server:cast(Pid, {handle_packet, PacketUp, GatewayTime, GatewayStream, RoutingInfo}).
+handle_packet(Pid, PacketUp, GatewayTime, GatewayStream) ->
+    gen_server:cast(Pid, {handle_packet, PacketUp, GatewayTime, GatewayStream}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -105,28 +103,28 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(
-    {handle_packet, PacketUp, GatewayTime, GatewayStream, RoutingInfo},
+    {handle_packet, PacketUp, GatewayTime, GatewayStream},
     #state{send_data_timer = 0, shutdown_timer_ref = ShutdownTimerRef0} = State
 ) ->
     {ok, StateWithPacket} = do_handle_packet(
-        PacketUp, GatewayTime, GatewayStream, RoutingInfo, State
+        PacketUp, GatewayTime, GatewayStream, State
     ),
     ok = send_data(StateWithPacket),
     {ok, ShutdownTimerRef1} = maybe_schedule_shutdown(ShutdownTimerRef0),
     {noreply, State#state{shutdown_timer_ref = ShutdownTimerRef1}};
 handle_cast(
-    {handle_packet, PacketUp, GatewayTime, GatewayStream, RoutingInfo},
+    {handle_packet, PacketUp, GatewayTime, GatewayStream},
     #state{
         should_shutdown = false,
         send_data_timer = Timeout,
         send_data_timer_ref = TimerRef0
     } = State0
 ) ->
-    {ok, State1} = do_handle_packet(PacketUp, GatewayTime, GatewayStream, RoutingInfo, State0),
+    {ok, State1} = do_handle_packet(PacketUp, GatewayTime, GatewayStream, State0),
     {ok, TimerRef1} = maybe_schedule_send_data(Timeout, TimerRef0),
     {noreply, State1#state{send_data_timer_ref = TimerRef1}};
 handle_cast(
-    {handle_packet, _PacketUp, _PacketTime, _GatewayStream, _RoutingInfo},
+    {handle_packet, _PacketUp, _PacketTime, _GatewayStream},
     #state{
         should_shutdown = true,
         shutdown_timer_ref = ShutdownTimerRef0,
@@ -149,9 +147,6 @@ handle_info(?SHUTDOWN, #state{} = State) ->
 handle_info(_Msg, State) ->
     lager:warning("rcvd unknown info msg: ~p, ~p", [_Msg, State]),
     {noreply, State}.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 terminate(_Reason, #state{}) ->
     lager:info("going down ~p", [_Reason]),
@@ -182,17 +177,16 @@ next_transaction_id() ->
     PacketUp :: hpr_packet_up:packet(),
     GatewayTime :: hpr_roaming_protocol:gateway_time(),
     GatewayStream :: hpr_router_stream_manager:gateway_stream(),
-    RoutingInfo :: hpr_routing:routing_info(),
     State :: #state{}
 ) -> {ok, #state{}}.
 do_handle_packet(
-    PacketUp, GatewayTime, GatewayStream, RoutingInfo, #state{packets = Packets} = State
+    PacketUp, GatewayTime, GatewayStream, #state{packets = Packets} = State
 ) ->
     State1 = State#state{
         packets = [
             hpr_roaming_protocol:new_packet(PacketUp, GatewayTime, GatewayStream) | Packets
         ],
-        routing_info = RoutingInfo
+        routing_info = hpr_routing:routing_info_from(PacketUp)
     },
     {ok, State1}.
 

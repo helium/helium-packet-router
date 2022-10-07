@@ -18,8 +18,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    push_data/4,
-    pubkeybin_to_mac/1
+    push_data/4
 ]).
 
 %% ------------------------------------------------------------------
@@ -83,7 +82,8 @@ init(Args) ->
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
     lager:md([
-        {gateway_mac, erlang:binary_to_list(binary:encode_hex(pubkeybin_to_mac(PubKeyBin)))},
+        {gateway_mac,
+            erlang:binary_to_list(binary:encode_hex(hpr_utils:pubkeybin_to_mac(PubKeyBin)))},
         {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
 
@@ -259,10 +259,6 @@ handle_udp(
         end,
     {noreply, State1}.
 
--spec pubkeybin_to_mac(binary()) -> binary().
-pubkeybin_to_mac(PubKeyBin) ->
-    <<(xxhash:hash64(PubKeyBin)):64/unsigned-integer>>.
-
 -spec schedule_pull_data(non_neg_integer(), socket_dest()) -> reference().
 schedule_pull_data(PullDataTimer, SocketDest) ->
     _ = erlang:send_after(PullDataTimer, self(), {?PULL_DATA_TICK, SocketDest}).
@@ -307,7 +303,7 @@ send_pull_data(
     }
 ) ->
     Token = semtech_udp:token(),
-    Data = semtech_udp:pull_data(Token, pubkeybin_to_mac(PubKeyBin)),
+    Data = semtech_udp:pull_data(Token, hpr_utils:pubkeybin_to_mac(PubKeyBin)),
     case udp_send(Socket, SocketDest, Data) of
         ok ->
             lager:debug("sent pull data keepalive ~p", [Token]),
@@ -387,7 +383,7 @@ send_tx_ack(
     Token,
     #{pubkeybin := PubKeyBin, socket := Socket, socket_dest := SocketDest}
 ) ->
-    Data = semtech_udp:tx_ack(Token, pubkeybin_to_mac(PubKeyBin)),
+    Data = semtech_udp:tx_ack(Token, hpr_utils:pubkeybin_to_mac(PubKeyBin)),
     Reply = udp_send(Socket, SocketDest, Data),
     lager:debug(
         "sent ~p/~p to ~p replied: ~p",

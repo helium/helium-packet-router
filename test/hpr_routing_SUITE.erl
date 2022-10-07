@@ -63,7 +63,7 @@ join_req_test(_Config) ->
     ),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -90,8 +90,7 @@ join_req_test(_Config) ->
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
                 Self,
-                Route,
-                {eui, 1, 1}
+                Route
             ]},
             ok},
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
@@ -106,8 +105,7 @@ join_req_test(_Config) ->
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
                 Self,
-                Route,
-                {devaddr, 0}
+                Route
             ]},
             ok},
     ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),

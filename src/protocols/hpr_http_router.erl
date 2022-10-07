@@ -14,16 +14,16 @@
 
 -include("hpr_roaming.hrl").
 
--export([send/4]).
+-export([send/3]).
 
 -spec send(
-    Packet :: hpr_packet_up:packet(),
+    PacketUp :: hpr_packet_up:packet(),
     GatewayStream :: hpr_router_stream_manager:gateway_stream(),
-    Route :: hpr_route:route(),
-    RoutingInfo :: hpr_routing:routing_info()
+    Route :: hpr_route:route()
 ) -> ok | {error, any()}.
-send(PacketUp, GatewayStream, Route, RoutingInfo) ->
+send(PacketUp, GatewayStream, Route) ->
     WorkerKey = worker_key_from(PacketUp, Route),
+    RoutingInfo = hpr_routing:routing_info_from(PacketUp),
     PacketType = hpr_routing:routing_info_type(RoutingInfo),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
@@ -51,15 +51,14 @@ send(PacketUp, GatewayStream, Route, RoutingInfo) ->
                 "~s: [routing_info: ~p]",
                 [PacketType, RoutingInfo]
             ),
+            GatewayTime = hpr_packet_up:timestamp(PacketUp),
             hpr_http_worker:handle_packet(
-                WorkerPid, PacketUp, erlang:system_time(millisecond), GatewayStream, RoutingInfo
+                WorkerPid, PacketUp, GatewayTime, GatewayStream
             )
     end,
-
-    todo,
     ok.
 
--spec worker_key_from(hpr_packet_up:binary(), hpr_route:route()) -> hpr_http_sup:worker_key().
+-spec worker_key_from(hpr_packet_up:packet(), hpr_route:route()) -> hpr_http_sup:worker_key().
 worker_key_from(PacketUp, Route) ->
     %%    get phash
     Phash = packet_hash(PacketUp),

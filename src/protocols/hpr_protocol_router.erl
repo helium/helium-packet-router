@@ -1,14 +1,13 @@
 -module(hpr_protocol_router).
 
--export([send/4]).
+-export([send/3]).
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
     GatewayStream :: hpr_router_stream_manager:gateway_stream(),
-    Route :: hpr_route:route(),
-    RoutingInfo :: hpr_routing:routing_info()
+    Route :: hpr_route:route()
 ) -> ok | {error, any()}.
-send(PacketUp, GatewayStream, Route, _RoutingInfo) ->
+send(PacketUp, GatewayStream, Route) ->
     LNS = hpr_route:lns(Route),
     case hpr_router_stream_manager:get_stream(GatewayStream, LNS) of
         {ok, RouterStream} ->
@@ -72,7 +71,7 @@ test_send() ->
     ),
     meck:expect(grpc_client, send, [Stream, HprPacketUpMap], ok),
 
-    ResponseValue = send(HprPacketUp, Stream, Route, ignore),
+    ResponseValue = send(HprPacketUp, Stream, Route),
 
     ?assertEqual(ok, ResponseValue),
     ?assertEqual(1, meck:num_calls(hpr_router_stream_manager, get_stream, 2)),

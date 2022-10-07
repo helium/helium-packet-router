@@ -4,7 +4,8 @@
     gateway_name/1,
     int_to_hex/1,
     bin_to_hex/1,
-    hex_to_bin/1
+    hex_to_bin/1,
+    pubkeybin_to_mac/1
 ]).
 
 -spec gateway_name(PubkeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
@@ -32,3 +33,7 @@ hex_to_bin(Hex) ->
         end
      || <<X:8/integer, Y:8/integer>> <= Hex
     >>.
+
+-spec pubkeybin_to_mac(binary()) -> binary().
+pubkeybin_to_mac(PubKeyBin) ->
+    <<(xxhash:hash64(PubKeyBin)):64/unsigned-integer>>.

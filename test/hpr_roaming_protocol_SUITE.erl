@@ -50,7 +50,7 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(_TestCase, Config) ->
-    ok = hpr_roaming_downlink:init_ets(),
+    ok = hpr_roaming_utils:init_ets(),
     Config.
 
 %%--------------------------------------------------------------------
@@ -65,7 +65,7 @@ end_per_testcase(_TestCase, _Config) ->
 
 class_c_downlink_test(_Config) ->
     TransactionID = 2176,
-    hpr_roaming_downlink:insert_handler(TransactionID, self()),
+    hpr_roaming_utils:insert_handler(TransactionID, self()),
 
     Token = hpr_roaming_protocol:make_uplink_token(
         TransactionID,
@@ -100,7 +100,7 @@ class_c_downlink_test(_Config) ->
 
 chirpstack_join_accept_test(_Config) ->
     TransactionID = 473719436,
-    hpr_roaming_downlink:insert_handler(TransactionID, self()),
+    hpr_roaming_utils:insert_handler(TransactionID, self()),
 
     Token = hpr_roaming_protocol:make_uplink_token(
         TransactionID,
@@ -147,7 +147,7 @@ chirpstack_join_accept_test(_Config) ->
 
 rx1_timestamp_test(_Config) ->
     TransactionID = 17,
-    ok = hpr_roaming_downlink:insert_handler(TransactionID, self()),
+    ok = hpr_roaming_utils:insert_handler(TransactionID, self()),
 
     PacketTime = 0,
     Token = hpr_roaming_protocol:make_uplink_token(
@@ -201,7 +201,7 @@ rx1_timestamp_test(_Config) ->
 
 rx1_downlink_test(_Config) ->
     TransactionID = 17,
-    ok = hpr_roaming_downlink:insert_handler(TransactionID, self()),
+    ok = hpr_roaming_utils:insert_handler(TransactionID, self()),
 
     Payload = <<"0x60c04e26e020000000a754ba934840c3bc120989b532ee4613e06e3dd5d95d9d1ceb9e20b1f2">>,
     RXDelay = 2,
@@ -264,7 +264,7 @@ rx1_downlink_test(_Config) ->
 
 rx2_downlink_test(_Config) ->
     TransactionID = 17,
-    ok = hpr_roaming_downlink:insert_handler(TransactionID, self()),
+    ok = hpr_roaming_utils:insert_handler(TransactionID, self()),
 
     Token = hpr_roaming_protocol:make_uplink_token(
         TransactionID,

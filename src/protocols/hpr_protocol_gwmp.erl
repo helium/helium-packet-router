@@ -1,6 +1,6 @@
 -module(hpr_protocol_gwmp).
 
--export([send/4]).
+-export([send/3]).
 
 -export([
     packet_up_to_push_data/2,
@@ -11,10 +11,9 @@
 -spec send(
     Packet :: hpr_packet_up:packet(),
     GatewayStream :: pid(),
-    Route :: hpr_route:route(),
-    RoutingInfo :: hpr_routing:routing_info()
+    Route :: hpr_route:route()
 ) -> ok | {error, any()}.
-send(PacketUp, GatewayStream, Route, _RoutingInfo) ->
+send(PacketUp, GatewayStream, Route) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
 
     case hpr_gwmp_sup:maybe_start_worker(Gateway, #{}) of
@@ -60,7 +59,7 @@ txpk_to_packet_down(TxPkBin) ->
 packet_up_to_push_data(Up, GatewayTime) ->
     Token = semtech_udp:token(),
     PubKeyBin = hpr_packet_up:gateway(Up),
-    MAC = hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin),
+    MAC = hpr_utils:pubkeybin_to_mac(PubKeyBin),
 
     %% TODO: Add back potential geo stuff
     %% CP breaks if {lati, long} are not parseable number

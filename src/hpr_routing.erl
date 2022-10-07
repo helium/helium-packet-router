@@ -3,7 +3,8 @@
 -export([
     init/0,
     handle_packet/1,
-    routing_info_type/1
+    routing_info_type/1,
+    routing_info_from/1
 ]).
 
 -type routing_info() ::
@@ -56,8 +57,18 @@ handle_packet(Packet) ->
     ok = hpr_metrics:observe_packet_up(PacketType, Res, NumberOfRoutes, Start),
     Res.
 
+-spec routing_info_type(routing_info()) -> eui | devaddr.
 routing_info_type({eui, _DevEUI, _AppEUI}) -> eui;
 routing_info_type({devaddr, _DevAddr}) -> devaddr.
+
+-spec routing_info_from(PacketUp :: hpr_packet_up:packet()) -> RoutingInfo :: routing_info().
+routing_info_from(PacketUp) ->
+    case
+    hpr_packet_up:type(PacketUp) of
+        {join_req, {AppEUI, DevEUI}} -> {eui, DevEUI, AppEUI};
+        {uplink, DevAddr} -> {devaddr, DevAddr};
+        {undefined, _} -> undefined
+    end.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -77,25 +88,22 @@ dispatch_packet({join_req, {AppEUI, DevEUI}}, Packet) ->
         ],
         "handling join"
     ),
-    RoutingInfo = {eui, DevEUI, AppEUI},
-    {deliver_packet(Packet, Routes, RoutingInfo), erlang:length(Routes)};
+    {deliver_packet(Packet, Routes), erlang:length(Routes)};
 dispatch_packet({uplink, DevAddr}, Packet) ->
     lager:debug(
         [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
         "handling uplink"
     ),
     Routes = hpr_config:lookup_devaddr(DevAddr),
-    RoutingInfo = {devaddr, DevAddr},
-    {deliver_packet(Packet, Routes, RoutingInfo), erlang:length(Routes)}.
+    {deliver_packet(Packet, Routes), erlang:length(Routes)}.
 
 -spec deliver_packet(
     Packet :: hpr_packet_up:packet(),
-    Routes :: [hpr_route:route()],
-    RoutingInfo :: routing_info()
+    Routes :: [hpr_route:route()]
 ) -> ok.
-deliver_packet(_Packet, [], _RoutingInfo) ->
+deliver_packet(_Packet, []) ->
     ok;
-deliver_packet(Packet, [Route | Routes], RoutingInfo) ->
+deliver_packet(Packet, [Route | Routes]) ->
     Server = hpr_route:server(Route),
     Protocol = hpr_route:protocol(Server),
     lager:debug(
@@ -112,11 +120,11 @@ deliver_packet(Packet, [Route | Routes], RoutingInfo) ->
     Resp =
         case Protocol of
             {packet_router, _} ->
-                hpr_protocol_router:send(Packet, self(), Route, RoutingInfo);
+                hpr_protocol_router:send(Packet, self(), Route);
             {gwmp, _} ->
-                hpr_protocol_gwmp:send(Packet, self(), Route, RoutingInfo);
+                hpr_protocol_gwmp:send(Packet, self(), Route);
             {http_roaming, _} ->
-                hpr_http_router:send(Packet, self(), Route, RoutingInfo);
+                hpr_http_router:send(Packet, self(), Route);
             _OtherProtocol ->
                 lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
                 ok
@@ -127,7 +135,7 @@ deliver_packet(Packet, [Route | Routes], RoutingInfo) ->
         {error, Err} ->
             lager:warning([{protocol, Protocol}], "error ~p", [Err])
     end,
-    deliver_packet(Packet, Routes, RoutingInfo).
+    deliver_packet(Packet, Routes).
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
 throttle_check(Packet) ->

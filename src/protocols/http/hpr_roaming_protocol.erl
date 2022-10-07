@@ -144,7 +144,7 @@ make_uplink_payload(
 
     Token = make_uplink_token(TransactionID, Region, PacketTime, Destination, FlowType),
 
-    ok = hpr_roaming_downlink:insert_handler(TransactionID, ResponseStream),
+    ok = hpr_roaming_utils:insert_handler(TransactionID, ResponseStream),
 
     VersionBase =
         case ProtocolVersion of
@@ -219,7 +219,7 @@ handle_prstart_ans(#{
         rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
     ),
 
-    case hpr_roaming_downlink:lookup_handler(TransactionID) of
+    case hpr_roaming_utils:lookup_handler(TransactionID) of
         {error, _} = Err -> Err;
         {ok, ResponseStream} -> {join_accept, {ResponseStream, DownlinkPacket}}
     end;
@@ -250,7 +250,7 @@ handle_prstart_ans(#{
                 undefined
             ),
 
-            case hpr_roaming_downlink:lookup_handler(TransactionID) of
+            case hpr_roaming_utils:lookup_handler(TransactionID) of
                 {error, _} = Err -> Err;
                 {ok, ResponseStream} -> {join_accept, {ResponseStream, DownlinkPacket}}
             end
@@ -333,7 +333,7 @@ handle_xmitdata_req(#{
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?RX2_DELAY)
             ),
 
-            case hpr_roaming_downlink:lookup_handler(TransactionID) of
+            case hpr_roaming_utils:lookup_handler(TransactionID) of
                 {error, _} = Err ->
                     Err;
                 {ok, ResponseStream} ->
@@ -394,7 +394,7 @@ handle_xmitdata_req(#{
                 undefined
             ),
 
-            case hpr_roaming_downlink:lookup_handler(TransactionID) of
+            case hpr_roaming_utils:lookup_handler(TransactionID) of
                 {error, _} = Err ->
                     Err;
                 {ok, ResponseStream} ->
@@ -487,7 +487,7 @@ gw_info(#packet{packet_up = PacketUp}) ->
     RSSI = hpr_packet_up:rssi(PacketUp),
 
     GW = #{
-        'ID' => hpr_roaming_utils:binary_to_hexstring(hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin)),
+        'ID' => hpr_roaming_utils:binary_to_hexstring(hpr_utils:pubkeybin_to_mac(PubKeyBin)),
         'RFRegion' => Region,
         'RSSI' => erlang:trunc(RSSI),
         'SNR' => SNR,

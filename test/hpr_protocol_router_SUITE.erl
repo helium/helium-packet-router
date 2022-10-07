@@ -77,7 +77,7 @@ grpc_test(_Config) ->
     ),
 
     %% Send packet and route directly through interface
-    _ = hpr_protocol_router:send(PacketUp, self(), Route, ignore),
+    _ = hpr_protocol_router:send(PacketUp, self(), Route),
 
     ok =
         receive
@@ -95,7 +95,7 @@ grpc_connection_refused_test(_Config) ->
 
     ?assertEqual(
         {error, econnrefused},
-        hpr_protocol_router:send(PacketUp, self(), Route, ignore)
+        hpr_protocol_router:send(PacketUp, self(), Route)
     ),
 
     ok.
