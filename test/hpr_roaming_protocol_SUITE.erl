@@ -205,7 +205,7 @@ rx1_downlink_test(_Config) ->
 
     Payload = <<"0x60c04e26e020000000a754ba934840c3bc120989b532ee4613e06e3dd5d95d9d1ceb9e20b1f2">>,
     RXDelay = 2,
-    Frequency = 925.1,
+    FrequencyMhz = 925.1,
     DataRate = 10,
 
     Token = hpr_roaming_protocol:make_uplink_token(
@@ -227,7 +227,7 @@ rx1_downlink_test(_Config) ->
             <<"DevEUI">> => <<"0x6081f9c306a777fd">>,
 
             <<"RXDelay1">> => RXDelay,
-            <<"DLFreq1">> => Frequency,
+            <<"DLFreq1">> => FrequencyMhz,
             <<"DataRate1">> => DataRate,
 
             <<"FNSULToken">> => Token,
@@ -248,7 +248,7 @@ rx1_downlink_test(_Config) ->
     ),
     FrequencyFromDownlinkPacket =
         DownlinkPacket#packet_router_packet_down_v1_pb.rx1#window_v1_pb.frequency,
-    ?assertEqual(Frequency, FrequencyFromDownlinkPacket),
+    ?assertEqual(true, (925_100_000 == FrequencyFromDownlinkPacket)),
 
     %% signal strength not available
     %%  ?assertEqual(27, blockchain_helium_packet_v1:signal_strength(Downlink)),
@@ -313,6 +313,6 @@ rx2_downlink_test(_Config) ->
 
     FrequencyFromDownlinkPacket =
         DownlinkPacket#packet_router_packet_down_v1_pb.rx2#window_v1_pb.frequency,
-    ?assertEqual(923.3, FrequencyFromDownlinkPacket),
+    ?assertEqual(true, (923_300_000 == FrequencyFromDownlinkPacket)),
 
     ok.

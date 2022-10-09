@@ -63,8 +63,7 @@ routing_info_type({devaddr, _DevAddr}) -> devaddr.
 
 -spec routing_info_from(PacketUp :: hpr_packet_up:packet()) -> RoutingInfo :: routing_info().
 routing_info_from(PacketUp) ->
-    case
-    hpr_packet_up:type(PacketUp) of
+    case hpr_packet_up:type(PacketUp) of
         {join_req, {AppEUI, DevEUI}} -> {eui, DevEUI, AppEUI};
         {uplink, DevAddr} -> {devaddr, DevAddr};
         {undefined, _} -> undefined

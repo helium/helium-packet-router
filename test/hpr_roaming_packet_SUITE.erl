@@ -30,8 +30,10 @@
 %% downlink response ets
 -export([
     insert_transaction_id/3,
-    lookup_transaction_id/1
-    , init_ets/0, frame_packet/5]).
+    lookup_transaction_id/1,
+    init_ets/0,
+    frame_packet/5
+]).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -448,9 +450,9 @@ start_uplink_listener(Options) ->
     ok.
 
 frame_packet(MType, PubKeyBin, DevAddr, FCnt, Options) ->
-  <<DevNum:32/integer-unsigned>> = DevAddr,
-  Routing = hpr_roaming_utils:make_routing_information_pb({devaddr, DevNum}),
-  frame_packet(MType, PubKeyBin, DevAddr, FCnt, Routing, Options).
+    <<DevNum:32/integer-unsigned>> = DevAddr,
+    Routing = hpr_roaming_utils:make_routing_information_pb({devaddr, DevNum}),
+    frame_packet(MType, PubKeyBin, DevAddr, FCnt, Routing, Options).
 
 frame_packet(MType, PubKeyBin, DevAddr, FCnt, _Routing, Options) ->
     NwkSessionKey = <<81, 103, 129, 150, 35, 76, 17, 164, 210, 66, 210, 149, 120, 193, 251, 85>>,

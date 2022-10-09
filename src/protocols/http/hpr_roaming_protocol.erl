@@ -204,7 +204,7 @@ handle_prstart_ans(#{
     <<"DevEUI">> := _DevEUI,
 
     <<"DLMetaData">> := #{
-        <<"DLFreq1">> := Frequency,
+        <<"DLFreq1">> := FrequencyMhz,
         <<"DataRate1">> := DR,
         <<"FNSULToken">> := Token
     } = DLMeta
@@ -214,7 +214,7 @@ handle_prstart_ans(#{
     DownlinkPacket = new_downlink(
         hpr_roaming_utils:hexstring_to_binary(Payload),
         hpr_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
-        Frequency,
+        FrequencyMhz * 1000000,
         hpr_lorawan:index_to_datarate(Region, DR),
         rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
     ),
@@ -231,7 +231,7 @@ handle_prstart_ans(#{
     <<"DevEUI">> := _DevEUI,
 
     <<"DLMetaData">> := #{
-        <<"DLFreq2">> := Frequency,
+        <<"DLFreq2">> := FrequencyMhz,
         <<"DataRate2">> := DR,
         <<"FNSULToken">> := Token
     }
@@ -245,7 +245,7 @@ handle_prstart_ans(#{
             DownlinkPacket = new_downlink(
                 hpr_roaming_utils:hexstring_to_binary(Payload),
                 hpr_roaming_utils:uint32(PacketTime + ?JOIN2_DELAY),
-                Frequency,
+                FrequencyMhz * 1000000,
                 DataRate,
                 undefined
             ),
@@ -298,7 +298,7 @@ handle_xmitdata_req(#{
         <<"ClassMode">> := <<"A">>,
         <<"FNSULToken">> := Token,
         <<"DataRate1">> := DR1,
-        <<"DLFreq1">> := Frequency1,
+        <<"DLFreq1">> := FrequencyMhz1,
         <<"RXDelay1">> := Delay0
     } = DLMeta
 }) ->
@@ -309,7 +309,7 @@ handle_xmitdata_req(#{
         'SenderID' => <<"0xC00053">>,
         'Result' => #{'ResultCode' => <<"Success">>},
         'TransactionID' => IncomingTransactionID,
-        'DLFreq1' => Frequency1
+        'DLFreq1' => FrequencyMhz1
     },
 
     %% Make downlink packet
@@ -328,7 +328,7 @@ handle_xmitdata_req(#{
             DownlinkPacket = new_downlink(
                 hpr_roaming_utils:hexstring_to_binary(Payload),
                 hpr_roaming_utils:uint32(PacketTime + (Delay1 * ?RX1_DELAY)),
-                Frequency1,
+                FrequencyMhz1 * 1000000,
                 DataRate1,
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?RX2_DELAY)
             ),
@@ -351,7 +351,7 @@ handle_xmitdata_req(#{
     <<"DLMetaData">> := #{
         <<"ClassMode">> := DeviceClass,
         <<"FNSULToken">> := Token,
-        <<"DLFreq2">> := Frequency,
+        <<"DLFreq2">> := FrequencyMhz,
         <<"DataRate2">> := DR,
         <<"RXDelay1">> := Delay0
     }
@@ -363,7 +363,7 @@ handle_xmitdata_req(#{
         'SenderID' => <<"0xC00053">>,
         'Result' => #{'ResultCode' => <<"Success">>},
         'TransactionID' => IncomingTransactionID,
-        'DLFreq2' => Frequency
+        'DLFreq2' => FrequencyMhz
     },
 
     case parse_uplink_token(Token) of
@@ -389,7 +389,7 @@ handle_xmitdata_req(#{
             DownlinkPacket = new_downlink(
                 hpr_roaming_utils:hexstring_to_binary(Payload),
                 Timeout,
-                Frequency,
+                FrequencyMhz * 1000000,
                 DataRate,
                 undefined
             ),
@@ -406,7 +406,7 @@ handle_xmitdata_req(#{
 rx2_from_dlmetadata(
     #{
         <<"DataRate2">> := DR,
-        <<"DLFreq2">> := Frequency
+        <<"DLFreq2">> := FrequencyMhz
     },
     PacketTime,
     Region,
@@ -416,7 +416,7 @@ rx2_from_dlmetadata(
         DataRate ->
             window(
                 hpr_roaming_utils:uint32(PacketTime + Timeout),
-                Frequency,
+                FrequencyMhz * 1000000,
                 DataRate
             )
     catch
@@ -505,8 +505,8 @@ encode_devaddr(Num) ->
 
 -spec window(non_neg_integer(), 'undefined' | non_neg_integer(), atom()) ->
     packet_router_pb:window_v1_pb().
-window(TS, Freq, DataRate) ->
-    #window_v1_pb{timestamp = TS, frequency = Freq, datarate = DataRate}.
+window(TS, FrequencyHz, DataRate) ->
+    #window_v1_pb{timestamp = TS, frequency = FrequencyHz, datarate = DataRate}.
 
 -spec new_downlink(
     Payload :: binary(),
@@ -515,12 +515,12 @@ window(TS, Freq, DataRate) ->
     DataRate :: atom() | integer(),
     Rx2 :: packet_router_pb:window_v1_pb() | undefined
 ) -> downlink_packet().
-new_downlink(Payload, Timestamp, Frequency, DataRate, Rx2) ->
+new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
     #packet_router_packet_down_v1_pb{
         payload = Payload,
         rx1 = #window_v1_pb{
             timestamp = Timestamp,
-            frequency = Frequency,
+            frequency = FrequencyHz,
             datarate = DataRate
         },
         rx2 = Rx2
