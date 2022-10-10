@@ -48,6 +48,7 @@ start_link() ->
 init([]) ->
     ok = hpr_routing:init(),
     ok = hpr_config:init(),
+    ok = hpr_max_copies:init(),
 
     ElliConfig = [
         {callback, hpr_metrics_handler},

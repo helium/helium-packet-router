@@ -9,6 +9,7 @@
     euis/1, euis/2,
     server/1,
     oui/1,
+    copies/1,
     lns/1
 ]).
 
@@ -72,6 +73,11 @@ server(Route) ->
 -spec oui(Route :: route()) -> non_neg_integer().
 oui(Route) ->
     Route#config_route_v1_pb.oui.
+
+% TODO: Set this to max from route when config service supports it
+-spec copies(Route :: route()) -> non_neg_integer().
+copies(_Route) ->
+    1000.
 
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->
