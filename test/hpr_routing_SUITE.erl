@@ -59,7 +59,7 @@ join_req_test(_Config) ->
         gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        ok, hpr_routing:handle_packet(JoinPacketUpInvalid)
+        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid)
     ),
 
     meck:new(hpr_protocol_router, [passthrough]),

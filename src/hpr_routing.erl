@@ -32,7 +32,8 @@ handle_packet(Packet) ->
     lager:debug("received packet"),
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
-        {fun throttle_check/1, gateway_limit_exceeded}
+        {fun throttle_check/1, gateway_limit_exceeded},
+        {fun packet_type_check/1, invalid_packet_type}
     ],
     case execute_checks(Packet, Checks) of
         {error, _Reason} = Error ->
@@ -51,9 +52,6 @@ handle_packet(Packet) ->
 %% ------------------------------------------------------------------
 
 -spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
-find_routes({undefined, FType}) ->
-    lager:debug("invalid packet type ~w", [FType]),
-    [];
 find_routes({join_req, {AppEUI, DevEUI}}) ->
     lager:debug(
         [
@@ -120,6 +118,14 @@ throttle_check(Packet) ->
     case throttle:check(?GATEWAY_THROTTLE, Gateway) of
         {limit_exceeded, _, _} -> false;
         _ -> true
+    end.
+
+-spec packet_type_check(Packet :: hpr_packet_up:packet()) -> boolean().
+packet_type_check(Packet) ->
+    case hpr_packet_up:type(Packet) of
+        {undefined, _} -> false;
+        {join_req, _} -> true;
+        {uplink, _} -> true
     end.
 
 -spec execute_checks(Packet :: hpr_packet_up:packet(), [{fun(), any()}]) -> ok | {error, any()}.
