@@ -59,7 +59,7 @@ txpk_to_packet_down(TxPkBin) ->
 packet_up_to_push_data(Up, GatewayTime) ->
     Token = semtech_udp:token(),
     PubKeyBin = hpr_packet_up:gateway(Up),
-    MAC = hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin),
+    MAC = hpr_utils:pubkeybin_to_mac(PubKeyBin),
 
     %% TODO: Add back potential geo stuff
     %% CP breaks if {lati, long} are not parseable number

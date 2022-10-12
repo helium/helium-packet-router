@@ -304,7 +304,7 @@ pull_data_test(_Config) ->
     %% Initial PULL_DATA
     {ok, Token, MAC} = expect_pull_data(RcvSocket, route_pull_data),
     ?assert(erlang:is_binary(Token)),
-    ?assertEqual(MAC, hpr_gwmp_worker:pubkeybin_to_mac(PubKeyBin)),
+    ?assertEqual(MAC, hpr_utils:pubkeybin_to_mac(PubKeyBin)),
 
     ok.
 
