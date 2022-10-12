@@ -480,7 +480,6 @@ udp_send(Socket, {Address, Port}, Data) ->
 -spec maybe_resolve_addr({string(), inet:port_number()}, IpResolutions :: map()) ->
     {{string() | inet:ip_address(), inet:port_number()}, map()}.
 maybe_resolve_addr({Addr, Port} = Dest, AddrResolutions) ->
-    %% ct:print("resolving :: ~p :: maybe :: ~p", [Dest, AddrResolutions]),
     case maps:get(Dest, AddrResolutions, undefined) of
         undefined ->
             New =
@@ -496,7 +495,7 @@ maybe_resolve_addr({Addr, Port} = Dest, AddrResolutions) ->
     end.
 
 resolve_addr(Addr) ->
-    case inet:gethostbyaddr(Addr) of
+    case inet:gethostbyname(Addr) of
         {ok, #hostent{h_addr_list = [IPAddr]}} ->
             IPAddr;
         {ok, #hostent{h_addr_list = [IPAddr | _]}} ->
