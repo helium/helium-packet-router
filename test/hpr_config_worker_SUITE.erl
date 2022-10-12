@@ -106,7 +106,7 @@ full_test(Config) ->
     ConfigRouteResV1 = #config_routes_res_v1_pb{routes = Routes},
     ok = test_config_service:config_route_res_v1(ConfigRouteResV1),
 
-    %% Let  process new routes
+    %% Let time to process new routes
     timer:sleep(100),
 
     %% Check backup file
@@ -120,11 +120,15 @@ full_test(Config) ->
     end,
 
     %% Check that we can query route via config
-    ?assertEqual([Route1], hpr_config:lookup_devaddr(16#00000005)),
-    ?assertEqual([Route2], hpr_config:lookup_devaddr(16#00000011)),
-    ?assertEqual([Route1], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([Route1], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual([Route2], hpr_config:lookup_eui(2, 2)),
+    ?assertEqual(
+        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+    ),
+    ?assertEqual(
+        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#00000011)
+    ),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_eui(2, 2)),
     ?assertEqual([], hpr_config:lookup_devaddr(16#00000020)),
     ?assertEqual([], hpr_config:lookup_eui(3, 3)),
     ok.

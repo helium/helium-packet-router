@@ -33,6 +33,15 @@
     modules => [I]
 }).
 
+-define(ELLI_WORKER(I, Args), #{
+    id => I,
+    start => {elli, start_link, Args},
+    restart => permanent,
+    shutdown => 5000,
+    type => worker,
+    modules => [elli]
+}).
+
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
@@ -41,12 +50,18 @@ init([]) ->
     ok = hpr_config:init(),
     ok = hpr_packet_reporter:init_ets(),
 
+    ElliConfig = [
+        {callback, hpr_metrics_handler},
+        {port, 3000}
+    ],
+
     RedirectMap = application:get_env(hpr, redirect_by_region, #{}),
     ConfigWorkerConfig = application:get_env(hpr, config_worker, #{}),
     PacketReporterConfig = application:get_env(hpr, packet_reporter, #{}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
+        ?ELLI_WORKER(hpr_metrics_handler, [ElliConfig]),
         ?WORKER(hpr_config_worker, [ConfigWorkerConfig]),
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
         ?SUP(hpr_gwmp_sup, []),

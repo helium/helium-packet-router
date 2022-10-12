@@ -19,7 +19,9 @@
         iso8601,
         xxhash,
         prometheus,
-        recon
+        recon,
+        elli,
+        observer_cli
     ]},
     {env, []},
     {modules, []},

@@ -6,6 +6,7 @@
     join_packet_up/1,
     uplink_packet_up/1,
     packet_route/1,
+    wait_until/1, wait_until/3,
     match_map/2
 ]).
 
@@ -138,3 +139,20 @@ match_map(Expected, Got) when is_map(Got) ->
     end;
 match_map(_Expected, _Got) ->
     {false, not_map}.
+
+wait_until(Fun) ->
+    wait_until(Fun, 100, 100).
+
+wait_until(Fun, Retry, Delay) when Retry > 0 ->
+    Res = Fun(),
+    case Res of
+        true ->
+            ok;
+        {fail, _Reason} = Fail ->
+            Fail;
+        _ when Retry == 1 ->
+            {fail, Res};
+        _ ->
+            timer:sleep(Delay),
+            wait_until(Fun, Retry - 1, Delay)
+    end.
