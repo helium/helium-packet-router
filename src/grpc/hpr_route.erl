@@ -9,7 +9,7 @@
     euis/1, euis/2,
     server/1,
     oui/1,
-    copies/1,
+    max_copies/1,
     lns/1
 ]).
 
@@ -74,10 +74,9 @@ server(Route) ->
 oui(Route) ->
     Route#config_route_v1_pb.oui.
 
-% TODO: Set this to max from route when config service supports it
--spec copies(Route :: route()) -> non_neg_integer().
-copies(_Route) ->
-    1000.
+-spec max_copies(Route :: route()) -> non_neg_integer().
+max_copies(Route) ->
+    Route#config_route_v1_pb.max_copies.
 
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->
@@ -121,7 +120,8 @@ new_test() ->
             host = <<"lsn.lora.com">>,
             port = 80,
             protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
-        }
+        },
+        max_copies = 1
     },
     ?assertEqual(
         Route,
@@ -136,7 +136,8 @@ new_test() ->
                 host => <<"lsn.lora.com">>,
                 port => 80,
                 protocol => {gwmp, #{mapping => []}}
-            }
+            },
+            max_copies => 1
         })
     ),
     ok.
@@ -153,7 +154,8 @@ net_id_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual(1, ?MODULE:net_id(Route)),
     ok.
@@ -170,7 +172,8 @@ devaddr_ranges_1_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual([{1, 10}, {11, 20}], ?MODULE:devaddr_ranges(Route)),
     ok.
@@ -187,7 +190,8 @@ devaddr_ranges_2_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual([], ?MODULE:devaddr_ranges(?MODULE:devaddr_ranges(Route, []))),
     ok.
@@ -204,7 +208,8 @@ euis_1_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual(
         [{1, 1}, {2, 0}], ?MODULE:euis(Route)
@@ -223,52 +228,12 @@ euis_2_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual(
         [], ?MODULE:euis(?MODULE:euis(Route, []))
     ),
-    ok.
-
-server_test() ->
-    Route = ?MODULE:new(#{
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        }
-    }),
-    ?assertEqual(
-        #config_server_v1_pb{
-            host = <<"lsn.lora.com">>,
-            port = 80,
-            protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
-        },
-        ?MODULE:server(Route)
-    ),
-    ok.
-
-lns_test() ->
-    Route = ?MODULE:new(#{
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        }
-    }),
-    ?assertEqual(<<"lsn.lora.com:80">>, ?MODULE:lns(Route)),
     ok.
 
 oui_test() ->
@@ -283,9 +248,71 @@ oui_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual(10, ?MODULE:oui(Route)),
+    ok.
+
+server_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1
+    }),
+    ?assertEqual(
+        #config_server_v1_pb{
+            host = <<"lsn.lora.com">>,
+            port = 80,
+            protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
+        },
+        ?MODULE:server(Route)
+    ),
+    ok.
+
+max_copies_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1
+    }),
+    ?assertEqual(1, ?MODULE:max_copies(Route)),
+    ok.
+
+lns_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1
+    }),
+    ?assertEqual(<<"lsn.lora.com:80">>, ?MODULE:lns(Route)),
     ok.
 
 host_test() ->
@@ -300,7 +327,8 @@ host_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual(<<"lsn.lora.com">>, ?MODULE:host(?MODULE:server(Route))),
     ok.
@@ -317,7 +345,8 @@ port_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual(80, ?MODULE:port(?MODULE:server(Route))),
     ok.
@@ -334,7 +363,8 @@ protocol_test() ->
             host => <<"lsn.lora.com">>,
             port => 80,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }),
     ?assertEqual(
         {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}, ?MODULE:protocol(?MODULE:server(Route))

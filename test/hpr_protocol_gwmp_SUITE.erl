@@ -493,7 +493,8 @@ test_route(Host, Port) ->
             host => Host,
             port => Port,
             protocol => {gwmp, #{mapping => []}}
-        }
+        },
+        max_copies => 1
     }).
 
 expect_pull_data(Socket, Reason) ->

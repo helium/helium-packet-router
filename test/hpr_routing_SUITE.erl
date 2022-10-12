@@ -76,7 +76,8 @@ join_req_test(_Config) ->
             host => <<"127.0.0.1">>,
             port => 80,
             protocol => {packet_router, #{}}
-        }
+        },
+        max_copies => 1
     }),
     ok = hpr_config:insert_route(Route),
 
