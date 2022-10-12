@@ -2,7 +2,7 @@
 
 -export([
     init/0,
-    maybe_buy/2,
+    check/2,
     delete/1
 ]).
 
@@ -23,11 +23,11 @@ init() ->
     ok = scheduled_cleanup(?CLEANUP),
     ok.
 
--spec maybe_buy(Key :: binary(), Max :: non_neg_integer()) ->
+-spec check(Key :: binary(), Max :: non_neg_integer()) ->
     ok | {error, ?MAX_TOO_LOW | ?MAX_COPIES}.
-maybe_buy(_Key, Max) when Max =< 0 ->
+check(_Key, Max) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
-maybe_buy(Key, Max) ->
+check(Key, Max) ->
     case
         ets:update_counter(
             ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
@@ -81,7 +81,7 @@ select_expired(Time) ->
 all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         ?_test(test_max_too_low()),
-        ?_test(test_maybe_buy()),
+        ?_test(test_check()),
         ?_test(test_delete()),
         ?_test(test_scheduled_cleanup())
     ]}.
@@ -97,34 +97,34 @@ foreach_cleanup(ok) ->
 test_max_too_low() ->
     Key = crypto:strong_rand_bytes(16),
     Max = 0,
-    ?assertEqual({error, ?MAX_TOO_LOW}, ?MODULE:maybe_buy(Key, Max)),
+    ?assertEqual({error, ?MAX_TOO_LOW}, ?MODULE:check(Key, Max)),
     ok.
 
-test_maybe_buy() ->
+test_check() ->
     Key = crypto:strong_rand_bytes(16),
     Max = 3,
-    ?assertEqual(ok, ?MODULE:maybe_buy(Key, Max)),
-    ?assertEqual(ok, ?MODULE:maybe_buy(Key, Max)),
-    ?assertEqual(ok, ?MODULE:maybe_buy(Key, Max)),
-    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:maybe_buy(Key, Max)),
+    ?assertEqual(ok, ?MODULE:check(Key, Max)),
+    ?assertEqual(ok, ?MODULE:check(Key, Max)),
+    ?assertEqual(ok, ?MODULE:check(Key, Max)),
+    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:check(Key, Max)),
     ok.
 
 test_delete() ->
     Key = crypto:strong_rand_bytes(16),
     Max = 1,
-    ?assertEqual(ok, ?MODULE:maybe_buy(Key, Max)),
-    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:maybe_buy(Key, Max)),
+    ?assertEqual(ok, ?MODULE:check(Key, Max)),
+    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:check(Key, Max)),
     ?assertEqual(ok, ?MODULE:delete(Key)),
-    ?assertEqual(ok, ?MODULE:maybe_buy(Key, Max)),
-    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:maybe_buy(Key, Max)),
+    ?assertEqual(ok, ?MODULE:check(Key, Max)),
+    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:check(Key, Max)),
     ok.
 
 test_scheduled_cleanup() ->
     Key1 = crypto:strong_rand_bytes(16),
     Key2 = crypto:strong_rand_bytes(16),
     Max = 1,
-    ?assertEqual(ok, ?MODULE:maybe_buy(Key1, Max)),
-    ?assertEqual(ok, ?MODULE:maybe_buy(Key2, Max)),
+    ?assertEqual(ok, ?MODULE:check(Key1, Max)),
+    ?assertEqual(ok, ?MODULE:check(Key2, Max)),
 
     ?assertEqual(2, ets:info(?ETS, size)),
 

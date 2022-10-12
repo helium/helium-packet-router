@@ -89,7 +89,7 @@ maybe_deliver_packet(Packet, [Route | Routes]) ->
     Key = crypto:hash(sha256, <<
         (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
     >>),
-    case hpr_max_copies:maybe_buy(Key, hpr_route:copies(Route)) of
+    case hpr_max_copies:check(Key, hpr_route:copies(Route)) of
         {error, Reason} ->
             lager:debug("not sending ~p", [Reason]);
         ok ->
