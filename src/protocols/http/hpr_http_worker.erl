@@ -89,7 +89,7 @@ init(Args) ->
     lager:debug("~p init with ~p", [?MODULE, Args]),
     {ok, #state{
         net_id = NetID,
-        address = Address,
+        address = << Address/binary, <<"/">>/binary, <<"uplink">>/binary >>,
         transaction_id = next_transaction_id(),
         send_data_timer = DedupeTimeout,
         flow_type = FlowType,
@@ -202,9 +202,6 @@ send_data(#state{
     send_data_timer = DedupWindow,
     routing_info = RoutingInfo
 }) ->
-    %%  TODO  This is probably not necessary.
-    %%  ok = pp_config:insert_transaction_id(TransactionID, Address, FlowType),
-
     Data = hpr_roaming_protocol:make_uplink_payload(
         NetID,
         Packets,

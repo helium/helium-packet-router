@@ -2,7 +2,10 @@
 
 -include("../grpc/autogen/server/packet_router_pb.hrl").
 
--export([to_record/1]).
+-export([
+    to_record/1,
+    rx1_frequency/1
+]).
 
 -type packet_map() :: client_packet_router_pb:packet_router_packet_down_v1_pb().
 -type packet() :: packet_router_pb:packet_router_packet_down_v1_pb().
@@ -11,6 +14,11 @@
     packet_map/0,
     packet/0
 ]).
+
+-spec rx1_frequency(PacketDown :: packet()) ->
+    Frequency :: non_neg_integer() | undefined.
+rx1_frequency(Packetdown) ->
+    Packetdown#packet_router_packet_down_v1_pb.rx1#window_v1_pb.frequency.
 
 -spec to_record(packet_map() | map()) -> packet().
 to_record(PacketMap) ->

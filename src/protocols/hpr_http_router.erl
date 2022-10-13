@@ -32,7 +32,7 @@ send(PacketUp, GatewayStream, Route) ->
     case
         hpr_http_sup:maybe_start_worker(
             WorkerKey,
-            #{protocol => Protocol}
+            #{protocol => Protocol, net_id => hpr_route:net_id(Route)}
         )
     of
         {error, worker_not_started, _} = Err ->
@@ -77,7 +77,7 @@ protocol_from(Route) ->
     %%    return hard-coded values until the roaming protocol is updated
     #http_protocol{
         protocol_version = pv_1_1,
-        flow_type = async,
+        flow_type = sync,
         endpoint = <<IP/binary, <<":">>/binary, (integer_to_binary(Port))/binary>>,
         dedupe_timeout = 250,
         auth_header = null

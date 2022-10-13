@@ -35,6 +35,8 @@ handle_packet(Packet) ->
     Start = erlang:system_time(millisecond),
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
     PacketType = hpr_packet_up:type(Packet),
+    lager:debug([{packet_type, PacketType}], "handle_packet"),
+
     {Type, _} = PacketType,
     lager:md([
         {gateway, GatewayName},
@@ -83,7 +85,8 @@ dispatch_packet({join_req, {AppEUI, DevEUI}}, Packet) ->
     lager:debug(
         [
             {app_eui, hpr_utils:int_to_hex(AppEUI)},
-            {dev_eui, hpr_utils:int_to_hex(DevEUI)}
+            {dev_eui, hpr_utils:int_to_hex(DevEUI)},
+            {routes, Routes}
         ],
         "handling join"
     ),
@@ -94,6 +97,10 @@ dispatch_packet({uplink, DevAddr}, Packet) ->
         "handling uplink"
     ),
     Routes = hpr_config:lookup_devaddr(DevAddr),
+    lager:debug(
+        [{routes, Routes}],
+        "routes"
+    ),
     {deliver_packet(Packet, Routes), erlang:length(Routes)}.
 
 -spec deliver_packet(

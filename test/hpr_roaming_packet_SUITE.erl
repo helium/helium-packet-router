@@ -32,7 +32,12 @@
     insert_transaction_id/3,
     lookup_transaction_id/1,
     init_ets/0,
-    frame_packet/5
+    http_rcv/1,
+    frame_packet_uplink/7,
+    b0/4,
+    cipher/5, cipher/7,
+    ai/4,
+    binxor/3
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -77,6 +82,7 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
+    ok = hpr_roaming_utils:init_ets(),
     test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
@@ -91,61 +97,38 @@ end_per_testcase(TestCase, Config) ->
 
 http_sync_uplink_join_test(_Config) ->
     %% One Gateway is going to be sending all the packets.
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    {ok, _Pid} = hpr_http_sup:start_link(),
 
     ok = start_uplink_listener(),
 
-    %% NOTE: Leading 00 are important in this test.
-    %% We want to make sure EUI are encoded with the correct number of bytes.
-    DevEUI = <<"00BBCCDDEEFF0011">>,
-    AppEUI = <<"1122334455667788">>,
+    DevEUIBin = <<"00BBCCDDEEFF0011">>,
+    DevEUI = erlang:binary_to_integer(DevEUIBin, 16),
+    AppEUI = erlang:binary_to_integer(<<"1122334455667788">>, 16),
 
-    SendPacketFun = fun(DevAddr) ->
-        RoutingInformationPB = hpr_roaming_utils:make_routing_information_pb(
-            {
-                eui,
-                erlang:binary_to_integer(DevEUI, 16),
-                erlang:binary_to_integer(AppEUI, 16)
-            }
-        ),
+    SendPacketFun = fun() ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = frame_packet(
-            ?UNCONFIRMED_UP,
+        PacketUp = frame_packet_join(
             PubKeyBin,
-            DevAddr,
-            0,
-            RoutingInformationPB,
+            SigFun,
+            DevEUI,
+            AppEUI,
             #{timestamp => GatewayTime}
         ),
-        hpr_routing:handle_packet(PacketUp),
-        %%    pp_sc_packet_handler:handle_packet(Packet, GatewayTime, self()),
+
+        ok = hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
-    %%  ok = pp_config:load_config([
-    %%    #{
-    %%      <<"name">> => <<"test">>,
-    %%      <<"net_id">> => ?NET_ID_ACTILITY,
-    %%      <<"configs">> => [
-    %%        #{
-    %%          <<"protocol">> => <<"http">>,
-    %%          <<"http_endpoint">> => <<"http://127.0.0.1:3002/uplink">>,
-    %%          <<"http_flow_type">> => <<"sync">>,
-    %%          <<"joins">> => [
-    %%            #{<<"dev_eui">> => DevEUI, <<"app_eui">> => AppEUI}
-    %%          ],
-    %%          <<"devaddrs">> => []
-    %%        }
-    %%      ]
-    %%    }
-    %%  ]),
     Route = #config_route_v1_pb{
         net_id = ?NET_ID_ACTILITY,
         server = #config_server_v1_pb{
             port = 3002,
             host = <<"127.0.0.1">>,
-            protocol = #config_protocol_http_roaming_v1_pb{}
+            protocol = {http_roaming, #config_protocol_http_roaming_v1_pb{}}
         },
         euis = [
             #config_eui_v1_pb{
@@ -157,11 +140,19 @@ http_sync_uplink_join_test(_Config) ->
     },
     hpr_config:insert_route(Route),
 
+    lager:debug(
+        [
+            {devaddr, ets:tab2list(hpr_config_routes_by_devaddr)},
+            {eui, ets:tab2list(hpr_config_routes_by_eui)}
+        ],
+        "config ets"
+    ),
+
     %% ===================================================================
     %% Done with setup.
 
     %% 1. Send a join uplink
-    {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY),
+    {ok, PacketUp, GatewayTime} = SendPacketFun(),
     Region = hpr_packet_up:region(PacketUp),
     PacketTime = hpr_packet_up:timestamp(PacketUp),
 
@@ -171,7 +162,7 @@ http_sync_uplink_join_test(_Config) ->
         #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
         _Request,
         {200, RespBody}
-    } = pp_lns:http_rcv(
+    } = ?MODULE:http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => fun erlang:is_binary/1,
@@ -184,7 +175,7 @@ http_sync_uplink_join_test(_Config) ->
                 hpr_packet_up:payload(PacketUp)
             ),
             <<"ULMetaData">> => #{
-                <<"DevEUI">> => <<"0x", DevEUI/binary>>,
+                <<"DevEUI">> => <<"0x", DevEUIBin/binary>>,
                 <<"DataRate">> => hpr_lorawan:datarate_to_index(
                     Region,
                     hpr_packet_up:datarate(PacketUp)
@@ -198,9 +189,7 @@ http_sync_uplink_join_test(_Config) ->
                 <<"GWInfo">> => [
                     #{
                         <<"RFRegion">> => erlang:atom_to_binary(Region),
-                        <<"RSSI">> => erlang:trunc(
-                            hpr_packet_up:rssi(PacketUp)
-                        ),
+                        <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
                         <<"ID">> => hpr_roaming_utils:binary_to_hexstring(
@@ -213,7 +202,7 @@ http_sync_uplink_join_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, TransactionID, 'US915', PacketTime, <<"http://127.0.0.1:3002/uplink">>, sync},
+        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
         hpr_roaming_protocol:parse_uplink_token(Token)
     ),
 
@@ -234,7 +223,7 @@ http_sync_uplink_join_test(_Config) ->
                 <<"PHYPayload">> => hpr_roaming_utils:binary_to_hexstring(
                     <<"join_accept_payload">>
                 ),
-                <<"DevEUI">> => <<"0x", DevEUI/binary>>,
+                <<"DevEUI">> => <<"0x", DevEUIBin/binary>>,
                 <<"DLMetaData">> => #{
                     <<"DLFreq1">> => hpr_packet_up:frequency_mhz(PacketUp),
                     <<"FNSULToken">> => Token,
@@ -249,9 +238,11 @@ http_sync_uplink_join_test(_Config) ->
         {false, Reason} -> ct:fail({http_response, Reason})
     end,
 
-    %% 4. Expect downlink queued for gateway
-    ok = gateway_expect_downlink(fun(_PacketDown) ->
-        %%    ?assertEqual(27, hpr_packet_down:rssi(Downlink)),
+    %% 4. Expect downlink for gateway
+    ok = gateway_expect_downlink(fun(PacketDown) ->
+            ?assertEqual(true,
+                hpr_packet_up:frequency_mhz(PacketUp) ==
+                hpr_packet_down:rx1_frequency(PacketDown) / 1000000),
         ok
     end),
 
@@ -313,7 +304,10 @@ handle(Req, Args) ->
 handle('POST', [<<"downlink">>], Req, Args) ->
     Forward = maps:get(forward, Args),
     Body = elli_request:body(Req),
-    #{<<"TransactionID">> := TransactionID} = Decoded = jsx:decode(Body),
+    #{
+        <<"TransactionID">> := TransactionID,
+        <<"ULMetaData">> := #{<<"FNSULToken">> := _Token}
+    } = Decoded = jsx:decode(Body),
 
     FlowType =
         case lookup_transaction_id(TransactionID) of
@@ -334,7 +328,6 @@ handle('POST', [<<"downlink">>], Req, Args) ->
             ct:pal("sync handling downlink:~n~p", [Decoded]),
             Response = hpr_roaming_downlink:handle(Req, Args),
 
-            %% ResponseBody = make_response_body(Decoded),
             %% Response = {200, [], jsx:encode(ResponseBody)},
             Forward ! {http_msg, Body, Req, Response},
             Response
@@ -343,8 +336,10 @@ handle('POST', [<<"uplink">>], Req, Args) ->
     Forward = maps:get(forward, Args),
     Body = elli_request:body(Req),
     #{<<"TransactionID">> := TransactionID} = jsx:decode(Body),
-
-    {ok, _, FlowType} = lookup_transaction_id(TransactionID),
+    #{
+        <<"TransactionID">> := TransactionID,
+        <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
+    } = jsx:decode(Body),
 
     ResponseBody =
         case maps:get(response, Args, undefined) of
@@ -355,6 +350,7 @@ handle('POST', [<<"uplink">>], Req, Args) ->
                 Resp
         end,
 
+    FlowType = flow_type_from(Token),
     case FlowType of
         async ->
             Response = {200, [], <<>>},
@@ -383,6 +379,12 @@ handle_event(_Event, _Data, _Args) ->
     %% uncomment for Elli errors.
     ct:print("Elli Event (~p):~nData~n~p~nArgs~n~p", [_Event, _Data, _Args]),
     ok.
+
+-spec flow_type_from(UplinkToken :: binary()) ->  sync | async.
+flow_type_from(UplinkToken) ->
+    {ok, _TransactionID, _Region, _PacketTime, _DestURLBin, FlowType} =
+        hpr_roaming_protocol:parse_uplink_token(UplinkToken),
+    FlowType.
 
 make_response_body(#{
     <<"ProtocolVersion">> := ProtocolVersion,
@@ -442,36 +444,33 @@ start_uplink_listener(Options) ->
     %% Uplinks we send to an LNS
     CallbackArgs = maps:get(callback_args, Options, #{}),
     {ok, _ElliPid} = elli:start_link([
-        {callback, pp_lns},
+        {callback, ?MODULE},
         {callback_args, maps:merge(#{forward => self()}, CallbackArgs)},
         {port, maps:get(port, Options, 3002)},
         {min_acceptors, 1}
     ]),
     ok.
 
-frame_packet(MType, PubKeyBin, DevAddr, FCnt, Options) ->
-    <<DevNum:32/integer-unsigned>> = DevAddr,
-    Routing = hpr_roaming_utils:make_routing_information_pb({devaddr, DevNum}),
-    frame_packet(MType, PubKeyBin, DevAddr, FCnt, Routing, Options).
 
-frame_packet(MType, PubKeyBin, DevAddr, FCnt, _Routing, Options) ->
+frame_packet_uplink(MType, PubKeyBin, SigFun, DevAddr, FCnt, _Routing, Options) ->
     NwkSessionKey = <<81, 103, 129, 150, 35, 76, 17, 164, 210, 66, 210, 149, 120, 193, 251, 85>>,
     AppSessionKey = <<245, 16, 127, 141, 191, 84, 201, 16, 111, 172, 36, 152, 70, 228, 52, 95>>,
-    Payload1 = frame_payload(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt),
+    Payload1 = frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt),
 
     PacketUp = #packet_router_packet_up_v1_pb{
         timestamp = maps:get(timestamp, Options, erlang:system_time(millisecond)),
         payload = Payload1,
-        frequency = 923.3,
+        frequency = 923_300_000,
         datarate = maps:get(datarate, Options, 'SF8BW125'),
-        rssi = maps:get(rssi, Options, 0.0),
+        rssi = maps:get(rssi, Options, 0),
         snr = maps:get(snr, Options, 0.0),
         region = 'US915',
         gateway = PubKeyBin
     },
-    PacketUp.
 
-frame_payload(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt) ->
+    hpr_packet_up:sign(PacketUp, SigFun).
+
+frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt) ->
     MHDRRFU = 0,
     Major = 0,
     ADR = 0,
@@ -493,15 +492,62 @@ frame_payload(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt) ->
     MIC = crypto:macN(cmac, aes_128_cbc, NwkSessionKey, <<B0/binary, Payload0/binary>>, 4),
     <<Payload0/binary, MIC:4/binary>>.
 
+frame_packet_join(PubKeyBin, SigFun, DevEUI, AppEUI, Options) ->
+    Payload1 = frame_payload_join(DevEUI, AppEUI),
+
+    PacketUp = #packet_router_packet_up_v1_pb{
+        timestamp = maps:get(timestamp, Options, erlang:system_time(millisecond)),
+        payload = Payload1,
+        frequency = 923_300_000,
+        datarate = maps:get(datarate, Options, 'SF8BW125'),
+        rssi = maps:get(rssi, Options, 0),
+        snr = maps:get(snr, Options, 0.0),
+        region = 'US915',
+        gateway = PubKeyBin
+    },
+
+    hpr_packet_up:sign(PacketUp, SigFun).
+
+frame_payload_join(DevEUI, AppEUI) ->
+    DevNonce = crypto:strong_rand_bytes(2),
+    AppKey = <<245, 16, 127, 141, 191, 84, 201, 16, 111, 172, 36, 152, 70, 228, 52, 95>>,
+    MType = ?JOIN_REQ,
+    MHDRRFU = 0,
+    Major = 0,
+    Payload0 =
+        <<MType:3, MHDRRFU:3, Major:2, AppEUI:64/integer-unsigned-little,
+            DevEUI:64/integer-unsigned-little, DevNonce:2/binary>>,
+    MIC = crypto:macN(cmac, aes_128_cbc, AppKey, Payload0, 4),
+    <<Payload0/binary, MIC:4/binary>>.
+
 gateway_expect_downlink(ExpectFn) ->
     receive
-        {send_response, PacketDown} ->
+        {http_reply, PacketDown} ->
             ExpectFn(PacketDown)
     after 1000 -> ct:fail(gateway_expect_downlink_timeout)
     end.
 
+-spec http_rcv() -> {ok, any()}.
+http_rcv() ->
+    receive
+        {http_msg, Payload, Request, {StatusCode, [], RespBody}} ->
+            {ok, jsx:decode(Payload), Request, {StatusCode, jsx:decode(RespBody)}}
+    after 2500 -> ct:fail(http_msg_timeout)
+    end.
+
+-spec http_rcv(map()) -> {ok, any(), any()}.
+http_rcv(Expected) ->
+    {ok, Got, Request, Response} = http_rcv(),
+    case test_utils:match_map(Expected, Got) of
+        true ->
+            {ok, Got, Request, Response};
+        {false, Reason} ->
+            ct:pal("FAILED got: ~n~p~n expected: ~n~p", [Got, Expected]),
+            ct:fail({http_rcv, Reason})
+    end.
+
 %% ------------------------------------------------------------------
-%% PP Utils
+%%  Utils
 %% ------------------------------------------------------------------
 
 -spec b0(integer(), binary(), integer(), integer()) -> binary().
