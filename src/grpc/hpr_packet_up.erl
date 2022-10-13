@@ -52,7 +52,7 @@ payload(Packet) ->
 timestamp(Packet) ->
     Packet#packet_router_packet_up_v1_pb.timestamp.
 
--spec rssi(Packet :: packet()) -> non_neg_integer() | undefined.
+-spec rssi(Packet :: packet()) -> integer() | undefined.
 rssi(Packet) ->
     Packet#packet_router_packet_up_v1_pb.rssi.
 
@@ -174,7 +174,7 @@ new(Opts) ->
     #packet_router_packet_up_v1_pb{
         payload = maps:get(payload, Opts, <<"payload">>),
         timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond)),
-        rssi = maps:get(rssi, Opts, 35),
+        rssi = maps:get(rssi, Opts, -40),
         frequency = maps:get(frequency, Opts, 904_300_000),
         datarate = maps:get(datarate, Opts, 'SF7BW125'),
         snr = maps:get(snr, Opts, 7.0),
@@ -215,7 +215,7 @@ timestamp_test() ->
 
 rssi_test() ->
     PacketUp = ?MODULE:new(#{}),
-    ?assertEqual(35, rssi(PacketUp)),
+    ?assertEqual(-40, rssi(PacketUp)),
     ok.
 
 frequency_mhz_test() ->
