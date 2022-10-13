@@ -78,7 +78,7 @@ protocol_from(Route) ->
     #http_protocol{
         protocol_version = pv_1_1,
         flow_type = sync,
-        endpoint = <<IP/binary, <<":">>/binary, (integer_to_binary(Port))/binary>>,
+        endpoint = hpr_route:lns(Route),
         dedupe_timeout = 250,
         auth_header = null
     }.
