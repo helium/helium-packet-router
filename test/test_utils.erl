@@ -5,9 +5,10 @@
     end_per_testcase/2,
     join_packet_up/1,
     uplink_packet_up/1,
-    match_map/2,
     frame_packet_uplink/7,
-    frame_packet_join/5
+    frame_packet_join/5,
+    wait_until/1, wait_until/3,
+    match_map/2
 ]).
 
 -include("hpr.hrl").
@@ -224,3 +225,20 @@ binxor(<<A, RestA/binary>>, <<B, RestB/binary>>, Acc) ->
 -spec b0(integer(), binary(), integer(), integer()) -> binary().
 b0(Dir, DevAddr, FCnt, Len) ->
     <<16#49, 0, 0, 0, 0, Dir, DevAddr:4/binary, FCnt:32/little-unsigned-integer, 0, Len>>.
+
+wait_until(Fun) ->
+    wait_until(Fun, 100, 100).
+
+wait_until(Fun, Retry, Delay) when Retry > 0 ->
+    Res = Fun(),
+    case Res of
+        true ->
+            ok;
+        {fail, _Reason} = Fail ->
+            Fail;
+        _ when Retry == 1 ->
+            {fail, Res};
+        _ ->
+            timer:sleep(Delay),
+            wait_until(Fun, Retry - 1, Delay)
+    end.

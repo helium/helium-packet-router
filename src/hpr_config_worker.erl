@@ -6,7 +6,9 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/1
+    start_link/1,
+    tmp_load/0,
+    tmp_save/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -47,6 +49,8 @@
 
 -spec start_link(config_worker_opts()) -> any().
 start_link(#{host := ""}) ->
+    %% TODO: Remove once HCS running
+    ok = tmp_load(),
     ignore;
 start_link(#{host := Host, port := Port} = Args) when is_list(Host) andalso is_number(Port) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []);
@@ -56,6 +60,32 @@ start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso i
     );
 start_link(_) ->
     ignore.
+
+%% TODO: Remove once HCS running
+-spec tmp_load() -> ok.
+tmp_load() ->
+    ConfigWorkerConf = application:get_env(hpr, config_worker, #{}),
+    BackupFilePath = maps:get(file_backup_path, ConfigWorkerConf),
+    maybe_init_from_file(#state{host = "", port = 80, file_backup_path = BackupFilePath}),
+    ok.
+
+%% TODO: Remove once HCS running
+-spec tmp_save(NewRoutes :: [client_config_pb:route_v1_pb()]) -> ok.
+tmp_save(NewRoutes) ->
+    ConfigWorkerConf = application:get_env(hpr, config_worker, #{}),
+    BackupFilePath = maps:get(file_backup_path, ConfigWorkerConf),
+    Map =
+        case file:read_file(BackupFilePath) of
+            {ok, Binary} ->
+                #{routes := OldRoutes} = erlang:binary_to_term(Binary),
+                #{routes => lists:usort(OldRoutes ++ NewRoutes)};
+            {error, Reason} ->
+                lager:warning("failed to read to file ~p", [Reason]),
+                #{routes => NewRoutes}
+        end,
+    ok = hpr_config:update_routes(Map),
+    ok = file:write_file(BackupFilePath, erlang:term_to_binary(Map)),
+    ok.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -136,18 +166,25 @@ terminate(_Reason, #state{connection = Connection}) ->
 %% ------------------------------------------------------------------
 
 -spec maybe_init_from_file(#state{}) -> ok.
-maybe_init_from_file(#state{file_backup_path = undefined} = State) ->
-    State;
+maybe_init_from_file(#state{file_backup_path = undefined}) ->
+    ok;
 maybe_init_from_file(#state{file_backup_path = Path}) ->
     ok = filelib:ensure_dir(Path),
     case file:read_file(Path) of
         {ok, Binary} ->
-            LastRoutesResV1 = erlang:binary_to_term(Binary),
-            ok = hpr_config:update_routes(LastRoutesResV1),
-            ok;
+            try erlang:binary_to_term(Binary) of
+                #{routes := Routes} = LastRoutesResV1 when is_list(Routes) ->
+                    ok = hpr_config:update_routes(LastRoutesResV1);
+                _ ->
+                    ok = file:write_file(Path, erlang:term_to_binary(#{routes => []})),
+                    lager:warning("binary_to_term failed, fixing")
+            catch
+                _E:_R ->
+                    ok = file:write_file(Path, erlang:term_to_binary(#{routes => []})),
+                    lager:warning("binary_to_term crash ~p ~p, fixing", [_E, _R])
+            end;
         {error, Reason} ->
-            lager:warning("failed to read to file ~p", [Reason]),
-            ok
+            lager:warning("failed to read to file ~p", [Reason])
     end.
 
 -spec process_routes_update(client_config_pb:routes_res_v1_pb(), #state{}) -> ok.

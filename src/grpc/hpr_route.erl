@@ -5,8 +5,8 @@
 -export([
     new/1,
     net_id/1,
-    devaddr_ranges/1,
-    euis/1,
+    devaddr_ranges/1, devaddr_ranges/2,
+    euis/1, euis/2,
     server/1,
     oui/1,
     lns/1
@@ -49,6 +49,10 @@ devaddr_ranges(Route) ->
             Route#config_route_v1_pb.devaddr_ranges
     ].
 
+-spec devaddr_ranges(Route :: route(), DevRanges :: [#config_devaddr_range_v1_pb{}]) -> route().
+devaddr_ranges(Route, DevRanges) ->
+    Route#config_route_v1_pb{devaddr_ranges = DevRanges}.
+
 -spec euis(Route :: route()) -> [{non_neg_integer(), non_neg_integer()}].
 euis(Route) ->
     [
@@ -56,6 +60,10 @@ euis(Route) ->
      || #config_eui_v1_pb{app_eui = AppEUI, dev_eui = DevEUI} <-
             Route#config_route_v1_pb.euis
     ].
+
+-spec euis(Route :: route(), EUIs :: [#config_eui_v1_pb{}]) -> route().
+euis(Route, EUIs) ->
+    Route#config_route_v1_pb{euis = EUIs}.
 
 -spec server(Route :: route()) -> server().
 server(Route) ->
@@ -144,7 +152,7 @@ net_id_test() ->
     ?assertEqual(1, ?MODULE:net_id(Route)),
     ok.
 
-devaddr_ranges_test() ->
+devaddr_ranges_1_test() ->
     Route = ?MODULE:new(#{
         net_id => 1,
         devaddr_ranges => [
@@ -161,7 +169,24 @@ devaddr_ranges_test() ->
     ?assertEqual([{1, 10}, {11, 20}], ?MODULE:devaddr_ranges(Route)),
     ok.
 
-euis_test() ->
+devaddr_ranges_2_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
+    }),
+    ?assertEqual([], ?MODULE:devaddr_ranges(?MODULE:devaddr_ranges(Route, []))),
+    ok.
+
+euis_1_test() ->
     Route = ?MODULE:new(#{
         net_id => 1,
         devaddr_ranges => [
@@ -177,6 +202,25 @@ euis_test() ->
     }),
     ?assertEqual(
         [{1, 1}, {2, 0}], ?MODULE:euis(Route)
+    ),
+    ok.
+
+euis_2_test() ->
+    Route = ?MODULE:new(#{
+        net_id => 1,
+        devaddr_ranges => [
+            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
+        oui => 10,
+        server => #{
+            host => <<"lsn.lora.com">>,
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        }
+    }),
+    ?assertEqual(
+        [], ?MODULE:euis(?MODULE:euis(Route, []))
     ),
     ok.
 

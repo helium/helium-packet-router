@@ -2,6 +2,7 @@
 
 -export([
     gateway_name/1,
+    gateway_mac/1,
     int_to_hex/1,
     bin_to_hex/1,
     hex_to_bin/1,
@@ -15,6 +16,10 @@ gateway_name(PubkeyBin) when is_binary(PubkeyBin) ->
 gateway_name(B58) when is_list(B58) ->
     {ok, Name} = erl_angry_purple_tiger:animal_name(B58),
     Name.
+
+-spec gateway_mac(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> string().
+gateway_mac(PubKeyBin) ->
+    erlang:binary_to_list(binary:encode_hex(pubkeybin_to_mac(PubKeyBin))).
 
 -spec int_to_hex(Integer :: integer()) -> string().
 int_to_hex(Integer) ->

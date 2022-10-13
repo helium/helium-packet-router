@@ -14,6 +14,8 @@
     multi_gw_single_lns_test/1,
     shutdown_idle_worker_test/1,
     pull_data_test/1,
+    pull_ack_test/1,
+    pull_ack_hostname_test/1,
     gateway_dest_redirect_test/1
 ]).
 
@@ -41,6 +43,8 @@ all() ->
         multi_gw_single_lns_test,
         shutdown_idle_worker_test,
         pull_data_test,
+        pull_ack_test,
+        pull_ack_hostname_test,
         gateway_dest_redirect_test
     ].
 
@@ -289,7 +293,7 @@ shutdown_idle_worker_test(_Config) ->
     ok.
 
 pull_data_test(_Config) ->
-    %%    send push_data to start sending of pull_data
+    %% send push_data to start sending of pull_data
     PacketUp = fake_join_up_packet(),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
 
@@ -303,6 +307,103 @@ pull_data_test(_Config) ->
     {ok, Token, MAC} = expect_pull_data(RcvSocket, route_pull_data),
     ?assert(erlang:is_binary(Token)),
     ?assertEqual(MAC, hpr_utils:pubkeybin_to_mac(PubKeyBin)),
+
+    ok.
+
+pull_ack_test(_Config) ->
+    PacketUp = fake_join_up_packet(),
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
+
+    Route = test_route(1777),
+
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+
+    %% Initial PULL_DATA, grab the address and port for responding
+    {ok, Token, Address, Port} =
+        receive
+            {udp, RcvSocket, A, P, Data} ->
+                ?assertEqual(pull_data, semtech_id_atom(Data)),
+                T = semtech_udp:token(Data),
+                {ok, T, A, P}
+        after timer:seconds(2) -> ct:fail({no_pull_data})
+        end,
+    ?assert(erlang:is_binary(Token)),
+
+    %% There is an outstanding pull_data
+    {ok, WorkerPid} = hpr_gwmp_sup:lookup_worker(PubKeyBin),
+    ?assertEqual(
+        1,
+        maps:size(element(6, sys:get_state(WorkerPid))),
+        "1 outstanding pull_data"
+    ),
+
+    %% send pull ack from server
+    PullAck = semtech_udp:pull_ack(Token),
+    ok = gen_udp:send(RcvSocket, Address, Port, PullAck),
+
+    %% pull_data has been acked
+    ok = test_utils:wait_until(fun() ->
+        0 == maps:size(element(6, sys:get_state(WorkerPid)))
+    end),
+
+    ok.
+
+pull_ack_hostname_test(_Config) ->
+    %% Mostly a copy of `pull_ack_test', but with some assertions around the
+    %% inet module to make sure we're attempting to resolve hostnames.
+    PacketUp = fake_join_up_packet(),
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
+
+    TestURL = "test_url.for.resolving",
+
+    meck:new(inet, [unstick, passthrough]),
+    %% Resovle to localhost so we can communicate
+    meck:expect(
+        inet,
+        gethostbyname,
+        1,
+        {ok, {hostent, TestURL, [], inet, 4, [{127, 0, 0, 1}]}}
+    ),
+
+    Route = test_route(erlang:list_to_binary(TestURL), 1777),
+
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+
+    %% Initial PULL_DATA, grab the address and port for responding
+    {ok, Token, Address, Port} =
+        receive
+            {udp, RcvSocket, A, P, Data} ->
+                ?assertEqual(pull_data, semtech_id_atom(Data)),
+                T = semtech_udp:token(Data),
+                {ok, T, A, P}
+        after timer:seconds(2) -> ct:fail({no_pull_data})
+        end,
+    ?assert(erlang:is_binary(Token)),
+
+    %% There is an outstanding pull_data
+    {ok, WorkerPid} = hpr_gwmp_sup:lookup_worker(PubKeyBin),
+    ?assertEqual(
+        1,
+        maps:size(element(6, sys:get_state(WorkerPid))),
+        "1 outstanding pull_data"
+    ),
+
+    %% send pull ack from server
+    PullAck = semtech_udp:pull_ack(Token),
+    ok = gen_udp:send(RcvSocket, Address, Port, PullAck),
+
+    %% pull_data has been acked
+    ok = test_utils:wait_until(fun() ->
+        0 == maps:size(element(6, sys:get_state(WorkerPid)))
+    end),
+
+    %% ensure url was resolved
+    ?assertEqual(TestURL, meck:capture(first, inet, gethostbyname, '_', 1)),
+
+    meck:unload(),
 
     ok.
 
@@ -338,13 +439,18 @@ gateway_dest_redirect_test(_Config) ->
     %% should not chat with this worker any longer.
     Self = self(),
     meck:new(hpr_gwmp_redirect_worker),
-    meck:expect(hpr_gwmp_redirect_worker, handle_info, fun({udp, _, _, _, _} = _A, _B) ->
-        Self ! {fail, no_more_udp},
-        meck:exception(error, no_more_udp)
-    end),
+
+    meck:expect(
+        hpr_gwmp_redirect_worker,
+        handle_info,
+        fun({udp, _Socket, _Address, _Port, IncomingData} = _A, State) ->
+            Self ! {fail, {no_more_udp, semtech_id_atom(IncomingData)}},
+            {noreply, State}
+        end
+    ),
 
     receive
-        {fail, no_more_udp} -> ct:fail(please_no_more_push_data)
+        {fail, X} -> ct:fail({please_no_more_push_data, X})
     after timer:seconds(1) -> ok
     end,
 
@@ -361,13 +467,16 @@ gateway_dest_redirect_test(_Config) ->
 %% ===================================================================
 
 test_route(Port) ->
+    test_route(<<"127.0.0.1">>, Port).
+
+test_route(Host, Port) ->
     hpr_route:new(#{
         net_id => 1337,
         devaddr_ranges => [],
         euis => [],
         oui => 42,
         server => #{
-            host => <<"127.0.0.1">>,
+            host => Host,
             port => Port,
             protocol => {gwmp, #{mapping => []}}
         }
@@ -408,7 +517,7 @@ fake_join_up_packet() ->
             <<0, 139, 222, 157, 101, 233, 17, 95, 30, 219, 224, 30, 233, 253, 104, 189, 10, 37, 23,
                 110, 239, 137, 95>>,
         timestamp = 620124,
-        rssi = 112,
+        rssi = -120,
         frequency = 903_900_024,
         datarate = 'SF10BW125',
         snr = 5.5,

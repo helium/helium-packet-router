@@ -12,6 +12,7 @@
 -behaviour(gen_server).
 
 -include("semtech_udp.hrl").
+-include_lib("kernel/include/inet.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -50,7 +51,8 @@
     pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
     shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()},
-    dest_remap = #{} :: #{socket_dest() => socket_dest()}
+    dest_remap = #{} :: #{socket_dest() => socket_dest()},
+    addr_resolutions = #{} :: #{socket_dest() => socket_dest()}
 }).
 
 %% ------------------------------------------------------------------
@@ -82,8 +84,8 @@ init(Args) ->
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
     lager:md([
-        {gateway_mac,
-            erlang:binary_to_list(binary:encode_hex(hpr_utils:pubkeybin_to_mac(PubKeyBin)))},
+        {gateway, hpr_utils:gateway_name(PubKeyBin)},
+        {gateway_mac, hpr_utils:gateway_mac(PubKeyBin)},
         {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
 
@@ -237,7 +239,7 @@ handle_udp(
                         State0;
                     {DestMap1, Resend} ->
                         {{A, B, C, D}, Port} = DataSrc,
-                        Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
+                        Key = {{A, B, C, D}, Port},
                         ?MODULE:push_data(self(), Resend, Stream, maps:get(Key, DestMap1)),
                         State0#state{dest_remap = DestMap1}
                 end;
@@ -398,11 +400,10 @@ send_tx_ack(
 ) ->
     {UpdatedMap :: map(), {Token :: binary(), Packet :: binary()}}
     | noop.
-maybe_remap_dest(Map, {{A, B, C, D}, Port}, <<"REMAP: ", Data/binary>>) ->
+maybe_remap_dest(Map, {_Address, _Port} = Key, <<"REMAP: ", Data/binary>>) ->
     #{<<"new_dest">> := New, <<"packet">> := Packet0} = jsx:decode(Data, [return_maps]),
     %% NOTE: binaries don't encode 1:1, so we convert to list.
     Packet = erlang:list_to_binary(Packet0),
-    Key = {lists:flatten(io_lib:format("~p.~p.~p.~p", [A, B, C, D])), Port},
     Token = semtech_udp:token(Packet),
     {Map#{Key => hpr_protocol_gwmp:route_to_dest(New)}, {Token, Packet}};
 maybe_remap_dest(_, _, _) ->
@@ -419,7 +420,12 @@ maybe_remap_dest(_, _, _) ->
     SocketDest :: socket_dest(),
     State :: #state{}
 ) -> #state{}.
-maybe_send_pull_data(SocketDest, #state{pull_data = PullDataMap} = State) ->
+maybe_send_pull_data(
+    SocketDest0,
+    #state{pull_data = PullDataMap, addr_resolutions = AddrResolutions0} = State0
+) ->
+    {SocketDest, AddrResolutions} = maybe_resolve_addr(SocketDest0, AddrResolutions0),
+    State = State0#state{addr_resolutions = AddrResolutions},
     case maps:get(SocketDest, PullDataMap, undefined) of
         undefined ->
             #state{
@@ -437,7 +443,11 @@ maybe_send_pull_data(SocketDest, #state{pull_data = PullDataMap} = State) ->
             of
                 {ok, RefAndToken} ->
                     State#state{
-                        pull_data = maps:put(SocketDest, RefAndToken, PullDataMap)
+                        pull_data = maps:put(
+                            SocketDest,
+                            RefAndToken,
+                            PullDataMap
+                        )
                     };
                 {error, Reason} ->
                     lager:warning(
@@ -453,3 +463,45 @@ maybe_send_pull_data(SocketDest, #state{pull_data = PullDataMap} = State) ->
 -spec udp_send(gen_udp:socket(), socket_dest(), binary()) -> ok | {error, any()}.
 udp_send(Socket, {Address, Port}, Data) ->
     gen_udp:send(Socket, Address, Port, Data).
+
+%%%-------------------------------------------------------------------
+%% @doc
+%%
+%% We get Addresses as strings, but they are handled as `inet:ip_address()'
+%% which is a tuple of numbers.
+%%
+%% So we attempt to clean provided Addresses. If we received a hostname, we will
+%% try to resolve it 1 time into the IP Address.
+%%
+%% Otherwise we carry on with the string form, and there will be warnings in the
+%% logs.
+%% @end
+%%%-------------------------------------------------------------------
+-spec maybe_resolve_addr({string(), inet:port_number()}, IpResolutions :: map()) ->
+    {{string() | inet:ip_address(), inet:port_number()}, map()}.
+maybe_resolve_addr({Addr, Port} = Dest, AddrResolutions) ->
+    case maps:get(Dest, AddrResolutions, undefined) of
+        undefined ->
+            New =
+                case inet:parse_address(Addr) of
+                    {ok, IPAddr} ->
+                        {IPAddr, Port};
+                    {error, _} ->
+                        {resolve_addr(Addr), Port}
+                end,
+            {New, AddrResolutions#{Dest => New}};
+        Resolved ->
+            {Resolved, AddrResolutions}
+    end.
+
+resolve_addr(Addr) ->
+    case inet:gethostbyname(Addr) of
+        {ok, #hostent{h_addr_list = [IPAddr]}} ->
+            IPAddr;
+        {ok, #hostent{h_addr_list = [IPAddr | _]}} ->
+            lager:info([{addr, Addr}], "multiple IPs for address, using the first"),
+            IPAddr;
+        {error, Err} ->
+            lager:warning([{err, Err}, {addr, Addr}], "could not resolve hostname"),
+            Addr
+    end.
