@@ -131,7 +131,7 @@ handle_cast(
         send_data_timer = DataTimeout
     } = State0
 ) ->
-    lager:info("packet delivery after data sent [send_data_timer: ~p]", [DataTimeout]),
+    lager:debug("packet delivery after data sent [send_data_timer: ~w]", [DataTimeout]),
     {ok, ShutdownTimerRef1} = maybe_schedule_shutdown(ShutdownTimerRef0),
     {noreply, State0#state{shutdown_timer_ref = ShutdownTimerRef1}};
 handle_cast(_Msg, State) ->
