@@ -8,12 +8,14 @@
             interval_duration => 300000,
             write_dir => "/var/data/hpr/tmp/",
             max_file_size => 50_000_000,
-            upload_window => 900000
+            upload_window => 900000,
+            retry_sleep_time => 60000,
+            max_upload_retries => 5
         }},
         {config_worker, #{
             host => "${HPR_CONFIG_WORKER_HOST}",
             port => "${HPR_CONFIG_WORKER_PORT:-8080}",
-            file_backup_path => "/var/data/config_worker.backup"
+            file_backup_path => "/var/data/hpr/config_worker.backup"
         }}
     ]},
     {grpcbox, [

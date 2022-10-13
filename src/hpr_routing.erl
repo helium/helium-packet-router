@@ -92,7 +92,6 @@ deliver_packet(Packet, [Route | Routes]) ->
         "delivering packet to ~s",
         [hpr_route:lns(Route)]
     ),
-    hpr_packet_reporter:report_packet(Packet, Route),
     Resp =
         try
             case Protocol of
@@ -115,6 +114,7 @@ deliver_packet(Packet, [Route | Routes]) ->
         end,
     case Resp of
         ok ->
+            hpr_packet_reporter:report_packet(Packet, Route),
             ok;
         {error, Err} ->
             lager:warning([{protocol, Protocol}], "error ~p", [Err])

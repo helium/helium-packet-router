@@ -17,6 +17,9 @@
     stop_report_interval/0
 ]).
 
+%% Exported to allow testing
+-export([handle_upload_retry/2]).
+
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
 %% ------------------------------------------------------------------
@@ -32,11 +35,6 @@
 -define(ETS, hpr_packet_report_ets).
 
 -define(FILE_WRITE_OPTIONS, [write, raw, binary, compressed]).
-%% Up to 5 retries, 1 minute sleep
--define(RETRY_SLEEP_TIME, 60000).
--define(AWS_RETRY_OPTIONS, [
-    {retry_options, {exponential_with_jitter, {5, ?RETRY_SLEEP_TIME, ?RETRY_SLEEP_TIME}}}
-]).
 
 -record(state, {
     aws_client :: aws_client:aws_client(),
@@ -47,9 +45,13 @@
     interval_duration :: non_neg_integer() | undefined,
     upload_window :: non_neg_integer(),
     upload_window_start_time :: non_neg_integer(),
+    upload_retries :: map(),
+    retry_sleep_time :: non_neg_integer(),
+    max_upload_retries :: non_neg_integer(),
     bucket :: binary()
 }).
 
+-type state() :: #state{}.
 -type interval_duration_ms() :: non_neg_integer().
 -type timestamp_ms() :: non_neg_integer().
 
@@ -62,6 +64,8 @@
     write_dir => string(),
     max_file_size => integer(),
     upload_window => timestamp_ms(),
+    retry_sleep_time => timestamp_ms(),
+    max_upload_retries => non_neg_integer(),
     localstack_host => binary(),
     localstack_port => binary()
 }.
@@ -112,7 +116,9 @@ init(
         max_file_size := MaxFileSize,
         interval_duration := IntervalDuration,
         upload_window := UploadWindow,
-        bucket := Bucket
+        bucket := Bucket,
+        retry_sleep_time := RetrySleepTime,
+        max_upload_retries := MaxUploadRetries
     } = Args
 ) ->
     AWSClient = setup_aws(Args),
@@ -128,6 +134,9 @@ init(
         interval_duration = IntervalDuration,
         upload_window = UploadWindow,
         upload_window_start_time = erlang:system_time(millisecond),
+        upload_retries = #{},
+        retry_sleep_time = RetrySleepTime,
+        max_upload_retries = MaxUploadRetries,
         bucket = Bucket
     }}.
 
@@ -144,27 +153,41 @@ handle_cast(
         upload_window = UploadWindow
     }
 ) ->
-    {ok, FileSize} = handle_write(FilePath, MaxFileSize, ?FILE_WRITE_OPTIONS),
+    try
+        {ok, FileSize} = handle_write(FilePath, MaxFileSize, ?FILE_WRITE_OPTIONS),
 
-    case FileSize >= MaxFileSize orelse upload_window_elapsed(WindowStartTime, UploadWindow) of
-        true ->
-            ?MODULE:upload_packets(FilePath),
-            {noreply, State#state{file_path = generate_file_name(WriteDir)}};
-        false ->
-            {noreply, State}
+        case FileSize >= MaxFileSize orelse upload_window_elapsed(WindowStartTime, UploadWindow) of
+            true ->
+                ?MODULE:upload_packets(FilePath),
+                {noreply, State#state{file_path = generate_file_name(WriteDir)}};
+            false ->
+                {noreply, State}
+        end
+    catch
+        _:file_error:_ ->
+            {noreply, State#state{file_path = generate_file_name(WriteDir)}}
     end;
-handle_cast({upload_packets, FilePath}, State = #state{aws_client = AWSClient, bucket = Bucket}) ->
+handle_cast(
+    {upload_packets, FilePath},
+    State = #state{aws_client = AWSClient, bucket = Bucket}
+) ->
     UploadTimestamp = erlang:system_time(millisecond),
     FileName = list_to_binary("packetreport." ++ integer_to_list(UploadTimestamp) ++ ".gz"),
-
-    case upload_file(AWSClient, list_to_binary(FilePath), FileName, Bucket) of
-        {ok, _} ->
-            file:delete(FilePath);
-        Error ->
-            lager:warning("packet reporter failed to upload: ~p~n", [Error]),
-            error
-    end,
-    {noreply, State#state{upload_window_start_time = UploadTimestamp}};
+    try
+        {ok, UpdatedState} =
+            case handle_upload(AWSClient, list_to_binary(FilePath), FileName, Bucket) of
+                {ok, _} ->
+                    file:delete(FilePath),
+                    clear_retry_state(FilePath, State);
+                Error ->
+                    lager:warning("packet reporter failed to upload: ~p~n", [Error]),
+                    ?MODULE:handle_upload_retry(FilePath, State)
+            end,
+        {noreply, UpdatedState#state{upload_window_start_time = UploadTimestamp}}
+    catch
+        _:file_error:_ ->
+            {noreply, State}
+    end;
 handle_cast({start_interval, IntervalDuration}, State = #state{report_interval = ReportInterval}) ->
     {ok, ReportInterval2} = handle_restart_interval(ReportInterval, IntervalDuration),
     {noreply, State#state{report_interval = ReportInterval2, interval_duration = IntervalDuration}};
@@ -195,36 +218,41 @@ terminate(
 %%%===================================================================
 
 -spec handle_write(FilePath :: string(), MaxFileSize :: integer(), WriteOptions :: [atom()]) ->
-    {ok, FileSize :: integer()}.
+    {ok, FileSize :: integer()} | {error, Error :: term}.
 
 handle_write(FilePath, MaxFileSize, WriteOptions) ->
     WriteTimestamp = erlang:system_time(millisecond),
-    {ok, S} = open_tmp_file(FilePath, WriteOptions),
-    Data = get_packets_by_timestamp(WriteTimestamp),
+    case file:open(FilePath, WriteOptions) of
+        {ok, S} ->
+            Data = get_packets_by_timestamp(WriteTimestamp),
 
-    lists:foreach(
-        fun(Packet) ->
-            PacketSize = encode_packet_size(Packet),
-            file:write(S, [PacketSize, Packet])
-        end,
-        Data
-    ),
-    file:close(S),
+            lists:foreach(
+                fun(Packet) ->
+                    PacketSize = encode_packet_size(Packet),
+                    file:write(S, [PacketSize, Packet])
+                end,
+                Data
+            ),
+            file:close(S),
 
-    NumDeleted = delete_packets_by_timestamp(WriteTimestamp),
-    FileSize = filelib:file_size(FilePath),
+            NumDeleted = delete_packets_by_timestamp(WriteTimestamp),
+            FileSize = filelib:file_size(FilePath),
 
-    lager:info(
-        [
-            {packets_processed, length(Data)},
-            {packets_deleted, NumDeleted},
-            {file_size, FileSize},
-            {max_file_size, MaxFileSize}
-        ],
-        "packet reporter processing"
-    ),
+            lager:info(
+                [
+                    {packets_processed, length(Data)},
+                    {packets_deleted, NumDeleted},
+                    {file_size, FileSize},
+                    {max_file_size, MaxFileSize}
+                ],
+                "packet reporter processing"
+            ),
 
-    {ok, FileSize}.
+            {ok, FileSize};
+        {error, Error} ->
+            lager:error("failed to open tmp write file: ~p", [Error]),
+            throw(file_error)
+    end.
 
 -spec setup_aws(packet_reporter_opts()) -> aws_client:aws_client().
 setup_aws(#{
@@ -293,24 +321,21 @@ generate_file_name(WriteDir) ->
     FileName = "packetreport." ++ integer_to_list(Timestamp),
     filename:join(WriteDir, FileName).
 
--spec open_tmp_file(FilePath :: string(), WriteOptions :: [atom()]) ->
-    {ok, IODevice :: file:io_device()} | {error, Reason :: atom()}.
-open_tmp_file(FilePath, WriteOptions) ->
-    case file:open(FilePath, WriteOptions) of
-        {error, Error} ->
-            lager:error("failed to open tmp write file: ~p", [Error]);
-        IODevice ->
-            IODevice
-    end.
-
--spec upload_file(
+-spec handle_upload(
     AWSClient :: aws_client:aws_client(),
     FilePath :: binary(),
     S3FileName :: binary(),
     BucketName :: binary()
 ) -> {ok, Response :: term()} | {error, upload_failed}.
-upload_file(AWSClient, FilePath, S3FileName, BucketName) ->
-    {ok, Content} = file:read_file(FilePath),
+handle_upload(AWSClient, FilePath, S3FileName, BucketName) ->
+    {ok, Content} =
+        case file:read_file(FilePath) of
+            {error, Reason} ->
+                lager:error("failed to read file for upload: ~p", [Reason]),
+                throw(file_error);
+            Contents ->
+                Contents
+        end,
 
     case
         aws_s3:put_object(
@@ -319,8 +344,7 @@ upload_file(AWSClient, FilePath, S3FileName, BucketName) ->
             S3FileName,
             #{
                 <<"Body">> => Content
-            },
-            ?AWS_RETRY_OPTIONS
+            }
         )
     of
         {ok, _, Response} ->
@@ -338,13 +362,43 @@ upload_window_elapsed(StartTime, UploadWindow) ->
     Timestamp = erlang:system_time(millisecond),
     Timestamp - StartTime >= UploadWindow.
 
+-spec handle_upload_retry(FilePath :: string(), state()) -> {ok, state()}.
+handle_upload_retry(FilePath, #state{retry_sleep_time = RetrySleepTime} = State) ->
+    case should_retry_upload(FilePath, State) of
+        true ->
+            schedule_upload_retry(RetrySleepTime, FilePath),
+            increment_upload_retries(FilePath, State);
+        false ->
+            clear_retry_state(FilePath, State)
+    end.
+
+-spec should_retry_upload(FilePath :: string(), state()) -> boolean().
+should_retry_upload(FilePath, #state{
+    upload_retries = RetriesMap, max_upload_retries = MaxUploadRetries
+}) ->
+    maps:get(FilePath, RetriesMap, 0) < MaxUploadRetries.
+
+-spec clear_retry_state(FilePath :: string(), state()) -> {ok, state()}.
+clear_retry_state(FilePath, #state{upload_retries = UploadRetries} = State) ->
+    {ok, State#state{upload_retries = maps:remove(FilePath, UploadRetries)}}.
+
+-spec increment_upload_retries(FilePath :: string(), state()) -> {ok, state()}.
+increment_upload_retries(FilePath, #state{upload_retries = UploadRetries} = State) ->
+    RetryValue = maps:get(FilePath, UploadRetries, 0) + 1,
+    {ok, State#state{upload_retries = maps:put(FilePath, RetryValue, UploadRetries)}}.
+
+-spec schedule_upload_retry(RetrySleepTime :: interval_duration_ms(), FilePath :: string()) ->
+    {ok, timer:tref()} | {error, term()}.
+schedule_upload_retry(RetrySleepTime, FilePath) ->
+    timer:apply_after(RetrySleepTime, ?MODULE, upload_packets, [FilePath]).
+
 -spec get_packets_by_timestamp(Timestamp :: timestamp_ms()) -> [term()].
 get_packets_by_timestamp(Timestamp) ->
-    ets:select(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], ['$2']}]).
+    ets:select(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], ['$2']}]).
 
 -spec delete_packets_by_timestamp(Timestamp :: timestamp_ms()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
-    ets:select_delete(?ETS, [{{'$1', '$2'}, [{'=<', '$1', Timestamp}], [true]}]).
+    ets:select_delete(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], [true]}]).
 
 % ------------------------------------------------------------------
 % EUnit Tests
@@ -365,6 +419,9 @@ file_test() ->
 
     report_packet(Packet, Route),
     report_packet(Packet2, Route),
+
+    %% Ensure write doesn't occur on same timestamp as report
+    timer:sleep(100),
 
     handle_write(FilePath, MaxFileSize, ?FILE_WRITE_OPTIONS),
 
@@ -395,5 +452,44 @@ upload_window_elapsed_test() ->
 
     ?assertEqual(false, upload_window_elapsed(Timestamp, UploadWindow)),
     ?assertEqual(true, upload_window_elapsed(Timestamp - UploadWindow, UploadWindow)).
+
+upload_retry_state_test() ->
+    {ok, State} = ?MODULE:init(test_opts()),
+    FilePath = State#state.file_path,
+
+    ?assertEqual(#{}, State#state.upload_retries),
+    ?assertEqual(true, should_retry_upload(FilePath, State)),
+
+    {ok, State2} = increment_upload_retries(FilePath, State),
+
+    ?assertEqual(#{FilePath => 1}, State2#state.upload_retries),
+    ?assertEqual(true, should_retry_upload(FilePath, State2)),
+
+    {ok, State3} = increment_upload_retries(FilePath, State2),
+
+    ?assertEqual(#{FilePath => 2}, State3#state.upload_retries),
+    ?assertEqual(false, should_retry_upload(FilePath, State3)),
+
+    {ok, State4} = clear_retry_state(FilePath, State3),
+
+    ?assertEqual(#{}, State4#state.upload_retries),
+
+    ok.
+
+test_opts() ->
+    #{
+        access_key_id => <<"testkey">>,
+        secret_access_key => <<"testsecret">>,
+        region => <<"local">>,
+        bucket => <<"test-bucket">>,
+        interval_duration => 300000,
+        write_dir => "./data/tmp/",
+        max_file_size => 50_000_000,
+        upload_window => 900000,
+        retry_sleep_time => 100,
+        max_upload_retries => 2,
+        localstack_host => <<"localhost">>,
+        localstack_port => <<"4566">>
+    }.
 
 -endif.
