@@ -36,7 +36,7 @@
 -define(SERVER, ?MODULE).
 
 -type pull_data_map() :: #{
-    socket_dest() => #{timer_ref := reference(), token := binary()}
+    socket_dest() => acknowledged | #{timer_ref := reference(), token := binary()}
 }.
 
 -type socket_address() :: inet:socket_address() | inet:hostname().
@@ -346,7 +346,7 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
         {Token, #{token := Token, timer_ref := TimerRef}} ->
             _ = erlang:cancel_timer(TimerRef),
             _ = schedule_pull_data(PullDataTimer, DataSrc),
-            maps:remove(DataSrc, PullDataMap);
+            maps:put(DataSrc, acknowledged, PullDataMap);
         {_, undefined} ->
             lager:warning("pull_ack for unknown source"),
             PullDataMap;
