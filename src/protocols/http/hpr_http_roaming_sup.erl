@@ -6,12 +6,12 @@
 %%% @end
 %%% Created : 22. Sep 2022 1:11 PM
 %%%-------------------------------------------------------------------
--module(hpr_http_sup).
+-module(hpr_http_roaming_sup).
 -author("jonathanruttenberg").
 
 -behaviour(supervisor).
 
--include("hpr_roaming.hrl").
+-include("hpr_http_roaming.hrl").
 
 -type http_protocol() :: #http_protocol{}.
 
@@ -92,7 +92,7 @@ lookup_worker(WorkerKey) ->
 
 init([]) ->
     ets:new(?ETS, [public, named_table, set]),
-    {ok, {?FLAGS, [?WORKER(hpr_http_worker)]}}.
+    {ok, {?FLAGS, [?WORKER(hpr_http_roaming_worker)]}}.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions

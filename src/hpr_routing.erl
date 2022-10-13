@@ -130,7 +130,7 @@ deliver_packet(Packet, [Route | Routes]) ->
             {gwmp, _} ->
                 hpr_protocol_gwmp:send(Packet, self(), Route);
             {http_roaming, _} ->
-                hpr_http_router:send(Packet, self(), Route);
+                hpr_protocol_http_roaming:send(Packet, self(), Route);
             _OtherProtocol ->
                 lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
                 ok

@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author jonathanruttenberg
-%%% @copyright (C) 2022, <COMPANY>
+%%% @copyright (C) 2022, Nova Labs
 %%% @doc
 %%%
 %%% @end

@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 05. Oct 2022 11:31 AM
 %%%-------------------------------------------------------------------
--module(hpr_roaming_protocol_SUITE).
+-module(hpr_http_roaming_protocol_SUITE).
 -author("jonathanruttenberg").
 
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
@@ -50,7 +50,7 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(_TestCase, Config) ->
-    ok = hpr_roaming_utils:init_ets(),
+    ok = hpr_http_roaming_utils:init_ets(),
     Config.
 
 %%--------------------------------------------------------------------
@@ -65,9 +65,9 @@ end_per_testcase(_TestCase, _Config) ->
 
 class_c_downlink_test(_Config) ->
     TransactionID = 2176,
-    hpr_roaming_utils:insert_handler(TransactionID, self()),
+    hpr_http_roaming_utils:insert_handler(TransactionID, self()),
 
-    Token = hpr_roaming_protocol:make_uplink_token(
+    Token = hpr_http_roaming:make_uplink_token(
         TransactionID,
         'US915',
         erlang:system_time(millisecond),
@@ -94,15 +94,15 @@ class_c_downlink_test(_Config) ->
     },
 
     Self = self(),
-    ?assertMatch({downlink, #{}, {Self, _}, _Dest}, hpr_roaming_protocol:handle_message(Input)),
+    ?assertMatch({downlink, #{}, {Self, _}, _Dest}, hpr_http_roaming:handle_message(Input)),
 
     ok.
 
 chirpstack_join_accept_test(_Config) ->
     TransactionID = 473719436,
-    hpr_roaming_utils:insert_handler(TransactionID, self()),
+    hpr_http_roaming_utils:insert_handler(TransactionID, self()),
 
-    Token = hpr_roaming_protocol:make_uplink_token(
+    Token = hpr_http_roaming:make_uplink_token(
         TransactionID,
         'US915',
         erlang:system_time(millisecond),
@@ -141,16 +141,16 @@ chirpstack_join_accept_test(_Config) ->
         <<"VSExtension">> => #{}
     },
     Self = self(),
-    ?assertMatch({join_accept, {Self, _}}, hpr_roaming_protocol:handle_message(A)),
+    ?assertMatch({join_accept, {Self, _}}, hpr_http_roaming:handle_message(A)),
 
     ok.
 
 rx1_timestamp_test(_Config) ->
     TransactionID = 17,
-    ok = hpr_roaming_utils:insert_handler(TransactionID, self()),
+    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
 
     PacketTime = 0,
-    Token = hpr_roaming_protocol:make_uplink_token(
+    Token = hpr_http_roaming:make_uplink_token(
         TransactionID,
         'US915',
         PacketTime,
@@ -185,7 +185,7 @@ rx1_timestamp_test(_Config) ->
     lists:foreach(
         fun({RXDelay, ExpectedTimestamp}) ->
             Input = MakeInput(RXDelay),
-            {downlink, _, {_, DownlinkPacket}, _} = hpr_roaming_protocol:handle_xmitdata_req(Input),
+            {downlink, _, {_, DownlinkPacket}, _} = hpr_http_roaming:handle_xmitdata_req(Input),
             Timestamp = DownlinkPacket#packet_router_packet_down_v1_pb.rx1#window_v1_pb.timestamp,
             ?assertEqual(ExpectedTimestamp, Timestamp)
         end,
@@ -201,14 +201,14 @@ rx1_timestamp_test(_Config) ->
 
 rx1_downlink_test(_Config) ->
     TransactionID = 17,
-    ok = hpr_roaming_utils:insert_handler(TransactionID, self()),
+    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
 
     Payload = <<"0x60c04e26e020000000a754ba934840c3bc120989b532ee4613e06e3dd5d95d9d1ceb9e20b1f2">>,
     RXDelay = 2,
     FrequencyMhz = 925.1,
     DataRate = 10,
 
-    Token = hpr_roaming_protocol:make_uplink_token(
+    Token = hpr_http_roaming:make_uplink_token(
         TransactionID,
         'US915',
         erlang:system_time(millisecond),
@@ -236,14 +236,14 @@ rx1_downlink_test(_Config) ->
         }
     },
 
-    {downlink, _Output, {Pid, DownlinkPacket}, _Dest} = hpr_roaming_protocol:handle_xmitdata_req(
+    {downlink, _Output, {Pid, DownlinkPacket}, _Dest} = hpr_http_roaming:handle_xmitdata_req(
         Input
     ),
     ?assertEqual(Pid, self()),
 
     PayloadFromDownlinkPacket = DownlinkPacket#packet_router_packet_down_v1_pb.payload,
     ?assertEqual(
-        hpr_roaming_utils:hexstring_to_binary(Payload),
+        hpr_http_roaming_utils:hexstring_to_binary(Payload),
         PayloadFromDownlinkPacket
     ),
     FrequencyFromDownlinkPacket =
@@ -264,9 +264,9 @@ rx1_downlink_test(_Config) ->
 
 rx2_downlink_test(_Config) ->
     TransactionID = 17,
-    ok = hpr_roaming_utils:insert_handler(TransactionID, self()),
+    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
 
-    Token = hpr_roaming_protocol:make_uplink_token(
+    Token = hpr_http_roaming:make_uplink_token(
         TransactionID,
         'US915',
         erlang:system_time(millisecond),
@@ -298,7 +298,7 @@ rx2_downlink_test(_Config) ->
         }
     },
 
-    {downlink, _Output, {Pid, DownlinkPacket}, _Dest} = hpr_roaming_protocol:handle_xmitdata_req(
+    {downlink, _Output, {Pid, DownlinkPacket}, _Dest} = hpr_http_roaming:handle_xmitdata_req(
         Input
     ),
     ?assertEqual(Pid, self()),

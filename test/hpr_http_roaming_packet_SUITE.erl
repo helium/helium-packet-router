@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 06. Oct 2022 2:11 PM
 %%%-------------------------------------------------------------------
--module(hpr_roaming_packet_SUITE).
+-module(hpr_http_roaming_packet_SUITE).
 -author("jonathanruttenberg").
 
 -define(TRANSACTION_ETS, hpr_http_roaming_transaction_ets).
@@ -32,19 +32,12 @@
     insert_transaction_id/3,
     lookup_transaction_id/1,
     init_ets/0,
-    http_rcv/1,
-    frame_packet_uplink/7,
-    b0/4,
-    cipher/5, cipher/7,
-    ai/4,
-    binxor/3
+    http_rcv/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
 
 -include("lorawan_vars.hrl").
--include("../src/grpc/autogen/server/packet_router_pb.hrl").
--include("../src/grpc/autogen/server/config_pb.hrl").
 
 %% NetIDs
 -define(NET_ID_ACTILITY, 16#000002).
@@ -76,13 +69,13 @@
 %%--------------------------------------------------------------------
 
 all() ->
-    [].
+    [http_sync_uplink_join_test].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    ok = hpr_roaming_utils:init_ets(),
+    ok = hpr_http_roaming_utils:init_ets(),
     test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
@@ -101,7 +94,7 @@ http_sync_uplink_join_test(_Config) ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    {ok, _Pid} = hpr_http_sup:start_link(),
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
 
     ok = start_uplink_listener(),
 
@@ -111,7 +104,7 @@ http_sync_uplink_join_test(_Config) ->
 
     SendPacketFun = fun() ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = frame_packet_join(
+        PacketUp = test_utils:frame_packet_join(
             PubKeyBin,
             SigFun,
             DevEUI,
@@ -123,21 +116,23 @@ http_sync_uplink_join_test(_Config) ->
         {ok, PacketUp, GatewayTime}
     end,
 
-    Route = #config_route_v1_pb{
-        net_id = ?NET_ID_ACTILITY,
-        server = #config_server_v1_pb{
-            port = 3002,
-            host = <<"127.0.0.1">>,
-            protocol = {http_roaming, #config_protocol_http_roaming_v1_pb{}}
-        },
-        euis = [
-            #config_eui_v1_pb{
-                dev_eui = DevEUI,
-                app_eui = AppEUI
+    RouteMap = #{
+        net_id => ?NET_ID_ACTILITY,
+        devaddr_ranges => [],
+        euis => [
+            #{
+                dev_eui => DevEUI,
+                app_eui => AppEUI
             }
         ],
-        devaddr_ranges = []
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 3002,
+            protocol => {http_roaming, #{}}
+        }
     },
+
+    Route = hpr_route:new(RouteMap),
     hpr_config:insert_route(Route),
 
     lager:debug(
@@ -171,7 +166,7 @@ http_sync_uplink_join_test(_Config) ->
             <<"SenderID">> => <<"0xC00053">>,
             <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
             <<"MessageType">> => <<"PRStartReq">>,
-            <<"PHYPayload">> => hpr_roaming_utils:binary_to_hexstring(
+            <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
                 hpr_packet_up:payload(PacketUp)
             ),
             <<"ULMetaData">> => #{
@@ -182,7 +177,7 @@ http_sync_uplink_join_test(_Config) ->
                 ),
                 <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
                 <<"RFRegion">> => erlang:atom_to_binary(Region),
-                <<"RecvTime">> => hpr_roaming_utils:format_time(GatewayTime),
+                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime),
 
                 <<"FNSULToken">> => fun erlang:is_binary/1,
                 <<"GWCnt">> => 1,
@@ -192,7 +187,7 @@ http_sync_uplink_join_test(_Config) ->
                         <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_roaming_utils:binary_to_hexstring(
+                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -203,7 +198,7 @@ http_sync_uplink_join_test(_Config) ->
 
     ?assertMatch(
         {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
-        hpr_roaming_protocol:parse_uplink_token(Token)
+        hpr_http_roaming:parse_uplink_token(Token)
     ),
 
     %% 3. Expect a PRStartAns from the lns
@@ -220,7 +215,7 @@ http_sync_uplink_join_test(_Config) ->
                 <<"Result">> => #{
                     <<"ResultCode">> => <<"Success">>
                 },
-                <<"PHYPayload">> => hpr_roaming_utils:binary_to_hexstring(
+                <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
                     <<"join_accept_payload">>
                 ),
                 <<"DevEUI">> => <<"0x", DevEUIBin/binary>>,
@@ -240,9 +235,11 @@ http_sync_uplink_join_test(_Config) ->
 
     %% 4. Expect downlink for gateway
     ok = gateway_expect_downlink(fun(PacketDown) ->
-            ?assertEqual(true,
-                hpr_packet_up:frequency_mhz(PacketUp) ==
-                hpr_packet_down:rx1_frequency(PacketDown) / 1000000),
+        ?assertEqual(
+            true,
+            hpr_packet_up:frequency_mhz(PacketUp) ==
+                hpr_packet_down:rx1_frequency(PacketDown) / 1000000
+        ),
         ok
     end),
 
@@ -288,7 +285,7 @@ handle(Req, Args) ->
 
 %% ------------------------------------------------------------------
 %% NOTE: HPR starts up with a downlink listener
-%% using `hpr_roaming_downlink' as the handler.
+%% using `hpr_http_roaming_downlink_handler' as the handler.
 %%
 %% Tests using the HTTP protocol start 2 Elli listeners.
 %%
@@ -297,7 +294,7 @@ handle(Req, Args) ->
 %%
 %% The normal downlink listener is started, but ignored.
 %%
-%% The downlink handler in this file delegates to `hpr_roaming_downlink' while
+%% The downlink handler in this file delegates to `hpr_http_roaming_downlink_handler' while
 %% sending extra messages to the test running so the production code doesn't
 %% need to know about the tests.
 %% ------------------------------------------------------------------
@@ -320,13 +317,13 @@ handle('POST', [<<"downlink">>], Req, Args) ->
     case FlowType of
         async ->
             Forward ! {http_downlink_data, Body},
-            Res = hpr_roaming_downlink:handle(Req, Args),
+            Res = hpr_http_roaming_downlink_handler:handle(Req, Args),
             ct:pal("Downlink handler resp: ~p", [Res]),
             Forward ! {http_downlink_data_response, 200},
             {200, [], <<>>};
         sync ->
             ct:pal("sync handling downlink:~n~p", [Decoded]),
-            Response = hpr_roaming_downlink:handle(Req, Args),
+            Response = hpr_http_roaming_downlink_handler:handle(Req, Args),
 
             %% Response = {200, [], jsx:encode(ResponseBody)},
             Forward ! {http_msg, Body, Req, Response},
@@ -380,10 +377,10 @@ handle_event(_Event, _Data, _Args) ->
     ct:print("Elli Event (~p):~nData~n~p~nArgs~n~p", [_Event, _Data, _Args]),
     ok.
 
--spec flow_type_from(UplinkToken :: binary()) ->  sync | async.
+-spec flow_type_from(UplinkToken :: binary()) -> sync | async.
 flow_type_from(UplinkToken) ->
     {ok, _TransactionID, _Region, _PacketTime, _DestURLBin, FlowType} =
-        hpr_roaming_protocol:parse_uplink_token(UplinkToken),
+        hpr_http_roaming:parse_uplink_token(UplinkToken),
     FlowType.
 
 make_response_body(#{
@@ -407,7 +404,7 @@ make_response_body(#{
         'TransactionID' => TransactionID,
         'MessageType' => <<"PRStartAns">>,
         'Result' => #{'ResultCode' => <<"Success">>},
-        'PHYPayload' => hpr_roaming_utils:binary_to_hexstring(<<"join_accept_payload">>),
+        'PHYPayload' => hpr_http_roaming_utils:binary_to_hexstring(<<"join_accept_payload">>),
         'DevEUI' => DevEUI,
 
         %% 11.3.1 Passive Roaming Start
@@ -451,75 +448,6 @@ start_uplink_listener(Options) ->
     ]),
     ok.
 
-
-frame_packet_uplink(MType, PubKeyBin, SigFun, DevAddr, FCnt, _Routing, Options) ->
-    NwkSessionKey = <<81, 103, 129, 150, 35, 76, 17, 164, 210, 66, 210, 149, 120, 193, 251, 85>>,
-    AppSessionKey = <<245, 16, 127, 141, 191, 84, 201, 16, 111, 172, 36, 152, 70, 228, 52, 95>>,
-    Payload1 = frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt),
-
-    PacketUp = #packet_router_packet_up_v1_pb{
-        timestamp = maps:get(timestamp, Options, erlang:system_time(millisecond)),
-        payload = Payload1,
-        frequency = 923_300_000,
-        datarate = maps:get(datarate, Options, 'SF8BW125'),
-        rssi = maps:get(rssi, Options, 0),
-        snr = maps:get(snr, Options, 0.0),
-        region = 'US915',
-        gateway = PubKeyBin
-    },
-
-    hpr_packet_up:sign(PacketUp, SigFun).
-
-frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt) ->
-    MHDRRFU = 0,
-    Major = 0,
-    ADR = 0,
-    ADRACKReq = 0,
-    ACK = 0,
-    RFU = 0,
-    FOptsBin = <<>>,
-    FOptsLen = byte_size(FOptsBin),
-    <<Port:8/integer, Body/binary>> = <<1:8>>,
-    Data = reverse(
-        cipher(Body, AppSessionKey, MType band 1, DevAddr, FCnt)
-    ),
-    FCntSize = 16,
-    Payload0 =
-        <<MType:3, MHDRRFU:3, Major:2, DevAddr:4/binary, ADR:1, ADRACKReq:1, ACK:1, RFU:1,
-            FOptsLen:4, FCnt:FCntSize/little-unsigned-integer, FOptsBin:FOptsLen/binary,
-            Port:8/integer, Data/binary>>,
-    B0 = b0(MType band 1, DevAddr, FCnt, erlang:byte_size(Payload0)),
-    MIC = crypto:macN(cmac, aes_128_cbc, NwkSessionKey, <<B0/binary, Payload0/binary>>, 4),
-    <<Payload0/binary, MIC:4/binary>>.
-
-frame_packet_join(PubKeyBin, SigFun, DevEUI, AppEUI, Options) ->
-    Payload1 = frame_payload_join(DevEUI, AppEUI),
-
-    PacketUp = #packet_router_packet_up_v1_pb{
-        timestamp = maps:get(timestamp, Options, erlang:system_time(millisecond)),
-        payload = Payload1,
-        frequency = 923_300_000,
-        datarate = maps:get(datarate, Options, 'SF8BW125'),
-        rssi = maps:get(rssi, Options, 0),
-        snr = maps:get(snr, Options, 0.0),
-        region = 'US915',
-        gateway = PubKeyBin
-    },
-
-    hpr_packet_up:sign(PacketUp, SigFun).
-
-frame_payload_join(DevEUI, AppEUI) ->
-    DevNonce = crypto:strong_rand_bytes(2),
-    AppKey = <<245, 16, 127, 141, 191, 84, 201, 16, 111, 172, 36, 152, 70, 228, 52, 95>>,
-    MType = ?JOIN_REQ,
-    MHDRRFU = 0,
-    Major = 0,
-    Payload0 =
-        <<MType:3, MHDRRFU:3, Major:2, AppEUI:64/integer-unsigned-little,
-            DevEUI:64/integer-unsigned-little, DevNonce:2/binary>>,
-    MIC = crypto:macN(cmac, aes_128_cbc, AppKey, Payload0, 4),
-    <<Payload0/binary, MIC:4/binary>>.
-
 gateway_expect_downlink(ExpectFn) ->
     receive
         {http_reply, PacketDown} ->
@@ -545,42 +473,3 @@ http_rcv(Expected) ->
             ct:pal("FAILED got: ~n~p~n expected: ~n~p", [Got, Expected]),
             ct:fail({http_rcv, Reason})
     end.
-
-%% ------------------------------------------------------------------
-%%  Utils
-%% ------------------------------------------------------------------
-
--spec b0(integer(), binary(), integer(), integer()) -> binary().
-b0(Dir, DevAddr, FCnt, Len) ->
-    <<16#49, 0, 0, 0, 0, Dir, DevAddr:4/binary, FCnt:32/little-unsigned-integer, 0, Len>>.
-
-%% ------------------------------------------------------------------
-%% Lorawan Utils
-%% ------------------------------------------------------------------
-
-reverse(Bin) -> reverse(Bin, <<>>).
-
-reverse(<<>>, Acc) -> Acc;
-reverse(<<H:1/binary, Rest/binary>>, Acc) -> reverse(Rest, <<H/binary, Acc/binary>>).
-
-cipher(Bin, Key, Dir, DevAddr, FCnt) ->
-    cipher(Bin, Key, Dir, DevAddr, FCnt, 1, <<>>).
-
-cipher(<<Block:16/binary, Rest/binary>>, Key, Dir, DevAddr, FCnt, I, Acc) ->
-    Si = crypto:crypto_one_time(aes_128_ecb, Key, ai(Dir, DevAddr, FCnt, I), true),
-    cipher(Rest, Key, Dir, DevAddr, FCnt, I + 1, <<(binxor(Block, Si, <<>>))/binary, Acc/binary>>);
-cipher(<<>>, _Key, _Dir, _DevAddr, _FCnt, _I, Acc) ->
-    Acc;
-cipher(<<LastBlock/binary>>, Key, Dir, DevAddr, FCnt, I, Acc) ->
-    Si = crypto:crypto_one_time(aes_128_ecb, Key, ai(Dir, DevAddr, FCnt, I), true),
-    <<(binxor(LastBlock, binary:part(Si, 0, byte_size(LastBlock)), <<>>))/binary, Acc/binary>>.
-
--spec ai(integer(), binary(), integer(), integer()) -> binary().
-ai(Dir, DevAddr, FCnt, I) ->
-    <<16#01, 0, 0, 0, 0, Dir, DevAddr:4/binary, FCnt:32/little-unsigned-integer, 0, I>>.
-
--spec binxor(binary(), binary(), binary()) -> binary().
-binxor(<<>>, <<>>, Acc) ->
-    Acc;
-binxor(<<A, RestA/binary>>, <<B, RestB/binary>>, Acc) ->
-    binxor(RestA, RestB, <<(A bxor B), Acc/binary>>).

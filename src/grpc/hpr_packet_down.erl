@@ -4,7 +4,9 @@
 
 -export([
     to_record/1,
-    rx1_frequency/1
+    rx1_frequency/1,
+    window/1,
+    to_record/2
 ]).
 
 -type packet_map() :: client_packet_router_pb:packet_router_packet_down_v1_pb().
@@ -29,15 +31,22 @@ to_record(PacketMap) ->
         rx2 = window(maps:get(rx2, PacketMap, Template#packet_router_packet_down_v1_pb.rx1))
     }.
 
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
+-spec to_record(PacketMap :: packet_map() | map(), Rx2 :: #window_v1_pb{} | undefined) -> packet().
+to_record(PacketMap, Rx2) ->
+    Template = #packet_router_packet_down_v1_pb{},
+    #packet_router_packet_down_v1_pb{
+        payload = maps:get(payload, PacketMap, Template#packet_router_packet_down_v1_pb.payload),
+        rx1 = window(maps:get(rx1, PacketMap, Template#packet_router_packet_down_v1_pb.rx1)),
+        rx2 = Rx2
+    }.
 
 -spec window
     (undefined) -> undefined;
     (client_packet_router_pb:window_v1_pb() | map()) -> packet_router_pb:window_v1_pb().
 window(undefined) ->
     undefined;
+window(#window_v1_pb{} = Window) ->
+    Window;
 window(WindowMap) ->
     Template = #window_v1_pb{},
     #window_v1_pb{

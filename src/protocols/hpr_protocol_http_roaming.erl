@@ -6,13 +6,13 @@
 %%% @end
 %%% Created : 21. Sep 2022 12:10 PM
 %%%-------------------------------------------------------------------
--module(hpr_http_router).
+-module(hpr_protocol_http_roaming).
 -author("jonathanruttenberg").
 
--include("../grpc/autogen/server/config_pb.hrl").
--include("../grpc/autogen/server/packet_router_pb.hrl").
+%%-include("../grpc/autogen/server/config_pb.hrl").
+%%-include("../grpc/autogen/server/packet_router_pb.hrl").
 
--include("hpr_roaming.hrl").
+-include("hpr_http_roaming.hrl").
 
 -export([send/3]).
 
@@ -30,7 +30,7 @@ send(PacketUp, GatewayStream, Route) ->
 
     %%    start worker
     case
-        hpr_http_sup:maybe_start_worker(
+        hpr_http_roaming_sup:maybe_start_worker(
             WorkerKey,
             #{protocol => Protocol, net_id => hpr_route:net_id(Route)}
         )
@@ -41,7 +41,7 @@ send(PacketUp, GatewayStream, Route) ->
                 "failed to start http connector for ~p: ~p",
                 [hpr_utils:gateway_name(PubKeyBin), Err]
             ),
-            Err;
+            {error, worker_not_started};
         {ok, WorkerPid} ->
             lager:debug(
                 [
@@ -52,13 +52,14 @@ send(PacketUp, GatewayStream, Route) ->
                 [PacketType, RoutingInfo]
             ),
             GatewayTime = hpr_packet_up:timestamp(PacketUp),
-            hpr_http_worker:handle_packet(
+            hpr_http_roaming_worker:handle_packet(
                 WorkerPid, PacketUp, GatewayTime, GatewayStream
-            )
-    end,
-    ok.
+            ),
+            ok
+    end.
 
--spec worker_key_from(hpr_packet_up:packet(), hpr_route:route()) -> hpr_http_sup:worker_key().
+-spec worker_key_from(hpr_packet_up:packet(), hpr_route:route()) ->
+    hpr_http_roaming_sup:worker_key().
 worker_key_from(PacketUp, Route) ->
     %%    get phash
     Phash = packet_hash(PacketUp),
@@ -67,12 +68,13 @@ worker_key_from(PacketUp, Route) ->
     Protocol = protocol_from(Route),
     {Phash, Protocol}.
 
--spec protocol_from(hpr_route:route()) -> hpr_http_sup:http_protocol().
+-spec protocol_from(hpr_route:route()) -> hpr_http_roaming_sup:http_protocol().
 protocol_from(Route) ->
     Server = hpr_route:server(Route),
-    #config_server_v1_pb{host = IP, port = Port} = Server,
-    Protocol = hpr_route:protocol(Server),
-    {http_roaming, #config_protocol_http_roaming_v1_pb{}} = Protocol,
+    _Protocol = hpr_route:protocol(Server),
+
+    %%    When this protobuf definition is expanded, there will be functions to access the added fields.
+    %%    {http_roaming, #config_protocol_http_roaming_v1_pb{}} = Protocol,
 
     %%    return hard-coded values until the roaming protocol is updated
     #http_protocol{

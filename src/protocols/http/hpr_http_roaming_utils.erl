@@ -6,11 +6,10 @@
 %%% @end
 %%% Created : 17. Sep 2022 10:56 AM
 %%%-------------------------------------------------------------------
--module(hpr_roaming_utils).
+-module(hpr_http_roaming_utils).
 -author("jonathanruttenberg").
 
 -define(RESPONSE_STREAM_ETS, hpr_http_response_stream_ets).
--include_lib("helium_proto/include/packet_pb.hrl").
 
 %% API
 -export([
@@ -21,8 +20,7 @@
     hexstring_to_binary/1,
     hexstring_to_int/1,
     hexstring/2,
-    hex_to_binary/1,
-    make_routing_information_pb/1
+    hex_to_binary/1
 ]).
 
 -export([
@@ -89,12 +87,6 @@ hexstring_to_int(Bin) ->
 -spec hex_to_binary(binary()) -> binary().
 hex_to_binary(ID) ->
     <<<<Z>> || <<X:8, Y:8>> <= ID, Z <- [erlang:binary_to_integer(<<X, Y>>, 16)]>>.
-
--spec make_routing_information_pb(hpr_routing:routing_info()) -> #routing_information_pb{}.
-make_routing_information_pb({devaddr, DevAddr}) ->
-    #routing_information_pb{data = {devaddr, DevAddr}};
-make_routing_information_pb({eui, DevEUI, AppEUI}) ->
-    #routing_information_pb{data = {eui, #eui_pb{deveui = DevEUI, appeui = AppEUI}}}.
 
 -spec init_ets() -> ok.
 init_ets() ->

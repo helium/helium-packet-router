@@ -6,11 +6,11 @@
 %%% @end
 %%% Created : 19. Sep 2022 12:44 PM
 %%%-------------------------------------------------------------------
--module(hpr_roaming_downlink).
+-module(hpr_http_roaming_downlink_handler).
 -author("jonathanruttenberg").
 
 -include_lib("elli/include/elli.hrl").
--include("hpr_roaming.hrl").
+-include("hpr_http_roaming.hrl").
 
 -behaviour(elli_handler).
 
@@ -32,7 +32,7 @@ handle(Req, Args) ->
     Body = elli_request:body(Req),
     Decoded = jsx:decode(Body),
 
-    case hpr_roaming_protocol:handle_message(Decoded) of
+    case hpr_http_roaming:handle_message(Decoded) of
         ok ->
             {200, [], <<"OK">>};
         {error, _} = Err ->
@@ -88,7 +88,7 @@ handle_event(Event, _Data, _Args) ->
 
 -spec send_response(
     ResponseStream :: hpr_router_stream_manager:gateway_stream(),
-    DownlinkPacket :: hpr_roaming_protocol:downlink_packet()
+    DownlinkPacket :: hpr_http_roaming:downlink_packet()
 ) -> ok.
 send_response(ResponseStream, DownlinkPacket) ->
     lager:debug("sending response: ~p, pid: ~p", [DownlinkPacket, ResponseStream]),

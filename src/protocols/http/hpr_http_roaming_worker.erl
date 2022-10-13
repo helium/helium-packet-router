@@ -6,12 +6,12 @@
 %%% @end
 %%% Created : 21. Sep 2022 1:01 PM
 %%%-------------------------------------------------------------------
--module(hpr_http_worker).
+-module(hpr_http_roaming_worker).
 -author("jonathanruttenberg").
 
 -behavior(gen_server).
 
--include("hpr_roaming.hrl").
+-include("hpr_http_roaming.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -40,10 +40,10 @@
 -type address() :: binary().
 
 -record(state, {
-    net_id :: hpr_roaming_protocol:netid_num(),
+    net_id :: hpr_http_roaming:netid_num(),
     address :: address(),
     transaction_id :: integer(),
-    packets = [] :: list(hpr_roaming_protocol:packet()),
+    packets = [] :: list(hpr_http_roaming:packet()),
 
     send_data_timer = 200 :: non_neg_integer(),
     send_data_timer_ref :: undefined | reference(),
@@ -66,7 +66,7 @@ start_link(Args) ->
 -spec handle_packet(
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
-    GatewayTime :: hpr_roaming_protocol:gateway_time(),
+    GatewayTime :: hpr_http_roaming:gateway_time(),
     GatewayStream :: hpr_router_stream_manager:gateway_stream()
 ) -> ok | {error, any()}.
 handle_packet(Pid, PacketUp, GatewayTime, GatewayStream) ->
@@ -89,7 +89,7 @@ init(Args) ->
     lager:debug("~p init with ~p", [?MODULE, Args]),
     {ok, #state{
         net_id = NetID,
-        address = << Address/binary, <<"/">>/binary, <<"uplink">>/binary >>,
+        address = <<Address/binary, <<"/">>/binary, <<"uplink">>/binary>>,
         transaction_id = next_transaction_id(),
         send_data_timer = DedupeTimeout,
         flow_type = FlowType,
@@ -175,7 +175,7 @@ next_transaction_id() ->
 
 -spec do_handle_packet(
     PacketUp :: hpr_packet_up:packet(),
-    GatewayTime :: hpr_roaming_protocol:gateway_time(),
+    GatewayTime :: hpr_http_roaming:gateway_time(),
     GatewayStream :: hpr_router_stream_manager:gateway_stream(),
     State :: #state{}
 ) -> {ok, #state{}}.
@@ -184,7 +184,7 @@ do_handle_packet(
 ) ->
     State1 = State#state{
         packets = [
-            hpr_roaming_protocol:new_packet(PacketUp, GatewayTime, GatewayStream) | Packets
+            hpr_http_roaming:new_packet(PacketUp, GatewayTime, GatewayStream) | Packets
         ],
         routing_info = hpr_routing:routing_info_from(PacketUp)
     },
@@ -202,7 +202,7 @@ send_data(#state{
     send_data_timer = DedupWindow,
     routing_info = RoutingInfo
 }) ->
-    Data = hpr_roaming_protocol:make_uplink_payload(
+    Data = hpr_http_roaming:make_uplink_payload(
         NetID,
         Packets,
         TransactionID,
@@ -232,12 +232,14 @@ send_data(#state{
                     %% PRStartAns from that. XMitDataReq downlinks come out of
                     %% band to the HTTP listener.
                     Decoded = jsx:decode(Res),
-                    case hpr_roaming_protocol:handle_prstart_ans(Decoded) of
+                    case hpr_http_roaming:handle_prstart_ans(Decoded) of
                         {error, Err} ->
                             lager:error("error handling response: ~p", [Err]),
                             ok;
                         {join_accept, {GatewayStream, DownlinkPacket}} ->
-                            hpr_roaming_downlink:send_response(GatewayStream, DownlinkPacket);
+                            hpr_http_roaming_downlink_handler:send_response(
+                                GatewayStream, DownlinkPacket
+                            );
                         ok ->
                             ok
                     end;
