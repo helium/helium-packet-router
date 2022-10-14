@@ -129,7 +129,7 @@ test_scheduled_cleanup() ->
 
     timer:sleep(10),
 
-    %% This will cleanup in 25ms 
+    %% This will cleanup in 25ms
     ?assertEqual(ok, scheduled_cleanup(25)),
     ?assertEqual(2, ets:info(?ETS, size)),
 
