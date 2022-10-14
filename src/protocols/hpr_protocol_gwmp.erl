@@ -4,7 +4,6 @@
 
 -export([
     packet_up_to_push_data/2,
-    route_to_dest/1, route_to_dest/2,
     txpk_to_packet_down/1
 ]).
 
@@ -21,7 +20,8 @@ send(PacketUp, Stream, Route) ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
             PushData = ?MODULE:packet_up_to_push_data(PacketUp, erlang:system_time(millisecond)),
-            Dest = ?MODULE:route_to_dest(PacketUp, Route),
+            Region = hpr_packet_up:region(PacketUp),
+            Dest = hpr_route:gwmp_region_lns(Region, Route),
             try hpr_gwmp_worker:push_data(Pid, PushData, Stream, Dest) of
                 _ -> ok
             catch
@@ -101,29 +101,6 @@ packet_up_to_push_data(Up, GatewayTime) ->
         }
     ),
     {Token, Data}.
-
--spec route_to_dest(binary() | hpr_route:route()) ->
-    {Address :: string(), Port :: non_neg_integer()}.
-route_to_dest(Route) when erlang:is_binary(Route) ->
-    case binary:split(Route, <<":">>) of
-        [Address, Port] ->
-            {
-                erlang:binary_to_list(Address),
-                erlang:binary_to_integer(Port)
-            };
-        Err ->
-            throw({route_to_dest_err, Err})
-    end;
-route_to_dest(Route) ->
-    Lns = hpr_route:lns(Route),
-    route_to_dest(Lns).
-
--spec route_to_dest(Packet :: hpr_packet_up:packet(), Route :: hpr_route:route()) ->
-    {Address :: string(), Port :: non_neg_integer()}.
-route_to_dest(Packet, Route) ->
-    Region = hpr_packet_up:region(Packet),
-    Lns = hpr_route:region_lns(Region, Route),
-    route_to_dest(Lns).
 
 %% ------------------------------------------------------------------
 % EUnit tests

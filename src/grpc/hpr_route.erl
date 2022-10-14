@@ -11,7 +11,7 @@
     oui/1,
     max_copies/1,
     lns/1,
-    region_lns/2
+    gwmp_region_lns/2
 ]).
 
 -export([
@@ -86,22 +86,19 @@ lns(Route) ->
     Port = ?MODULE:port(Server),
     <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary>>.
 
--spec region_lns(Region :: atom(), Route :: route()) -> binary().
-region_lns(Region, Route) ->
+-spec gwmp_region_lns(Region :: atom(), Route :: route()) ->
+    {Address :: string(), Port :: inet:port_number()}.
+gwmp_region_lns(Region, Route) ->
     Server = ?MODULE:server(Route),
+    {gwmp, #config_protocol_gwmp_v1_pb{mapping = Mapping}} = ?MODULE:protocol(Server),
 
-    case ?MODULE:protocol(Server) of
-        {gwmp, #config_protocol_gwmp_v1_pb{mapping = Mapping}} ->
-            Host = ?MODULE:host(Server),
-            Port =
-                case lists:keyfind(Region, 2, Mapping) of
-                    false -> ?MODULE:port(Server);
-                    #config_protocol_gwmp_mapping_v1_pb{port = P} -> P
-                end,
-            <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary>>;
-        _ ->
-            ?MODULE:lns(Route)
-    end.
+    Host = ?MODULE:host(Server),
+    Port =
+        case lists:keyfind(Region, 2, Mapping) of
+            false -> ?MODULE:port(Server);
+            #config_protocol_gwmp_mapping_v1_pb{port = P} -> P
+        end,
+    {erlang:binary_to_list(Host), Port}.
 
 -spec host(Server :: server()) -> binary().
 host(Server) ->
@@ -316,10 +313,10 @@ region_lns_test() ->
                 }}
         }
     }),
-    ?assertEqual(<<"lsn.lora.com:81">>, ?MODULE:region_lns('US915', Route)),
-    ?assertEqual(<<"lsn.lora.com:82">>, ?MODULE:region_lns('EU868', Route)),
-    ?assertEqual(<<"lsn.lora.com:83">>, ?MODULE:region_lns('AS923_1', Route)),
-    ?assertEqual(<<"lsn.lora.com:80">>, ?MODULE:region_lns('AS923_2', Route)),
+    ?assertEqual({"lsn.lora.com", 81}, ?MODULE:gwmp_region_lns('US915', Route)),
+    ?assertEqual({"lsn.lora.com", 82}, ?MODULE:gwmp_region_lns('EU868', Route)),
+    ?assertEqual({"lsn.lora.com", 83}, ?MODULE:gwmp_region_lns('AS923_1', Route)),
+    ?assertEqual({"lsn.lora.com", 80}, ?MODULE:gwmp_region_lns('AS923_2', Route)),
     ok.
 
 oui_test() ->
