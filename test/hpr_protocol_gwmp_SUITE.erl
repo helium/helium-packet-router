@@ -23,8 +23,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
 
--define(REDIRECT_WORKER_PORT, 2777).
-
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
 %%--------------------------------------------------------------------
@@ -53,15 +51,6 @@ all() ->
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
-init_per_testcase(gateway_dest_redirect_test = TestCase, Config) ->
-    application:set_env(hpr, redirect_by_region, #{
-        port => ?REDIRECT_WORKER_PORT,
-        remap => #{
-            <<"US915">> => <<"127.0.0.1:1778">>,
-            <<"EU868">> => <<"127.0.0.1:1779">>
-        }
-    }),
-    test_utils:init_per_testcase(TestCase, Config);
 init_per_testcase(TestCase, Config) ->
     test_utils:init_per_testcase(TestCase, Config).
 
@@ -488,22 +477,44 @@ pull_ack_hostname_test(_Config) ->
     ok.
 
 gateway_dest_redirect_test(_Config) ->
-    Route = test_route(?REDIRECT_WORKER_PORT),
+    FallbackPort = 2777,
+    USPort = 1778,
+    EUPort = 1779,
 
-    {ok, USSocket} = gen_udp:open(1778, [binary, {active, true}]),
-    {ok, EUSocket} = gen_udp:open(1779, [binary, {active, true}]),
+    Route = hpr_route:new(#{
+        net_id => 1337,
+        devaddr_ranges => [],
+        euis => [],
+        oui => 42,
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => FallbackPort,
+            protocol =>
+                {gwmp, #{
+                    mapping => [
+                        #{region => 'US915', port => USPort},
+                        #{region => 'EU868', port => EUPort}
+                    ]
+                }}
+        }
+    }),
 
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    {ok, FallbackSocket} = gen_udp:open(FallbackPort, [binary, {active, true}]),
+    {ok, USSocket} = gen_udp:open(USPort, [binary, {active, true}]),
+    {ok, EUSocket} = gen_udp:open(EUPort, [binary, {active, true}]),
+
+    #{public := EUPubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    EUPubKeyBin = libp2p_crypto:pubkey_to_bin(EUPubKey),
+
+    %% This gateway will have no mapping, and should result in sending to the
+    %% fallback port.
+    #{public := CNPubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    CNPubKeyBin = libp2p_crypto:pubkey_to_bin(CNPubKey),
 
     %% NOTE: Hotspot needs to be changed because 1 hotspot can't send from 2 regions.
     USPacketUp = fake_join_up_packet(),
-    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = PubKeyBin, region = 'EU868'},
-
-    %% Start before sending the packet so we can reduce the pull_data_timer from default
-    {ok, _Pid} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{
-        pull_data_timer => 250
-    }),
+    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = EUPubKeyBin, region = 'EU868'},
+    CNPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = CNPubKeyBin, region = 'CN470'},
 
     %% US send packet
     hpr_protocol_gwmp:send(USPacketUp, unused_test_stream_handler, Route),
@@ -515,28 +526,19 @@ gateway_dest_redirect_test(_Config) ->
     {ok, _, _} = expect_pull_data(EUSocket, eu_redirected_pull_data),
     {ok, _} = expect_push_data(EUSocket, eu_redirected_push_data),
 
-    %% Meck the redirect worker _after_ it redirects the UDP workers, they
-    %% should not chat with this worker any longer.
-    Self = self(),
-    meck:new(hpr_gwmp_redirect_worker),
-
-    meck:expect(
-        hpr_gwmp_redirect_worker,
-        handle_info,
-        fun({udp, _Socket, _Address, _Port, IncomingData} = _A, State) ->
-            Self ! {fail, {no_more_udp, semtech_id_atom(IncomingData)}},
-            {noreply, State}
-        end
-    ),
-
+    %% No messages received on the fallback port
     receive
-        {fail, X} -> ct:fail({please_no_more_push_data, X})
-    after timer:seconds(1) -> ok
+        {udp, FallbackSocket, _Address, _Port, _Data} ->
+            ct:fail(expected_no_messages_on_fallback_port)
+    after 250 -> ok
     end,
 
-    meck:unload(hpr_gwmp_redirect_worker),
+    hpr_protocol_gwmp:send(CNPacketUp, unused_test_stream_handler, Route),
+    {ok, _, _} = expect_pull_data(FallbackSocket, fallback_pull_data),
+    {ok, _} = expect_push_data(FallbackSocket, fallback_push_data),
 
     %% cleanup
+    ok = gen_udp:close(FallbackSocket),
     ok = gen_udp:close(USSocket),
     ok = gen_udp:close(EUSocket),
 
