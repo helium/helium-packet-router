@@ -481,23 +481,14 @@ region_port_redirect_test(_Config) ->
     USPort = 1778,
     EUPort = 1779,
 
-    Route = hpr_route:new(#{
-        net_id => 1337,
-        devaddr_ranges => [],
-        euis => [],
-        oui => 42,
-        server => #{
-            host => <<"127.0.0.1">>,
-            port => FallbackPort,
-            protocol =>
-                {gwmp, #{
-                    mapping => [
-                        #{region => 'US915', port => USPort},
-                        #{region => 'EU868', port => EUPort}
-                    ]
-                }}
-        }
-    }),
+    Route = test_route(
+        <<"127.0.0.1">>,
+        FallbackPort,
+        [
+            #{region => 'US915', port => USPort},
+            #{region => 'EU868', port => EUPort}
+        ]
+    ),
 
     {ok, FallbackSocket} = gen_udp:open(FallbackPort, [binary, {active, true}]),
     {ok, USSocket} = gen_udp:open(USPort, [binary, {active, true}]),
@@ -553,6 +544,9 @@ test_route(Port) ->
     test_route(<<"127.0.0.1">>, Port).
 
 test_route(Host, Port) ->
+    test_route(Host, Port, []).
+
+test_route(Host, Port, RegionMapping) ->
     hpr_route:new(#{
         net_id => 1337,
         devaddr_ranges => [],
@@ -561,7 +555,7 @@ test_route(Host, Port) ->
         server => #{
             host => Host,
             port => Port,
-            protocol => {gwmp, #{mapping => []}}
+            protocol => {gwmp, #{mapping => RegionMapping}}
         },
         max_copies => 1
     }).
