@@ -2,10 +2,11 @@
 
 -export([
     init/0,
-    check/2,
-    delete/1
+    check/2
 ]).
 
+%% Table structure
+%% {Key :: binary(), Counter :: non_neg_integer() :: Timestamp :: integer()}
 -define(ETS, hpr_max_copies_ets).
 -define(MAX_COPIES, max_copies).
 -define(MAX_TOO_LOW, max_copies_max_too_low).
@@ -39,11 +40,6 @@ check(Key, Max) ->
             ok
     end.
 
--spec delete(Key :: binary()) -> ok.
-delete(Key) ->
-    _ = ets:delete(?ETS, Key),
-    ok.
-
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
@@ -53,20 +49,15 @@ scheduled_cleanup(Duration) ->
     erlang:spawn(
         fun() ->
             Time = erlang:system_time(millisecond) - Duration,
-            Expired = select_expired(Time),
-            lists:foreach(fun ?MODULE:delete/1, Expired),
-            lager:debug("expiring ~p Key", [erlang:length(Expired)]),
+            Deleted = ets:select_delete(?ETS, [
+                {{'_', '_', '$3'}, [{'<', '$3', Time}], [true]}
+            ]),
+            lager:debug("expiring ~w keys", [Deleted]),
             timer:sleep(?CLEANUP_SLEEP),
             ok = scheduled_cleanup(Duration)
         end
     ),
     ok.
-
--spec select_expired(Time :: non_neg_integer()) -> list(binary()).
-select_expired(Time) ->
-    ets:select(?ETS, [
-        {{'$1', '$2', '$3'}, [{'<', '$3', Time}], ['$1']}
-    ]).
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -82,7 +73,6 @@ all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         ?_test(test_max_too_low()),
         ?_test(test_check()),
-        ?_test(test_delete()),
         ?_test(test_scheduled_cleanup())
     ]}.
 
@@ -105,16 +95,6 @@ test_check() ->
     Max = 3,
     ?assertEqual(ok, ?MODULE:check(Key, Max)),
     ?assertEqual(ok, ?MODULE:check(Key, Max)),
-    ?assertEqual(ok, ?MODULE:check(Key, Max)),
-    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:check(Key, Max)),
-    ok.
-
-test_delete() ->
-    Key = crypto:strong_rand_bytes(16),
-    Max = 1,
-    ?assertEqual(ok, ?MODULE:check(Key, Max)),
-    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:check(Key, Max)),
-    ?assertEqual(ok, ?MODULE:delete(Key)),
     ?assertEqual(ok, ?MODULE:check(Key, Max)),
     ?assertEqual({error, ?MAX_COPIES}, ?MODULE:check(Key, Max)),
     ok.
