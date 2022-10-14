@@ -17,7 +17,7 @@
     pull_data_test/1,
     pull_ack_test/1,
     pull_ack_hostname_test/1,
-    gateway_dest_redirect_test/1
+    region_port_redirect_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -45,7 +45,7 @@ all() ->
         pull_data_test,
         pull_ack_test,
         pull_ack_hostname_test,
-        gateway_dest_redirect_test
+        region_port_redirect_test
     ].
 
 %%--------------------------------------------------------------------
@@ -476,7 +476,7 @@ pull_ack_hostname_test(_Config) ->
 
     ok.
 
-gateway_dest_redirect_test(_Config) ->
+region_port_redirect_test(_Config) ->
     FallbackPort = 2777,
     USPort = 1778,
     EUPort = 1779,
@@ -533,6 +533,7 @@ gateway_dest_redirect_test(_Config) ->
     after 250 -> ok
     end,
 
+    %% Send from the last region to make sure fallback port is chosen
     hpr_protocol_gwmp:send(CNPacketUp, unused_test_stream_handler, Route),
     {ok, _, _} = expect_pull_data(FallbackSocket, fallback_pull_data),
     {ok, _} = expect_push_data(FallbackSocket, fallback_push_data),
