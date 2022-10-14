@@ -36,7 +36,7 @@
 -define(SERVER, ?MODULE).
 
 -type pull_data_map() :: #{
-    socket_dest() => #{timer_ref := reference(), token := binary()}
+    socket_dest() => acknowledged | #{timer_ref := reference(), token := binary()}
 }.
 
 -type socket_address() :: inet:socket_address() | inet:hostname().
@@ -175,14 +175,7 @@ handle_info(
             lager:debug([{dest, SocketDest}], "not resending pull_data to remapped destination"),
             {noreply, State};
         false ->
-            case
-                send_pull_data(#{
-                    pubkeybin => PubKeyBin,
-                    socket => Socket,
-                    dest => SocketDest,
-                    pull_data_timer => PullDataTimer
-                })
-            of
+            case send_pull_data(PubKeyBin, Socket, SocketDest, PullDataTimer) of
                 {ok, RefAndToken} ->
                     PullDataMap1 = maps:put(SocketDest, RefAndToken, PullDataMap0),
                     {noreply, State#state{pull_data = PullDataMap1}};
@@ -290,20 +283,13 @@ new_push_and_shutdown(Token, Data, TimerRef, PushData, ShutdownTimeout) ->
     NewShutdownTimer = {ShutdownTimeout, schedule_shutdown(ShutdownTimeout)},
     {NewPushData, NewShutdownTimer}.
 
--spec send_pull_data(#{
-    pubkeybin := libp2p_crypto:pubkey_bin(),
-    socket := gen_udp:socket(),
-    dest := socket_dest(),
-    pull_data_timer := non_neg_integer()
-}) -> {ok, #{timer_ref := reference(), token := binary()}} | {error, any()}.
-send_pull_data(
-    #{
-        pubkeybin := PubKeyBin,
-        socket := Socket,
-        dest := SocketDest,
-        pull_data_timer := PullDataTimer
-    }
-) ->
+-spec send_pull_data(
+    PubKeybin :: libp2p_crypto:pubkey_bin(),
+    Socket :: gen_udp:socket(),
+    Dest :: socket_dest(),
+    PullDataTimer :: non_neg_integer()
+) -> {ok, #{timer_ref := reference(), token := binary()}} | {error, any()}.
+send_pull_data(PubKeyBin, Socket, SocketDest, PullDataTimer) ->
     Token = semtech_udp:token(),
     Data = semtech_udp:pull_data(Token, hpr_utils:pubkeybin_to_mac(PubKeyBin)),
     case udp_send(Socket, SocketDest, Data) of
@@ -346,7 +332,7 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
         {Token, #{token := Token, timer_ref := TimerRef}} ->
             _ = erlang:cancel_timer(TimerRef),
             _ = schedule_pull_data(PullDataTimer, DataSrc),
-            maps:remove(DataSrc, PullDataMap);
+            maps:put(DataSrc, acknowledged, PullDataMap);
         {_, undefined} ->
             lager:warning("pull_ack for unknown source"),
             PullDataMap;
@@ -370,21 +356,16 @@ handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream) ->
 
     %% Ack the downlink
     Token = semtech_udp:token(Data),
-    send_tx_ack(Token, #{pubkeybin => PubKeyBin, socket => Socket, socket_dest => DataSrc}),
+    send_tx_ack(Token, PubKeyBin, Socket, DataSrc),
     ok.
 
 -spec send_tx_ack(
-    binary(),
-    #{
-        pubkeybin := libp2p_crypto:pubkey_bin(),
-        socket := gen_udp:socket(),
-        socket_dest := socket_dest()
-    }
+    Token :: binary(),
+    PubKeyBin :: libp2p_crypto:pubkey_bin(),
+    Socket :: gen_udp:socket(),
+    SocketDest :: socket_dest()
 ) -> ok | {error, any()}.
-send_tx_ack(
-    Token,
-    #{pubkeybin := PubKeyBin, socket := Socket, socket_dest := SocketDest}
-) ->
+send_tx_ack(Token, PubKeyBin, Socket, SocketDest) ->
     Data = semtech_udp:tx_ack(Token, hpr_utils:pubkeybin_to_mac(PubKeyBin)),
     Reply = udp_send(Socket, SocketDest, Data),
     lager:debug(
@@ -433,14 +414,7 @@ maybe_send_pull_data(
                 socket = Socket,
                 pull_data_timer = PullDataTimer
             } = State,
-            case
-                send_pull_data(#{
-                    pubkeybin => PubKeyBin,
-                    socket => Socket,
-                    dest => SocketDest,
-                    pull_data_timer => PullDataTimer
-                })
-            of
+            case send_pull_data(PubKeyBin, Socket, SocketDest, PullDataTimer) of
                 {ok, RefAndToken} ->
                     State#state{
                         pull_data = maps:put(

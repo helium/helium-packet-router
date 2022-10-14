@@ -345,8 +345,22 @@ pull_ack_test(_Config) ->
 
     %% pull_data has been acked
     ok = test_utils:wait_until(fun() ->
-        0 == maps:size(element(6, sys:get_state(WorkerPid)))
+        [acknowledged] == maps:values(element(6, sys:get_state(WorkerPid)))
     end),
+
+    %% ===================================================================
+    %% Send another packet, there should not be another pull_data.
+    %% There's already a session started, and we'll send the pull_data on a cadence.
+
+    %% Sending the same packet again shouldn't matter here, we only want to
+    %% trigger the push_data/pull_data logic.
+    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+
+    ?assertEqual(
+        #{{{127, 0, 0, 1}, 1777} => acknowledged},
+        element(6, sys:get_state(WorkerPid)),
+        "0 outstanding pull_data"
+    ),
 
     ok.
 
@@ -397,7 +411,7 @@ pull_ack_hostname_test(_Config) ->
 
     %% pull_data has been acked
     ok = test_utils:wait_until(fun() ->
-        0 == maps:size(element(6, sys:get_state(WorkerPid)))
+        [acknowledged] == maps:values(element(6, sys:get_state(WorkerPid)))
     end),
 
     %% ensure url was resolved
