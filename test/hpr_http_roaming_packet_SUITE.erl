@@ -18,7 +18,8 @@
 ]).
 
 -export([
-    http_sync_uplink_join_test/1
+    http_sync_uplink_join_test/1,
+    http_sync_downlink_test/1
 ]).
 
 %% Elli callback functions
@@ -69,7 +70,10 @@
 %%--------------------------------------------------------------------
 
 all() ->
-    [http_sync_uplink_join_test].
+    [
+        http_sync_uplink_join_test,
+        http_sync_downlink_test
+    ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
@@ -245,6 +249,106 @@ http_sync_uplink_join_test(_Config) ->
 
     ok.
 
+http_sync_downlink_test(_Config) ->
+    ok = start_forwarder_listener(),
+
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    DownlinkPayload = <<"downlink_payload">>,
+    DownlinkTimestamp = erlang:system_time(millisecond),
+    DownlinkFreq = 915.0,
+    DownlinkDatr = 'SF10BW125',
+    TransactionID = 23,
+
+    Token = hpr_http_roaming:make_uplink_token(
+        TransactionID,
+        'US915',
+        DownlinkTimestamp,
+        <<"http://127.0.0.1:3002/uplink">>,
+        sync
+    ),
+    RXDelay = 1,
+
+    DownlinkBody = #{
+        'ProtocolVersion' => <<"1.1">>,
+        'SenderID' => hpr_http_roaming_utils:binary_to_hexstring(?NET_ID_ACTILITY),
+        'ReceiverID' => <<"0xC00053">>,
+        'TransactionID' => TransactionID,
+        'MessageType' => <<"XmitDataReq">>,
+        'PHYPayload' => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
+        'DLMetaData' => #{
+            'DevEUI' => <<"0xaabbffccfeeff001">>,
+            'DLFreq1' => DownlinkFreq,
+            'DataRate1' => 0,
+            'RXDelay1' => RXDelay,
+            'FNSULToken' => Token,
+            'GWInfo' => [
+                #{'ULToken' => libp2p_crypto:bin_to_b58(PubKeyBin)}
+            ],
+            'ClassMode' => <<"A">>,
+            'HiPriorityFlag' => false
+        }
+    },
+
+    %% NOTE: We need to insert the transaction and handler here because we're
+    %% only simulating downlinks. In a normal flow, these details would be
+    %% filled during the uplink process.
+    %%    ok = pp_config:insert_transaction_id(TransactionID, <<"http://127.0.0.1:3002/uplink">>, sync),
+    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+
+    RouteMap = #{
+        net_id => ?NET_ID_ACTILITY,
+        devaddr_ranges => [],
+        euis => [],
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 3002,
+            protocol => {http_roaming, #{}}
+        }
+    },
+    Route = hpr_route:new(RouteMap),
+    hpr_config:insert_route(Route),
+
+    {ok, 200, _Headers, Resp} = hackney:post(
+        <<"http://127.0.0.1:3003/downlink">>,
+        [{<<"Host">>, <<"localhost">>}],
+        jsx:encode(DownlinkBody),
+        [with_body]
+    ),
+
+    case
+        test_utils:match_map(
+            #{
+                <<"ProtocolVersion">> => <<"1.1">>,
+                <<"TransactionID">> => TransactionID,
+                <<"SenderID">> => <<"0xC00053">>,
+                <<"ReceiverID">> => hpr_http_roaming_utils:binary_to_hexstring(?NET_ID_ACTILITY),
+                <<"MessageType">> => <<"XmitDataAns">>,
+                <<"Result">> => #{
+                    <<"ResultCode">> => <<"Success">>
+                },
+                <<"DLFreq1">> => DownlinkFreq
+            },
+            jsx:decode(Resp)
+        )
+    of
+        true -> ok;
+        {false, Reason} -> ct:fail({http_response, Reason})
+    end,
+
+    ok = gateway_expect_downlink(fun(PacketDown) ->
+        ?assertEqual(DownlinkPayload, hpr_packet_down:payload(PacketDown)),
+        ?assertEqual(
+            hpr_http_roaming_utils:uint32(DownlinkTimestamp + (RXDelay * 1000000)),
+            hpr_packet_down:rx1_timestamp(PacketDown)
+        ),
+        ?assertEqual(DownlinkFreq, hpr_packet_down:rx1_frequency(PacketDown) / 1000000),
+        ?assertEqual(DownlinkDatr, hpr_packet_down:rx1_datarate(PacketDown)),
+        ok
+    end),
+    ok.
+
 -spec insert_transaction_id(integer(), binary(), atom()) -> ok.
 insert_transaction_id(TransactionID, Endpoint, FlowType) ->
     true = ets:insert(?TRANSACTION_ETS, {TransactionID, Endpoint, FlowType}),
@@ -302,18 +406,10 @@ handle('POST', [<<"downlink">>], Req, Args) ->
     Forward = maps:get(forward, Args),
     Body = elli_request:body(Req),
     #{
-        <<"TransactionID">> := TransactionID,
-        <<"ULMetaData">> := #{<<"FNSULToken">> := _Token}
+        <<"DLMetaData">> := #{<<"FNSULToken">> := Token}
     } = Decoded = jsx:decode(Body),
 
-    FlowType =
-        case lookup_transaction_id(TransactionID) of
-            {ok, _Endpoint, FT} ->
-                FT;
-            {error, _} ->
-                Forward ! {http_downlink_data_error, transaction_id_not_found}
-        end,
-
+    FlowType = flow_type_from(Token),
     case FlowType of
         async ->
             Forward ! {http_downlink_data, Body},
@@ -332,9 +428,7 @@ handle('POST', [<<"downlink">>], Req, Args) ->
 handle('POST', [<<"uplink">>], Req, Args) ->
     Forward = maps:get(forward, Args),
     Body = elli_request:body(Req),
-    #{<<"TransactionID">> := TransactionID} = jsx:decode(Body),
     #{
-        <<"TransactionID">> := TransactionID,
         <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
     } = jsx:decode(Body),
 
@@ -447,6 +541,18 @@ start_uplink_listener(Options) ->
         {min_acceptors, 1}
     ]),
     ok.
+
+start_downlink_listener() ->
+    {ok, _ElliPid} = elli:start_link([
+        {callback, ?MODULE},
+        {callback_args, #{forward => self()}},
+        {port, 3003},
+        {min_acceptors, 1}
+    ]),
+    ok.
+
+start_forwarder_listener() ->
+    start_downlink_listener().
 
 gateway_expect_downlink(ExpectFn) ->
     receive
