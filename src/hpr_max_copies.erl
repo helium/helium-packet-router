@@ -5,8 +5,6 @@
     check/2
 ]).
 
-%% Table structure
-%% {Key :: binary(), Counter :: non_neg_integer() :: Timestamp :: integer()}
 -define(ETS, hpr_max_copies_ets).
 -define(MAX_COPIES, max_copies).
 -define(MAX_TOO_LOW, max_copies_max_too_low).
@@ -15,6 +13,8 @@
 
 -spec init() -> ok.
 init() ->
+    %% Table structure
+    %% {Key :: binary(), Counter :: non_neg_integer() :: Timestamp :: integer()}
     ets:new(?ETS, [
         public,
         named_table,
