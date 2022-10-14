@@ -2,14 +2,14 @@
 
 -export([
     init/0,
-    check/2
+    check/2,
+    cleanup/1
 ]).
 
 -define(ETS, hpr_max_copies_ets).
 -define(MAX_COPIES, max_copies).
 -define(MAX_TOO_LOW, max_copies_max_too_low).
--define(CLEANUP, timer:hours(1)).
--define(CLEANUP_SLEEP, timer:hours(1)).
+-define(CLEANUP_TIME, timer:hours(1)).
 
 -spec init() -> ok.
 init() ->
@@ -21,7 +21,7 @@ init() ->
         set,
         {write_concurrency, true}
     ]),
-    ok = scheduled_cleanup(?CLEANUP),
+    ok = scheduled_cleanup(?CLEANUP_TIME),
     ok.
 
 -spec check(Key :: binary(), Max :: non_neg_integer()) ->
@@ -40,23 +40,24 @@ check(Key, Max) ->
             ok
     end.
 
+-spec cleanup(Duration :: non_neg_integer()) -> ok.
+cleanup(Duration) ->
+    erlang:spawn(fun() ->
+        Time = erlang:system_time(millisecond) - Duration,
+        Deleted = ets:select_delete(?ETS, [
+            {{'_', '_', '$3'}, [{'<', '$3', Time}], [true]}
+        ]),
+        lager:debug("expiring ~w keys", [Deleted])
+    end),
+    ok.
+
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
 -spec scheduled_cleanup(Duration :: non_neg_integer()) -> ok.
 scheduled_cleanup(Duration) ->
-    erlang:spawn(
-        fun() ->
-            Time = erlang:system_time(millisecond) - Duration,
-            Deleted = ets:select_delete(?ETS, [
-                {{'_', '_', '$3'}, [{'<', '$3', Time}], [true]}
-            ]),
-            lager:debug("expiring ~w keys", [Deleted]),
-            timer:sleep(?CLEANUP_SLEEP),
-            ok = scheduled_cleanup(Duration)
-        end
-    ),
+    {ok, _} = timer:apply_interval(Duration, ?MODULE, cleanup, [Duration]),
     ok.
 
 %% ------------------------------------------------------------------
@@ -73,6 +74,7 @@ all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         ?_test(test_max_too_low()),
         ?_test(test_check()),
+        ?_test(test_cleanup()),
         ?_test(test_scheduled_cleanup())
     ]}.
 
@@ -99,6 +101,23 @@ test_check() ->
     ?assertEqual({error, ?MAX_COPIES}, ?MODULE:check(Key, Max)),
     ok.
 
+test_cleanup() ->
+    Key1 = crypto:strong_rand_bytes(16),
+    Key2 = crypto:strong_rand_bytes(16),
+    Max = 1,
+    ?assertEqual(ok, ?MODULE:check(Key1, Max)),
+    ?assertEqual(ok, ?MODULE:check(Key2, Max)),
+
+    ?assertEqual(2, ets:info(?ETS, size)),
+
+    timer:sleep(10),
+    ?assertEqual(ok, ?MODULE:cleanup(10)),
+    timer:sleep(10),
+
+    ?assertEqual(0, ets:info(?ETS, size)),
+
+    ok.
+
 test_scheduled_cleanup() ->
     Key1 = crypto:strong_rand_bytes(16),
     Key2 = crypto:strong_rand_bytes(16),
@@ -108,11 +127,13 @@ test_scheduled_cleanup() ->
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
-    %% Wait 100ms and then run a cleanup for 10ms
-    timer:sleep(10),
-    ?assertEqual(ok, scheduled_cleanup(10)),
     timer:sleep(10),
 
+    %% This will cleanup in 25ms 
+    ?assertEqual(ok, scheduled_cleanup(25)),
+    ?assertEqual(2, ets:info(?ETS, size)),
+
+    timer:sleep(30),
     ?assertEqual(0, ets:info(?ETS, size)),
 
     ok.
