@@ -132,7 +132,7 @@ http_sync_uplink_join_test(_Config) ->
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,
-            protocol => {http_roaming, #{}}
+            protocol => {http_roaming, #{flow_type => sync}}
         }
     },
 
@@ -304,7 +304,7 @@ http_sync_downlink_test(_Config) ->
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,
-            protocol => {http_roaming, #{}}
+            protocol => {http_roaming, #{flow_type => sync}}
         }
     },
     Route = hpr_route:new(RouteMap),

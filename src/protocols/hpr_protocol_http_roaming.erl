@@ -70,8 +70,7 @@ worker_key_from(PacketUp, Route) ->
 
 -spec protocol_from(hpr_route:route()) -> hpr_http_roaming_sup:http_protocol().
 protocol_from(Route) ->
-    Server = hpr_route:server(Route),
-    _Protocol = hpr_route:protocol(Server),
+    FlowType = hpr_route:http_roaming_flow_type(Route),
 
     %%    When this protobuf definition is expanded, there will be functions to access the added fields.
     %%    {http_roaming, #config_protocol_http_roaming_v1_pb{}} = Protocol,
@@ -79,7 +78,7 @@ protocol_from(Route) ->
     %%    return hard-coded values until the roaming protocol is updated
     #http_protocol{
         protocol_version = pv_1_1,
-        flow_type = sync,
+        flow_type = FlowType,
         endpoint = hpr_route:lns(Route),
         dedupe_timeout = 250,
         auth_header = null

@@ -15,7 +15,8 @@
 -export([
     host/1,
     port/1,
-    protocol/1
+    protocol/1,
+    http_roaming_flow_type/1
 ]).
 
 -type route() :: #config_route_v1_pb{}.
@@ -91,6 +92,12 @@ port(Server) ->
 -spec protocol(Server :: server()) -> protocol().
 protocol(Server) ->
     Server#config_server_v1_pb.protocol.
+
+-spec http_roaming_flow_type(Route :: route()) -> sync | async | integer() | undefined.
+http_roaming_flow_type(Route) ->
+    Server = Route#config_route_v1_pb.server,
+    {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
+    HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.flow_type.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
