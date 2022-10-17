@@ -2,7 +2,7 @@
 
 -export([
     init/0,
-    check/2,
+    update_counter/2,
     cleanup/1
 ]).
 
@@ -24,11 +24,11 @@ init() ->
     ok = scheduled_cleanup(?CLEANUP_TIME),
     ok.
 
--spec check(Key :: binary(), Max :: non_neg_integer()) ->
+-spec update_counter(Key :: binary(), Max :: non_neg_integer()) ->
     ok | {error, ?MAX_TOO_LOW | ?MAX_COPIES}.
-check(_Key, Max) when Max =< 0 ->
+update_counter(_Key, Max) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
-check(Key, Max) ->
+update_counter(Key, Max) ->
     case
         ets:update_counter(
             ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
@@ -73,7 +73,7 @@ scheduled_cleanup(Duration) ->
 all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         ?_test(test_max_too_low()),
-        ?_test(test_check()),
+        ?_test(test_update_counter()),
         ?_test(test_cleanup()),
         ?_test(test_scheduled_cleanup())
     ]}.
@@ -89,24 +89,24 @@ foreach_cleanup(ok) ->
 test_max_too_low() ->
     Key = crypto:strong_rand_bytes(16),
     Max = 0,
-    ?assertEqual({error, ?MAX_TOO_LOW}, ?MODULE:check(Key, Max)),
+    ?assertEqual({error, ?MAX_TOO_LOW}, ?MODULE:update_counter(Key, Max)),
     ok.
 
-test_check() ->
+test_update_counter() ->
     Key = crypto:strong_rand_bytes(16),
     Max = 3,
-    ?assertEqual(ok, ?MODULE:check(Key, Max)),
-    ?assertEqual(ok, ?MODULE:check(Key, Max)),
-    ?assertEqual(ok, ?MODULE:check(Key, Max)),
-    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:check(Key, Max)),
+    ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:update_counter(Key, Max)),
     ok.
 
 test_cleanup() ->
     Key1 = crypto:strong_rand_bytes(16),
     Key2 = crypto:strong_rand_bytes(16),
     Max = 1,
-    ?assertEqual(ok, ?MODULE:check(Key1, Max)),
-    ?assertEqual(ok, ?MODULE:check(Key2, Max)),
+    ?assertEqual(ok, ?MODULE:update_counter(Key1, Max)),
+    ?assertEqual(ok, ?MODULE:update_counter(Key2, Max)),
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
@@ -122,8 +122,8 @@ test_scheduled_cleanup() ->
     Key1 = crypto:strong_rand_bytes(16),
     Key2 = crypto:strong_rand_bytes(16),
     Max = 1,
-    ?assertEqual(ok, ?MODULE:check(Key1, Max)),
-    ?assertEqual(ok, ?MODULE:check(Key2, Max)),
+    ?assertEqual(ok, ?MODULE:update_counter(Key1, Max)),
+    ?assertEqual(ok, ?MODULE:update_counter(Key2, Max)),
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
