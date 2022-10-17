@@ -142,14 +142,16 @@ single_lns_downlink_test(_Config) ->
         end,
 
     %% Send a downlink to the worker
-    {DownToken, DownPullResp} = fake_down_packet(),
-
-    %%    save these fake values to compare with what is received
     #{
-        data := Data,
-        freq := Freq,
-        datr := Datr
-    } = fake_down_map(),
+        token := DownToken,
+        pull_resp := DownPullResp,
+        %% save these fake values to compare with what is received
+        data := #{
+            data := Data,
+            freq := Freq,
+            datr := Datr
+        }
+    } = fake_down_packet(),
     ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
 
     %% receive the PacketRouterPacketDownV1 sent to grcp_stream
@@ -217,10 +219,8 @@ multi_lns_downlink_test(_Config) ->
 
     %% Send a downlink to the worker from LNS 1
     %% we don't care about the contents
-    {DownToken, DownPullResp} = fake_down_packet(),
+    #{token := DownToken, pull_resp := DownPullResp} = fake_down_packet(),
     ok = gen_udp:send(LNSSocket1, UDPWorkerAddress, DownPullResp),
-
-    %% XXX: Why don't we expect a grcp reply here?
 
     %% expect the ack for our downlink
     receive
@@ -552,11 +552,25 @@ fake_join_up_packet() ->
 fake_down_packet() ->
     DownMap = fake_down_map(),
     DownToken = semtech_udp:token(),
-    {DownToken, semtech_udp:pull_resp(DownToken, DownMap)}.
+    #{
+        token => DownToken,
+        pull_resp => semtech_udp:pull_resp(DownToken, DownMap),
+        data => DownMap
+    }.
+
+fake_class_c_down_packet() ->
+    DownMap0 = fake_down_map(),
+    DownMap = DownMap0#{imme => true},
+    DownToken = semtech_udp:token(),
+    #{
+        token => DownToken,
+        pull_resp => semtech_udp:pull_resp(DownToken, DownMap),
+        data => DownMap
+    }.
 
 fake_down_map() ->
     DownMap = #{
-        imme => true,
+        imme => false,
         freq => 904.1,
         rfch => 0,
         powe => 27,
