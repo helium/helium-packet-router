@@ -51,7 +51,6 @@
     pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
     shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()},
-    dest_remap = #{} :: #{socket_dest() => socket_dest()},
     addr_resolutions = #{} :: #{socket_dest() => socket_dest()}
 }).
 
@@ -110,18 +109,16 @@ handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(
-    {push_data, _Data = {Token, Payload}, Stream, SocketDest0},
+    {push_data, _Data = {Token, Payload}, Stream, SocketDest},
     #state{
         push_data = PushData,
         shutdown_timer = {ShutdownTimeout, ShutdownRef},
-        socket = Socket,
-        dest_remap = DestMap
+        socket = Socket
     } =
         State0
 ) ->
     _ = erlang:cancel_timer(ShutdownRef),
 
-    SocketDest = maps:get(SocketDest0, DestMap, SocketDest0),
     State = maybe_send_pull_data(SocketDest, State0),
     {_Reply, TimerRef} = send_push_data(Token, Payload, Socket, SocketDest),
 
@@ -165,27 +162,20 @@ handle_info(
         pubkeybin = PubKeyBin,
         socket = Socket,
         pull_data_timer = PullDataTimer,
-        pull_data = PullDataMap0,
-        dest_remap = Remap
+        pull_data = PullDataMap0
     } =
         State
 ) ->
-    case maps:is_key(SocketDest, Remap) of
-        true ->
-            lager:debug([{dest, SocketDest}], "not resending pull_data to remapped destination"),
-            {noreply, State};
-        false ->
-            case send_pull_data(PubKeyBin, Socket, SocketDest, PullDataTimer) of
-                {ok, RefAndToken} ->
-                    PullDataMap1 = maps:put(SocketDest, RefAndToken, PullDataMap0),
-                    {noreply, State#state{pull_data = PullDataMap1}};
-                {error, Reason} ->
-                    lager:warning(
-                        [{error, Reason}, {lns, SocketDest}],
-                        "could not send pull_data"
-                    ),
-                    {noreply, State}
-            end
+    case send_pull_data(PubKeyBin, Socket, SocketDest, PullDataTimer) of
+        {ok, RefAndToken} ->
+            PullDataMap1 = maps:put(SocketDest, RefAndToken, PullDataMap0),
+            {noreply, State#state{pull_data = PullDataMap1}};
+        {error, Reason} ->
+            lager:warning(
+                [{error, Reason}, {lns, SocketDest}],
+                "could not send pull_data"
+            ),
+            {noreply, State}
     end;
 handle_info(
     {?PULL_DATA_TIMEOUT_TICK, SocketDest},
@@ -220,37 +210,23 @@ handle_udp(
         pull_data = PullDataMap0,
         socket = Socket,
         response_stream = Stream,
-        pubkeybin = PubKeyBin,
-        dest_remap = DestMap0
+        pubkeybin = PubKeyBin
     } = State0
 ) ->
     State1 =
-        case Data of
-            <<"REMAP: ", _/binary>> ->
-                case maybe_remap_dest(DestMap0, DataSrc, Data) of
-                    noop ->
-                        State0;
-                    {DestMap1, Resend} ->
-                        {{A, B, C, D}, Port} = DataSrc,
-                        Key = {{A, B, C, D}, Port},
-                        ?MODULE:push_data(self(), Resend, Stream, maps:get(Key, DestMap1)),
-                        State0#state{dest_remap = DestMap1}
-                end;
-            _ ->
-                case semtech_udp:identifier(Data) of
-                    ?PUSH_ACK ->
-                        PushData1 = handle_push_ack(Data, PushData0),
-                        State0#state{push_data = PushData1};
-                    ?PULL_ACK ->
-                        PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
-                        State0#state{pull_data = PullDataMap1};
-                    ?PULL_RESP ->
-                        ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream),
-                        State0;
-                    _Id ->
-                        lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
-                        State0
-                end
+        case semtech_udp:identifier(Data) of
+            ?PUSH_ACK ->
+                PushData1 = handle_push_ack(Data, PushData0),
+                State0#state{push_data = PushData1};
+            ?PULL_ACK ->
+                PullDataMap1 = handle_pull_ack(Data, DataSrc, PullDataMap0, PullDataTimer),
+                State0#state{pull_data = PullDataMap1};
+            ?PULL_RESP ->
+                ok = handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream),
+                State0;
+            _Id ->
+                lager:warning("got unknown identifier ~p for ~p", [_Id, Data]),
+                State0
         end,
     {noreply, State1}.
 
@@ -373,22 +349,6 @@ send_tx_ack(Token, PubKeyBin, Socket, SocketDest) ->
         [Token, Data, SocketDest, Reply]
     ),
     Reply.
-
--spec maybe_remap_dest(
-    Map :: map(),
-    SocketDest :: socket_dest(),
-    IncomingPayload :: binary()
-) ->
-    {UpdatedMap :: map(), {Token :: binary(), Packet :: binary()}}
-    | noop.
-maybe_remap_dest(Map, {_Address, _Port} = Key, <<"REMAP: ", Data/binary>>) ->
-    #{<<"new_dest">> := New, <<"packet">> := Packet0} = jsx:decode(Data, [return_maps]),
-    %% NOTE: binaries don't encode 1:1, so we convert to list.
-    Packet = erlang:list_to_binary(Packet0),
-    Token = semtech_udp:token(Packet),
-    {Map#{Key => hpr_protocol_gwmp:route_to_dest(New)}, {Token, Packet}};
-maybe_remap_dest(_, _, _) ->
-    noop.
 
 %%%-------------------------------------------------------------------
 %% @doc
