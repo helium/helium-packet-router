@@ -19,7 +19,8 @@
 
 -export([
     http_sync_uplink_join_test/1,
-    http_sync_downlink_test/1
+    http_sync_downlink_test/1,
+    http_async_uplink_join_test/1
 ]).
 
 %% Elli callback functions
@@ -28,11 +29,7 @@
     handle_event/3
 ]).
 
-%% downlink response ets
 -export([
-    insert_transaction_id/3,
-    lookup_transaction_id/1,
-    init_ets/0,
     http_rcv/1
 ]).
 
@@ -120,24 +117,7 @@ http_sync_uplink_join_test(_Config) ->
         {ok, PacketUp, GatewayTime}
     end,
 
-    RouteMap = #{
-        net_id => ?NET_ID_ACTILITY,
-        devaddr_ranges => [],
-        euis => [
-            #{
-                dev_eui => DevEUI,
-                app_eui => AppEUI
-            }
-        ],
-        server => #{
-            host => <<"127.0.0.1">>,
-            port => 3002,
-            protocol => {http_roaming, #{flow_type => sync}}
-        }
-    },
-
-    Route = hpr_route:new(RouteMap),
-    hpr_config:insert_route(Route),
+    uplink_test_route(DevEUI, AppEUI, sync),
 
     lager:debug(
         [
@@ -297,18 +277,7 @@ http_sync_downlink_test(_Config) ->
     %%    ok = pp_config:insert_transaction_id(TransactionID, <<"http://127.0.0.1:3002/uplink">>, sync),
     ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
 
-    RouteMap = #{
-        net_id => ?NET_ID_ACTILITY,
-        devaddr_ranges => [],
-        euis => [],
-        server => #{
-            host => <<"127.0.0.1">>,
-            port => 3002,
-            protocol => {http_roaming, #{flow_type => sync}}
-        }
-    },
-    Route = hpr_route:new(RouteMap),
-    hpr_config:insert_route(Route),
+    downlink_test_route(),
 
     {ok, 200, _Headers, Resp} = hackney:post(
         <<"http://127.0.0.1:3003/downlink">>,
@@ -349,32 +318,161 @@ http_sync_downlink_test(_Config) ->
     end),
     ok.
 
--spec insert_transaction_id(integer(), binary(), atom()) -> ok.
-insert_transaction_id(TransactionID, Endpoint, FlowType) ->
-    true = ets:insert(?TRANSACTION_ETS, {TransactionID, Endpoint, FlowType}),
-    ok.
+uplink_test_route(DevEUI, AppEUI, FlowType) ->
+    RouteMap = #{
+        net_id => ?NET_ID_ACTILITY,
+        devaddr_ranges => [],
+        euis => [
+            #{
+                dev_eui => DevEUI,
+                app_eui => AppEUI
+            }
+        ],
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 3002,
+            protocol => {http_roaming, #{flow_type => FlowType}}
+        }
+    },
+    Route = hpr_route:new(RouteMap),
+    hpr_config:insert_route(Route).
 
--spec lookup_transaction_id(integer()) -> {ok, binary(), atom()} | {error, routing_not_found}.
-lookup_transaction_id(TransactionID) ->
-    case ets:lookup(?TRANSACTION_ETS, TransactionID) of
-        [] -> {error, routing_not_found};
-        [{_, Endpoint, FlowType}] -> {ok, Endpoint, FlowType}
-    end.
+downlink_test_route() ->
+    RouteMap = #{
+        net_id => ?NET_ID_ACTILITY,
+        devaddr_ranges => [],
+        euis => [],
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 3002,
+            protocol => {http_roaming, #{flow_type => sync}}
+        }
+    },
+    Route = hpr_route:new(RouteMap),
+    hpr_config:insert_route(Route).
+
+http_async_uplink_join_test(_Config) ->
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
+    %%
+    %% Forwarder : HPR
+    %% Roamer    : partner-lns
+    %%
+    ok = start_forwarder_listener(),
+    ok = start_roamer_listener(),
+
+    %% 1. Get a gateway to send from
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    DevEUIBin = <<"AABBCCDDEEFF0011">>,
+    DevEUI = erlang:binary_to_integer(DevEUIBin, 16),
+    AppEUI = erlang:binary_to_integer(<<"1122334455667788">>, 16),
+
+    SendPacketFun = fun() ->
+        GatewayTime = erlang:system_time(millisecond),
+        PacketUp = test_utils:frame_packet_join(
+            PubKeyBin,
+            SigFun,
+            DevEUI,
+            AppEUI,
+            #{timestamp => GatewayTime}
+        ),
+        ok = hpr_routing:handle_packet(PacketUp),
+        {ok, PacketUp, GatewayTime}
+    end,
+
+    %% 2. load Roamer into the config
+    uplink_test_route(DevEUI, AppEUI, async),
+
+    %% 3. send packet
+    {ok, PacketUp, GatewayTime} = SendPacketFun(),
+    Region = hpr_packet_up:region(PacketUp),
+    PacketTime = hpr_packet_up:timestamp(PacketUp),
+
+    %% 4. Roamer receive http uplink
+    {ok, #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}}} = roamer_expect_uplink_data(
+        #{
+            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"DedupWindowSize">> => fun erlang:is_integer/1,
+            <<"TransactionID">> => fun erlang:is_number/1,
+            <<"SenderID">> => <<"0xC00053">>,
+            <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+            <<"MessageType">> => <<"PRStartReq">>,
+            <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
+                hpr_packet_up:payload(PacketUp)
+            ),
+            <<"ULMetaData">> => #{
+                <<"DevEUI">> => <<"0x", DevEUIBin/binary>>,
+                <<"DataRate">> => hpr_lorawan:datarate_to_index(
+                    Region,
+                    hpr_packet_up:datarate(PacketUp)
+                ),
+                <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
+                <<"RFRegion">> => erlang:atom_to_binary(Region),
+                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime),
+
+                <<"FNSULToken">> => fun erlang:is_binary/1,
+                <<"GWCnt">> => 1,
+                <<"GWInfo">> => [
+                    #{
+                        <<"RFRegion">> => erlang:atom_to_binary(Region),
+                        <<"RSSI">> => erlang:trunc(
+                            hpr_packet_up:rssi(PacketUp)
+                        ),
+                        <<"SNR">> => hpr_packet_up:snr(PacketUp),
+                        <<"DLAllowed">> => true,
+                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                            hpr_utils:pubkeybin_to_mac(PubKeyBin)
+                        )
+                    }
+                ]
+            }
+        }
+    ),
+
+    ?assertMatch(
+        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, async},
+        hpr_http_roaming:parse_uplink_token(Token)
+    ),
+
+    %% 5. Forwarder receive 200 response
+    ok = forwarder_expect_response(200),
+
+    %% 6. Forwarder receive http downlink
+    {ok, _Data} = forwarder_expect_downlink_data(#{
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"TransactionID">> => TransactionID,
+        <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
+        <<"ReceiverID">> => <<"0xC00053">>,
+        <<"MessageType">> => <<"PRStartAns">>,
+        <<"Result">> => #{
+            <<"ResultCode">> => <<"Success">>
+        },
+        <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(<<"join_accept_payload">>),
+        <<"DevEUI">> => <<"0x", DevEUIBin/binary>>,
+        <<"DLMetaData">> => #{
+            <<"DataRate1">> => fun erlang:is_integer/1,
+            <<"FNSULToken">> => Token,
+            <<"Lifetime">> => 0,
+            <<"DLFreq1">> => hpr_packet_up:frequency_mhz(PacketUp)
+        }
+    }),
+    %% 7. Roamer receive 200 response
+    ok = roamer_expect_response(200),
+
+    %% 8. Gateway receive downlink
+    ok = gateway_expect_downlink(fun(PacketDown) ->
+        ?assertEqual('SF9BW125', hpr_packet_down:rx1_datarate(PacketDown)),
+        ok
+    end),
+
+    ok.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
--spec init_ets() -> ok.
-init_ets() ->
-    ?TRANSACTION_ETS = ets:new(?TRANSACTION_ETS, [
-        public,
-        named_table,
-        set,
-        {read_concurrency, true},
-        {write_concurrency, true}
-    ]),
-    ok.
 
 handle(Req, Args) ->
     Method =
@@ -554,6 +652,9 @@ start_downlink_listener() ->
 start_forwarder_listener() ->
     start_downlink_listener().
 
+start_roamer_listener() ->
+    start_uplink_listener().
+
 gateway_expect_downlink(ExpectFn) ->
     receive
         {http_reply, PacketDown} ->
@@ -578,4 +679,57 @@ http_rcv(Expected) ->
         {false, Reason} ->
             ct:pal("FAILED got: ~n~p~n expected: ~n~p", [Got, Expected]),
             ct:fail({http_rcv, Reason})
+    end.
+
+roamer_expect_uplink_data(Expected) ->
+    {ok, Got} = roamer_expect_uplink_data(),
+    case test_utils:match_map(Expected, Got) of
+        true ->
+            {ok, Got};
+        {false, Reason} ->
+            ct:pal("FAILED got: ~n~p~n expected: ~n~p", [Got, Expected]),
+            ct:fail({roamer_expect_uplink_data, Reason})
+    end.
+
+roamer_expect_uplink_data() ->
+    receive
+        http_uplink_data -> ct:fail({http_uplink_data_err, no_payload});
+        {http_uplink_data, Payload} -> {ok, jsx:decode(Payload)}
+    after 1000 -> ct:fail(http_uplink_data_timeout)
+    end.
+
+forwarder_expect_response(Code) ->
+    receive
+        {http_uplink_data_response, Code} ->
+            ok;
+        {http_uplink_data_response, OtherCode} ->
+            ct:fail({http_uplink_data_response_err, [{expected, Code}, {got, OtherCode}]})
+    after 1000 -> ct:fail(http_uplink_data_200_response_timeout)
+    end.
+
+forwarder_expect_downlink_data(Expected) ->
+    {ok, Got} = forwarder_expect_downlink_data(),
+    case test_utils:match_map(Expected, Got) of
+        true ->
+            {ok, Got};
+        {false, Reason} ->
+            ct:pal("FAILED got: ~n~p~n expected: ~n~p", [Got, Expected]),
+            ct:fail({forwarder_expect_downlink_data, Reason})
+    end.
+
+forwarder_expect_downlink_data() ->
+    receive
+        http_downlink_data -> ct:fail({http_downlink_data, no_payload});
+        {http_downlink_data_error, Err} -> ct:fail(Err);
+        {http_downlink_data, Payload} -> {ok, jsx:decode(Payload)}
+    after 1000 -> ct:fail(http_downlink_data_timeout)
+    end.
+
+roamer_expect_response(Code) ->
+    receive
+        {http_downlink_data_response, Code} ->
+            ok;
+        {http_downlink_data_response, OtherCode} ->
+            ct:fail({http_downlink_data_response_err, [{expected, Code}, {got, OtherCode}]})
+    after 1000 -> ct:fail(http_downlink_data_200_response_timeout)
     end.
