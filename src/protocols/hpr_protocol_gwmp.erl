@@ -40,10 +40,15 @@ txpk_to_packet_down(TxPkBin) ->
     TxPk = semtech_udp:json_data(TxPkBin),
     Map = maps:get(<<"txpk">>, TxPk),
     JSONData0 = base64:decode(maps:get(<<"data">>, Map)),
+    Timestamp =
+        case maps:get(<<"imme">>, Map, false) of
+            false -> maps:get(<<"tmst">>, Map);
+            true -> 0
+        end,
     hpr_packet_down:to_record(#{
         payload => JSONData0,
         rx1 => #{
-            timestamp => maps:get(<<"tmst">>, Map),
+            timestamp => Timestamp,
             frequency => erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
             datarate => erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
         },

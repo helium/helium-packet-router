@@ -10,6 +10,7 @@
     single_lns_test/1,
     multi_lns_test/1,
     single_lns_downlink_test/1,
+    single_lns_class_c_downlink_test/1,
     multi_lns_downlink_test/1,
     multi_gw_single_lns_test/1,
     shutdown_idle_worker_test/1,
@@ -39,6 +40,7 @@ all() ->
         single_lns_test,
         multi_lns_test,
         single_lns_downlink_test,
+        single_lns_class_c_downlink_test,
         multi_lns_downlink_test,
         multi_gw_single_lns_test,
         shutdown_idle_worker_test,
@@ -142,14 +144,16 @@ single_lns_downlink_test(_Config) ->
         end,
 
     %% Send a downlink to the worker
-    {DownToken, DownPullResp} = fake_down_packet(),
-
-    %%    save these fake values to compare with what is received
     #{
-        data := Data,
-        freq := Freq,
-        datr := Datr
-    } = fake_down_map(),
+        token := DownToken,
+        pull_resp := DownPullResp,
+        %% save these fake values to compare with what is received
+        data := #{
+            data := Data,
+            freq := Freq,
+            datr := Datr
+        }
+    } = fake_down_packet(),
     ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
 
     %% receive the PacketRouterPacketDownV1 sent to grcp_stream
@@ -163,6 +167,70 @@ single_lns_downlink_test(_Config) ->
             }
         }} ->
             ?assert(erlang:is_integer(Timestamp)),
+            ?assertEqual(Data, base64:encode(Payload)),
+            ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
+            ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
+            ok;
+        {reply, Other} ->
+            ct:fail({rcvd_bad_packet_down, Other})
+    after timer:seconds(2) -> ct:fail(no_packet_down)
+    end,
+
+    %% expect the ack for our downlink
+    receive
+        {udp, LnsSocket, _Address, _Port, Data2} ->
+            ?assertEqual(tx_ack, semtech_id_atom(Data2)),
+            ?assertEqual(DownToken, semtech_udp:token(Data2))
+    after timer:seconds(2) -> ct:fail(no_tx_ack_for_downlink)
+    end,
+
+    ok.
+
+single_lns_class_c_downlink_test(_Config) ->
+    PacketUp = fake_join_up_packet(),
+
+    %% Sending a packet up, to get a packet down.
+    Route1 = test_route(1777),
+    {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    %% Send packet
+    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route1),
+
+    %% Eat the pull_data
+    {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
+    %% Receive the uplink (mostly to get the return address)
+    {ok, ReturnSocketDest} =
+        receive
+            {udp, LnsSocket, Address, Port, Data1} ->
+                ?assertEqual(push_data, semtech_id_atom(Data1)),
+                {ok, {Address, Port}}
+        after timer:seconds(2) -> ct:fail(no_push_data)
+        end,
+
+    %% Send a downlink to the worker
+    #{
+        token := DownToken,
+        pull_resp := DownPullResp,
+        %% save these fake values to compare with what is received
+        data := #{
+            data := Data,
+            freq := Freq,
+            datr := Datr
+        }
+    } = fake_class_c_down_packet(),
+    ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
+
+    %% receive the PacketRouterPacketDownV1 sent to grcp_stream
+    receive
+        {reply, #packet_router_packet_down_v1_pb{
+            payload = Payload,
+            rx1 = #window_v1_pb{
+                timestamp = Timestamp,
+                frequency = Frequency,
+                datarate = Datarate
+            }
+        }} ->
+            ?assertEqual(0, Timestamp, "0ms means immediate"),
             ?assertEqual(Data, base64:encode(Payload)),
             ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
             ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
@@ -217,10 +285,8 @@ multi_lns_downlink_test(_Config) ->
 
     %% Send a downlink to the worker from LNS 1
     %% we don't care about the contents
-    {DownToken, DownPullResp} = fake_down_packet(),
+    #{token := DownToken, pull_resp := DownPullResp} = fake_down_packet(),
     ok = gen_udp:send(LNSSocket1, UDPWorkerAddress, DownPullResp),
-
-    %% XXX: Why don't we expect a grcp reply here?
 
     %% expect the ack for our downlink
     receive
@@ -553,11 +619,25 @@ fake_join_up_packet() ->
 fake_down_packet() ->
     DownMap = fake_down_map(),
     DownToken = semtech_udp:token(),
-    {DownToken, semtech_udp:pull_resp(DownToken, DownMap)}.
+    #{
+        token => DownToken,
+        pull_resp => semtech_udp:pull_resp(DownToken, DownMap),
+        data => DownMap
+    }.
+
+fake_class_c_down_packet() ->
+    DownMap0 = fake_down_map(),
+    DownMap = DownMap0#{imme => true},
+    DownToken = semtech_udp:token(),
+    #{
+        token => DownToken,
+        pull_resp => semtech_udp:pull_resp(DownToken, DownMap),
+        data => DownMap
+    }.
 
 fake_down_map() ->
     DownMap = #{
-        imme => true,
+        imme => false,
         freq => 904.1,
         rfch => 0,
         powe => 27,
