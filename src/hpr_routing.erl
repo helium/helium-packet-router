@@ -18,9 +18,7 @@ init() ->
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     ok.
 
--spec handle_packet(
-    Packet :: hpr_packet_up:packet()
-) -> hpr_routing_response().
+-spec handle_packet(Packet :: hpr_packet_up:packet()) -> hpr_routing_response().
 handle_packet(Packet) ->
     Start = erlang:system_time(millisecond),
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
@@ -34,30 +32,27 @@ handle_packet(Packet) ->
     lager:debug("received packet"),
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
-        {fun throttle_check/1, gateway_limit_exceeded}
+        {fun throttle_check/1, gateway_limit_exceeded},
+        {fun packet_type_check/1, invalid_packet_type}
     ],
-    {Res, NumberOfRoutes} =
-        case execute_checks(Packet, Checks) of
-            {error, _Reason} = Error ->
-                lager:error("packet failed verification: ~p", [_Reason]),
-                {Error, 0};
-            ok ->
-                dispatch_packet(PacketType, Packet)
-        end,
-    ok = hpr_metrics:observe_packet_up(PacketType, Res, NumberOfRoutes, Start),
-    Res.
+    case execute_checks(Packet, Checks) of
+        {error, _Reason} = Error ->
+            lager:error("packet failed verification: ~p", [_Reason]),
+            hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
+            Error;
+        ok ->
+            Routes = find_routes(PacketType),
+            ok = maybe_deliver_packet(Packet, Routes),
+            hpr_metrics:observe_packet_up(PacketType, ok, erlang:length(Routes), Start),
+            ok
+    end.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec dispatch_packet(hpr_packet_up:type(), hpr_packet_up:packet()) ->
-    {hpr_routing_response(), non_neg_integer()}.
-dispatch_packet({undefined, FType}, _Packet) ->
-    lager:warning("invalid packet type ~w", [FType]),
-    {{error, invalid_packet_type}, 0};
-dispatch_packet({join_req, {AppEUI, DevEUI}}, Packet) ->
-    Routes = hpr_config:lookup_eui(AppEUI, DevEUI),
+-spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
+find_routes({join_req, {AppEUI, DevEUI}}) ->
     lager:debug(
         [
             {app_eui, hpr_utils:int_to_hex(AppEUI)},
@@ -65,22 +60,21 @@ dispatch_packet({join_req, {AppEUI, DevEUI}}, Packet) ->
         ],
         "handling join"
     ),
-    {deliver_packet(Packet, Routes), erlang:length(Routes)};
-dispatch_packet({uplink, DevAddr}, Packet) ->
+    hpr_config:lookup_eui(AppEUI, DevEUI);
+find_routes({uplink, DevAddr}) ->
     lager:debug(
         [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
         "handling uplink"
     ),
-    Routes = hpr_config:lookup_devaddr(DevAddr),
-    {deliver_packet(Packet, Routes), erlang:length(Routes)}.
+    hpr_config:lookup_devaddr(DevAddr).
 
--spec deliver_packet(
+-spec maybe_deliver_packet(
     Packet :: hpr_packet_up:packet(),
     Routes :: [hpr_route:route()]
 ) -> ok.
-deliver_packet(_Packet, []) ->
+maybe_deliver_packet(_Packet, []) ->
     ok;
-deliver_packet(Packet, [Route | Routes]) ->
+maybe_deliver_packet(Packet, [Route | Routes]) ->
     Server = hpr_route:server(Route),
     Protocol = hpr_route:protocol(Server),
     lager:debug(
@@ -92,25 +86,31 @@ deliver_packet(Packet, [Route | Routes]) ->
         "delivering packet to ~s",
         [hpr_route:lns(Route)]
     ),
-    %% FIXME: delivery could be halted to multiple routes if one of the earlier
-    %% Protocol:send(...) errors out.
-    Resp =
-        case Protocol of
-            {packet_router, _} ->
-                hpr_protocol_router:send(Packet, self(), Route);
-            {gwmp, _} ->
-                hpr_protocol_gwmp:send(Packet, self(), Route);
-            _OtherProtocol ->
-                lager:warning([{protocol, _OtherProtocol}], "unimplemented"),
-                ok
-        end,
-    case Resp of
+    Key = crypto:hash(sha256, <<
+        (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
+    >>),
+    case hpr_max_copies:update_counter(Key, hpr_route:max_copies(Route)) of
+        {error, Reason} ->
+            lager:debug("not sending ~p", [Reason]);
         ok ->
-            ok;
-        {error, Err} ->
-            lager:warning([{protocol, Protocol}], "error ~p", [Err])
+            case deliver_packet(Protocol, Packet, Route) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    lager:warning([{protocol, Protocol}], "error ~p", [Reason])
+            end
     end,
-    deliver_packet(Packet, Routes).
+    maybe_deliver_packet(Packet, Routes).
+
+-spec deliver_packet(
+    hpr_route:protocol(), Packet :: hpr_packet_up:packet(), Route :: hpr_route:route()
+) -> hpr_routing_response().
+deliver_packet({packet_router, _}, Packet, Route) ->
+    hpr_protocol_router:send(Packet, self(), Route);
+deliver_packet({gwmp, _}, Packet, Route) ->
+    hpr_protocol_gwmp:send(Packet, self(), Route);
+deliver_packet(_OtherProtocol, _Packet, _Route) ->
+    lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
 throttle_check(Packet) ->
@@ -118,6 +118,14 @@ throttle_check(Packet) ->
     case throttle:check(?GATEWAY_THROTTLE, Gateway) of
         {limit_exceeded, _, _} -> false;
         _ -> true
+    end.
+
+-spec packet_type_check(Packet :: hpr_packet_up:packet()) -> boolean().
+packet_type_check(Packet) ->
+    case hpr_packet_up:type(Packet) of
+        {undefined, _} -> false;
+        {join_req, _} -> true;
+        {uplink, _} -> true
     end.
 
 -spec execute_checks(Packet :: hpr_packet_up:packet(), [{fun(), any()}]) -> ok | {error, any()}.

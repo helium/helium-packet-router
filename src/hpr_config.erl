@@ -186,7 +186,8 @@ test_eui_lookup() ->
             host => <<"lns1.testdomain.com">>,
             port => 80,
             protocol => {http_roaming, #{}}
-        }
+        },
+        max_copies => 1
     }),
 
     Route2 = hpr_route:new(#{
@@ -201,7 +202,8 @@ test_eui_lookup() ->
             host => <<"lns2.testdomain.com">>,
             port => 80,
             protocol => {http_roaming, #{}}
-        }
+        },
+        max_copies => 1
     }),
 
     ok = insert_route(Route1),
@@ -229,7 +231,8 @@ route_v1() ->
             host => <<"lns1.testdomain.com">>,
             port => 80,
             protocol => {http_roaming, #{}}
-        }
+        },
+        max_copies => 1
     }).
 
 -endif.
