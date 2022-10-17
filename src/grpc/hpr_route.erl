@@ -251,47 +251,6 @@ euis_2_test() ->
     ),
     ok.
 
-server_test() ->
-    Route = ?MODULE:new(#{
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        }
-    }),
-    ?assertEqual(
-        #config_server_v1_pb{
-            host = <<"lsn.lora.com">>,
-            port = 80,
-            protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
-        },
-        ?MODULE:server(Route)
-    ),
-    ok.
-
-lns_test() ->
-    Route = ?MODULE:new(#{
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        }
-    }),
-    ?assertEqual(<<"lsn.lora.com:80">>, ?MODULE:lns(Route)),
-    ok.
-
 region_lns_test() ->
     Route = ?MODULE:new(#{
         net_id => 1,
@@ -310,7 +269,8 @@ region_lns_test() ->
                         #{region => 'EU868', port => 82},
                         #{region => 'AS923_1', port => 83}
                     ]
-                }}
+                }},
+            max_copies => 1
         }
     }),
     ?assertEqual({"lsn.lora.com", 81}, ?MODULE:gwmp_region_lns('US915', Route)),
