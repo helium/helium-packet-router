@@ -70,7 +70,9 @@
 all() ->
     [
         http_sync_uplink_join_test,
-        http_sync_downlink_test
+        http_sync_downlink_test,
+        http_async_uplink_join_test,
+        http_async_downlink_test
     ].
 
 %%--------------------------------------------------------------------
@@ -95,6 +97,8 @@ http_sync_uplink_join_test(_Config) ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    %%    ok = hpr_max_copies:init(),
 
     {ok, _Pid} = hpr_http_roaming_sup:start_link(),
 
@@ -273,7 +277,7 @@ http_sync_downlink_test(_Config) ->
                 <<"ProtocolVersion">> => <<"1.1">>,
                 <<"TransactionID">> => TransactionID,
                 <<"SenderID">> => <<"0xC00053">>,
-                <<"ReceiverID">> => hpr_http_roaming_utils:binary_to_hexstring(?NET_ID_ACTILITY),
+                <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
                 <<"MessageType">> => <<"XmitDataAns">>,
                 <<"Result">> => #{
                     <<"ResultCode">> => <<"Success">>
@@ -524,6 +528,7 @@ uplink_test_route(DevEUI, AppEUI, FlowType) ->
                 app_eui => AppEUI
             }
         ],
+        max_copies => 1,
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,
@@ -538,6 +543,7 @@ downlink_test_route(FlowType) ->
         net_id => ?NET_ID_ACTILITY,
         devaddr_ranges => [],
         euis => [],
+        max_copies => 1,
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,

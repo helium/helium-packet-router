@@ -330,5 +330,6 @@ test_route() ->
             host => <<"127.0.0.1">>,
             port => 8082,
             protocol => {packet_router, #{}}
-        }
+        },
+        max_copies => 1
     }).

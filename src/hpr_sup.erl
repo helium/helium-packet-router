@@ -48,13 +48,13 @@ start_link() ->
 init([]) ->
     ok = hpr_routing:init(),
     ok = hpr_config:init(),
+    ok = hpr_max_copies:init(),
 
     ElliConfig = [
         {callback, hpr_metrics_handler},
         {port, 3000}
     ],
 
-    RedirectMap = application:get_env(hpr, redirect_by_region, #{}),
     ConfigWorkerConfig = application:get_env(hpr, config_worker, #{}),
 
     ChildSpecs = [
@@ -62,7 +62,6 @@ init([]) ->
         ?ELLI_WORKER(hpr_metrics_handler, [ElliConfig]),
         ?WORKER(hpr_config_worker, [ConfigWorkerConfig]),
         ?SUP(hpr_gwmp_sup, []),
-        ?WORKER(hpr_gwmp_redirect_worker, [RedirectMap]),
         ?WORKER(hpr_router_connection_manager, []),
         ?WORKER(hpr_router_stream_manager, [
             'helium.packet_router.packet', route, client_packet_router_pb
