@@ -39,12 +39,12 @@ handle(Req, Args) ->
             lager:error("dowlink handle message error ~p", [Err]),
             {500, [], <<"An error occurred">>};
         {join_accept, {ResponseStream, DownlinkPacket}} ->
-            lager:debug("sending downlink [respnse_stream: ~p]", [ResponseStream]),
+            lager:debug("sending downlink [response_stream: ~p]", [ResponseStream]),
             ok = send_response(ResponseStream, DownlinkPacket),
             {200, [], <<"downlink sent: 1">>};
         {downlink, PayloadResponse, {ResponseStream, DownlinkPacket}, {Endpoint, FlowType}} ->
             lager:debug(
-                "sending downlink [respnse_stream: ~p] [response: ~p]",
+                "sending downlink [response_stream: ~p] [response: ~p]",
                 [ResponseStream, PayloadResponse]
             ),
             ok = send_response(ResponseStream, DownlinkPacket),
@@ -54,7 +54,7 @@ handle(Req, Args) ->
                 async ->
                     spawn(fun() ->
                         Res = hackney:post(Endpoint, [], jsx:encode(PayloadResponse), [with_body]),
-                        lager:debug("async downlink repsonse ~p", [?MODULE, Res])
+                        lager:debug("async downlink response ~p, Endpoint: ~p", [Res, Endpoint])
                     end),
                     {200, [], <<"downlink sent: 2">>}
             end

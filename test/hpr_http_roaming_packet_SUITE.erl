@@ -20,7 +20,8 @@
 -export([
     http_sync_uplink_join_test/1,
     http_sync_downlink_test/1,
-    http_async_uplink_join_test/1
+    http_async_uplink_join_test/1,
+    http_async_downlink_test/1
 ]).
 
 %% Elli callback functions
@@ -250,34 +251,14 @@ http_sync_downlink_test(_Config) ->
     ),
     RXDelay = 1,
 
-    DownlinkBody = #{
-        'ProtocolVersion' => <<"1.1">>,
-        'SenderID' => hpr_http_roaming_utils:binary_to_hexstring(?NET_ID_ACTILITY),
-        'ReceiverID' => <<"0xC00053">>,
-        'TransactionID' => TransactionID,
-        'MessageType' => <<"XmitDataReq">>,
-        'PHYPayload' => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
-        'DLMetaData' => #{
-            'DevEUI' => <<"0xaabbffccfeeff001">>,
-            'DLFreq1' => DownlinkFreq,
-            'DataRate1' => 0,
-            'RXDelay1' => RXDelay,
-            'FNSULToken' => Token,
-            'GWInfo' => [
-                #{'ULToken' => libp2p_crypto:bin_to_b58(PubKeyBin)}
-            ],
-            'ClassMode' => <<"A">>,
-            'HiPriorityFlag' => false
-        }
-    },
+    DownlinkBody = test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin),
 
     %% NOTE: We need to insert the transaction and handler here because we're
     %% only simulating downlinks. In a normal flow, these details would be
     %% filled during the uplink process.
-    %%    ok = pp_config:insert_transaction_id(TransactionID, <<"http://127.0.0.1:3002/uplink">>, sync),
     ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
 
-    downlink_test_route(),
+    downlink_test_route(sync),
 
     {ok, 200, _Headers, Resp} = hackney:post(
         <<"http://127.0.0.1:3003/downlink">>,
@@ -318,39 +299,6 @@ http_sync_downlink_test(_Config) ->
     end),
     ok.
 
-uplink_test_route(DevEUI, AppEUI, FlowType) ->
-    RouteMap = #{
-        net_id => ?NET_ID_ACTILITY,
-        devaddr_ranges => [],
-        euis => [
-            #{
-                dev_eui => DevEUI,
-                app_eui => AppEUI
-            }
-        ],
-        server => #{
-            host => <<"127.0.0.1">>,
-            port => 3002,
-            protocol => {http_roaming, #{flow_type => FlowType}}
-        }
-    },
-    Route = hpr_route:new(RouteMap),
-    hpr_config:insert_route(Route).
-
-downlink_test_route() ->
-    RouteMap = #{
-        net_id => ?NET_ID_ACTILITY,
-        devaddr_ranges => [],
-        euis => [],
-        server => #{
-            host => <<"127.0.0.1">>,
-            port => 3002,
-            protocol => {http_roaming, #{flow_type => sync}}
-        }
-    },
-    Route = hpr_route:new(RouteMap),
-    hpr_config:insert_route(Route).
-
 http_async_uplink_join_test(_Config) ->
     {ok, _Pid} = hpr_http_roaming_sup:start_link(),
     %%
@@ -358,7 +306,7 @@ http_async_uplink_join_test(_Config) ->
     %% Roamer    : partner-lns
     %%
     ok = start_forwarder_listener(),
-    ok = start_roamer_listener(),
+    ok = start_roamer_listener(#{callback_args => #{flow_type => async}}),
 
     %% 1. Get a gateway to send from
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
@@ -470,6 +418,157 @@ http_async_uplink_join_test(_Config) ->
 
     ok.
 
+http_async_downlink_test(_Config) ->
+    %%
+    %% Forwarder : packet-purchaser
+    %% Roamer    : partner-lns
+    %%
+    ok = start_forwarder_listener(),
+    ok = start_roamer_listener(#{callback_args => #{flow_type => async}}),
+
+    %% 1. Get a gateway to send from
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    %% 2. insert response handler
+    TransactionID = 23,
+    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+
+    %%    insert route
+    downlink_test_route(async),
+
+    %% 3. send downlink
+    DownlinkPayload = <<"downlink_payload">>,
+    DownlinkTimestamp = erlang:system_time(millisecond),
+    DownlinkFreq = 915.0,
+    DownlinkDatr = 'SF10BW125',
+
+    Token = hpr_http_roaming:make_uplink_token(
+        TransactionID,
+        'US915',
+        DownlinkTimestamp,
+        <<"http://127.0.0.1:3002/uplink">>,
+        async
+    ),
+    RXDelay = 1,
+
+    DownlinkBody = test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin),
+
+    _ = hackney:post(
+        <<"http://127.0.0.1:3003/downlink">>,
+        [{<<"Host">>, <<"localhost">>}],
+        jsx:encode(DownlinkBody),
+        [with_body]
+    ),
+
+    %% 4. forwarder receive http downlink
+    {ok, #{<<"TransactionID">> := TransactionID}} = forwarder_expect_downlink_data(#{
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
+        <<"ReceiverID">> => <<"0xC00053">>,
+        <<"TransactionID">> => TransactionID,
+        <<"MessageType">> => <<"XmitDataReq">>,
+        <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
+        <<"DLMetaData">> => #{
+            <<"DevEUI">> => <<"0xaabbffccfeeff001">>,
+            <<"DLFreq1">> => DownlinkFreq,
+            <<"DataRate1">> => 0,
+            <<"RXDelay1">> => RXDelay,
+            <<"FNSULToken">> => Token,
+            <<"GWInfo">> => [
+                #{<<"ULToken">> => libp2p_crypto:bin_to_b58(PubKeyBin)}
+            ],
+            <<"ClassMode">> => <<"A">>,
+            <<"HiPriorityFlag">> => false
+        }
+    }),
+
+    %% 5. roamer expect 200 response
+    ok = roamer_expect_response(200),
+
+    %% 6. roamer receives http downlink ack (xmitdata_ans)
+    {ok, _Data} = roamer_expect_uplink_data(#{
+        <<"DLFreq1">> => DownlinkFreq,
+        <<"MessageType">> => <<"XmitDataAns">>,
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
+        <<"SenderID">> => <<"0xC00053">>,
+        <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
+        <<"TransactionID">> => TransactionID
+    }),
+
+    %% 7. forwarder expects 200 response
+    ok = forwarder_expect_response(200),
+
+    %% 8. gateway receives downlink
+    ok = gateway_expect_downlink(fun(PacketDown) ->
+        ?assertEqual(DownlinkPayload, hpr_packet_down:payload(PacketDown)),
+        ?assertEqual(
+            hpr_http_roaming_utils:uint32(DownlinkTimestamp + (RXDelay * 1000000)),
+            hpr_packet_down:rx1_timestamp(PacketDown)
+        ),
+        ?assertEqual(DownlinkFreq, hpr_packet_down:rx1_frequency(PacketDown) / 1000000),
+        ?assertEqual(DownlinkDatr, hpr_packet_down:rx1_datarate(PacketDown)),
+        ok
+    end),
+
+    ok.
+
+uplink_test_route(DevEUI, AppEUI, FlowType) ->
+    RouteMap = #{
+        net_id => ?NET_ID_ACTILITY,
+        devaddr_ranges => [],
+        euis => [
+            #{
+                dev_eui => DevEUI,
+                app_eui => AppEUI
+            }
+        ],
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 3002,
+            protocol => {http_roaming, #{flow_type => FlowType}}
+        }
+    },
+    Route = hpr_route:new(RouteMap),
+    hpr_config:insert_route(Route).
+
+downlink_test_route(FlowType) ->
+    RouteMap = #{
+        net_id => ?NET_ID_ACTILITY,
+        devaddr_ranges => [],
+        euis => [],
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 3002,
+            protocol => {http_roaming, #{flow_type => FlowType}}
+        }
+    },
+    Route = hpr_route:new(RouteMap),
+    hpr_config:insert_route(Route).
+
+test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
+    DownlinkBody = #{
+        'ProtocolVersion' => <<"1.1">>,
+        'SenderID' => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
+        'ReceiverID' => <<"0xC00053">>,
+        'TransactionID' => TransactionID,
+        'MessageType' => <<"XmitDataReq">>,
+        'PHYPayload' => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
+        'DLMetaData' => #{
+            'DevEUI' => <<"0xaabbffccfeeff001">>,
+            'DLFreq1' => 915.0,
+            'DataRate1' => 0,
+            'RXDelay1' => 1,
+            'FNSULToken' => Token,
+            'GWInfo' => [
+                #{'ULToken' => libp2p_crypto:bin_to_b58(PubKeyBin)}
+            ],
+            'ClassMode' => <<"A">>,
+            'HiPriorityFlag' => false
+        }
+    },
+    DownlinkBody.
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
@@ -525,10 +624,25 @@ handle('POST', [<<"downlink">>], Req, Args) ->
     end;
 handle('POST', [<<"uplink">>], Req, Args) ->
     Forward = maps:get(forward, Args),
+
     Body = elli_request:body(Req),
-    #{
-        <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
-    } = jsx:decode(Body),
+
+    DecodedBody = jsx:decode(Body),
+    MessageType = message_type_from_uplink(DecodedBody),
+
+    FlowType =
+        case MessageType of
+            <<"PRStartReq">> ->
+                #{
+                    <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
+                } = DecodedBody,
+                flow_type_from(Token);
+            _ ->
+                maps:get(flow_type, Args, sync)
+        end,
+
+    lager:debug("MessageType: ~p, FlowType: ~p", [MessageType, FlowType]),
+    ok = message_type_from_uplink_ok(MessageType, FlowType),
 
     ResponseBody =
         case maps:get(response, Args, undefined) of
@@ -539,7 +653,6 @@ handle('POST', [<<"uplink">>], Req, Args) ->
                 Resp
         end,
 
-    FlowType = flow_type_from(Token),
     case FlowType of
         async ->
             Response = {200, [], <<>>},
@@ -568,6 +681,20 @@ handle_event(_Event, _Data, _Args) ->
     %% uncomment for Elli errors.
     ct:print("Elli Event (~p):~nData~n~p~nArgs~n~p", [_Event, _Data, _Args]),
     ok.
+
+-spec message_type_from_uplink(UplinkBody :: map()) -> binary().
+message_type_from_uplink(#{<<"MessageType">> := MessageType}) ->
+    MessageType.
+
+-spec message_type_from_uplink_ok(MessageType :: binary(), FlowType :: sync | async) -> ok.
+message_type_from_uplink_ok(<<"XmitDataAns">>, sync) ->
+    throw(bad_message_type);
+message_type_from_uplink_ok(<<"XmitDataAns">>, async) ->
+    ok;
+message_type_from_uplink_ok(<<"PRStartReq">>, _FlowType) ->
+    ok;
+message_type_from_uplink_ok(_MessageType, _FlowType) ->
+    throw(bad_message_type).
 
 -spec flow_type_from(UplinkToken :: binary()) -> sync | async.
 flow_type_from(UplinkToken) ->
@@ -652,8 +779,8 @@ start_downlink_listener() ->
 start_forwarder_listener() ->
     start_downlink_listener().
 
-start_roamer_listener() ->
-    start_uplink_listener().
+start_roamer_listener(Options) ->
+    start_uplink_listener(Options).
 
 gateway_expect_downlink(ExpectFn) ->
     receive
