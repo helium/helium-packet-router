@@ -63,6 +63,16 @@ insert_route(Route) ->
     true = ets:insert(?DEVADDRS_ETS, route_to_devaddr_rows(Route)),
     true = ets:insert(?EUIS_ETS, route_to_eui_rows(Route)),
     true = ets:insert(?ROUTE_ETS, Route),
+    Server = hpr_route:server(Route),
+    RouteFields = [
+        {net_id, hpr_utils:net_id_display(hpr_route:net_id(Route))},
+        {oui, hpr_route:oui(Route)},
+        {protocol, hpr_route:protocol_type(Server)},
+        {max_copies, hpr_route:max_copies(Route)},
+        {devaddr_cnt, erlang:length(hpr_route:devaddr_ranges(Route))},
+        {eui_cnt, erlang:length(hpr_route:euis(Route))}
+    ],
+    lager:info(RouteFields, "inserting route"),
     ok.
 
 -spec lookup_devaddr(Devaddr :: non_neg_integer()) -> list(hpr_route:route()).

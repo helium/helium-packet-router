@@ -55,7 +55,7 @@ config_list(["config", "ls"], [], []) ->
     MkRow = fun(Route) ->
         Server = hpr_route:server(Route),
         [
-            {" Net ID ", net_id(hpr_route:net_id(Route))},
+            {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" OUI ", hpr_route:oui(Route)},
             {" Protocol ", hpr_route:protocol_type(Server)},
             {" Max Copies ", hpr_route:max_copies(Route)},
@@ -108,7 +108,7 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
         EUIInfo = [EUIHeader | EUIs],
 
         Info = [
-            io_lib:format("- Net ID     :: ~s (~p)~n", [net_id(NetID), NetID]),
+            io_lib:format("- Net ID     :: ~s (~p)~n", [hpr_utils:net_id_display(NetID), NetID]),
             io_lib:format("- Max Copies :: ~p~n", [hpr_route:max_copies(Route)]),
             io_lib:format("- Server     :: ~s~n", [hpr_route:lns(Route)]),
             io_lib:format("- Protocol   :: ~p~n", [hpr_route:protocol(Server)])
@@ -138,7 +138,3 @@ c_table(PropLists) -> [clique_status:table(PropLists)].
 
 -spec c_list(list(string())) -> clique_status:status().
 c_list(L) -> [clique_status:list(L)].
-
--spec net_id(non_neg_integer()) -> string().
-net_id(Num) ->
-    string:right(erlang:integer_to_list(Num, 16), 6, $0).
