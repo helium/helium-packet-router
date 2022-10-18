@@ -8,6 +8,12 @@
     lookup_eui/2
 ]).
 
+%% CLI exports
+-export([
+    all_routes/0,
+    oui_routes/1
+]).
+
 -ifdef(TEST).
 
 -export([
@@ -18,11 +24,13 @@
 
 -define(DEVADDRS_ETS, hpr_config_routes_by_devaddr).
 -define(EUIS_ETS, hpr_config_routes_by_eui).
+-define(ROUTE_ETS, hpr_config_routes_plain).
 
 -spec init() -> ok.
 init() ->
     ?DEVADDRS_ETS = ets:new(?DEVADDRS_ETS, [public, named_table, bag, {read_concurrency, true}]),
     ?EUIS_ETS = ets:new(?EUIS_ETS, [public, named_table, bag, {read_concurrency, true}]),
+    ?ROUTE_ETS = ets:new(?ROUTE_ETS, [public, named_table, bag]),
     ok.
 
 -spec update_routes(client_config_pb:routes_res_v1_pb()) -> ok.
@@ -31,7 +39,8 @@ update_routes(#{routes := []}) ->
         true ->
             lager:info("applying empty routes update"),
             true = ets:delete_all_objects(?DEVADDRS_ETS),
-            true = ets:delete_all_objects(?EUIS_ETS);
+            true = ets:delete_all_objects(?EUIS_ETS),
+            true = ets:delete_all_objects(?ROUTE_ETS);
         false ->
             lager:info("ignoring empty routes update"),
             ok
@@ -40,6 +49,7 @@ update_routes(#{routes := Routes}) ->
     lager:info("got update  with ~w routes", [erlang:length(Routes)]),
     true = ets:delete_all_objects(?DEVADDRS_ETS),
     true = ets:delete_all_objects(?EUIS_ETS),
+    true = ets:delete_all_objects(?ROUTE_ETS),
     lists:foreach(
         fun(RouteConfigMap) ->
             Route = hpr_route:new(RouteConfigMap),
@@ -52,6 +62,7 @@ update_routes(#{routes := Routes}) ->
 insert_route(Route) ->
     true = ets:insert(?DEVADDRS_ETS, route_to_devaddr_rows(Route)),
     true = ets:insert(?EUIS_ETS, route_to_eui_rows(Route)),
+    true = ets:insert(?ROUTE_ETS, Route),
     ok.
 
 -spec lookup_devaddr(Devaddr :: non_neg_integer()) -> list(hpr_route:route()).
@@ -81,6 +92,16 @@ lookup_eui(AppEUI, 0) ->
 lookup_eui(AppEUI, DevEUI) ->
     Routes = ets:lookup(?EUIS_ETS, {AppEUI, DevEUI}),
     [Route || {_, Route} <- Routes] ++ lookup_eui(AppEUI, 0).
+
+%% ------------------------------------------------------------------
+%% CLI Functions
+%% ------------------------------------------------------------------
+
+all_routes() ->
+    ets:tab2list(?ROUTE_ETS).
+
+oui_routes(OUI) ->
+    [Route || Route <- ets:tab2list(?ROUTE_ETS), OUI == hpr_route:oui(Route)].
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -131,6 +152,7 @@ foreach_setup() ->
 foreach_cleanup(ok) ->
     true = ets:delete(?DEVADDRS_ETS),
     true = ets:delete(?EUIS_ETS),
+    true = ets:delete(?ROUTE_ETS),
     ok.
 
 test_route_to_devaddr_rows() ->

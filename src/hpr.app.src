@@ -11,6 +11,7 @@
         helium_proto,
         grpcbox,
         grpc_client,
+        clique,
         erlang_lorawan,
         libp2p_crypto,
         erl_angry_purple_tiger,

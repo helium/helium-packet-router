@@ -26,6 +26,7 @@ COPY rebar3 rebar3
 COPY rebar.config rebar.config
 COPY rebar.lock rebar.lock
 COPY config/ config/
+COPY scripts/ scripts/
 RUN ./rebar3 get-deps
 RUN make compile
 
