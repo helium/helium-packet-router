@@ -13,7 +13,6 @@
     single_lns_class_c_downlink_test/1,
     multi_lns_downlink_test/1,
     multi_gw_single_lns_test/1,
-    shutdown_idle_worker_test/1,
     pull_data_test/1,
     pull_ack_test/1,
     pull_ack_hostname_test/1,
@@ -41,7 +40,6 @@ all() ->
         single_lns_class_c_downlink_test,
         multi_lns_downlink_test,
         multi_gw_single_lns_test,
-        shutdown_idle_worker_test,
         pull_data_test,
         pull_ack_test,
         pull_ack_hostname_test,
@@ -312,38 +310,6 @@ multi_gw_single_lns_test(_Config) ->
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
 
     ok = gen_udp:close(RcvSocket),
-
-    ok.
-
-shutdown_idle_worker_test(_Config) ->
-    %%    make an up packet
-    PacketUp = fake_join_up_packet(),
-
-    PubKeyBin = hpr_packet_up:gateway(PacketUp),
-    %%    start worker
-    {ok, WorkerPid1} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
-    ?assert(erlang:is_process_alive(WorkerPid1)),
-
-    %%    wait for shutdown timer to expire
-    timer:sleep(120),
-    ?assertNot(erlang:is_process_alive(WorkerPid1)),
-
-    %%    start worker
-    {ok, WorkerPid2} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
-    ?assert(erlang:is_process_alive(WorkerPid2)),
-    timer:sleep(50),
-
-    %%    before timer expires, send push_data
-    Route = test_route(1777),
-    ok = hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
-
-    %%    check that timer restarted when the push_data occurred
-    timer:sleep(50),
-    ?assert(erlang:is_process_alive(WorkerPid2)),
-
-    %%    check that the timer expires and the worker is shut down
-    timer:sleep(100),
-    ?assertNot(erlang:is_process_alive(WorkerPid2)),
 
     ok.
 
