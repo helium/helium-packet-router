@@ -5,7 +5,7 @@
     end_per_testcase/2,
     join_packet_up/1,
     uplink_packet_up/1,
-    frame_packet_uplink/7,
+    frame_packet_uplink/6,
     frame_packet_join/5,
     wait_until/1, wait_until/3,
     match_map/2
@@ -120,7 +120,7 @@ match_map(Expected, Got) when is_map(Got) ->
 match_map(_Expected, _Got) ->
     {false, not_map}.
 
-frame_packet_uplink(MType, PubKeyBin, SigFun, DevAddr, FCnt, _Routing, Options) ->
+frame_packet_uplink(MType, PubKeyBin, SigFun, DevAddr, FCnt, Options) ->
     NwkSessionKey = <<81, 103, 129, 150, 35, 76, 17, 164, 210, 66, 210, 149, 120, 193, 251, 85>>,
     AppSessionKey = <<245, 16, 127, 141, 191, 84, 201, 16, 111, 172, 36, 152, 70, 228, 52, 95>>,
     Payload1 = frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt),
@@ -155,10 +155,12 @@ frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt) ->
     ),
     FCntSize = 16,
     Payload0 =
-        <<MType:3, MHDRRFU:3, Major:2, DevAddr:4/binary, ADR:1, ADRACKReq:1, ACK:1, RFU:1,
+        <<MType:3, MHDRRFU:3, Major:2, DevAddr:32/little-unsigned-integer, ADR:1, ADRACKReq:1, ACK:1, RFU:1,
             FOptsLen:4, FCnt:FCntSize/little-unsigned-integer, FOptsBin:FOptsLen/binary,
             Port:8/integer, Data/binary>>,
+
     B0 = b0(MType band 1, DevAddr, FCnt, erlang:byte_size(Payload0)),
+
     MIC = crypto:macN(cmac, aes_128_cbc, NwkSessionKey, <<B0/binary, Payload0/binary>>, 4),
     <<Payload0/binary, MIC:4/binary>>.
 
@@ -222,9 +224,9 @@ binxor(<<>>, <<>>, Acc) ->
 binxor(<<A, RestA/binary>>, <<B, RestB/binary>>, Acc) ->
     binxor(RestA, RestB, <<(A bxor B), Acc/binary>>).
 
--spec b0(integer(), binary(), integer(), integer()) -> binary().
+-spec b0(integer(), integer(), integer(), integer()) -> binary().
 b0(Dir, DevAddr, FCnt, Len) ->
-    <<16#49, 0, 0, 0, 0, Dir, DevAddr:4/binary, FCnt:32/little-unsigned-integer, 0, Len>>.
+    <<16#49, 0, 0, 0, 0, Dir, DevAddr:32/little-unsigned-integer, FCnt:32/little-unsigned-integer, 0, Len>>.
 
 wait_until(Fun) ->
     wait_until(Fun, 100, 100).

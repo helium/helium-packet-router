@@ -21,7 +21,8 @@
     http_sync_uplink_join_test/1,
     http_sync_downlink_test/1,
     http_async_uplink_join_test/1,
-    http_async_downlink_test/1
+    http_async_downlink_test/1,
+    http_uplink_packet_no_roaming_agreement_test/1
 ]).
 
 %% Elli callback functions
@@ -51,7 +52,7 @@
 %% DevAddrs
 
 % pp_utils:hex_to_binary(<<"04ABCDEF">>)
--define(DEVADDR_ACTILITY, <<4, 171, 205, 239>>).
+-define(DEVADDR_ACTILITY, 16#04abcdef).
 -define(DEVADDR_ACTILITY_BIN, <<"0x04ABCDEF">>).
 
 % pp_utils:hex_to_binary(<<"45000042">>)
@@ -72,7 +73,8 @@ all() ->
         http_sync_uplink_join_test,
         http_sync_downlink_test,
         http_async_uplink_join_test,
-        http_async_downlink_test
+        http_async_downlink_test,
+        http_uplink_packet_no_roaming_agreement_test
     ].
 
 %%--------------------------------------------------------------------
@@ -98,8 +100,6 @@ http_sync_uplink_join_test(_Config) ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    %%    ok = hpr_max_copies:init(),
-
     {ok, _Pid} = hpr_http_roaming_sup:start_link(),
 
     ok = start_uplink_listener(),
@@ -122,7 +122,7 @@ http_sync_uplink_join_test(_Config) ->
         {ok, PacketUp, GatewayTime}
     end,
 
-    uplink_test_route(DevEUI, AppEUI, sync),
+    join_test_route(DevEUI, AppEUI, sync),
 
     lager:debug(
         [
@@ -335,7 +335,7 @@ http_async_uplink_join_test(_Config) ->
     end,
 
     %% 2. load Roamer into the config
-    uplink_test_route(DevEUI, AppEUI, async),
+    join_test_route(DevEUI, AppEUI, async),
 
     %% 3. send packet
     {ok, PacketUp, GatewayTime} = SendPacketFun(),
@@ -518,7 +518,109 @@ http_async_downlink_test(_Config) ->
 
     ok.
 
-uplink_test_route(DevEUI, AppEUI, FlowType) ->
+http_uplink_packet_no_roaming_agreement_test(_Config) ->
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
+
+    %% When receiving a response that there is no roaming agreement for a NetID,
+    %% we should stop purchasing for that NetID.
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    ok = start_uplink_listener(#{
+        callback_args => #{
+            response => #{
+                <<"SenderID">> => <<"000002">>,
+                <<"ReceiverID">> => <<"C00053">>,
+                <<"ProtocolVersion">> => <<"1.1">>,
+                <<"TransactionID">> => 601913476,
+                <<"MessageType">> => <<"PRStartAns">>,
+                <<"Result">> => #{
+                    <<"ResultCode">> => <<"NoRoamingAgreement">>,
+                    <<"Description">> => <<"There is no roaming agreement between the operators">>
+                }
+            }
+        }
+    }),
+
+    SendPacketFun = fun(DevAddr, FrameCount) ->
+        GatewayTime = erlang:system_time(millisecond),
+        PacketUp = test_utils:frame_packet_uplink(
+            ?UNCONFIRMED_UP,
+            PubKeyBin,
+            SigFun,
+            DevAddr,
+            FrameCount,
+            #{timestamp => GatewayTime}
+        ),
+        hpr_routing:handle_packet(PacketUp),
+        {ok, PacketUp, GatewayTime}
+    end,
+
+    uplink_test_route(sync),
+    lager:debug("routes by devaddr: ~p", [ets:tab2list(hpr_config_routes_by_devaddr)]),
+
+    {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY, 0),
+    Payload = hpr_packet_up:payload(PacketUp),
+    Region = hpr_packet_up:region(PacketUp),
+    PacketTime = hpr_packet_up:timestamp(PacketUp),
+
+    %% First packet is purchased and sent to Roamer
+    {
+        ok,
+        #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        _Request,
+        {200, _RespBody}
+    } = http_rcv(
+        #{
+            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"DedupWindowSize">> => fun erlang:is_integer/1,
+            <<"TransactionID">> => fun erlang:is_number/1,
+            <<"SenderID">> => <<"0xC00053">>,
+            <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+            <<"MessageType">> => <<"PRStartReq">>,
+            <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(Payload),
+            <<"ULMetaData">> => #{
+                <<"DevAddr">> => ?DEVADDR_ACTILITY_BIN,
+                <<"DataRate">> => hpr_lorawan:datarate_to_index(
+                    Region,
+                    hpr_packet_up:datarate(PacketUp)
+                ),
+                <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
+                <<"RFRegion">> => erlang:atom_to_binary(Region),
+                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime),
+
+                <<"FNSULToken">> => fun erlang:is_binary/1,
+                <<"GWCnt">> => 1,
+                <<"GWInfo">> => [
+                    #{
+                        <<"RFRegion">> => erlang:atom_to_binary(Region),
+                        <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
+                        <<"SNR">> => hpr_packet_up:snr(PacketUp),
+                        <<"DLAllowed">> => true,
+                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                            hpr_utils:pubkeybin_to_mac(PubKeyBin)
+                        )
+                    }
+                ]
+            }
+        }
+    ),
+
+    ?assertMatch(
+        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        hpr_http_roaming:parse_uplink_token(Token)
+    ),
+
+    timer:sleep(500),
+    %% Second packet is not forwarded
+    {ok, _PacketUp, _GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY, 1),
+    ok = not_http_rcv(1000),
+
+    ok.
+
+join_test_route(DevEUI, AppEUI, FlowType) ->
     RouteMap = #{
         net_id => ?NET_ID_ACTILITY,
         devaddr_ranges => [],
@@ -528,6 +630,24 @@ uplink_test_route(DevEUI, AppEUI, FlowType) ->
                 app_eui => AppEUI
             }
         ],
+        max_copies => 1,
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 3002,
+            protocol => {http_roaming, #{flow_type => FlowType}}
+        }
+    },
+    Route = hpr_route:new(RouteMap),
+    hpr_config:insert_route(Route).
+
+uplink_test_route(FlowType) ->
+    RouteMap = #{
+        net_id => ?NET_ID_ACTILITY,
+        devaddr_ranges => [
+            #{start_addr => 16#04ABCDEF,
+                end_addr => 16#04ABCDFF}
+        ],
+        euis => [],
         max_copies => 1,
         server => #{
             host => <<"127.0.0.1">>,
@@ -647,7 +767,6 @@ handle('POST', [<<"uplink">>], Req, Args) ->
                 maps:get(flow_type, Args, sync)
         end,
 
-    lager:debug("MessageType: ~p, FlowType: ~p", [MessageType, FlowType]),
     ok = message_type_from_uplink_ok(MessageType, FlowType),
 
     ResponseBody =
@@ -812,6 +931,14 @@ http_rcv(Expected) ->
         {false, Reason} ->
             ct:pal("FAILED got: ~n~p~n expected: ~n~p", [Got, Expected]),
             ct:fail({http_rcv, Reason})
+    end.
+
+-spec not_http_rcv(Delay :: integer()) -> ok.
+not_http_rcv(Delay) ->
+    receive
+        {http_msg, _, _} ->
+            ct:fail(expected_no_more_http)
+    after Delay -> ok
     end.
 
 roamer_expect_uplink_data(Expected) ->
