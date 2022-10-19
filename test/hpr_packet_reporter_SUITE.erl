@@ -144,7 +144,6 @@ upload_error_test(_Config) ->
         meck:passthrough([fun() -> {error, connect_timeout} end, Opts])
     end),
 
-    % hpr_packet_reporter:handle_cast({upload_packets, FilePath}, State),
     hpr_packet_reporter:upload_packets(FilePath),
 
     % Allow time for asychronous uploads, call to upload_packets + retries

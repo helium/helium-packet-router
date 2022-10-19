@@ -35,6 +35,7 @@
 -define(ETS, hpr_packet_report_ets).
 
 -define(FILE_WRITE_OPTIONS, [write, raw, binary, compressed]).
+-define(WRITE_BATCH_SIZE, 1000).
 
 -record(state, {
     aws_client :: aws_client:aws_client(),
@@ -221,27 +222,15 @@ terminate(
     {ok, FileSize :: integer()} | {error, Error :: term}.
 
 handle_write(FilePath, MaxFileSize, WriteOptions) ->
-    WriteTimestamp = erlang:system_time(millisecond),
     case file:open(FilePath, WriteOptions) of
         {ok, S} ->
-            Data = get_packets_by_timestamp(WriteTimestamp),
-
-            lists:foreach(
-                fun(Packet) ->
-                    PacketSize = encode_packet_size(Packet),
-                    file:write(S, [PacketSize, Packet])
-                end,
-                Data
-            ),
-            file:close(S),
-
-            NumDeleted = delete_packets_by_timestamp(WriteTimestamp),
+            {ok, PacketsProcessed, PacketsDeleted} = write_packets(S),
             FileSize = filelib:file_size(FilePath),
 
             lager:info(
                 [
-                    {packets_processed, length(Data)},
-                    {packets_deleted, NumDeleted},
+                    {packets_processed, PacketsProcessed},
+                    {packets_deleted, PacketsDeleted},
                     {file_size, FileSize},
                     {max_file_size, MaxFileSize}
                 ],
@@ -253,6 +242,35 @@ handle_write(FilePath, MaxFileSize, WriteOptions) ->
             lager:error("failed to open tmp write file: ~p", [Error]),
             throw(file_error)
     end.
+
+-spec write_packets(FileStream :: file:io_device()) ->
+    {ok, PacketsProcessed :: integer(), NumDeleted :: integer()}.
+write_packets(FileStream) ->
+    WriteTimestamp = erlang:system_time(millisecond),
+    write_packets(
+        FileStream, WriteTimestamp, get_packets_by_timestamp(WriteTimestamp, ?WRITE_BATCH_SIZE), 0
+    ).
+
+-spec write_packets(
+    FileStream :: file:io_device(),
+    WriteTimestamp :: timestamp_ms(),
+    {[term()], ets:continuation()} | '$end_of_table',
+    non_neg_integer()
+) ->
+    {ok, PacketsProcessed :: integer(), NumDeleted :: integer()}.
+write_packets(FileStream, WriteTimestamp, '$end_of_table', PacketsProcessed) ->
+    NumDeleted = delete_packets_by_timestamp(WriteTimestamp),
+    file:close(FileStream),
+    {ok, PacketsProcessed, NumDeleted};
+write_packets(FileStream, WriteTimestamp, {Data, Cont}, PacketsProcessed) ->
+    lists:foreach(
+        fun(Packet) ->
+            PacketSize = encode_packet_size(Packet),
+            file:write(FileStream, [PacketSize, Packet])
+        end,
+        Data
+    ),
+    write_packets(FileStream, WriteTimestamp, ets:select(Cont), PacketsProcessed + length(Data)).
 
 -spec setup_aws(packet_reporter_opts()) -> aws_client:aws_client().
 setup_aws(#{
@@ -392,9 +410,10 @@ increment_upload_retries(FilePath, #state{upload_retries = UploadRetries} = Stat
 schedule_upload_retry(RetrySleepTime, FilePath) ->
     timer:apply_after(RetrySleepTime, ?MODULE, upload_packets, [FilePath]).
 
--spec get_packets_by_timestamp(Timestamp :: timestamp_ms()) -> [term()].
-get_packets_by_timestamp(Timestamp) ->
-    ets:select(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], ['$2']}]).
+-spec get_packets_by_timestamp(Timestamp :: timestamp_ms(), BatchSize :: non_neg_integer()) ->
+    [term()].
+get_packets_by_timestamp(Timestamp, BatchSize) ->
+    ets:select(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], ['$2']}], BatchSize).
 
 -spec delete_packets_by_timestamp(Timestamp :: timestamp_ms()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
