@@ -50,7 +50,6 @@
     response_stream :: undefined | pid(),
     pull_data = #{} :: pull_data_map(),
     pull_data_timer :: non_neg_integer(),
-    shutdown_timer :: {Timeout :: non_neg_integer(), Timer :: reference()},
     addr_resolutions = #{} :: #{socket_dest() => socket_dest()}
 }).
 
@@ -94,14 +93,10 @@ init(Args) ->
     %% initiate the connection and allow downlinks to start
     %% flowing.
 
-    ShutdownTimeout = maps:get(shutdown_timer, Args, ?SHUTDOWN_TIMER),
-    ShutdownRef = schedule_shutdown(ShutdownTimeout),
-
     {ok, #state{
         pubkeybin = PubKeyBin,
         socket = Socket,
-        pull_data_timer = PullDataTimer,
-        shutdown_timer = {ShutdownTimeout, ShutdownRef}
+        pull_data_timer = PullDataTimer
     }}.
 
 -spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
@@ -112,24 +107,18 @@ handle_cast(
     {push_data, _Data = {Token, Payload}, Stream, SocketDest},
     #state{
         push_data = PushData,
-        shutdown_timer = {ShutdownTimeout, ShutdownRef},
         socket = Socket
     } =
         State0
 ) ->
-    _ = erlang:cancel_timer(ShutdownRef),
-
     State = maybe_send_pull_data(SocketDest, State0),
     {_Reply, TimerRef} = send_push_data(Token, Payload, Socket, SocketDest),
 
-    {NewPushData, NewShutdownTimer} = new_push_and_shutdown(
-        Token, Payload, TimerRef, PushData, ShutdownTimeout
-    ),
+    NewPushData = maps:put(Token, {Payload, TimerRef}, PushData),
 
     {noreply, State#state{
         push_data = NewPushData,
-        response_stream = Stream,
-        shutdown_timer = NewShutdownTimer
+        response_stream = Stream
     }};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -183,9 +172,6 @@ handle_info(
 ) ->
     handle_pull_data_timeout(PullDataTimer, SocketDest),
     {noreply, State};
-handle_info(?SHUTDOWN_TICK, #state{shutdown_timer = {ShutdownTimeout, _}} = State) ->
-    lager:info("shutting down, haven't sent data in ~p", [ShutdownTimeout]),
-    {stop, normal, State};
 handle_info(_Msg, State) ->
     {noreply, State}.
 
@@ -234,10 +220,6 @@ handle_udp(
 schedule_pull_data(PullDataTimer, SocketDest) ->
     _ = erlang:send_after(PullDataTimer, self(), {?PULL_DATA_TICK, SocketDest}).
 
--spec schedule_shutdown(non_neg_integer()) -> reference().
-schedule_shutdown(ShutdownTimer) ->
-    _ = erlang:send_after(ShutdownTimer, self(), ?SHUTDOWN_TICK).
-
 -spec send_push_data(binary(), binary(), gen_udp:socket(), socket_dest()) ->
     {ok | {error, any()}, reference()}.
 send_push_data(
@@ -253,11 +235,6 @@ send_push_data(
         "sent push_data"
     ),
     {Reply, TimerRef}.
-
-new_push_and_shutdown(Token, Data, TimerRef, PushData, ShutdownTimeout) ->
-    NewPushData = maps:put(Token, {Data, TimerRef}, PushData),
-    NewShutdownTimer = {ShutdownTimeout, schedule_shutdown(ShutdownTimeout)},
-    {NewPushData, NewShutdownTimer}.
 
 -spec send_pull_data(
     PubKeybin :: libp2p_crypto:pubkey_bin(),
