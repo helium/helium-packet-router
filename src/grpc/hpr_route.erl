@@ -18,7 +18,8 @@
     host/1,
     port/1,
     protocol/1,
-    http_roaming_flow_type/1
+    http_roaming_flow_type/1,
+    protocol_type/1
 ]).
 
 -type route() :: #config_route_v1_pb{}.
@@ -30,6 +31,8 @@
     | {gwmp, #config_protocol_gwmp_v1_pb{}}
     | {http_roaming, #config_protocol_http_roaming_v1_pb{}}
     | undefined.
+
+-type protocol_type() :: packet_router | gwmp | http_roaming | undefined.
 
 -export_type([route/0, server/0, protocol/0]).
 
@@ -118,6 +121,13 @@ http_roaming_flow_type(Route) ->
     Server = Route#config_route_v1_pb.server,
     {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
     HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.flow_type.
+
+-spec protocol_type(Server :: server()) -> protocol_type().
+protocol_type(Server) ->
+    case Server#config_server_v1_pb.protocol of
+        {Type, _} -> Type;
+        undefined -> undefined
+    end.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests

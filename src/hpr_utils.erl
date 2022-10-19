@@ -6,7 +6,8 @@
     int_to_hex/1,
     bin_to_hex/1,
     hex_to_bin/1,
-    pubkeybin_to_mac/1
+    pubkeybin_to_mac/1,
+    net_id_display/1
 ]).
 
 -spec gateway_name(PubkeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
@@ -42,3 +43,7 @@ hex_to_bin(Hex) ->
 -spec pubkeybin_to_mac(binary()) -> binary().
 pubkeybin_to_mac(PubKeyBin) ->
     <<(xxhash:hash64(PubKeyBin)):64/unsigned-integer>>.
+
+-spec net_id_display(non_neg_integer()) -> string().
+net_id_display(Num) ->
+    string:right(erlang:integer_to_list(Num, 16), 6, $0).
