@@ -644,8 +644,10 @@ uplink_test_route(FlowType) ->
     RouteMap = #{
         net_id => ?NET_ID_ACTILITY,
         devaddr_ranges => [
-            #{start_addr => 16#04ABCDEF,
-                end_addr => 16#04ABCDFF}
+            #{
+                start_addr => 16#04ABCDEF,
+                end_addr => 16#04ABCDFF
+            }
         ],
         euis => [],
         max_copies => 1,

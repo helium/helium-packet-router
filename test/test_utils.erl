@@ -155,9 +155,9 @@ frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt) ->
     ),
     FCntSize = 16,
     Payload0 =
-        <<MType:3, MHDRRFU:3, Major:2, DevAddr:32/little-unsigned-integer, ADR:1, ADRACKReq:1, ACK:1, RFU:1,
-            FOptsLen:4, FCnt:FCntSize/little-unsigned-integer, FOptsBin:FOptsLen/binary,
-            Port:8/integer, Data/binary>>,
+        <<MType:3, MHDRRFU:3, Major:2, DevAddr:32/little-unsigned-integer, ADR:1, ADRACKReq:1,
+            ACK:1, RFU:1, FOptsLen:4, FCnt:FCntSize/little-unsigned-integer,
+            FOptsBin:FOptsLen/binary, Port:8/integer, Data/binary>>,
 
     B0 = b0(MType band 1, DevAddr, FCnt, erlang:byte_size(Payload0)),
 
@@ -226,7 +226,8 @@ binxor(<<A, RestA/binary>>, <<B, RestB/binary>>, Acc) ->
 
 -spec b0(integer(), integer(), integer(), integer()) -> binary().
 b0(Dir, DevAddr, FCnt, Len) ->
-    <<16#49, 0, 0, 0, 0, Dir, DevAddr:32/little-unsigned-integer, FCnt:32/little-unsigned-integer, 0, Len>>.
+    <<16#49, 0, 0, 0, 0, Dir, DevAddr:32/little-unsigned-integer, FCnt:32/little-unsigned-integer,
+        0, Len>>.
 
 wait_until(Fun) ->
     wait_until(Fun, 100, 100).
