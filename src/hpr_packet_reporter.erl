@@ -33,6 +33,7 @@
 
 -define(SERVER, ?MODULE).
 -define(ETS, hpr_packet_report_ets).
+-define(COUNTER, hpr_packet_report_counter).
 
 -define(FILE_WRITE_OPTIONS, [write, raw, binary, compressed]).
 -define(WRITE_BATCH_SIZE, 1000).
@@ -81,14 +82,16 @@ start_link(Args) ->
 
 -spec init_ets() -> ok.
 init_ets() ->
-    ?ETS = ets:new(?ETS, [named_table, bag, public, {write_concurrency, true}]),
+    ?ETS = ets:new(?ETS, [named_table, ordered_set, public, {write_concurrency, true}]),
+    ?COUNTER = ets:new(?COUNTER, [named_table, set, public, {write_concurrency, true}]),
+    ets:insert(?COUNTER, {?MODULE, 0}),
     ok.
 
 -spec report_packet(Packet :: hpr_packet_up:packet(), PacketRoute :: hpr_route:route()) -> ok.
 report_packet(Packet, PacketRoute) ->
     EncodedPacket = encode_packet(Packet, PacketRoute),
     ReportTimestamp = erlang:system_time(millisecond),
-    true = ets:insert(?ETS, {ReportTimestamp, EncodedPacket}),
+    true = ets:insert(?ETS, {increment_index(), ReportTimestamp, EncodedPacket}),
     ok.
 
 -spec write_packets() -> ok.
@@ -413,11 +416,15 @@ schedule_upload_retry(RetrySleepTime, FilePath) ->
 -spec get_packets_by_timestamp(Timestamp :: timestamp_ms(), BatchSize :: non_neg_integer()) ->
     [term()].
 get_packets_by_timestamp(Timestamp, BatchSize) ->
-    ets:select(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], ['$2']}], BatchSize).
+    ets:select(?ETS, [{{'$1', '$2', '$3'}, [{'<', '$2', Timestamp}], ['$3']}], BatchSize).
 
 -spec delete_packets_by_timestamp(Timestamp :: timestamp_ms()) -> integer().
 delete_packets_by_timestamp(Timestamp) ->
-    ets:select_delete(?ETS, [{{'$1', '$2'}, [{'<', '$1', Timestamp}], [true]}]).
+    ets:select_delete(?ETS, [{{'$1', '$2', '$3'}, [{'<', '$2', Timestamp}], [true]}]).
+
+-spec increment_index() -> CounterValue :: integer().
+increment_index() ->
+    ets:update_counter(?COUNTER, ?MODULE, {2, 1}).
 
 % ------------------------------------------------------------------
 % EUnit Tests
@@ -456,6 +463,60 @@ file_test() ->
     ?assertEqual(eof, file:read(S, 4)),
 
     file:close(S),
+
+    ?assertEqual(encode_packet(Packet, Route), EncodedPacket),
+    ?assertEqual(encode_packet(Packet2, Route), EncodedPacket2),
+
+    file:delete(FilePath),
+
+    ok.
+
+batch_write_test() ->
+    BatchSize = 1,
+    Timestamp = erlang:system_time(millisecond),
+    FilePath = "./packetreport." ++ integer_to_list(Timestamp),
+
+    Packet = test_utils:join_packet_up(#{}),
+    Packet2 = test_utils:uplink_packet_up(#{}),
+    Route = test_utils:packet_route(#{}),
+
+    {ok, S} = file:open(FilePath, ?FILE_WRITE_OPTIONS),
+
+    ?assertEqual(
+        {ok, 0, 0},
+        write_packets(
+            S, Timestamp, get_packets_by_timestamp(Timestamp, BatchSize), 0
+        )
+    ),
+
+    report_packet(Packet, Route),
+    report_packet(Packet2, Route),
+
+    %% Ensure write doesn't occur on same timestamp as report
+    timer:sleep(100),
+
+    {ok, S2} = file:open(FilePath, ?FILE_WRITE_OPTIONS),
+
+    WriteTimestamp = erlang:system_time(millisecond),
+    ?assertEqual(
+        {ok, 2, 2},
+        write_packets(
+            S2, WriteTimestamp, get_packets_by_timestamp(WriteTimestamp, BatchSize), 0
+        )
+    ),
+
+    {ok, S3} = file:open(FilePath, [raw, binary, compressed]),
+
+    %% Read length-delimited protobufs
+    {ok, EncodedPacketSize} = file:read(S3, 4),
+    {ok, EncodedPacket} = file:read(S3, binary:decode_unsigned(EncodedPacketSize)),
+
+    {ok, EncodedPacketSize2} = file:read(S3, 4),
+    {ok, EncodedPacket2} = file:read(S3, binary:decode_unsigned(EncodedPacketSize2)),
+
+    ?assertEqual(eof, file:read(S3, 4)),
+
+    file:close(S3),
 
     ?assertEqual(encode_packet(Packet, Route), EncodedPacket),
     ?assertEqual(encode_packet(Packet2, Route), EncodedPacket2),

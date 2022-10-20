@@ -89,8 +89,9 @@ upload_report_test(_Config) ->
 
     ETSValues = ets:tab2list(hpr_packet_report_ets),
     ?assertEqual(2, length(ETSValues)),
+    ?assertEqual([{hpr_packet_reporter, 2}], ets:tab2list(hpr_packet_report_counter)),
     [P1, P2] = lists:map(
-        fun({_, P}) ->
+        fun({_, _, P}) ->
             P
         end,
         ETSValues
