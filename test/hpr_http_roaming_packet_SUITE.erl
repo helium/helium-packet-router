@@ -22,7 +22,8 @@
     http_sync_downlink_test/1,
     http_async_uplink_join_test/1,
     http_async_downlink_test/1,
-    http_uplink_packet_no_roaming_agreement_test/1
+    http_uplink_packet_no_roaming_agreement_test/1,
+    http_uplink_packet_test/1
 ]).
 
 %% Elli callback functions
@@ -617,6 +618,85 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     %% Second packet is not forwarded
     {ok, _PacketUp, _GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY, 1),
     ok = not_http_rcv(1000),
+
+    ok.
+
+http_uplink_packet_test(_Config) ->
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
+
+    %% One Gateway is going to be sending all the packets.
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    ok = start_uplink_listener(),
+
+    SendPacketFun = fun(DevAddr) ->
+        GatewayTime = erlang:system_time(millisecond),
+        PacketUp = test_utils:frame_packet_uplink(
+            ?UNCONFIRMED_UP,
+            PubKeyBin,
+            SigFun,
+            DevAddr,
+            0,
+            #{timestamp => GatewayTime}
+        ),
+        hpr_routing:handle_packet(PacketUp),
+        {ok, PacketUp, GatewayTime}
+    end,
+
+    uplink_test_route(sync),
+
+    {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY),
+    Payload = hpr_packet_up:payload(PacketUp),
+    Region = hpr_packet_up:region(PacketUp),
+    PacketTime = hpr_packet_up:timestamp(PacketUp),
+
+    {
+        ok,
+        #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        _Request,
+        {200, _RespBody}
+    } = http_rcv(
+        #{
+            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"DedupWindowSize">> => fun erlang:is_integer/1,
+            <<"TransactionID">> => fun erlang:is_number/1,
+            <<"SenderID">> => <<"0xC00053">>,
+            <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+            <<"MessageType">> => <<"PRStartReq">>,
+            <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(Payload),
+            <<"ULMetaData">> => #{
+                <<"DevAddr">> => ?DEVADDR_ACTILITY_BIN,
+                <<"DataRate">> => hpr_lorawan:datarate_to_index(
+                    Region,
+                    hpr_packet_up:datarate(PacketUp)
+                ),
+                <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
+                <<"RFRegion">> => erlang:atom_to_binary(Region),
+                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime),
+                <<"FNSULToken">> => fun erlang:is_binary/1,
+                <<"GWCnt">> => 1,
+                <<"GWInfo">> => [
+                    #{
+                        <<"RFRegion">> => erlang:atom_to_binary(Region),
+                        <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
+                        <<"SNR">> => hpr_packet_up:snr(PacketUp),
+                        <<"DLAllowed">> => true,
+                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                            hpr_utils:pubkeybin_to_mac(PubKeyBin)
+                        )
+                    }
+                ]
+            }
+        }
+    ),
+
+    ?assertMatch(
+        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        hpr_http_roaming:parse_uplink_token(Token)
+    ),
 
     ok.
 
