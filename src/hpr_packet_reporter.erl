@@ -413,8 +413,8 @@ increment_upload_retries(FilePath, #state{upload_retries = UploadRetries} = Stat
 schedule_upload_retry(RetrySleepTime, FilePath) ->
     timer:apply_after(RetrySleepTime, ?MODULE, upload_packets, [FilePath]).
 
--spec get_packets_by_timestamp(Timestamp :: timestamp_ms(), BatchSize :: non_neg_integer()) ->
-    [term()].
+-spec get_packets_by_timestamp(Timestamp :: timestamp_ms(), BatchSize :: integer()) ->
+    {[term()], ets:continuation()} | '$end_of_table'.
 get_packets_by_timestamp(Timestamp, BatchSize) ->
     ets:select(?ETS, [{{'$1', '$2', '$3'}, [{'<', '$2', Timestamp}], ['$3']}], BatchSize).
 
