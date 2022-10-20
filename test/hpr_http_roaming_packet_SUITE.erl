@@ -23,7 +23,8 @@
     http_async_uplink_join_test/1,
     http_async_downlink_test/1,
     http_uplink_packet_no_roaming_agreement_test/1,
-    http_uplink_packet_test/1
+    http_uplink_packet_test/1,
+    http_class_c_downlink_test/1
 ]).
 
 %% Elli callback functions
@@ -75,7 +76,9 @@ all() ->
         http_sync_downlink_test,
         http_async_uplink_join_test,
         http_async_downlink_test,
-        http_uplink_packet_no_roaming_agreement_test
+        http_uplink_packet_no_roaming_agreement_test,
+        http_uplink_packet_test,
+        http_class_c_downlink_test
     ].
 
 %%--------------------------------------------------------------------
@@ -697,6 +700,112 @@ http_uplink_packet_test(_Config) ->
         {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
+
+    ok.
+
+http_class_c_downlink_test(_Config) ->
+    %%
+    %% Forwarder : HPR
+    %% Roamer    : partner-lns
+    %%
+    ok = start_forwarder_listener(),
+    ok = start_roamer_listener(#{callback_args => #{flow_type => async}}),
+
+    %% 1. N/A
+
+    %% 2. insert handler and config
+    TransactionID = 2176,
+    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    downlink_test_route(async),
+
+    %% 3. send downlink
+    DownlinkPayload = <<"downlink_payload">>,
+    DownlinkTimestamp = erlang:system_time(millisecond),
+    DownlinkFreq = 915.0,
+    DownlinkDatr = 'SF10BW125',
+
+    Token = hpr_http_roaming:make_uplink_token(
+        TransactionID,
+        'US915',
+        DownlinkTimestamp,
+        <<"http://127.0.0.1:3002/uplink">>,
+        async
+    ),
+    RXDelay = 0,
+
+    DownlinkBody = #{
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"MessageType">> => <<"XmitDataReq">>,
+        <<"ReceiverID">> => <<"0xC00053">>,
+        <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
+        <<"DLMetaData">> => #{
+            <<"ClassMode">> => <<"C">>,
+            <<"DLFreq2">> => DownlinkFreq,
+            <<"DataRate2">> => 0,
+            <<"DevEUI">> => <<"0xaabbffccfeeff001">>,
+            <<"FNSULToken">> => Token,
+            <<"HiPriorityFlag">> => false,
+            <<"RXDelay1">> => 0
+        },
+        <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
+        <<"TransactionID">> => TransactionID
+    },
+
+    _ = hackney:post(
+        <<"http://127.0.0.1:3003/downlink">>,
+        [{<<"Host">>, <<"localhost">>}],
+        jsx:encode(DownlinkBody),
+        [with_body]
+    ),
+
+    %% 4. forwarder receive http downlink
+    {ok, #{<<"TransactionID">> := TransactionID}} = forwarder_expect_downlink_data(#{
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
+        <<"ReceiverID">> => <<"0xC00053">>,
+        <<"TransactionID">> => TransactionID,
+        <<"MessageType">> => <<"XmitDataReq">>,
+        <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
+        <<"DLMetaData">> => #{
+            <<"DevEUI">> => <<"0xaabbffccfeeff001">>,
+            <<"DLFreq2">> => DownlinkFreq,
+            <<"DataRate2">> => 0,
+            <<"RXDelay1">> => RXDelay,
+            <<"FNSULToken">> => Token,
+            <<"ClassMode">> => <<"C">>,
+            <<"HiPriorityFlag">> => false
+        }
+    }),
+
+    %% 5. roamer expect 200 response
+    ok = roamer_expect_response(200),
+
+    %% 6. roamer receives http downlink ack (xmitdata_ans)
+    {ok, _Data} = roamer_expect_uplink_data(#{
+        <<"DLFreq2">> => DownlinkFreq,
+        <<"MessageType">> => <<"XmitDataAns">>,
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
+        <<"SenderID">> => <<"0xC00053">>,
+        <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
+        <<"TransactionID">> => TransactionID
+    }),
+
+    %% 7. forwarder expects 200 response
+    ok = forwarder_expect_response(200),
+
+    %% 8. gateway receive downlink
+    ok = gateway_expect_downlink(fun(PacketDown) ->
+
+        ?assertEqual(DownlinkPayload, hpr_packet_down:payload(PacketDown)),
+        ?assertEqual(
+            immediate,
+            hpr_packet_down:rx1_timestamp(PacketDown)
+        ),
+        ?assertEqual(DownlinkFreq, hpr_packet_down:rx1_frequency(PacketDown) / 1000000),
+        ?assertEqual(DownlinkDatr, hpr_packet_down:rx1_datarate(PacketDown)),
+        ok
+    end),
 
     ok.
 
