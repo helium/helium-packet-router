@@ -59,7 +59,8 @@ test_send() ->
                 host => Host,
                 port => Port,
                 protocol => {packet_router, #{}}
-            }
+            },
+            max_copies => 1
         }
     ),
 

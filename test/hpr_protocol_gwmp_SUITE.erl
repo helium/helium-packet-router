@@ -10,19 +10,17 @@
     single_lns_test/1,
     multi_lns_test/1,
     single_lns_downlink_test/1,
+    single_lns_class_c_downlink_test/1,
     multi_lns_downlink_test/1,
     multi_gw_single_lns_test/1,
-    shutdown_idle_worker_test/1,
     pull_data_test/1,
     pull_ack_test/1,
     pull_ack_hostname_test/1,
-    gateway_dest_redirect_test/1
+    region_port_redirect_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
-
--define(REDIRECT_WORKER_PORT, 2777).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -39,27 +37,18 @@ all() ->
         single_lns_test,
         multi_lns_test,
         single_lns_downlink_test,
+        single_lns_class_c_downlink_test,
         multi_lns_downlink_test,
         multi_gw_single_lns_test,
-        shutdown_idle_worker_test,
         pull_data_test,
         pull_ack_test,
         pull_ack_hostname_test,
-        gateway_dest_redirect_test
+        region_port_redirect_test
     ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
-init_per_testcase(gateway_dest_redirect_test = TestCase, Config) ->
-    application:set_env(hpr, redirect_by_region, #{
-        port => ?REDIRECT_WORKER_PORT,
-        remap => #{
-            <<"US915">> => <<"127.0.0.1:1778">>,
-            <<"EU868">> => <<"127.0.0.1:1779">>
-        }
-    }),
-    test_utils:init_per_testcase(TestCase, Config);
 init_per_testcase(TestCase, Config) ->
     test_utils:init_per_testcase(TestCase, Config).
 
@@ -142,14 +131,16 @@ single_lns_downlink_test(_Config) ->
         end,
 
     %% Send a downlink to the worker
-    {DownToken, DownPullResp} = fake_down_packet(),
-
-    %%    save these fake values to compare with what is received
     #{
-        data := Data,
-        freq := Freq,
-        datr := Datr
-    } = fake_down_map(),
+        token := DownToken,
+        pull_resp := DownPullResp,
+        %% save these fake values to compare with what is received
+        data := #{
+            data := Data,
+            freq := Freq,
+            datr := Datr
+        }
+    } = fake_down_packet(),
     ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
 
     %% receive the PacketRouterPacketDownV1 sent to grcp_stream
@@ -163,6 +154,70 @@ single_lns_downlink_test(_Config) ->
             }
         }} ->
             ?assert(erlang:is_integer(Timestamp)),
+            ?assertEqual(Data, base64:encode(Payload)),
+            ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
+            ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
+            ok;
+        {reply, Other} ->
+            ct:fail({rcvd_bad_packet_down, Other})
+    after timer:seconds(2) -> ct:fail(no_packet_down)
+    end,
+
+    %% expect the ack for our downlink
+    receive
+        {udp, LnsSocket, _Address, _Port, Data2} ->
+            ?assertEqual(tx_ack, semtech_id_atom(Data2)),
+            ?assertEqual(DownToken, semtech_udp:token(Data2))
+    after timer:seconds(2) -> ct:fail(no_tx_ack_for_downlink)
+    end,
+
+    ok.
+
+single_lns_class_c_downlink_test(_Config) ->
+    PacketUp = fake_join_up_packet(),
+
+    %% Sending a packet up, to get a packet down.
+    Route1 = test_route(1777),
+    {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    %% Send packet
+    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route1),
+
+    %% Eat the pull_data
+    {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
+    %% Receive the uplink (mostly to get the return address)
+    {ok, ReturnSocketDest} =
+        receive
+            {udp, LnsSocket, Address, Port, Data1} ->
+                ?assertEqual(push_data, semtech_id_atom(Data1)),
+                {ok, {Address, Port}}
+        after timer:seconds(2) -> ct:fail(no_push_data)
+        end,
+
+    %% Send a downlink to the worker
+    #{
+        token := DownToken,
+        pull_resp := DownPullResp,
+        %% save these fake values to compare with what is received
+        data := #{
+            data := Data,
+            freq := Freq,
+            datr := Datr
+        }
+    } = fake_class_c_down_packet(),
+    ok = gen_udp:send(LnsSocket, ReturnSocketDest, DownPullResp),
+
+    %% receive the PacketRouterPacketDownV1 sent to grcp_stream
+    receive
+        {reply, #packet_router_packet_down_v1_pb{
+            payload = Payload,
+            rx1 = #window_v1_pb{
+                timestamp = Timestamp,
+                frequency = Frequency,
+                datarate = Datarate
+            }
+        }} ->
+            ?assertEqual(0, Timestamp, "0ms means immediate"),
             ?assertEqual(Data, base64:encode(Payload)),
             ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
             ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
@@ -217,10 +272,8 @@ multi_lns_downlink_test(_Config) ->
 
     %% Send a downlink to the worker from LNS 1
     %% we don't care about the contents
-    {DownToken, DownPullResp} = fake_down_packet(),
+    #{token := DownToken, pull_resp := DownPullResp} = fake_down_packet(),
     ok = gen_udp:send(LNSSocket1, UDPWorkerAddress, DownPullResp),
-
-    %% XXX: Why don't we expect a grcp reply here?
 
     %% expect the ack for our downlink
     receive
@@ -257,38 +310,6 @@ multi_gw_single_lns_test(_Config) ->
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
 
     ok = gen_udp:close(RcvSocket),
-
-    ok.
-
-shutdown_idle_worker_test(_Config) ->
-    %%    make an up packet
-    PacketUp = fake_join_up_packet(),
-
-    PubKeyBin = hpr_packet_up:gateway(PacketUp),
-    %%    start worker
-    {ok, WorkerPid1} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
-    ?assert(erlang:is_process_alive(WorkerPid1)),
-
-    %%    wait for shutdown timer to expire
-    timer:sleep(120),
-    ?assertNot(erlang:is_process_alive(WorkerPid1)),
-
-    %%    start worker
-    {ok, WorkerPid2} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{shutdown_timer => 100}),
-    ?assert(erlang:is_process_alive(WorkerPid2)),
-    timer:sleep(50),
-
-    %%    before timer expires, send push_data
-    Route = test_route(1777),
-    ok = hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
-
-    %%    check that timer restarted when the push_data occurred
-    timer:sleep(50),
-    ?assert(erlang:is_process_alive(WorkerPid2)),
-
-    %%    check that the timer expires and the worker is shut down
-    timer:sleep(100),
-    ?assertNot(erlang:is_process_alive(WorkerPid2)),
 
     ok.
 
@@ -345,8 +366,22 @@ pull_ack_test(_Config) ->
 
     %% pull_data has been acked
     ok = test_utils:wait_until(fun() ->
-        0 == maps:size(element(6, sys:get_state(WorkerPid)))
+        [acknowledged] == maps:values(element(6, sys:get_state(WorkerPid)))
     end),
+
+    %% ===================================================================
+    %% Send another packet, there should not be another pull_data.
+    %% There's already a session started, and we'll send the pull_data on a cadence.
+
+    %% Sending the same packet again shouldn't matter here, we only want to
+    %% trigger the push_data/pull_data logic.
+    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+
+    ?assertEqual(
+        #{{{127, 0, 0, 1}, 1777} => acknowledged},
+        element(6, sys:get_state(WorkerPid)),
+        "0 outstanding pull_data"
+    ),
 
     ok.
 
@@ -397,7 +432,7 @@ pull_ack_hostname_test(_Config) ->
 
     %% pull_data has been acked
     ok = test_utils:wait_until(fun() ->
-        0 == maps:size(element(6, sys:get_state(WorkerPid)))
+        [acknowledged] == maps:values(element(6, sys:get_state(WorkerPid)))
     end),
 
     %% ensure url was resolved
@@ -407,23 +442,36 @@ pull_ack_hostname_test(_Config) ->
 
     ok.
 
-gateway_dest_redirect_test(_Config) ->
-    Route = test_route(?REDIRECT_WORKER_PORT),
+region_port_redirect_test(_Config) ->
+    FallbackPort = 2777,
+    USPort = 1778,
+    EUPort = 1779,
 
-    {ok, USSocket} = gen_udp:open(1778, [binary, {active, true}]),
-    {ok, EUSocket} = gen_udp:open(1779, [binary, {active, true}]),
+    Route = test_route(
+        <<"127.0.0.1">>,
+        FallbackPort,
+        [
+            #{region => 'US915', port => USPort},
+            #{region => 'EU868', port => EUPort}
+        ]
+    ),
 
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    {ok, FallbackSocket} = gen_udp:open(FallbackPort, [binary, {active, true}]),
+    {ok, USSocket} = gen_udp:open(USPort, [binary, {active, true}]),
+    {ok, EUSocket} = gen_udp:open(EUPort, [binary, {active, true}]),
+
+    #{public := EUPubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    EUPubKeyBin = libp2p_crypto:pubkey_to_bin(EUPubKey),
+
+    %% This gateway will have no mapping, and should result in sending to the
+    %% fallback port.
+    #{public := CNPubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    CNPubKeyBin = libp2p_crypto:pubkey_to_bin(CNPubKey),
 
     %% NOTE: Hotspot needs to be changed because 1 hotspot can't send from 2 regions.
     USPacketUp = fake_join_up_packet(),
-    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = PubKeyBin, region = 'EU868'},
-
-    %% Start before sending the packet so we can reduce the pull_data_timer from default
-    {ok, _Pid} = hpr_gwmp_sup:maybe_start_worker(PubKeyBin, #{
-        pull_data_timer => 250
-    }),
+    EUPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = EUPubKeyBin, region = 'EU868'},
+    CNPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = CNPubKeyBin, region = 'CN470'},
 
     %% US send packet
     hpr_protocol_gwmp:send(USPacketUp, unused_test_stream_handler, Route),
@@ -435,28 +483,20 @@ gateway_dest_redirect_test(_Config) ->
     {ok, _, _} = expect_pull_data(EUSocket, eu_redirected_pull_data),
     {ok, _} = expect_push_data(EUSocket, eu_redirected_push_data),
 
-    %% Meck the redirect worker _after_ it redirects the UDP workers, they
-    %% should not chat with this worker any longer.
-    Self = self(),
-    meck:new(hpr_gwmp_redirect_worker),
-
-    meck:expect(
-        hpr_gwmp_redirect_worker,
-        handle_info,
-        fun({udp, _Socket, _Address, _Port, IncomingData} = _A, State) ->
-            Self ! {fail, {no_more_udp, semtech_id_atom(IncomingData)}},
-            {noreply, State}
-        end
-    ),
-
+    %% No messages received on the fallback port
     receive
-        {fail, X} -> ct:fail({please_no_more_push_data, X})
-    after timer:seconds(1) -> ok
+        {udp, FallbackSocket, _Address, _Port, _Data} ->
+            ct:fail(expected_no_messages_on_fallback_port)
+    after 250 -> ok
     end,
 
-    meck:unload(hpr_gwmp_redirect_worker),
+    %% Send from the last region to make sure fallback port is chosen
+    hpr_protocol_gwmp:send(CNPacketUp, unused_test_stream_handler, Route),
+    {ok, _, _} = expect_pull_data(FallbackSocket, fallback_pull_data),
+    {ok, _} = expect_push_data(FallbackSocket, fallback_push_data),
 
     %% cleanup
+    ok = gen_udp:close(FallbackSocket),
     ok = gen_udp:close(USSocket),
     ok = gen_udp:close(EUSocket),
 
@@ -470,6 +510,9 @@ test_route(Port) ->
     test_route(<<"127.0.0.1">>, Port).
 
 test_route(Host, Port) ->
+    test_route(Host, Port, []).
+
+test_route(Host, Port, RegionMapping) ->
     hpr_route:new(#{
         net_id => 1337,
         devaddr_ranges => [],
@@ -478,8 +521,9 @@ test_route(Host, Port) ->
         server => #{
             host => Host,
             port => Port,
-            protocol => {gwmp, #{mapping => []}}
-        }
+            protocol => {gwmp, #{mapping => RegionMapping}}
+        },
+        max_copies => 1
     }).
 
 expect_pull_data(Socket, Reason) ->
@@ -538,11 +582,25 @@ fake_join_up_packet() ->
 fake_down_packet() ->
     DownMap = fake_down_map(),
     DownToken = semtech_udp:token(),
-    {DownToken, semtech_udp:pull_resp(DownToken, DownMap)}.
+    #{
+        token => DownToken,
+        pull_resp => semtech_udp:pull_resp(DownToken, DownMap),
+        data => DownMap
+    }.
+
+fake_class_c_down_packet() ->
+    DownMap0 = fake_down_map(),
+    DownMap = DownMap0#{imme => true},
+    DownToken = semtech_udp:token(),
+    #{
+        token => DownToken,
+        pull_resp => semtech_udp:pull_resp(DownToken, DownMap),
+        data => DownMap
+    }.
 
 fake_down_map() ->
     DownMap = #{
-        imme => true,
+        imme => false,
         freq => 904.1,
         rfch => 0,
         powe => 27,

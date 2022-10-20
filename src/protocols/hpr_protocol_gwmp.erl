@@ -4,7 +4,6 @@
 
 -export([
     packet_up_to_push_data/2,
-    route_to_dest/1,
     txpk_to_packet_down/1
 ]).
 
@@ -21,7 +20,8 @@ send(PacketUp, Stream, Route) ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
             PushData = ?MODULE:packet_up_to_push_data(PacketUp, erlang:system_time(millisecond)),
-            Dest = ?MODULE:route_to_dest(Route),
+            Region = hpr_packet_up:region(PacketUp),
+            Dest = hpr_route:gwmp_region_lns(Region, Route),
             try hpr_gwmp_worker:push_data(Pid, PushData, Stream, Dest) of
                 _ -> ok
             catch
@@ -40,10 +40,15 @@ txpk_to_packet_down(TxPkBin) ->
     TxPk = semtech_udp:json_data(TxPkBin),
     Map = maps:get(<<"txpk">>, TxPk),
     JSONData0 = base64:decode(maps:get(<<"data">>, Map)),
+    Timestamp =
+        case maps:get(<<"imme">>, Map, false) of
+            false -> maps:get(<<"tmst">>, Map);
+            true -> 0
+        end,
     hpr_packet_down:to_record(#{
         payload => JSONData0,
         rx1 => #{
-            timestamp => maps:get(<<"tmst">>, Map),
+            timestamp => Timestamp,
             frequency => erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
             datarate => erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
         },
@@ -96,22 +101,6 @@ packet_up_to_push_data(Up, GatewayTime) ->
         }
     ),
     {Token, Data}.
-
--spec route_to_dest(binary() | hpr_route:route()) ->
-    {Address :: string(), Port :: non_neg_integer()}.
-route_to_dest(Route) when erlang:is_binary(Route) ->
-    case binary:split(Route, <<":">>) of
-        [Address, Port] ->
-            {
-                erlang:binary_to_list(Address),
-                erlang:binary_to_integer(Port)
-            };
-        Err ->
-            throw({route_to_dest_err, Err})
-    end;
-route_to_dest(Route) ->
-    Lns = hpr_route:lns(Route),
-    route_to_dest(Lns).
 
 %% ------------------------------------------------------------------
 % EUnit tests

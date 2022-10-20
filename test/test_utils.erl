@@ -58,11 +58,11 @@ uplink_packet_up(Opts0) ->
     ADRACKReq = 0,
     ACK = 0,
     RFU = 0,
-    FCntLow = 1,
+    FCntLow = maps:get(fcnt, Opts0, 1),
     FOptsBin = <<>>,
     FOptsLen = erlang:byte_size(FOptsBin),
     Port = 0,
-    Data = <<"dataandmic">>,
+    Data = maps:get(data, Opts0, <<"dataandmic">>),
     Payload =
         <<MType:3, MHDRRFU:3, Major:2, DevAddr:32/integer-unsigned-little, ADR:1, ADRACKReq:1,
             ACK:1, RFU:1, FOptsLen:4, FCntLow:16/little-unsigned-integer, FOptsBin:FOptsLen/binary,

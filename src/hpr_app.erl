@@ -11,7 +11,13 @@
 
 start(_StartType, _StartArgs) ->
     lager:info("starting app"),
-    hpr_sup:start_link().
+    case hpr_sup:start_link() of
+        {error, _} = Error ->
+            Error;
+        OK ->
+            hpr_cli_registry:register_cli(),
+            OK
+    end.
 
 stop(_State) ->
     lager:info("stopping app"),
