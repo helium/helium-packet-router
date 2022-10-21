@@ -489,7 +489,7 @@ gw_info(#packet{packet_up = PacketUp}) ->
     GW = #{
         'ID' => hpr_http_roaming_utils:binary_to_hexstring(hpr_utils:pubkeybin_to_mac(PubKeyBin)),
         'RFRegion' => Region,
-        'RSSI' => erlang:trunc(RSSI),
+        'RSSI' => RSSI,
         'SNR' => SNR,
         'DLAllowed' => true
     },

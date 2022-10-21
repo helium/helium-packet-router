@@ -24,7 +24,8 @@
     http_async_downlink_test/1,
     http_uplink_packet_no_roaming_agreement_test/1,
     http_uplink_packet_test/1,
-    http_class_c_downlink_test/1
+    http_class_c_downlink_test/1,
+    http_multiple_gateways_test/1
 ]).
 
 %% Elli callback functions
@@ -78,7 +79,8 @@ all() ->
         http_async_downlink_test,
         http_uplink_packet_no_roaming_agreement_test,
         http_uplink_packet_test,
-        http_class_c_downlink_test
+        http_class_c_downlink_test,
+        http_multiple_gateways_test
     ].
 
 %%--------------------------------------------------------------------
@@ -796,7 +798,6 @@ http_class_c_downlink_test(_Config) ->
 
     %% 8. gateway receive downlink
     ok = gateway_expect_downlink(fun(PacketDown) ->
-
         ?assertEqual(DownlinkPayload, hpr_packet_down:payload(PacketDown)),
         ?assertEqual(
             immediate,
@@ -806,6 +807,105 @@ http_class_c_downlink_test(_Config) ->
         ?assertEqual(DownlinkDatr, hpr_packet_down:rx1_datarate(PacketDown)),
         ok
     end),
+
+    ok.
+
+http_multiple_gateways_test(_Config) ->
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
+
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
+    PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
+    PubKeyBin2 = libp2p_crypto:pubkey_to_bin(PubKey2),
+
+    ok = start_uplink_listener(),
+
+    SendPacketFun = fun(PubKeyBin, DevAddr, RSSI, SigFun) ->
+        GatewayTime = erlang:system_time(millisecond),
+        PacketUp = test_utils:frame_packet_uplink(
+            ?UNCONFIRMED_UP,
+            PubKeyBin,
+            SigFun,
+            DevAddr,
+            0,
+            #{timestamp => GatewayTime, rssi => RSSI}
+        ),
+        hpr_routing:handle_packet(PacketUp),
+        {ok, PacketUp, GatewayTime}
+    end,
+
+    uplink_test_route(sync),
+
+    {ok, PacketUp1, GatewayTime1} = SendPacketFun(PubKeyBin1, ?DEVADDR_ACTILITY, -25, SigFun1),
+
+    %% Sleep to ensure packets have different timing information
+    timer:sleep(10),
+
+    {ok, PacketUp2, _GatewayTime2} = SendPacketFun(PubKeyBin2, ?DEVADDR_ACTILITY, -30, SigFun2),
+
+    PacketTime1 = hpr_packet_up:timestamp(PacketUp1),
+    Region = hpr_packet_up:region(PacketUp1),
+
+    {
+        ok,
+        #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        _Request,
+        {200, _RespBody}
+    } =
+        http_rcv(#{
+            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"DedupWindowSize">> => fun erlang:is_integer/1,
+            <<"TransactionID">> => fun erlang:is_number/1,
+            <<"SenderID">> => <<"0xC00053">>,
+            <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+            <<"MessageType">> => <<"PRStartReq">>,
+            <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
+                hpr_packet_up:payload(PacketUp1)
+            ),
+            <<"ULMetaData">> => #{
+                <<"DevAddr">> => ?DEVADDR_ACTILITY_BIN,
+                <<"DataRate">> => hpr_lorawan:datarate_to_index(
+                    Region,
+                    hpr_packet_up:datarate(PacketUp1)
+                ),
+                <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp1),
+                <<"RFRegion">> => erlang:atom_to_binary(Region),
+                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime1),
+
+                <<"FNSULToken">> => fun erlang:is_binary/1,
+                <<"GWCnt">> => 2,
+                <<"GWInfo">> => [
+                    #{
+                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                            hpr_utils:pubkeybin_to_mac(PubKeyBin1)
+                        ),
+                        <<"RFRegion">> => erlang:atom_to_binary(Region),
+                        <<"RSSI">> => hpr_packet_up:rssi(PacketUp1),
+                        <<"SNR">> => hpr_packet_up:snr(PacketUp1),
+                        <<"DLAllowed">> => true
+                    },
+                    #{
+                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                            hpr_utils:pubkeybin_to_mac(PubKeyBin2)
+                        ),
+                        <<"RFRegion">> => erlang:atom_to_binary(Region),
+                        <<"RSSI">> => hpr_packet_up:rssi(PacketUp2),
+                        <<"SNR">> => hpr_packet_up:snr(PacketUp2),
+                        <<"DLAllowed">> => true
+                    }
+                ]
+            }
+        }),
+
+    %% Gateway with better RSSI should be chosen
+    ?assertMatch(
+        {ok, TransactionID, 'US915', PacketTime1, <<"127.0.0.1:3002/uplink">>, sync},
+        hpr_http_roaming:parse_uplink_token(Token)
+    ),
 
     ok.
 
@@ -839,7 +939,7 @@ uplink_test_route(FlowType) ->
             }
         ],
         euis => [],
-        max_copies => 1,
+        max_copies => 2,
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,
