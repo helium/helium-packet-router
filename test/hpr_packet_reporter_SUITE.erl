@@ -1,3 +1,11 @@
+%%--------------------------------------------------------------------
+%% @doc
+%% To run this SUITE:
+%% - `docker-compose -f docker-compose-ct.yaml up`
+%% - Update your `/etc/hosts` with `127.0.0.1 localstack`
+%% - Make sure that the direcotry `/tmp/packet_reporter` exists
+%% @end
+%%--------------------------------------------------------------------
 -module(hpr_packet_reporter_SUITE).
 
 -export([

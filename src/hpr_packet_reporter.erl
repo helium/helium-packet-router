@@ -223,7 +223,6 @@ terminate(
 
 -spec handle_write(FilePath :: string(), MaxFileSize :: integer(), WriteOptions :: [atom()]) ->
     {ok, FileSize :: integer()} | {error, Error :: term}.
-
 handle_write(FilePath, MaxFileSize, WriteOptions) ->
     case file:open(FilePath, WriteOptions) of
         {ok, S} ->
@@ -296,7 +295,6 @@ setup_aws(#{
     end.
 
 -spec start_report_interval(IntervalDuration :: interval_duration_ms()) -> {ok, timer:tref()}.
-
 start_report_interval(IntervalDuration) ->
     timer:apply_interval(IntervalDuration, ?MODULE, write_packets, []).
 
@@ -430,8 +428,8 @@ increment_index() ->
 % EUnit Tests
 % ------------------------------------------------------------------
 -ifdef(TEST).
+
 -include_lib("eunit/include/eunit.hrl").
--include_lib("common_test/include/ct.hrl").
 
 file_test() ->
     init_ets(),
