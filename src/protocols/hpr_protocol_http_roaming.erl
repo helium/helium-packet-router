@@ -63,10 +63,11 @@ send(PacketUp, GatewayStream, Route) ->
 worker_key_from(PacketUp, Route) ->
     %%    get phash
     Phash = packet_hash(PacketUp),
+    NetId = hpr_route:net_id(Route),
 
     %%    get protocol
     Protocol = protocol_from(Route),
-    {Phash, Protocol}.
+    {Phash, Protocol, NetId}.
 
 -spec protocol_from(hpr_route:route()) -> hpr_http_roaming_sup:http_protocol().
 protocol_from(Route) ->

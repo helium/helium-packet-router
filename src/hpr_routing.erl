@@ -54,6 +54,7 @@ handle_packet(Packet) ->
             Error;
         ok ->
             Routes = find_routes(PacketType),
+            lager:debug("Routes: ~p", [Routes]),
             ok = maybe_deliver_packet(Packet, Routes),
             hpr_metrics:observe_packet_up(PacketType, ok, erlang:length(Routes), Start),
             ok

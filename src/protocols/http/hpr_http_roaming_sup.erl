@@ -44,7 +44,8 @@
 
 -type worker_key() :: {
     PHash :: binary(),
-    Protocol :: http_protocol()
+    Protocol :: http_protocol(),
+    NetId :: non_neg_integer()
 }.
 
 -export_type([worker_key/0, http_protocol/0]).

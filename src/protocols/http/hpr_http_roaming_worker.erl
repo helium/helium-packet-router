@@ -70,6 +70,15 @@ start_link(Args) ->
     GatewayStream :: hpr_router_stream_manager:gateway_stream()
 ) -> ok | {error, any()}.
 handle_packet(Pid, PacketUp, GatewayTime, GatewayStream) ->
+    lager:debug(
+        [
+            {pid, Pid},
+            {packet_up, PacketUp},
+            {gateway_time, GatewayTime},
+            {gateway_stream, GatewayStream}
+        ],
+        "handle_packet"
+    ),
     gen_server:cast(Pid, {handle_packet, PacketUp, GatewayTime, GatewayStream}).
 
 %% ------------------------------------------------------------------
@@ -191,17 +200,19 @@ do_handle_packet(
     {ok, State1}.
 
 -spec send_data(#state{}) -> ok.
-send_data(#state{
-    net_id = NetID,
-    address = Address,
-    packets = Packets,
-    transaction_id = TransactionID,
-    flow_type = FlowType,
-    auth_header = Auth,
-    protocol_version = ProtocolVersion,
-    send_data_timer = DedupWindow,
-    routing_info = RoutingInfo
-}) ->
+send_data(
+    #state{
+        net_id = NetID,
+        address = Address,
+        packets = Packets,
+        transaction_id = TransactionID,
+        flow_type = FlowType,
+        auth_header = Auth,
+        protocol_version = ProtocolVersion,
+        send_data_timer = DedupWindow,
+        routing_info = RoutingInfo
+    }
+) ->
     Data = hpr_http_roaming:make_uplink_payload(
         NetID,
         Packets,

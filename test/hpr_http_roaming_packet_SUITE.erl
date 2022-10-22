@@ -25,7 +25,8 @@
     http_uplink_packet_no_roaming_agreement_test/1,
     http_uplink_packet_test/1,
     http_class_c_downlink_test/1,
-    http_multiple_gateways_test/1
+    http_multiple_gateways_test/1,
+    http_multiple_joins_same_dest_test/1
 ]).
 
 %% Elli callback functions
@@ -80,7 +81,8 @@ all() ->
         http_uplink_packet_no_roaming_agreement_test,
         http_uplink_packet_test,
         http_class_c_downlink_test,
-        http_multiple_gateways_test
+        http_multiple_gateways_test,
+        http_multiple_joins_same_dest_test
     ].
 
 %%--------------------------------------------------------------------
@@ -909,9 +911,52 @@ http_multiple_gateways_test(_Config) ->
 
     ok.
 
+http_multiple_joins_same_dest_test(_Config) ->
+    DevEUI1 = 1,
+    AppEUI1 = 16#200000001,
+
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
+
+    GatewayTime = erlang:system_time(millisecond),
+    PacketUp = test_utils:frame_packet_join(
+        PubKeyBin,
+        SigFun,
+        DevEUI1,
+        AppEUI1,
+        #{timestamp => GatewayTime}
+    ),
+
+    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ACTILITY),
+    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ORANGE),
+
+    ok = start_uplink_listener(#{port => 3002, callback_args => #{forward => self()}}),
+
+    ok = hpr_routing:handle_packet(PacketUp),
+
+    {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
+
+    lager:debug("ReceiverOne: ~p", [ReceiverOne]),
+
+    {ok, #{<<"ReceiverID">> := ReceiverTwo}, _, _} = http_rcv(),
+
+    lager:debug("ReceiverOne: ~p", [ReceiverTwo]),
+
+    ok = not_http_rcv(250),
+
+    ?assertNotEqual(ReceiverOne, ReceiverTwo),
+
+    ok.
+
 join_test_route(DevEUI, AppEUI, FlowType) ->
+    join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY).
+
+join_test_route(DevEUI, AppEUI, FlowType, NetId) ->
     RouteMap = #{
-        net_id => ?NET_ID_ACTILITY,
+        net_id => NetId,
         devaddr_ranges => [],
         euis => [
             #{
@@ -919,7 +964,7 @@ join_test_route(DevEUI, AppEUI, FlowType) ->
                 app_eui => AppEUI
             }
         ],
-        max_copies => 1,
+        max_copies => 2,
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,
