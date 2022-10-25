@@ -27,7 +27,8 @@
     http_class_c_downlink_test/1,
     http_multiple_gateways_test/1,
     http_multiple_joins_same_dest_test/1,
-    http_multiple_gateways_single_shot_test/1
+    http_multiple_gateways_single_shot_test/1,
+    http_overlapping_devaddr_test/1
 ]).
 
 %% Elli callback functions
@@ -61,7 +62,7 @@
 -define(DEVADDR_ACTILITY_BIN, <<"0x04ABCDEF">>).
 
 % pp_utils:hex_to_binary(<<"45000042">>)
--define(DEVADDR_COMCAST, <<69, 0, 0, 66>>).
+-define(DEVADDR_COMCAST, 16#45000042).
 % pp_utils:hex_to_binary(<<"0000041">>)
 -define(DEVADDR_EXPERIMENTAL, <<0, 0, 0, 42>>).
 %pp_utils:hex_to_binary(<<"1E123456">>)
@@ -84,7 +85,8 @@ all() ->
         http_class_c_downlink_test,
         http_multiple_gateways_test,
         http_multiple_joins_same_dest_test,
-        http_multiple_gateways_single_shot_test
+        http_multiple_gateways_single_shot_test,
+        http_overlapping_devaddr_test
     ].
 
 %%--------------------------------------------------------------------
@@ -567,7 +569,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
         {ok, PacketUp, GatewayTime}
     end,
 
-    uplink_test_route(sync),
+    uplink_test_route(),
     lager:debug("routes by devaddr: ~p", [ets:tab2list(hpr_config_routes_by_devaddr)]),
 
     {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY, 0),
@@ -654,7 +656,7 @@ http_uplink_packet_test(_Config) ->
         {ok, PacketUp, GatewayTime}
     end,
 
-    uplink_test_route(sync),
+    uplink_test_route(),
 
     {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY),
     Payload = hpr_packet_up:payload(PacketUp),
@@ -841,7 +843,7 @@ http_multiple_gateways_test(_Config) ->
         {ok, PacketUp, GatewayTime}
     end,
 
-    uplink_test_route(sync),
+    uplink_test_route(),
 
     {ok, PacketUp1, GatewayTime1} = SendPacketFun(PubKeyBin1, ?DEVADDR_ACTILITY, -25, SigFun1),
 
@@ -979,7 +981,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
         hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
-    uplink_test_route(sync, 0),
+    uplink_test_route(#{dedupe_timeout => 0}),
 
     {ok, PacketUp1, GatewayTime1} = SendPacketFun(PubKeyBin1, ?DEVADDR_ACTILITY, -25, SigFun1),
     {ok, PacketUp2, _GatewayTime2} = SendPacketFun(PubKeyBin2, ?DEVADDR_ACTILITY, -30, SigFun2),
@@ -1039,6 +1041,60 @@ http_multiple_gateways_single_shot_test(_Config) ->
     ),
     ok.
 
+http_overlapping_devaddr_test(_Config) ->
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
+
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    GatewayTime = erlang:system_time(millisecond),
+    PacketUp = test_utils:frame_packet_uplink(
+        ?UNCONFIRMED_UP,
+        PubKeyBin,
+        SigFun,
+        ?DEVADDR_COMCAST,
+        0,
+        #{timestamp => GatewayTime}
+    ),
+
+    DevAddrRangeSingle = #{
+        start_addr => 16#45000042,
+        end_addr => 16#45000042
+    },
+    DevAddrInRange = #{
+        start_addr => 16#45000040,
+        end_addr => 16#45000044
+    },
+
+    %% Overlapping Devaddrs, but going to different endpoints
+    uplink_test_route(#{
+        net_id => ?NET_ID_COMCAST,
+        dedupe_timeout => 50,
+        devaddr_ranges => [DevAddrRangeSingle]
+    }),
+    uplink_test_route(#{
+        net_id => ?NET_ID_COMCAST,
+        dedupe_timeout => 50,
+        devaddr_ranges => [DevAddrInRange],
+        port => 3003
+    }),
+
+    ok = start_uplink_listener(#{port => 3002}),
+    ok = start_uplink_listener(#{port => 3003}),
+
+    hpr_routing:handle_packet(PacketUp),
+
+    {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
+    {ok, #{<<"ReceiverID">> := ReceiverTwo}, _, _} = http_rcv(),
+    ok = not_http_rcv(250),
+
+    %% Receiver ID must be the same because DevAddr is explicitly partitioned by
+    %% NetID, unlike Join EUI. And we got 2 requests.
+    ?assertEqual(ReceiverOne, ReceiverTwo),
+
+    ok.
+
 join_test_route(DevEUI, AppEUI, FlowType) ->
     join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY).
 
@@ -1062,23 +1118,33 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId) ->
     Route = hpr_route:new(RouteMap),
     hpr_config:insert_route(Route).
 
-uplink_test_route(FlowType) ->
-    uplink_test_route(FlowType, 250).
+uplink_test_route() ->
+    uplink_test_route(#{}).
 
-uplink_test_route(FlowType, DedupeTimeout) ->
-    RouteMap = #{
-        net_id => ?NET_ID_ACTILITY,
-        devaddr_ranges => [
+uplink_test_route(InputMap) ->
+    NetId = maps:get(net_id, InputMap, ?NET_ID_ACTILITY),
+    DevAddrRanges = maps:get(
+        devaddr_ranges,
+        InputMap,
+        [
             #{
                 start_addr => 16#04ABCDEF,
                 end_addr => 16#04ABCDFF
             }
-        ],
+        ]
+    ),
+    FlowType = maps:get(flow_type, InputMap, sync),
+    DedupeTimeout = maps:get(dedupe_timeout, InputMap, 250),
+    Port = maps:get(port, InputMap, 3002),
+
+    RouteMap = #{
+        net_id => NetId,
+        devaddr_ranges => DevAddrRanges,
         euis => [],
         max_copies => 2,
         server => #{
             host => <<"127.0.0.1">>,
-            port => 3002,
+            port => Port,
             protocol =>
                 {http_roaming, #{
                     flow_type => FlowType,
