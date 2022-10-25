@@ -28,7 +28,8 @@
     http_multiple_gateways_test/1,
     http_multiple_joins_same_dest_test/1,
     http_multiple_gateways_single_shot_test/1,
-    http_overlapping_devaddr_test/1
+    http_overlapping_devaddr_test/1,
+    http_uplink_packet_late_test/1
 ]).
 
 %% Elli callback functions
@@ -1092,6 +1093,101 @@ http_overlapping_devaddr_test(_Config) ->
     %% Receiver ID must be the same because DevAddr is explicitly partitioned by
     %% NetID, unlike Join EUI. And we got 2 requests.
     ?assertEqual(ReceiverOne, ReceiverTwo),
+
+    ok.
+
+http_uplink_packet_late_test(_Config) ->
+    %% There's a builtin dedupe for http roaming, we want to make sure that
+    %% gateways with high hold time don't cause the same packet to be sent again
+    %% if they missed the dedupe window.
+
+    ok = start_uplink_listener(),
+
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
+
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
+    PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
+    PubKeyBin2 = libp2p_crypto:pubkey_to_bin(PubKey2),
+
+    SendPacketFun = fun(PubKeyBin, DevAddr, SigFun) ->
+        GatewayTime = erlang:system_time(millisecond),
+        PacketUp = test_utils:frame_packet_uplink(
+            ?UNCONFIRMED_UP,
+            PubKeyBin,
+            SigFun,
+            DevAddr,
+            0,
+            #{timestamp => GatewayTime}
+        ),
+        hpr_routing:handle_packet(PacketUp),
+        {ok, PacketUp, GatewayTime}
+    end,
+
+    uplink_test_route(#{dedupe_timeout => 10}),
+
+    {ok, PacketUp1, GatewayTime1} = SendPacketFun(PubKeyBin1, ?DEVADDR_ACTILITY, SigFun1),
+    Region = hpr_packet_up:region(PacketUp1),
+    PacketTime = hpr_packet_up:timestamp(PacketUp1),
+
+    %% Wait past the timeout before sending another packet
+    ok = timer:sleep(100),
+    {ok, _, _} = SendPacketFun(PubKeyBin2, ?DEVADDR_ACTILITY, SigFun2),
+
+    {
+        ok,
+        #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        _Request,
+        {200, _RespBody}
+    } = http_rcv(
+        #{
+            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"DedupWindowSize">> => fun erlang:is_integer/1,
+            <<"TransactionID">> => fun erlang:is_number/1,
+            <<"SenderID">> => <<"0xC00053">>,
+            <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+            <<"MessageType">> => <<"PRStartReq">>,
+            <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
+                hpr_packet_up:payload(PacketUp1)
+            ),
+            <<"ULMetaData">> => #{
+                <<"DevAddr">> => ?DEVADDR_ACTILITY_BIN,
+                <<"DataRate">> => hpr_lorawan:datarate_to_index(
+                    Region,
+                    hpr_packet_up:datarate(PacketUp1)
+                ),
+                <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp1),
+                <<"RFRegion">> => erlang:atom_to_binary(Region),
+                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime1),
+
+                <<"FNSULToken">> => fun erlang:is_binary/1,
+                <<"GWCnt">> => 1,
+                <<"GWInfo">> => [
+                    #{
+                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                            hpr_utils:pubkeybin_to_mac(PubKeyBin1)
+                        ),
+                        <<"RFRegion">> => erlang:atom_to_binary(Region),
+                        <<"RSSI">> => hpr_packet_up:rssi(PacketUp1),
+                        <<"SNR">> => hpr_packet_up:snr(PacketUp1),
+                        <<"DLAllowed">> => true
+                    }
+                ]
+            }
+        }
+    ),
+
+    ?assertMatch(
+        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        hpr_http_roaming:parse_uplink_token(Token)
+    ),
+
+    %% We should not get another http request for the second packet that missed the window.
+    ok = not_http_rcv(timer:seconds(1)),
 
     ok.
 
