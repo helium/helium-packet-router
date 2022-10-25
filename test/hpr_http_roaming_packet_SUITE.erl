@@ -26,7 +26,8 @@
     http_uplink_packet_test/1,
     http_class_c_downlink_test/1,
     http_multiple_gateways_test/1,
-    http_multiple_joins_same_dest_test/1
+    http_multiple_joins_same_dest_test/1,
+    http_multiple_gateways_single_shot_test/1
 ]).
 
 %% Elli callback functions
@@ -82,7 +83,8 @@ all() ->
         http_uplink_packet_test,
         http_class_c_downlink_test,
         http_multiple_gateways_test,
-        http_multiple_joins_same_dest_test
+        http_multiple_joins_same_dest_test,
+        http_multiple_gateways_single_shot_test
     ].
 
 %%--------------------------------------------------------------------
@@ -951,6 +953,92 @@ http_multiple_joins_same_dest_test(_Config) ->
 
     ok.
 
+http_multiple_gateways_single_shot_test(_Config) ->
+    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
+
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
+    PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
+    PubKeyBin2 = libp2p_crypto:pubkey_to_bin(PubKey2),
+
+    ok = start_uplink_listener(),
+
+    SendPacketFun = fun(PubKeyBin, DevAddr, RSSI, SigFun) ->
+        GatewayTime = erlang:system_time(millisecond),
+        PacketUp = test_utils:frame_packet_uplink(
+            ?UNCONFIRMED_UP,
+            PubKeyBin,
+            SigFun,
+            DevAddr,
+            0,
+            #{timestamp => GatewayTime, rssi => RSSI}
+        ),
+        hpr_routing:handle_packet(PacketUp),
+        {ok, PacketUp, GatewayTime}
+    end,
+    uplink_test_route(sync, 0),
+
+    {ok, PacketUp1, GatewayTime1} = SendPacketFun(PubKeyBin1, ?DEVADDR_ACTILITY, -25, SigFun1),
+    {ok, PacketUp2, _GatewayTime2} = SendPacketFun(PubKeyBin2, ?DEVADDR_ACTILITY, -30, SigFun2),
+    Region = hpr_packet_up:region(PacketUp1),
+
+    MakeBaseExpect = fun(GatewayInfo) ->
+        #{
+            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"DedupWindowSize">> => fun erlang:is_integer/1,
+            <<"TransactionID">> => fun erlang:is_number/1,
+            <<"SenderID">> => <<"0xC00053">>,
+            <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+            <<"MessageType">> => <<"PRStartReq">>,
+            <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
+                hpr_packet_up:payload(PacketUp1)
+            ),
+            <<"ULMetaData">> => #{
+                <<"DevAddr">> => ?DEVADDR_ACTILITY_BIN,
+                <<"DataRate">> => hpr_lorawan:datarate_to_index(
+                    Region,
+                    hpr_packet_up:datarate(PacketUp1)
+                ),
+                <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp1),
+                <<"RFRegion">> => erlang:atom_to_binary(Region),
+                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime1),
+
+                <<"FNSULToken">> => fun erlang:is_binary/1,
+                <<"GWCnt">> => 1,
+                <<"GWInfo">> => [GatewayInfo]
+            }
+        }
+    end,
+
+    {ok, _Data1, _, {200, _RespBody1}} = http_rcv(
+        MakeBaseExpect(#{
+            <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                hpr_utils:pubkeybin_to_mac(PubKeyBin1)
+            ),
+            <<"RFRegion">> => erlang:atom_to_binary(Region),
+            <<"RSSI">> => hpr_packet_up:rssi(PacketUp1),
+            <<"SNR">> => hpr_packet_up:snr(PacketUp1),
+            <<"DLAllowed">> => true
+        })
+    ),
+
+    {ok, _Data2, _, {200, _RespBody2}} = http_rcv(
+        MakeBaseExpect(#{
+            <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                hpr_utils:pubkeybin_to_mac(PubKeyBin2)
+            ),
+            <<"RFRegion">> => erlang:atom_to_binary(Region),
+            <<"RSSI">> => hpr_packet_up:rssi(PacketUp2),
+            <<"SNR">> => hpr_packet_up:snr(PacketUp2),
+            <<"DLAllowed">> => true
+        })
+    ),
+    ok.
+
 join_test_route(DevEUI, AppEUI, FlowType) ->
     join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY).
 
@@ -975,6 +1063,9 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId) ->
     hpr_config:insert_route(Route).
 
 uplink_test_route(FlowType) ->
+    uplink_test_route(FlowType, 250).
+
+uplink_test_route(FlowType, DedupeTimeout) ->
     RouteMap = #{
         net_id => ?NET_ID_ACTILITY,
         devaddr_ranges => [
@@ -988,7 +1079,11 @@ uplink_test_route(FlowType) ->
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,
-            protocol => {http_roaming, #{flow_type => FlowType}}
+            protocol =>
+                {http_roaming, #{
+                    flow_type => FlowType,
+                    dedupe_timeout => DedupeTimeout
+                }}
         }
     },
     Route = hpr_route:new(RouteMap),

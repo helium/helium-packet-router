@@ -19,7 +19,8 @@
     port/1,
     protocol/1,
     http_roaming_flow_type/1,
-    protocol_type/1
+    protocol_type/1,
+    http_roaming_dedupe_timeout/1
 ]).
 
 -type route() :: #config_route_v1_pb{}.
@@ -121,6 +122,12 @@ http_roaming_flow_type(Route) ->
     Server = Route#config_route_v1_pb.server,
     {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
     HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.flow_type.
+
+-spec http_roaming_dedupe_timeout(Route :: route()) -> non_neg_integer() | undefined.
+http_roaming_dedupe_timeout(Route) ->
+    Server = Route#config_route_v1_pb.server,
+    {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
+    HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.dedupe_timeout.
 
 -spec protocol_type(Server :: server()) -> protocol_type().
 protocol_type(Server) ->

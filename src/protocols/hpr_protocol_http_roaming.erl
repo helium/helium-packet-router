@@ -9,9 +9,6 @@
 -module(hpr_protocol_http_roaming).
 -author("jonathanruttenberg").
 
-%%-include("../grpc/autogen/server/config_pb.hrl").
-%%-include("../grpc/autogen/server/packet_router_pb.hrl").
-
 -include("hpr_http_roaming.hrl").
 
 -export([send/3]).
@@ -72,6 +69,11 @@ worker_key_from(PacketUp, Route) ->
 -spec protocol_from(hpr_route:route()) -> hpr_http_roaming_sup:http_protocol().
 protocol_from(Route) ->
     FlowType = hpr_route:http_roaming_flow_type(Route),
+    DedupeTimeout =
+        case hpr_route:http_roaming_dedupe_timeout(Route) of
+            undefined -> 250;
+            DT -> DT
+        end,
 
     %%    When this protobuf definition is expanded, there will be functions to access the added fields.
     %%    {http_roaming, #config_protocol_http_roaming_v1_pb{}} = Protocol,
@@ -81,7 +83,7 @@ protocol_from(Route) ->
         protocol_version = pv_1_1,
         flow_type = FlowType,
         endpoint = hpr_route:lns(Route),
-        dedupe_timeout = 250,
+        dedupe_timeout = DedupeTimeout,
         auth_header = null
     }.
 
