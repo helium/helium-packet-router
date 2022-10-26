@@ -450,7 +450,7 @@ make_uplink_token(TransactionID, Region, PacketTime, DestURL, FlowType) ->
 parse_uplink_token(<<"0x", Token/binary>>) ->
     parse_uplink_token(Token);
 parse_uplink_token(Token) ->
-    Bin = hpr_http_roaming_utils:hex_to_binary(Token),
+    Bin = binary:decode_hex(Token),
     case binary:split(Bin, ?TOKEN_SEP, [global]) of
         [TransactionIDBin, RegionBin, PacketTimeBin, DestURLBin, FlowTypeBin] ->
             TransactionID = erlang:binary_to_integer(TransactionIDBin),
