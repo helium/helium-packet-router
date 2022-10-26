@@ -52,8 +52,7 @@
     protocol_version :: pv_1_0 | pv_1_1,
 
     should_shutdown = false :: boolean(),
-    shutdown_timer_ref :: undefined | reference(),
-    routing_info :: undefined | hpr_routing:routing_info()
+    shutdown_timer_ref :: undefined | reference()
 }).
 
 %% ------------------------------------------------------------------
@@ -103,8 +102,7 @@ init(Args) ->
         send_data_timer = DedupeTimeout,
         flow_type = FlowType,
         auth_header = Auth,
-        protocol_version = ProtocolVersion,
-        routing_info = undefined
+        protocol_version = ProtocolVersion
     }}.
 
 handle_call(_Msg, _From, State) ->
@@ -194,8 +192,7 @@ do_handle_packet(
     State1 = State#state{
         packets = [
             hpr_http_roaming:new_packet(PacketUp, GatewayTime, GatewayStream) | Packets
-        ],
-        routing_info = hpr_routing:routing_info_from(PacketUp)
+        ]
     },
     {ok, State1}.
 
@@ -209,8 +206,7 @@ send_data(
         flow_type = FlowType,
         auth_header = Auth,
         protocol_version = ProtocolVersion,
-        send_data_timer = DedupWindow,
-        routing_info = RoutingInfo
+        send_data_timer = DedupWindow
     }
 ) ->
     Data = hpr_http_roaming:make_uplink_payload(
@@ -220,8 +216,7 @@ send_data(
         ProtocolVersion,
         DedupWindow,
         Address,
-        FlowType,
-        RoutingInfo
+        FlowType
     ),
     RoundedFloats = semtech_udp:round_to_fourth_decimal_all_float_values(Data),
     Data1 = jsx:encode(RoundedFloats),

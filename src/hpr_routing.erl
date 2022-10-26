@@ -2,9 +2,7 @@
 
 -export([
     init/0,
-    handle_packet/1,
-    routing_info_type/1,
-    routing_info_from/1
+    handle_packet/1
 ]).
 
 -type routing_info() ::
@@ -58,18 +56,6 @@ handle_packet(Packet) ->
             ok = maybe_deliver_packet(Packet, Routes),
             hpr_metrics:observe_packet_up(PacketType, ok, erlang:length(Routes), Start),
             ok
-    end.
-
--spec routing_info_type(routing_info()) -> eui | devaddr.
-routing_info_type({eui, _DevEUI, _AppEUI}) -> eui;
-routing_info_type({devaddr, _DevAddr}) -> devaddr.
-
--spec routing_info_from(PacketUp :: hpr_packet_up:packet()) -> RoutingInfo :: routing_info().
-routing_info_from(PacketUp) ->
-    case hpr_packet_up:type(PacketUp) of
-        {join_req, {AppEUI, DevEUI}} -> {eui, DevEUI, AppEUI};
-        {uplink, DevAddr} -> {devaddr, DevAddr};
-        {undefined, _} -> undefined
     end.
 
 %% ------------------------------------------------------------------

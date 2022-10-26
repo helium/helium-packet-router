@@ -20,8 +20,8 @@
 ) -> ok | {error, any()}.
 send(PacketUp, GatewayStream, Route) ->
     WorkerKey = worker_key_from(PacketUp, Route),
-    RoutingInfo = hpr_routing:routing_info_from(PacketUp),
-    PacketType = hpr_routing:routing_info_type(RoutingInfo),
+    RoutingInfo = hpr_packet_up:routing_info_from(PacketUp),
+    PacketType = hpr_packet_up:routing_info_type(PacketUp),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
 

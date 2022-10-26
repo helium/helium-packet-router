@@ -11,7 +11,7 @@
 
 %% Uplinking
 -export([
-    make_uplink_payload/8,
+    make_uplink_payload/7,
     select_best/1,
     gateway_time/1,
     response_stream/1
@@ -109,8 +109,7 @@ response_stream(#packet{response_stream = ResponseStream}) ->
     ProtocolVersion :: pv_1_0 | pv_1_1,
     DedupWindowSize :: non_neg_integer(),
     Destination :: binary(),
-    FlowType :: sync | async,
-    RoutingInfo :: hpr_routing:routing_info()
+    FlowType :: sync | async
 ) -> prstart_req().
 make_uplink_payload(
     NetID,
@@ -119,8 +118,7 @@ make_uplink_payload(
     ProtocolVersion,
     DedupWindowSize,
     Destination,
-    FlowType,
-    RoutingInfo
+    FlowType
 ) ->
     #packet{
         packet_up = PacketUp,
@@ -134,11 +132,7 @@ make_uplink_payload(
     DataRate = hpr_packet_up:datarate(PacketUp),
     Frequency = hpr_packet_up:frequency_mhz(PacketUp),
 
-    {RoutingKey, RoutingValue} =
-        case RoutingInfo of
-            {devaddr, DevAddr} -> {'DevAddr', encode_devaddr(DevAddr)};
-            {eui, DevEUI, _AppEUI} -> {'DevEUI', encode_deveui(DevEUI)}
-        end,
+    {RoutingKey, RoutingValue} = routing_key_and_value(PacketUp),
 
     Token = make_uplink_token(TransactionID, Region, PacketTime, Destination, FlowType),
 
@@ -173,6 +167,15 @@ make_uplink_payload(
             'GWInfo' => lists:map(fun gw_info/1, Uplinks)
         }
     }.
+
+routing_key_and_value(PacketUp) ->
+    RoutingInfo = hpr_packet_up:routing_info_from(PacketUp),
+    {RoutingKey, RoutingValue} =
+        case RoutingInfo of
+            {devaddr, DevAddr} -> {'DevAddr', encode_devaddr(DevAddr)};
+            {eui, DevEUI, _AppEUI} -> {'DevEUI', encode_deveui(DevEUI)}
+        end,
+    {RoutingKey, RoutingValue}.
 
 %% ------------------------------------------------------------------
 %% Downlink

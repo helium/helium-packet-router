@@ -18,7 +18,9 @@
     encode/1,
     decode/1,
     to_map/1,
-    type/1
+    type/1,
+    routing_info_from/1,
+    routing_info_type/1
 ]).
 
 -ifdef(TEST).
@@ -157,6 +159,23 @@ type(Packet) ->
             {undefined, FType};
         _ ->
             {undefined, 0}
+    end.
+
+-spec routing_info_from(PacketUp :: hpr_packet_up:packet()) ->
+    RoutingInfo :: hpr_routing:routing_info().
+routing_info_from(PacketUp) ->
+    case hpr_packet_up:type(PacketUp) of
+        {join_req, {AppEUI, DevEUI}} -> {eui, DevEUI, AppEUI};
+        {uplink, DevAddr} -> {devaddr, DevAddr};
+        {undefined, _} -> undefined
+    end.
+
+-spec routing_info_type(hpr_packet_up:packet()) -> eui | devaddr.
+routing_info_type(PacketUp) ->
+    RoutingInfo = routing_info_from(PacketUp),
+    case RoutingInfo of
+        {eui, _DevEUI, _AppEUI} -> eui;
+        {devaddr, _DevAddr} -> devaddr
     end.
 
 %% ------------------------------------------------------------------
