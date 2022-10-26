@@ -2,11 +2,14 @@
 %% @doc
 %% To run this SUITE:
 %% - `docker-compose -f docker-compose-ct.yaml up`
-%% - Update your `/etc/hosts` with `127.0.0.1 localstack`
-%% - Make sure that the direcotry `/tmp/packet_reporter` exists
 %% @end
 %%--------------------------------------------------------------------
 -module(hpr_packet_reporter_SUITE).
+
+-include("hpr.hrl").
+
+-include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -export([
     all/0,
@@ -15,31 +18,8 @@
 ]).
 
 -export([
-    upload_report_test/1,
-    upload_error_test/1,
-    report_interval_test/1,
-    upload_window_test/1
+    upload_test/1
 ]).
-
--include("hpr.hrl").
-
--include_lib("common_test/include/ct.hrl").
--include_lib("eunit/include/eunit.hrl").
-
--record(state, {
-    aws_client :: aws_client:aws_client(),
-    write_dir :: string(),
-    file_path :: string(),
-    max_file_size :: non_neg_integer(),
-    report_interval :: timer:tref() | undefined,
-    interval_duration :: non_neg_integer() | undefined,
-    upload_window :: non_neg_integer(),
-    upload_window_start_time :: non_neg_integer(),
-    upload_retries :: map(),
-    retry_sleep_time :: non_neg_integer(),
-    max_upload_retries :: non_neg_integer(),
-    bucket :: binary()
-}).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -53,173 +33,126 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        upload_report_test,
-        upload_error_test,
-        report_interval_test,
-        upload_window_test
+        upload_test
     ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    Config1 = test_utils:init_per_testcase(TestCase, Config),
-    meck:new(aws_s3, [passthrough]),
-    meck:new(aws_request, [passthrough]),
-    meck:new(hpr_packet_reporter, [passthrough]),
-
-    Config1.
+    ReporterCfg = application:get_env(?APP, packet_reporter, #{}),
+    OSEnv = os:getenv("HPR_PACKET_REPORTER_LOCAL_HOST", "localhost"),
+    ok = application:set_env(?APP, packet_reporter, ReporterCfg#{local_host => OSEnv}, [
+        {persistent, true}
+    ]),
+    test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
-    ets:delete_all_objects(hpr_packet_report_ets),
-    meck:unload(),
-
+    %% Empty bucket for next test
+    AWSClient = erlang:element(2, sys:get_state(hpr_packet_reporter)),
+    Bucket = erlang:element(3, sys:get_state(hpr_packet_reporter)),
+    {ok, #{<<"ListBucketResult">> := #{<<"Contents">> := Contents}}, _} = aws_s3:list_objects(
+        AWSClient, Bucket
+    ),
+    Keys =
+        case erlang:is_map(Contents) of
+            true ->
+                [maps:get(<<"Key">>, Contents)];
+            false ->
+                [maps:get(<<"Key">>, Content) || Content <- Contents]
+        end,
+    {ok, _, _} = aws_s3:delete_objects(
+        AWSClient, Bucket, #{
+            <<"Body">> => #{
+                <<"Delete">> => [
+                    #{<<"Object">> => #{<<"Key">> => Key}}
+                 || Key <- Keys
+                ]
+            }
+        }
+    ),
     test_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-upload_report_test(_Config) ->
-    State = sys:get_state(hpr_packet_reporter),
-    #state{file_path = FilePath, aws_client = AWSClient, bucket = Bucket} = State,
-
-    Packet = test_utils:join_packet_up(#{}),
-    Packet2 = test_utils:uplink_packet_up(#{}),
+upload_test(_Config) ->
+    %% Send N packets
+    N = 100,
     Route = test_utils:packet_route(#{}),
-
-    %% Reported packets are encoded and saved to ETS
-    hpr_packet_reporter:report_packet(Packet, Route),
-    hpr_packet_reporter:report_packet(Packet2, Route),
-
-    ETSValues = ets:tab2list(hpr_packet_report_ets),
-    ?assertEqual(2, length(ETSValues)),
-    ?assertEqual([{hpr_packet_reporter, 2}], ets:tab2list(hpr_packet_report_counter)),
-    [P1, P2] = lists:map(
-        fun({_, _, P}) ->
-            P
+    ExpectedPackets = lists:foldl(
+        fun(X, Acc) ->
+            Packet = test_utils:uplink_packet_up(#{rssi => X}),
+            hpr_packet_reporter:report_packet(Packet, Route),
+            PacketReport = hpr_packet_report:to_record(#{
+                gateway_timestamp_ms => hpr_packet_up:timestamp(Packet),
+                oui => hpr_route:oui(Route),
+                net_id => hpr_route:net_id(Route),
+                rssi => hpr_packet_up:rssi(Packet),
+                frequency => hpr_packet_up:frequency(Packet),
+                datarate => hpr_packet_up:datarate(Packet),
+                snr => hpr_packet_up:snr(Packet),
+                region => hpr_packet_up:region(Packet),
+                gateway => hpr_packet_up:gateway(Packet),
+                payload_hash => hpr_packet_up:phash(Packet)
+            }),
+            [PacketReport | Acc]
         end,
-        ETSValues
-    ),
-    verify_packet(Packet, Route, P1),
-    verify_packet(Packet2, Route, P2),
-
-    %% Ensure write doesn't occur on same timestamp as report
-    timer:sleep(100),
-
-    %% Encoded packets are written to a tmp write file
-    hpr_packet_reporter:handle_cast(write_packets, State),
-
-    %% Contents of tmp file are uploaded to S3 (localstack)
-    hpr_packet_reporter:handle_cast({upload_packets, FilePath}, State),
-
-    UploadedFile = meck:capture(first, aws_s3, put_object, '_', 3),
-    {ok, #{<<"Body">> := ResponseBody}, _} = aws_s3:get_object(AWSClient, Bucket, UploadedFile),
-
-    [EncodedPacket, EncodedPacket2] = parse_packet_report(ResponseBody),
-    verify_packet(Packet, Route, EncodedPacket),
-    verify_packet(Packet2, Route, EncodedPacket2),
-
-    %% Packets are cleared from ETS
-    ?assertEqual(0, length(ets:tab2list(hpr_packet_report_ets))),
-
-    file:delete(FilePath),
-
-    ok.
-
-upload_error_test(_Config) ->
-    State = sys:get_state(hpr_packet_reporter),
-    #state{file_path = FilePath, max_upload_retries = MaxUploadRetries} = State,
-
-    Packet = test_utils:join_packet_up(#{}),
-    Packet2 = test_utils:uplink_packet_up(#{}),
-    Route = test_utils:packet_route(#{}),
-
-    %% Reported packets are encoded and saved to ETS
-    hpr_packet_reporter:report_packet(Packet, Route),
-    hpr_packet_reporter:report_packet(Packet2, Route),
-
-    %% Ensure write doesn't occur on same timestamp as report
-    timer:sleep(100),
-
-    %% Encoded packets are written to a tmp write file
-    hpr_packet_reporter:handle_cast(write_packets, State),
-
-    %% Mock failed connection to AWS
-    meck:expect(aws_request, request, fun(_, Opts) ->
-        meck:passthrough([fun() -> {error, connect_timeout} end, Opts])
-    end),
-
-    hpr_packet_reporter:upload_packets(FilePath),
-
-    % Allow time for asychronous uploads, call to upload_packets + retries
-    timer:sleep(1000),
-
-    ExpectedAttempts = MaxUploadRetries + 1,
-    ?assertEqual(ExpectedAttempts, meck:num_calls(hpr_packet_reporter, handle_upload_retry, '_')),
-    ?assertEqual(
-        ExpectedAttempts,
-        meck:num_calls(hpr_packet_reporter, handle_cast, [{upload_packets, FilePath}, '_'])
+        [],
+        lists:seq(1, N)
     ),
 
-    file:delete(FilePath),
+    %% Wait until packets are all in state
+    ok = test_utils:wait_until(
+        fun() ->
+            State = sys:get_state(hpr_packet_reporter),
+            N == erlang:length(erlang:element(6, State))
+        end
+    ),
 
-    ok.
+    AWSClient = erlang:element(2, sys:get_state(hpr_packet_reporter)),
+    Bucket = erlang:element(3, sys:get_state(hpr_packet_reporter)),
 
-report_interval_test(_Config) ->
-    PacketReporterConfig = application:get_env(hpr, packet_reporter, #{}),
-    #{interval_duration := DefaultDuration} = PacketReporterConfig,
-    State = sys:get_state(hpr_packet_reporter),
-    #state{report_interval = IntervalRef, interval_duration = IntervalDuration} = State,
+    %% Check that bucket is still empty
+    {ok, #{<<"ListBucketResult">> := ListBucketResult0}, _} = aws_s3:list_objects(
+        AWSClient, Bucket
+    ),
+    ?assertNot(maps:is_key(<<"Contents">>, ListBucketResult0)),
 
-    ?assertEqual(DefaultDuration, IntervalDuration),
-    verify_timer(IntervalRef, IntervalDuration),
+    %% Force upload
+    hpr_packet_reporter ! upload,
 
-    hpr_packet_reporter:stop_report_interval(),
-    State2 = sys:get_state(hpr_packet_reporter),
-    #state{report_interval = IntervalRef2, interval_duration = IntervalDuration2} = State2,
+    %% Wait unitl bucket report not empty
+    ok = test_utils:wait_until(
+        fun() ->
+            {ok, #{<<"ListBucketResult">> := ListBucketResult}, _} = aws_s3:list_objects(
+                AWSClient, Bucket
+            ),
+            maps:is_key(<<"Contents">>, ListBucketResult)
+        end
+    ),
 
-    ?assertEqual(undefined, IntervalRef2),
-    ?assertEqual(undefined, IntervalDuration2),
+    %% Check file name
+    {ok, #{<<"ListBucketResult">> := #{<<"Contents">> := Contents}}, _} = aws_s3:list_objects(
+        AWSClient, Bucket
+    ),
+    FileName = maps:get(<<"Key">>, Contents),
+    [Prefix, Timestamp, Ext] = binary:split(FileName, <<".">>, [global]),
+    ?assertEqual(<<"packetreport">>, Prefix),
+    ?assert(erlang:binary_to_integer(Timestamp) < erlang:system_time(millisecond)),
+    ?assert(
+        erlang:binary_to_integer(Timestamp) > erlang:system_time(millisecond) - timer:seconds(2)
+    ),
+    ?assertEqual(<<"gz">>, Ext),
 
-    NewDuration = 500000,
-    hpr_packet_reporter:restart_report_interval(NewDuration),
-    State3 = sys:get_state(hpr_packet_reporter),
-    #state{report_interval = IntervalRef3, interval_duration = IntervalDuration3} = State3,
-
-    ?assertEqual(NewDuration, IntervalDuration3),
-    verify_timer(IntervalRef3, IntervalDuration3),
-
-    ok.
-
-upload_window_test(_Config) ->
-    Env = application:get_env(?APP, packet_reporter, #{}),
-    UploadWindow = maps:get(upload_window, Env, 900000),
-    State = sys:get_state(hpr_packet_reporter),
-    #state{file_path = FilePath, upload_window_start_time = WindowStartTime} = State,
-
-    Packet = test_utils:join_packet_up(#{}),
-    Route = test_utils:packet_route(#{}),
-
-    %% Reported packets are encoded and saved to ETS
-    hpr_packet_reporter:report_packet(Packet, Route),
-
-    %% Encoded packets are written to a tmp write file
-    hpr_packet_reporter:handle_cast(write_packets, State),
-
-    ?assertEqual(false, meck:called(hpr_packet_reporter, upload_packets, '_')),
-
-    %% Write packets after upload window has elapsed
-    hpr_packet_reporter:handle_cast(write_packets, State#state{
-        upload_window_start_time = (WindowStartTime - UploadWindow - 1000)
-    }),
-
-    ?assertEqual(true, meck:called(hpr_packet_reporter, upload_packets, '_')),
-
-    file:delete(FilePath),
+    %% Get file content and check that all packets are there
+    {ok, #{<<"Body">> := Compressed}, _} = aws_s3:get_object(AWSClient, Bucket, FileName),
+    ExtractedPackets = extract_packets(Compressed),
+    ?assertEqual(ExpectedPackets, ExtractedPackets),
 
     ok.
 
@@ -227,52 +160,16 @@ upload_window_test(_Config) ->
 %% Helpers
 %% ------------------------------------------------------------------
 
-verify_packet(Packet, PacketRoute, EncodedPacket) ->
-    PacketReport = hpr_packet_report:decode(EncodedPacket),
-    ?assertEqual(
-        hpr_packet_up:timestamp(Packet), hpr_packet_report:gateway_timestamp_ms(PacketReport)
-    ),
-    ?assertEqual(hpr_route:oui(PacketRoute), hpr_packet_report:oui(PacketReport)),
-    ?assertEqual(hpr_route:net_id(PacketRoute), hpr_packet_report:net_id(PacketReport)),
-    ?assertEqual(hpr_packet_up:rssi(Packet), hpr_packet_report:rssi(PacketReport)),
-    ?assertEqual(hpr_packet_up:frequency(Packet), hpr_packet_report:frequency(PacketReport)),
-    ?assertEqual(hpr_packet_up:snr(Packet), hpr_packet_report:snr(PacketReport)),
-    ?assertEqual(hpr_packet_up:datarate(Packet), hpr_packet_report:datarate(PacketReport)),
-    ?assertEqual(hpr_packet_up:region(Packet), hpr_packet_report:region(PacketReport)),
-    ?assertEqual(hpr_packet_up:gateway(Packet), hpr_packet_report:gateway(PacketReport)),
-    ?assertEqual(hpr_packet_up:phash(Packet), hpr_packet_report:payload_hash(PacketReport)).
+-spec extract_packets(Compressed :: binary()) -> [hpr_packet_report:packet_report()].
+extract_packets(Compressed) ->
+    UnCompressed = zlib:gunzip(Compressed),
+    extract_packets(UnCompressed, []).
 
-%% Parse length-delimited protobufs
-parse_packet_report(Report) ->
-    UncompressedReport = zlib:gunzip(Report),
-    parse_packet_report(UncompressedReport, []).
-
-parse_packet_report(<<>>, Acc) ->
+-spec extract_packets(Rest :: binary(), Acc :: [hpr_packet_report:packet_report()]) ->
+    [hpr_packet_report:packet_report()].
+extract_packets(<<>>, Acc) ->
     lists:reverse(Acc);
-parse_packet_report(<<Size:4/binary, Rest/binary>>, Acc) ->
-    DecodedSize = binary:decode_unsigned(Size),
-    <<Packet:DecodedSize/binary, Rest2/binary>> = Rest,
-    parse_packet_report(Rest2, [Packet | Acc]).
-
-verify_timer({interval, ExpectedReportInterval}, ExpectedDuration) ->
-    case get_write_interval() of
-        {{_, TimerRef}, {_, Duration, _}, {_, _, _}} ->
-            ?assertEqual(ExpectedReportInterval, TimerRef),
-            ?assertEqual(ExpectedDuration, Duration div 1000);
-        _ ->
-            ?assertEqual(undefined, ExpectedReportInterval)
-    end.
-
-get_write_interval() ->
-    case
-        lists:filter(
-            fun
-                ({_, _, {hpr_packet_reporter, write_packets, []}}) -> true;
-                (_) -> false
-            end,
-            ets:tab2list(timer_tab)
-        )
-    of
-        [] -> undefined;
-        [Interval] -> Interval
-    end.
+extract_packets(<<Size:32/big-integer-unsigned, Rest/binary>>, Acc) ->
+    <<EncodedPacket:Size/binary, Rest2/binary>> = Rest,
+    Packet = hpr_packet_report:decode(EncodedPacket),
+    extract_packets(Rest2, [Packet | Acc]).

@@ -1,20 +1,16 @@
 [
     {hpr, [
         {packet_reporter, #{
-            access_key_id => <<"${AWS_ACCESS_KEY_ID}">>,
-            secret_access_key => <<"${AWS_SECRET_ACCESS_KEY}">>,
-            region => <<"${AWS_DEFAULT_REGION}">>,
-            bucket => <<"${PACKET_REPORTER_BUCKET_NAME}">>,
-            interval_duration => 300000,
-            write_dir => "/var/data/tmp/",
-            max_file_size => 50_000_000,
-            upload_window => 900000,
-            retry_sleep_time => 60000,
-            max_upload_retries => 5
+            aws_key => "${HPR_PACKET_REPORTER_AWS_KEY}",
+            aws_secret => "${HPR_PACKET_REPORTER_AWS_SECRET}",
+            aws_region => "${HPR_PACKET_REPORTER_AWS_REGION}",
+            aws_bucket => "${HPR_PACKET_REPORTER_AWS_BUCKET}",
+            report_interval => 300_000,
+            report_max_size => 50_000_000
         }},
         {config_worker, #{
             host => "${HPR_CONFIG_WORKER_HOST}",
-            port => "${HPR_CONFIG_WORKER_PORT:-8080}",
+            port => "${HPR_CONFIG_WORKER_PORT}",
             file_backup_path => "/var/data/config_worker.backup"
         }}
     ]},

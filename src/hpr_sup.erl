@@ -48,7 +48,6 @@ start_link() ->
 init([]) ->
     ok = hpr_routing:init(),
     ok = hpr_config:init(),
-    ok = hpr_packet_reporter:init_ets(),
     ok = hpr_max_copies:init(),
 
     ElliConfig = [
@@ -56,8 +55,8 @@ init([]) ->
         {port, 3000}
     ],
 
-    ConfigWorkerConfig = application:get_env(hpr, config_worker, #{}),
-    PacketReporterConfig = application:get_env(hpr, packet_reporter, #{}),
+    ConfigWorkerConfig = application:get_env(?APP, config_worker, #{}),
+    PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
