@@ -454,7 +454,7 @@ parse_uplink_token(Token) ->
     case binary:split(Bin, ?TOKEN_SEP, [global]) of
         [TransactionIDBin, RegionBin, PacketTimeBin, DestURLBin, FlowTypeBin] ->
             TransactionID = erlang:binary_to_integer(TransactionIDBin),
-            Region = erlang:binary_to_atom(RegionBin),
+            Region = erlang:binary_to_existing_atom(RegionBin),
             PacketTime = erlang:binary_to_integer(PacketTimeBin),
             FlowType = erlang:binary_to_existing_atom(FlowTypeBin),
             {ok, TransactionID, Region, PacketTime, DestURLBin, FlowType};
