@@ -95,6 +95,7 @@ maybe_deliver_packet(Packet, [Route | Routes]) ->
         ok ->
             case deliver_packet(Protocol, Packet, Route) of
                 ok ->
+                    ok = hpr_packet_reporter:report_packet(Packet, Route),
                     ok;
                 {error, Reason} ->
                     lager:warning([{protocol, Protocol}], "error ~p", [Reason])
