@@ -40,12 +40,22 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    ReporterCfg = application:get_env(?APP, packet_reporter, #{}),
-    OSEnv = os:getenv("HPR_PACKET_REPORTER_LOCAL_HOST", "localhost"),
-    ok = application:set_env(?APP, packet_reporter, ReporterCfg#{local_host => OSEnv}, [
-        {persistent, true}
-    ]),
-    test_utils:init_per_testcase(TestCase, Config).
+    case os:getenv("HPR_PACKET_REPORTER_LOCAL_HOST") of
+        false ->
+            {skip, env_var_not_set};
+        [] ->
+            {skip, env_var_empty};
+        OSEnv ->
+            ReporterCfg = application:get_env(?APP, packet_reporter, #{}),
+
+            ok = application:set_env(
+                ?APP,
+                packet_reporter,
+                ReporterCfg#{local_host => erlang:list_to_binary(OSEnv)},
+                [{persistent, true}]
+            ),
+            test_utils:init_per_testcase(TestCase, Config)
+    end.
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
