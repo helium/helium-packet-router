@@ -164,8 +164,16 @@ upload(
 ) ->
     Timestamp = erlang:system_time(millisecond),
     FileName = erlang:list_to_binary("packetreport." ++ erlang:integer_to_list(Timestamp) ++ ".gz"),
-    lager:info("uploading ~s to ~s", [FileName, Bucket]),
     Compressed = zlib:gzip(Packets),
+
+    MD = [
+        {filename, FileName},
+        {bucket, Bucket},
+        {packet_cnt, erlang:length(Packets)},
+        {gzip_bytes, erlang:size(Compressed)},
+        {bytes, Size}
+    ],
+    lager:info(MD, "uploading report"),
     case
         aws_s3:put_object(
             AWSClient,
@@ -177,12 +185,10 @@ upload(
         )
     of
         {ok, _, _Response} ->
-            lager:info("~w packets uploaded for ~w bytes (gzip) / ~w bytes ", [
-                erlang:length(Packets), erlang:size(Compressed), Size
-            ]),
+            lager:info(MD, "upload success"),
             State#state{current_packets = [], current_size = 0};
         _Error ->
-            lager:error("failed to upload ~p", [_Error]),
+            lager:error(MD, "upload failed ~p", [_Error]),
             State
     end.
 
