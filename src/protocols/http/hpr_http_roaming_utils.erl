@@ -30,15 +30,12 @@
     lookup_handler/1
 ]).
 
--spec binary_to_hex(binary()) -> binary().
-binary_to_hex(ID) ->
-    <<<<Y>> || <<X:4>> <= ID, Y <- integer_to_list(X, 16)>>.
-
--spec binary_to_hexstring(number() | binary()) -> binary().
-binary_to_hexstring(ID) when erlang:is_number(ID) ->
-    binary_to_hexstring(<<ID:32/integer-unsigned>>);
+%%-spec binary_to_hexstring(number() | binary()) -> binary().
+-spec binary_to_hexstring(binary()) -> binary().
+%%binary_to_hexstring(ID) when erlang:is_number(ID) ->
+%%    binary_to_hexstring(<<ID:32/integer-unsigned>>);
 binary_to_hexstring(ID) ->
-    <<"0x", (binary_to_hex(ID))/binary>>.
+    <<"0x", (binary:encode_hex(ID))/binary>>.
 
 -spec hexstring(number()) -> binary().
 hexstring(Bin) when erlang:is_binary(Bin) ->
@@ -53,7 +50,7 @@ hexstring(Other) ->
 
 -spec hexstring(non_neg_integer(), non_neg_integer()) -> binary().
 hexstring(Bin, Length) when erlang:is_binary(Bin) ->
-    Inter0 = binary_to_hex(Bin),
+    Inter0 = binary:encode_hex(Bin),
     Inter1 = string:pad(Inter0, Length, leading, $0),
     Inter = erlang:iolist_to_binary(Inter1),
     <<"0x", Inter/binary>>;
@@ -63,6 +60,7 @@ hexstring(Num, Length) ->
     Inter = erlang:iolist_to_binary(Inter1),
     <<"0x", Inter/binary>>.
 
+-spec format_time(integer()) -> calendar:datetime() | calendar:timestamp().
 format_time(Time) ->
     iso8601:format(calendar:system_time_to_universal_time(Time, millisecond)).
 
