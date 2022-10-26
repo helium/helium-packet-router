@@ -83,15 +83,17 @@ end_per_testcase(TestCase, Config) ->
 upload_test(_Config) ->
     %% Send N packets
     N = 100,
-    Route = test_utils:packet_route(#{}),
+    OUI = 1,
+    NetID = 2,
+    Route = hpr_route:new(#{oui => OUI, net_id => NetID}),
     ExpectedPackets = lists:foldl(
         fun(X, Acc) ->
             Packet = test_utils:uplink_packet_up(#{rssi => X}),
             hpr_packet_reporter:report_packet(Packet, Route),
             PacketReport = hpr_packet_report:to_record(#{
                 gateway_timestamp_ms => hpr_packet_up:timestamp(Packet),
-                oui => hpr_route:oui(Route),
-                net_id => hpr_route:net_id(Route),
+                oui => OUI,
+                net_id => NetID,
                 rssi => hpr_packet_up:rssi(Packet),
                 frequency => hpr_packet_up:frequency(Packet),
                 datarate => hpr_packet_up:datarate(Packet),

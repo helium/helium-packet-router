@@ -5,7 +5,6 @@
     end_per_testcase/2,
     join_packet_up/1,
     uplink_packet_up/1,
-    packet_route/1,
     wait_until/1, wait_until/3,
     match_map/2
 ]).
@@ -71,25 +70,6 @@ uplink_packet_up(Opts0) ->
     PacketUp = hpr_packet_up:new(Opts1),
     SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
     hpr_packet_up:sign(PacketUp, SigFun).
-
--spec packet_route(Opts :: map()) -> hpr_packet_route:route().
-packet_route(Opts) ->
-    NetID = maps:get(net_id, Opts, 0),
-    DevAddrRanges = maps:get(devaddr_ranges, Opts, [
-        #{start_addr => 16#00000000, end_addr => 16#0000000A}
-    ]),
-    EUIs = maps:get(euis, Opts, [#{app_eui => 1, dev_eui => 1}]),
-    Protocol = maps:get(
-        protocol, Opts, {router, #{ip => <<"127.0.0.1">>, port => 80}}
-    ),
-    OUI = maps:get(oui, Opts, 1),
-    hpr_route:new(#{
-        net_id => NetID,
-        devaddr_ranges => DevAddrRanges,
-        euis => EUIs,
-        oui => OUI,
-        protocol => Protocol
-    }).
 
 -spec match_map(map(), any()) -> true | {false, term()}.
 match_map(Expected, Got) when is_map(Got) ->
