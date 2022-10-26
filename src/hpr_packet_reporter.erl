@@ -36,14 +36,14 @@
 -type state() :: #state{}.
 
 -type packet_reporter_opts() :: #{
-    aws_key => string(),
-    aws_secret => string(),
-    aws_region => string(),
-    aws_bucket => string(),
+    aws_key => binary(),
+    aws_secret => binary(),
+    aws_region => binary(),
+    aws_bucket => binary(),
     report_interval => non_neg_integer(),
     report_max_size => non_neg_integer(),
-    local_host => string(),
-    local_port => non_neg_integer()
+    local_host => binary(),
+    local_port => binary()
 }.
 
 %% ------------------------------------------------------------------
@@ -75,7 +75,7 @@ init(
     ok = schedule_upload(Interval),
     {ok, #state{
         aws_client = AWSClient,
-        bucket = erlang:list_to_binary(Bucket),
+        bucket = Bucket,
         report_max_size = MaxSize,
         report_interval = Interval
     }}.
@@ -139,6 +139,7 @@ encode_packet(Packet, PacketRoute) ->
     PacketSize = erlang:size(EncodedPacket),
     <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>.
 
+-spec setup_aws(packet_reporter_opts()) -> aws_client:aws_client().
 setup_aws(#{
     aws_key := AccessKey,
     aws_secret := Secret,
@@ -147,19 +148,10 @@ setup_aws(#{
     local_host := LocalHost
 }) ->
     case Region of
-        "local" ->
-            aws_client:make_local_client(
-                erlang:list_to_binary(AccessKey),
-                erlang:list_to_binary(Secret),
-                erlang:integer_to_binary(LocalPort),
-                erlang:list_to_binary(LocalHost)
-            );
+        <<"local">> ->
+            aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
         _ ->
-            aws_client:make_client(
-                erlang:list_to_binary(AccessKey),
-                erlang:list_to_binary(Secret),
-                erlang:list_to_binary(Region)
-            )
+            aws_client:make_client(AccessKey, Secret, Region)
     end.
 
 -spec upload(state()) -> state().
