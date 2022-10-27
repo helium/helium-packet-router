@@ -12,9 +12,7 @@
 %% Uplinking
 -export([
     make_uplink_payload/6,
-    select_best/1,
-    gateway_time/1,
-    response_stream/1
+    select_best/1
 ]).
 
 %% Downlinking
@@ -93,14 +91,6 @@ new_packet(PacketUp, GatewayTime, GatewayStream) ->
         gateway_time = GatewayTime,
         response_stream = GatewayStream
     }.
-
--spec gateway_time(#packet{}) -> gateway_time().
-gateway_time(#packet{gateway_time = GWTime}) ->
-    GWTime.
-
--spec response_stream(#packet{}) -> hpr_router_stream_manager:gateway_stream().
-response_stream(#packet{response_stream = ResponseStream}) ->
-    ResponseStream.
 
 -spec make_uplink_payload(
     NetID :: netid_num(),
@@ -207,7 +197,7 @@ handle_prstart_ans(#{
 }) ->
     {ok, TransactionID, Region, PacketTime, _, _} = parse_uplink_token(Token),
 
-    DownlinkPacket = new_downlink(
+    DownlinkPacket = hpr_packet_down:new_downlink(
         hpr_http_roaming_utils:hexstring_to_binary(Payload),
         hpr_http_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
         FrequencyMhz * 1000000,
@@ -238,7 +228,7 @@ handle_prstart_ans(#{
         {ok, TransactionID, Region, PacketTime, _, _} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
 
-            DownlinkPacket = new_downlink(
+            DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 hpr_http_roaming_utils:uint32(PacketTime + ?JOIN2_DELAY),
                 FrequencyMhz * 1000000,
@@ -321,7 +311,7 @@ handle_xmitdata_req(#{
                     N -> N
                 end,
 
-            DownlinkPacket = new_downlink(
+            DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 hpr_http_roaming_utils:uint32(PacketTime + (Delay1 * ?RX1_DELAY)),
                 FrequencyMhz1 * 1000000,
@@ -384,7 +374,7 @@ handle_xmitdata_req(#{
                         )
                 end,
 
-            DownlinkPacket = new_downlink(
+            DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 Timeout,
                 FrequencyMhz * 1000000,
@@ -412,7 +402,7 @@ rx2_from_dlmetadata(
 ) ->
     try hpr_lorawan:index_to_datarate(Region, DR) of
         DataRate ->
-            window(
+            hpr_packet_down:window(
                 hpr_http_roaming_utils:uint32(PacketTime + Timeout),
                 FrequencyMhz * 1000000,
                 DataRate
@@ -500,34 +490,6 @@ encode_deveui(Num) ->
 -spec encode_devaddr(non_neg_integer()) -> binary().
 encode_devaddr(Num) ->
     hpr_http_roaming_utils:hexstring(Num, 8).
-
--spec window(non_neg_integer(), 'undefined' | non_neg_integer(), atom()) ->
-    packet_router_pb:window_v1_pb().
-window(TS, FrequencyHz, DataRate) ->
-    WindowMap = #{
-        timestamp => TS,
-        frequency => FrequencyHz,
-        datarate => DataRate
-    },
-    hpr_packet_down:window(WindowMap).
-
--spec new_downlink(
-    Payload :: binary(),
-    Timestamp :: non_neg_integer(),
-    Frequency :: atom() | number(),
-    DataRate :: atom() | integer(),
-    Rx2 :: packet_router_pb:window_v1_pb() | undefined
-) -> downlink_packet().
-new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
-    PacketMap = #{
-        payload => Payload,
-        rx1 => #{
-            timestamp => Timestamp,
-            frequency => FrequencyHz,
-            datarate => DataRate
-        }
-    },
-    hpr_packet_down:to_record(PacketMap, Rx2).
 
 -ifdef(TEST).
 

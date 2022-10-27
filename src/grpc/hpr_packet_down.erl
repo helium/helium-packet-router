@@ -11,15 +11,19 @@
     payload/1,
     rx1_timestamp/1,
     rx1_datarate/1,
-    rx2_datarate/1
+    rx2_datarate/1,
+    window/3,
+    new_downlink/5
 ]).
 
 -type packet_map() :: client_packet_router_pb:packet_router_packet_down_v1_pb().
 -type packet() :: packet_router_pb:packet_router_packet_down_v1_pb().
+-type downlink_packet() :: hpr_packet_down:packet().
 
 -export_type([
     packet_map/0,
-    packet/0
+    packet/0,
+    downlink_packet/0
 ]).
 
 -spec rx1_frequency(PacketDown :: packet()) ->
@@ -81,6 +85,33 @@ window(WindowMap) ->
         datarate = maps:get(datarate, WindowMap, Template#window_v1_pb.datarate)
     }.
 
+-spec window(non_neg_integer(), 'undefined' | non_neg_integer(), atom()) ->
+    packet_router_pb:window_v1_pb().
+window(TS, FrequencyHz, DataRate) ->
+    WindowMap = #{
+        timestamp => TS,
+        frequency => FrequencyHz,
+        datarate => DataRate
+    },
+    hpr_packet_down:window(WindowMap).
+
+-spec new_downlink(
+    Payload :: binary(),
+    Timestamp :: non_neg_integer(),
+    Frequency :: atom() | number(),
+    DataRate :: atom() | integer(),
+    Rx2 :: packet_router_pb:window_v1_pb() | undefined
+) -> downlink_packet().
+new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
+    PacketMap = #{
+        payload => Payload,
+        rx1 => #{
+            timestamp => Timestamp,
+            frequency => FrequencyHz,
+            datarate => DataRate
+        }
+    },
+    hpr_packet_down:to_record(PacketMap, Rx2).
 %% ------------------------------------------------------------------
 % EUnit tests
 %% ------------------------------------------------------------------
