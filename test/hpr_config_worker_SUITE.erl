@@ -10,7 +10,9 @@
 ]).
 
 -export([
-    full_test/1
+    create_route_test/1,
+    update_route_test/1,
+    delete_route_test/1
 ]).
 
 -define(PORT, 8085).
@@ -27,7 +29,9 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        full_test
+        create_route_test,
+        update_route_test,
+        delete_route_test
     ].
 
 %%--------------------------------------------------------------------
@@ -71,78 +75,234 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-full_test(Config) ->
+create_route_test(Config) ->
     %% Let it startup
     timer:sleep(100),
 
     %% Create route and send them from server
-    Route1 = #config_route_v1_pb{
-        id = <<"7d502f32-4d58-4746-965e-001">>,
-        net_id = 0,
-        devaddr_ranges = [
-            #config_devaddr_range_v1_pb{start_addr = 16#00000001, end_addr = 16#0000000A}
+    RouteMap = #{
+        id => <<"7d502f32-4d58-4746-965e-001">>,
+        net_id => 0,
+        devaddr_ranges => [
+            #{start_addr => 16#00000001, end_addr => 16#0000000A}
         ],
-        euis = [#config_eui_v1_pb{app_eui = 1, dev_eui = 0}],
-        oui = 1,
-        server = #config_server_v1_pb{
-            host = <<"llocalhost">>,
-            port = 8080,
-            protocol = {packet_router, #config_protocol_packet_router_v1_pb{}}
+        euis => [#{app_eui => 1, dev_eui => 0}],
+        oui => 1,
+        server => #{
+            host => <<"localhost">>,
+            port => 8080,
+            protocol => {packet_router, #{}}
         },
-        max_copies = 1,
-        nonce = 1
+        max_copies => 1,
+        nonce => 1
     },
-    Route2 = #config_route_v1_pb{
-        id = <<"7d502f32-4d58-4746-965e-002">>,
-        net_id = 0,
-        devaddr_ranges = [
-            #config_devaddr_range_v1_pb{start_addr = 16#00000010, end_addr = 16#0000001A}
-        ],
-        euis = [#config_eui_v1_pb{app_eui = 2, dev_eui = 2}],
-        oui = 2,
-        server = #config_server_v1_pb{
-            host = <<"llocalhost">>,
-            port = 8080,
-            protocol = {gwmp, #config_protocol_gwmp_v1_pb{}}
-        },
-        max_copies = 1,
-        nonce = 1
-    },
-    ok = test_config_service:route_stream_resp(#config_route_stream_res_v1_pb{
-        action = create, route = Route1
-    }),
-    ok = test_config_service:route_stream_resp(#config_route_stream_res_v1_pb{
-        action = create, route = Route2
-    }),
+    Route = hpr_route:new(RouteMap),
+    ok = test_config_service:route_stream_resp(
+        hpr_route_stream_res:from_map(#{
+            action => create, route => RouteMap
+        })
+    ),
 
     %% Let time to process new routes
-    timer:sleep(1000),
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_config_routes, size)
+        end
+    ),
 
     %% Check backup file
     FilePath = proplists:get_value(file_backup_path, Config),
     case file:read_file(FilePath) of
         {ok, Binary} ->
             Map = erlang:binary_to_term(Binary),
-            ?assertEqual(Route1, maps:get(hpr_route:id(Route1), Map)),
-            ?assertEqual(Route2, maps:get(hpr_route:id(Route2), Map));
+            ?assertEqual(Route, maps:get(hpr_route:id(Route), Map));
         {error, Reason} ->
             ct:fail(Reason)
     end,
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#00000011)
-    ),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_eui(2, 2)),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_eui(1, 12)),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_eui(1, 100)),
     ?assertEqual([], hpr_config:lookup_devaddr(16#00000020)),
     ?assertEqual([], hpr_config:lookup_eui(3, 3)),
     ok.
 
+update_route_test(Config) ->
+    %% Let it startup
+    timer:sleep(100),
+
+    %% Create route and send them from server
+    Route1Map = #{
+        id => <<"7d502f32-4d58-4746-965e-001">>,
+        net_id => 0,
+        devaddr_ranges => [
+            #{start_addr => 16#00000001, end_addr => 16#0000000A}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 0}],
+        oui => 1,
+        server => #{
+            host => <<"localhost">>,
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1,
+        nonce => 1
+    },
+    Route1 = hpr_route:new(Route1Map),
+    ok = test_config_service:route_stream_resp(
+        hpr_route_stream_res:from_map(#{
+            action => create, route => Route1Map
+        })
+    ),
+
+    %% Let time to process new routes
+    FilePath = proplists:get_value(file_backup_path, Config),
+    ok = test_utils:wait_until(
+        fun() ->
+            case file:read_file(FilePath) of
+                {ok, Binary} ->
+                    Map = erlang:binary_to_term(Binary),
+                    Route1 =:= maps:get(hpr_route:id(Route1), Map, undefined);
+                {error, _Reason} ->
+                    false
+            end
+        end
+    ),
+
+    %% Check that we can query route via config
+    ?assertEqual(
+        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+    ),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
+
+    %% Update our Route
+    Route2Map = Route1Map#{
+        devaddr_ranges => [
+            #{start_addr => 16#00000001, end_addr => 16#0000000A},
+            #{start_addr => 16#0000000B, end_addr => 16#0000000C}
+        ],
+        euis => [#{app_eui => 2, dev_eui => 2}],
+        nonce => 2
+    },
+    Route2 = hpr_route:new(Route2Map),
+    ok = test_config_service:route_stream_resp(
+        hpr_route_stream_res:from_map(#{
+            action => update, route => Route2Map
+        })
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            case file:read_file(FilePath) of
+                {ok, Binary} ->
+                    Map = erlang:binary_to_term(Binary),
+                    Route2 =:= maps:get(hpr_route:id(Route2), Map, undefined);
+                {error, _Reason} ->
+                    false
+            end
+        end
+    ),
+
+    %% Check that we can query route via config
+    ?assertEqual(
+        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#00000005)
+    ),
+    ?assertEqual(
+        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#0000000B)
+    ),
+    ?assertEqual(
+        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#0000000C)
+    ),
+    ?assertEqual([], hpr_config:lookup_eui(1, 12)),
+    ?assertEqual([], hpr_config:lookup_eui(1, 100)),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_eui(2, 2)),
+
+    ok.
+
+delete_route_test(Config) ->
+    %% Let it startup
+    timer:sleep(100),
+
+    %% Create route and send them from server
+    Route1Map = #{
+        id => <<"7d502f32-4d58-4746-965e-001">>,
+        net_id => 0,
+        devaddr_ranges => [
+            #{start_addr => 16#00000001, end_addr => 16#0000000A}
+        ],
+        euis => [#{app_eui => 1, dev_eui => 0}],
+        oui => 1,
+        server => #{
+            host => <<"localhost">>,
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1,
+        nonce => 1
+    },
+    Route1 = hpr_route:new(Route1Map),
+    ok = test_config_service:route_stream_resp(
+        hpr_route_stream_res:from_map(#{
+            action => create, route => Route1Map
+        })
+    ),
+
+    %% Let time to process new routes
+    FilePath = proplists:get_value(file_backup_path, Config),
+    ok = test_utils:wait_until(
+        fun() ->
+            case file:read_file(FilePath) of
+                {ok, Binary} ->
+                    Map = erlang:binary_to_term(Binary),
+                    Route1 =:= maps:get(hpr_route:id(Route1), Map, undefined);
+                {error, _Reason} ->
+                    false
+            end
+        end
+    ),
+
+    %% Check that we can query route via config
+    ?assertEqual(
+        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+    ),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
+    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
+
+    %% Delete our Route
+
+    ok = test_config_service:route_stream_resp(
+        hpr_route_stream_res:from_map(#{
+            action => delete, route => Route1Map
+        })
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            case file:read_file(FilePath) of
+                {ok, Binary} ->
+                    Map = erlang:binary_to_term(Binary),
+                    0 =:= maps:size(Map);
+                {error, _Reason} ->
+                    false
+            end
+        end
+    ),
+
+    %% Check that we can query route via config
+    ?assertEqual(
+        [], hpr_config:lookup_devaddr(16#00000005)
+    ),
+    ?assertEqual([], hpr_config:lookup_eui(1, 12)),
+    ?assertEqual([], hpr_config:lookup_eui(1, 100)),
+    ?assertEqual(0, ets:info(hpr_config_routes_by_devaddr, size)),
+    ?assertEqual(0, ets:info(hpr_config_routes_by_eui, size)),
+    ?assertEqual(0, ets:info(hpr_config_routes, size)),
+
+    ok.
 %% ===================================================================
 %% Helpers
 %% ===================================================================

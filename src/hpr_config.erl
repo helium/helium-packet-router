@@ -24,7 +24,7 @@
 
 -define(DEVADDRS_ETS, hpr_config_routes_by_devaddr).
 -define(EUIS_ETS, hpr_config_routes_by_eui).
--define(ROUTE_ETS, hpr_config_routes_plain).
+-define(ROUTE_ETS, hpr_config_routes).
 
 -spec init() -> ok.
 init() ->
