@@ -109,6 +109,7 @@ join_req_test(_Config) ->
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
     Route = hpr_route:new(#{
+        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => NetID,
         devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
@@ -118,7 +119,8 @@ join_req_test(_Config) ->
             port => 80,
             protocol => {packet_router, #{}}
         },
-        max_copies => 1
+        max_copies => 1,
+        nonce => 1
     }),
     ok = hpr_config:insert_route(Route),
 
@@ -167,6 +169,7 @@ max_copies_test(_Config) ->
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
     Route = hpr_route:new(#{
+        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => NetID,
         devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
@@ -176,7 +179,8 @@ max_copies_test(_Config) ->
             port => 80,
             protocol => {packet_router, #{}}
         },
-        max_copies => MaxCopies
+        max_copies => MaxCopies,
+        nonce => 1
     }),
     ok = hpr_config:insert_route(Route),
 

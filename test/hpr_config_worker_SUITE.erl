@@ -9,9 +9,9 @@
     end_per_testcase/2
 ]).
 
--export([
-    full_test/1
-]).
+% -export([
+%     full_test/1
+% ]).
 
 -define(PORT, 8085).
 
@@ -27,7 +27,7 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        full_test
+        % full_test
     ].
 
 %%--------------------------------------------------------------------
@@ -71,67 +71,67 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-full_test(Config) ->
-    %% Let it startup
-    timer:sleep(100),
+% full_test(Config) ->
+%     %% Let it startup
+%     timer:sleep(100),
 
-    %% Create route and send them from server
-    Route1 = #config_route_v1_pb{
-        net_id = 0,
-        devaddr_ranges = [
-            #config_devaddr_range_v1_pb{start_addr = 16#00000001, end_addr = 16#0000000A}
-        ],
-        euis = [#config_eui_v1_pb{app_eui = 1, dev_eui = 0}],
-        oui = 1,
-        server = #config_server_v1_pb{
-            host = <<"llocalhost">>,
-            port = 8080,
-            protocol = {packet_router, #config_protocol_packet_router_v1_pb{}}
-        }
-    },
-    Route2 = #config_route_v1_pb{
-        net_id = 0,
-        devaddr_ranges = [
-            #config_devaddr_range_v1_pb{start_addr = 16#00000010, end_addr = 16#0000001A}
-        ],
-        euis = [#config_eui_v1_pb{app_eui = 2, dev_eui = 2}],
-        oui = 2,
-        server = #config_server_v1_pb{
-            host = <<"llocalhost">>,
-            port = 8080,
-            protocol = {gwmp, #config_protocol_gwmp_v1_pb{}}
-        }
-    },
-    Routes = [Route1, Route2],
-    ConfigRouteResV1 = #config_routes_res_v1_pb{routes = Routes},
-    ok = test_config_service:config_route_res_v1(ConfigRouteResV1),
+%     %% Create route and send them from server
+%     Route1 = #config_route_v1_pb{
+%         net_id = 0,
+%         devaddr_ranges = [
+%             #config_devaddr_range_v1_pb{start_addr = 16#00000001, end_addr = 16#0000000A}
+%         ],
+%         euis = [#config_eui_v1_pb{app_eui = 1, dev_eui = 0}],
+%         oui = 1,
+%         server = #config_server_v1_pb{
+%             host = <<"llocalhost">>,
+%             port = 8080,
+%             protocol = {packet_router, #config_protocol_packet_router_v1_pb{}}
+%         }
+%     },
+%     Route2 = #config_route_v1_pb{
+%         net_id = 0,
+%         devaddr_ranges = [
+%             #config_devaddr_range_v1_pb{start_addr = 16#00000010, end_addr = 16#0000001A}
+%         ],
+%         euis = [#config_eui_v1_pb{app_eui = 2, dev_eui = 2}],
+%         oui = 2,
+%         server = #config_server_v1_pb{
+%             host = <<"llocalhost">>,
+%             port = 8080,
+%             protocol = {gwmp, #config_protocol_gwmp_v1_pb{}}
+%         }
+%     },
+%     Routes = [Route1, Route2],
+%     ConfigRouteResV1 = #config_routes_res_v1_pb{routes = Routes},
+%     ok = test_config_service:config_route_res_v1(ConfigRouteResV1),
 
-    %% Let time to process new routes
-    timer:sleep(100),
+%     %% Let time to process new routes
+%     timer:sleep(100),
 
-    %% Check backup file
-    FilePath = proplists:get_value(file_backup_path, Config),
-    case file:read_file(FilePath) of
-        {ok, Binary} ->
-            #{routes := BackupRoutes} = erlang:binary_to_term(Binary),
-            ?assertEqual(Routes, [hpr_route:new(R) || R <- BackupRoutes]);
-        {error, Reason} ->
-            ct:fail(Reason)
-    end,
+%     %% Check backup file
+%     FilePath = proplists:get_value(file_backup_path, Config),
+%     case file:read_file(FilePath) of
+%         {ok, Binary} ->
+%             #{routes := BackupRoutes} = erlang:binary_to_term(Binary),
+%             ?assertEqual(Routes, [hpr_route:new(R) || R <- BackupRoutes]);
+%         {error, Reason} ->
+%             ct:fail(Reason)
+%     end,
 
-    %% Check that we can query route via config
-    ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
-    ),
-    ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#00000011)
-    ),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_eui(2, 2)),
-    ?assertEqual([], hpr_config:lookup_devaddr(16#00000020)),
-    ?assertEqual([], hpr_config:lookup_eui(3, 3)),
-    ok.
+%     %% Check that we can query route via config
+%     ?assertEqual(
+%         [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+%     ),
+%     ?assertEqual(
+%         [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#00000011)
+%     ),
+%     ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
+%     ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
+%     ?assertEqual([hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_eui(2, 2)),
+%     ?assertEqual([], hpr_config:lookup_devaddr(16#00000020)),
+%     ?assertEqual([], hpr_config:lookup_eui(3, 3)),
+%     ok.
 
 %% ===================================================================
 %% Helpers
