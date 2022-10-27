@@ -20,7 +20,6 @@
 ) -> ok | {error, any()}.
 send(PacketUp, GatewayStream, Route) ->
     WorkerKey = worker_key_from(PacketUp, Route),
-    PacketType = hpr_packet_up:type(PacketUp),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
 
@@ -38,11 +37,6 @@ send(PacketUp, GatewayStream, Route) ->
             ),
             {error, worker_not_started};
         {ok, WorkerPid} ->
-            lager:debug(
-                [{protocol, http}],
-                "Packet Type: ~p",
-                [PacketType]
-            ),
             GatewayTime = hpr_packet_up:timestamp(PacketUp),
             hpr_http_roaming_worker:handle_packet(
                 WorkerPid, PacketUp, GatewayTime, GatewayStream
@@ -54,7 +48,7 @@ send(PacketUp, GatewayStream, Route) ->
     hpr_http_roaming_sup:worker_key().
 worker_key_from(PacketUp, Route) ->
     %%    get phash
-    Phash = packet_hash(PacketUp),
+    Phash = hpr_packet_up:phash(PacketUp),
     NetId = hpr_route:net_id(Route),
 
     %%    get protocol
@@ -70,17 +64,9 @@ protocol_from(Route) ->
             DT -> DT
         end,
 
-    %%    When this protobuf definition is expanded, there will be functions to access the added fields.
-    %%    {http_roaming, #config_protocol_http_roaming_v1_pb{}} = Protocol,
-
-    %%    return hard-coded values until the roaming protocol is updated
     #http_protocol{
         flow_type = FlowType,
         endpoint = hpr_route:lns(Route),
         dedupe_timeout = DedupeTimeout,
         auth_header = null
     }.
-
--spec packet_hash(hpr_packet_up:packet()) -> binary().
-packet_hash(PacketUp) ->
-    crypto:hash(sha256, hpr_packet_up:payload(PacketUp)).

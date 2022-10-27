@@ -186,7 +186,7 @@ rx1_timestamp_test(_Config) ->
         fun({RXDelay, ExpectedTimestamp}) ->
             Input = MakeInput(RXDelay),
             {downlink, _, {_, DownlinkPacket}, _} = hpr_http_roaming:handle_xmitdata_req(Input),
-            Timestamp = DownlinkPacket#packet_router_packet_down_v1_pb.rx1#window_v1_pb.timestamp,
+            Timestamp = hpr_packet_down:rx1_timestamp(DownlinkPacket),
             ?assertEqual(ExpectedTimestamp, Timestamp)
         end,
         [
@@ -241,20 +241,16 @@ rx1_downlink_test(_Config) ->
     ),
     ?assertEqual(Pid, self()),
 
-    PayloadFromDownlinkPacket = DownlinkPacket#packet_router_packet_down_v1_pb.payload,
+    PayloadFromDownlinkPacket = hpr_packet_down:payload(DownlinkPacket),
+
     ?assertEqual(
         hpr_http_roaming_utils:hexstring_to_binary(Payload),
         PayloadFromDownlinkPacket
     ),
-    FrequencyFromDownlinkPacket =
-        DownlinkPacket#packet_router_packet_down_v1_pb.rx1#window_v1_pb.frequency,
-    ?assertEqual(true, (925_100_000 == FrequencyFromDownlinkPacket)),
+    FrequencyFromDownlinkPacket = hpr_packet_down:rx1_frequency(DownlinkPacket),
+    ?assertEqual(true, (925100000 == FrequencyFromDownlinkPacket)),
 
-    %% signal strength not available
-    %%  ?assertEqual(27, blockchain_helium_packet_v1:signal_strength(Downlink)),
-
-    DatarateFromDownlinkPacket =
-        DownlinkPacket#packet_router_packet_down_v1_pb.rx1#window_v1_pb.datarate,
+    DatarateFromDownlinkPacket = hpr_packet_down:rx1_datarate(DownlinkPacket),
     ?assertEqual(
         hpr_lorawan:index_to_datarate('US915', DataRate),
         DatarateFromDownlinkPacket
@@ -304,15 +300,14 @@ rx2_downlink_test(_Config) ->
     ?assertEqual(Pid, self()),
 
     DatarateFromDownlinkPacket =
-        DownlinkPacket#packet_router_packet_down_v1_pb.rx2#window_v1_pb.datarate,
+        hpr_packet_down:rx2_datarate(DownlinkPacket),
 
     ?assertEqual(
         hpr_lorawan:index_to_datarate('US915', 8),
         DatarateFromDownlinkPacket
     ),
 
-    FrequencyFromDownlinkPacket =
-        DownlinkPacket#packet_router_packet_down_v1_pb.rx2#window_v1_pb.frequency,
+    FrequencyFromDownlinkPacket = hpr_packet_down:rx2_frequency(DownlinkPacket),
     ?assertEqual(true, (923_300_000 == FrequencyFromDownlinkPacket)),
 
     ok.

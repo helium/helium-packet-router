@@ -5,11 +5,13 @@
 -export([
     to_record/1,
     rx1_frequency/1,
+    rx2_frequency/1,
     window/1,
     to_record/2,
     payload/1,
     rx1_timestamp/1,
-    rx1_datarate/1
+    rx1_datarate/1,
+    rx2_datarate/1
 ]).
 
 -type packet_map() :: client_packet_router_pb:packet_router_packet_down_v1_pb().
@@ -25,6 +27,11 @@
 rx1_frequency(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx1#window_v1_pb.frequency.
 
+-spec rx2_frequency(PacketDown :: packet()) ->
+    Frequency :: non_neg_integer() | undefined.
+rx2_frequency(PacketDown) ->
+    PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.frequency.
+
 -spec payload(PacketDown :: packet()) -> iodata() | undefined.
 payload(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.payload.
@@ -36,6 +43,10 @@ rx1_timestamp(PacketDown) ->
 -spec rx1_datarate(PacketDown :: packet()) -> atom() | integer() | undefined.
 rx1_datarate(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx1#window_v1_pb.datarate.
+
+-spec rx2_datarate(PacketDown :: packet()) -> atom() | integer() | undefined.
+rx2_datarate(PacketDown) ->
+    PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.datarate.
 
 -spec to_record(packet_map() | map()) -> packet().
 to_record(PacketMap) ->

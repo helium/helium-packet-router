@@ -720,14 +720,12 @@ http_class_c_downlink_test(_Config) ->
     ok = start_forwarder_listener(),
     ok = start_roamer_listener(#{callback_args => #{flow_type => async}}),
 
-    %% 1. N/A
-
-    %% 2. insert handler and config
+    %% 1. insert handler and config
     TransactionID = 2176,
     ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
     downlink_test_route(async),
 
-    %% 3. send downlink
+    %% 2. send downlink
     DownlinkPayload = <<"downlink_payload">>,
     DownlinkTimestamp = erlang:system_time(millisecond),
     DownlinkFreq = 915.0,
@@ -767,7 +765,7 @@ http_class_c_downlink_test(_Config) ->
         [with_body]
     ),
 
-    %% 4. forwarder receive http downlink
+    %% 3. forwarder receive http downlink
     {ok, #{<<"TransactionID">> := TransactionID}} = forwarder_expect_downlink_data(#{
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
@@ -786,10 +784,10 @@ http_class_c_downlink_test(_Config) ->
         }
     }),
 
-    %% 5. roamer expect 200 response
+    %% 4. roamer expect 200 response
     ok = roamer_expect_response(200),
 
-    %% 6. roamer receives http downlink ack (xmitdata_ans)
+    %% 5. roamer receives http downlink ack (xmitdata_ans)
     {ok, _Data} = roamer_expect_uplink_data(#{
         <<"DLFreq2">> => DownlinkFreq,
         <<"MessageType">> => <<"XmitDataAns">>,
@@ -800,10 +798,10 @@ http_class_c_downlink_test(_Config) ->
         <<"TransactionID">> => TransactionID
     }),
 
-    %% 7. forwarder expects 200 response
+    %% 6. forwarder expects 200 response
     ok = forwarder_expect_response(200),
 
-    %% 8. gateway receive downlink
+    %% 7. gateway receive downlink
     ok = gateway_expect_downlink(fun(PacketDown) ->
         ?assertEqual(DownlinkPayload, hpr_packet_down:payload(PacketDown)),
         ?assertEqual(
@@ -944,11 +942,7 @@ http_multiple_joins_same_dest_test(_Config) ->
 
     {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
 
-    lager:debug("ReceiverOne: ~p", [ReceiverOne]),
-
     {ok, #{<<"ReceiverID">> := ReceiverTwo}, _, _} = http_rcv(),
-
-    lager:debug("ReceiverOne: ~p", [ReceiverTwo]),
 
     ok = not_http_rcv(250),
 
