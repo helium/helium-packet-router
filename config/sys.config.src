@@ -1,5 +1,6 @@
 [
     {hpr, [
+        {key, "/var/data/hpr.key"},
         {packet_reporter, #{
             aws_key => <<"${HPR_PACKET_REPORTER_AWS_KEY}">>,
             aws_secret => <<"${HPR_PACKET_REPORTER_AWS_SECRET}">>,
