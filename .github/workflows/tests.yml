@@ -138,11 +138,31 @@ jobs:
     concurrency: 
       group: ${{ github.workflow }}-${{ github.ref }}-ct
       cancel-in-progress: true
+    services:
+      localstack:
+        image: localstack/localstack
+        env:
+          SERVICES: s3
+        ports: 
+          - '4566-4583:4566-4583'
+        volumes:
+          - "/var/lib/localstack:/var/lib/localstack" 
+          - "/var/run/docker.sock:/var/run/docker.sock"
+    env:
+      HPR_PACKET_REPORTER_LOCAL_HOST: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_HOST }}
     steps:
       - name: checkout
         uses: actions/checkout@v2
       - name: deps
-        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
+        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim python3 python3-dev py3-pip
+      - name: localstack
+        run: | 
+          curl 'http://localstack:4566/health'
+          pip install awscli-local[ver1]
+          aws configure set aws_access_key_id testkey
+          aws configure set aws_secret_access_key testsecret
+          aws configure set default.region us-east-1
+          aws s3 mb s3://test-bucket --endpoint-url=http://localstack:4566
       - name: rust
         uses: actions-rs/toolchain@v1
         with:

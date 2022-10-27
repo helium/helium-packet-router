@@ -1,8 +1,16 @@
 [
     {hpr, [
+        {packet_reporter, #{
+            aws_key => <<"${HPR_PACKET_REPORTER_AWS_KEY}">>,
+            aws_secret => <<"${HPR_PACKET_REPORTER_AWS_SECRET}">>,
+            aws_region => <<"${HPR_PACKET_REPORTER_AWS_REGION}">>,
+            aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
+            report_interval => 300_000,
+            report_max_size => 50_000_000
+        }},
         {config_worker, #{
             host => "${HPR_CONFIG_WORKER_HOST}",
-            port => "${HPR_CONFIG_WORKER_PORT:-8080}",
+            port => "${HPR_CONFIG_WORKER_PORT}",
             file_backup_path => "/var/data/config_worker.backup"
         }}
     ]},
