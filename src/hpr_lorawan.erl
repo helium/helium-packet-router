@@ -9,7 +9,6 @@
 -module(hpr_lorawan).
 -author("jonathanruttenberg").
 
-%% Functions that map Region -> Top Level Region
 -export([
     index_to_datarate/2,
     datarate_to_index/2
