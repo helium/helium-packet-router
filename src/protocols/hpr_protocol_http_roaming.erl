@@ -20,8 +20,7 @@
 ) -> ok | {error, any()}.
 send(PacketUp, GatewayStream, Route) ->
     WorkerKey = worker_key_from(PacketUp, Route),
-    RoutingInfo = hpr_packet_up:routing_info_from(PacketUp),
-    PacketType = hpr_packet_up:routing_info_type(PacketUp),
+    PacketType = hpr_packet_up:type(PacketUp),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
 
@@ -34,19 +33,15 @@ send(PacketUp, GatewayStream, Route) ->
     of
         {error, worker_not_started, _} = Err ->
             lager:error(
-                [{packet_type, PacketType}],
                 "failed to start http connector for ~p: ~p",
                 [hpr_utils:gateway_name(PubKeyBin), Err]
             ),
             {error, worker_not_started};
         {ok, WorkerPid} ->
             lager:debug(
-                [
-                    {packet_type, PacketType},
-                    {protocol, http}
-                ],
-                "~s: [routing_info: ~p]",
-                [PacketType, RoutingInfo]
+                [{protocol, http}],
+                "Packet Type: ~p",
+                [PacketType]
             ),
             GatewayTime = hpr_packet_up:timestamp(PacketUp),
             hpr_http_roaming_worker:handle_packet(

@@ -160,12 +160,15 @@ make_uplink_payload(
         }
     }.
 
+-spec routing_key_and_value(PacketUp :: hpr_packet_up:packet()) -> {atom(), binary()}.
 routing_key_and_value(PacketUp) ->
-    RoutingInfo = hpr_packet_up:routing_info_from(PacketUp),
+    PacketType = hpr_packet_up:type(PacketUp),
     {RoutingKey, RoutingValue} =
-        case RoutingInfo of
-            {devaddr, DevAddr} -> {'DevAddr', encode_devaddr(DevAddr)};
-            {eui, DevEUI, _AppEUI} -> {'DevEUI', encode_deveui(DevEUI)}
+        case PacketType of
+            {join_req, {_AppEUI, DevEUI}} ->
+                {'DevEUI', encode_deveui(DevEUI)};
+            {uplink, DevAddr} ->
+                {'DevAddr', encode_devaddr(DevAddr)}
         end,
     {RoutingKey, RoutingValue}.
 
