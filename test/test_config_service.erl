@@ -19,7 +19,7 @@
 ]).
 
 -export([
-    route_v1/1
+    route_stream_resp/1
 ]).
 
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
@@ -30,7 +30,7 @@ init(_RPC, StreamState) ->
     StreamState.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info({route_v1, RouteStreamResp}, StreamState) ->
+handle_info({route_stream_resp, RouteStreamResp}, StreamState) ->
     ct:pal("got RouteStreamResp ~p", [RouteStreamResp]),
     grpcbox_stream:send(false, RouteStreamResp, StreamState);
 handle_info(_Msg, StreamState) ->
@@ -55,8 +55,8 @@ delete(_Ctx, _RouteListReq) ->
 stream(_RouteStreamReq, StreamState) ->
     {ok, StreamState}.
 
--spec route_v1(RouteStreamResp :: #config_route_stream_res_v1_pb{}) -> ok.
-route_v1(RouteStreamResp) ->
-    ct:pal("route_v1 ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
-    ?MODULE ! {route_v1, RouteStreamResp},
+-spec route_stream_resp(RouteStreamResp :: #config_route_stream_res_v1_pb{}) -> ok.
+route_stream_resp(RouteStreamResp) ->
+    ct:pal("route_stream_resp ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
+    ?MODULE ! {route_stream_resp, RouteStreamResp},
     ok.

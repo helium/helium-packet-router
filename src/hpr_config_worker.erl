@@ -151,7 +151,7 @@ process_route_stream_res(RouteStreamRes, State) ->
         delete ->
             hpr_config:delete_route(Route);
         _ ->
-            hpr_config:insert(Route)
+            hpr_config:insert_route(Route)
     end,
     case maybe_cache_response(RouteStreamRes, State) of
         {error, Reason} -> lager:error("failed to write to file ~p", [Reason]);
@@ -186,6 +186,9 @@ maybe_init_from_file(undefined) ->
 maybe_init_from_file(Path) ->
     ok = filelib:ensure_dir(Path),
     case open_backup_file(Path) of
+        {error, enoent} ->
+            lager:warning("file does not exist creating"),
+            ok = file:write_file(Path, erlang:term_to_binary(#{}));
         {error, _Reason} ->
             lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
         {ok, Map} ->
@@ -196,6 +199,7 @@ maybe_init_from_file(Path) ->
                 Map
             )
     end.
+
 -spec open_backup_file(Path :: string()) -> {ok, map()} | {error, any()}.
 open_backup_file(Path) ->
     case file:read_file(Path) of
