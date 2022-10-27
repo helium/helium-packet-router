@@ -94,7 +94,6 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    ok = hpr_http_roaming_utils:init_ets(),
     test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
