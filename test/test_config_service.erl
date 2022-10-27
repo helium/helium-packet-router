@@ -51,9 +51,13 @@ update(_Ctx, _RouteListReq) ->
 delete(_Ctx, _RouteListReq) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-%% TODO: Check RouteStreamReq
-stream(_RouteStreamReq, StreamState) ->
-    {ok, StreamState}.
+stream(RouteStreamReq, StreamState) ->
+    case hpr_route_stream_req:verify(RouteStreamReq) of
+        false ->
+            {grpc_error, {7, <<"PERMISSION_DENIED">>}};
+        true ->
+            {ok, StreamState}
+    end.
 
 -spec route_stream_resp(RouteStreamResp :: #config_route_stream_res_v1_pb{}) -> ok.
 route_stream_resp(RouteStreamResp) ->

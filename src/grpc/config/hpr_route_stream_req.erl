@@ -5,8 +5,10 @@
 -export([
     new/2,
     pub_key/1,
+    signature/1,
     timestamp/1,
     sign/2,
+    verify/1,
     to_map/1
 ]).
 
@@ -29,10 +31,28 @@ pub_key(RouteStreamReq) ->
 timestamp(RouteStreamReq) ->
     RouteStreamReq#config_route_stream_req_v1_pb.timestamp.
 
+-spec signature(RouteStreamReq :: route_stream_req()) -> binary().
+signature(RouteStreamReq) ->
+    RouteStreamReq#config_route_stream_req_v1_pb.signature.
+
 -spec sign(RouteStreamReq :: route_stream_req(), SigFun :: fun()) -> route_stream_req().
 sign(RouteStreamReq, SigFun) ->
     EncodedRouteStreamReq = config_pb:encode_msg(RouteStreamReq, config_route_stream_req_v1_pb),
     RouteStreamReq#config_route_stream_req_v1_pb{signature = SigFun(EncodedRouteStreamReq)}.
+
+-spec verify(RouteStreamReq :: route_stream_req()) -> boolean().
+verify(RouteStreamReq) ->
+    EncodedRouteStreamReq = config_pb:encode_msg(
+        RouteStreamReq#config_route_stream_req_v1_pb{
+            signature = <<>>
+        },
+        config_route_stream_req_v1_pb
+    ),
+    libp2p_crypto:verify(
+        EncodedRouteStreamReq,
+        ?MODULE:signature(RouteStreamReq),
+        libp2p_crypto:bin_to_pubkey(?MODULE:pub_key(RouteStreamReq))
+    ).
 
 -spec to_map(RouteStreamReq :: route_stream_req()) -> map().
 to_map(RouteStreamReq) ->
@@ -78,7 +98,16 @@ timestamp_test() ->
     ),
     ok.
 
-sign_test() ->
+signature_test() ->
+    PubKeyBin = <<"PubKeyBin">>,
+    Timestamp = erlang:system_time(millisecond),
+    ?assertEqual(
+        <<>>,
+        ?MODULE:signature(?MODULE:new(PubKeyBin, Timestamp))
+    ),
+    ok.
+
+sign_verify_test() ->
     #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
@@ -87,15 +116,7 @@ sign_test() ->
 
     SignedRouteStreamReq = ?MODULE:sign(RouteStreamReq, SigFun),
 
-    EncodedTx1 = config_pb:encode_msg(
-        SignedRouteStreamReq#config_route_stream_req_v1_pb{
-            signature = <<>>
-        },
-        config_route_stream_req_v1_pb
-    ),
-    Signature = SignedRouteStreamReq#config_route_stream_req_v1_pb.signature,
-
-    ?assert(libp2p_crypto:verify(EncodedTx1, Signature, PubKey)),
+    ?assert(?MODULE:verify(SignedRouteStreamReq)),
     ok.
 
 to_map_test() ->
