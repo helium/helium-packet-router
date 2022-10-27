@@ -11,7 +11,7 @@
 
 %% Uplinking
 -export([
-    make_uplink_payload/7,
+    make_uplink_payload/6,
     select_best/1,
     gateway_time/1,
     response_stream/1
@@ -106,7 +106,6 @@ response_stream(#packet{response_stream = ResponseStream}) ->
     NetID :: netid_num(),
     Uplinks :: list(packet()),
     TransactionID :: integer(),
-    ProtocolVersion :: pv_1_0 | pv_1_1,
     DedupWindowSize :: non_neg_integer(),
     Destination :: binary(),
     FlowType :: sync | async
@@ -115,7 +114,6 @@ make_uplink_payload(
     NetID,
     Uplinks,
     TransactionID,
-    ProtocolVersion,
     DedupWindowSize,
     Destination,
     FlowType
@@ -138,17 +136,11 @@ make_uplink_payload(
 
     ok = hpr_http_roaming_utils:insert_handler(TransactionID, ResponseStream),
 
-    VersionBase =
-        case ProtocolVersion of
-            pv_1_0 ->
-                #{'ProtocolVersion' => <<"1.0">>};
-            pv_1_1 ->
-                #{
-                    'ProtocolVersion' => <<"1.1">>,
-                    'SenderNSID' => <<"">>,
-                    'DedupWindowSize' => DedupWindowSize
-                }
-        end,
+    VersionBase = #{
+        'ProtocolVersion' => <<"1.1">>,
+        'SenderNSID' => <<"">>,
+        'DedupWindowSize' => DedupWindowSize
+    },
 
     VersionBase#{
         'SenderID' => <<"0xC00053">>,

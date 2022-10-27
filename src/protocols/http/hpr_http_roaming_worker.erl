@@ -44,13 +44,10 @@
     address :: address(),
     transaction_id :: integer(),
     packets = [] :: list(hpr_http_roaming:packet()),
-
     send_data_timer = 200 :: non_neg_integer(),
     send_data_timer_ref :: undefined | reference(),
     flow_type :: async | sync,
     auth_header :: null | binary(),
-    protocol_version :: pv_1_0 | pv_1_1,
-
     should_shutdown = false :: boolean(),
     shutdown_timer_ref :: undefined | reference()
 }).
@@ -89,8 +86,7 @@ init(Args) ->
             endpoint = Address,
             flow_type = FlowType,
             dedupe_timeout = DedupeTimeout,
-            auth_header = Auth,
-            protocol_version = ProtocolVersion
+            auth_header = Auth
         },
         net_id := NetID
     } = Args,
@@ -101,8 +97,7 @@ init(Args) ->
         transaction_id = next_transaction_id(),
         send_data_timer = DedupeTimeout,
         flow_type = FlowType,
-        auth_header = Auth,
-        protocol_version = ProtocolVersion
+        auth_header = Auth
     }}.
 
 handle_call(_Msg, _From, State) ->
@@ -205,7 +200,6 @@ send_data(
         transaction_id = TransactionID,
         flow_type = FlowType,
         auth_header = Auth,
-        protocol_version = ProtocolVersion,
         send_data_timer = DedupWindow
     }
 ) ->
@@ -213,7 +207,6 @@ send_data(
         NetID,
         Packets,
         TransactionID,
-        ProtocolVersion,
         DedupWindow,
         Address,
         FlowType

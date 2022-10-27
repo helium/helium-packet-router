@@ -80,7 +80,6 @@ protocol_from(Route) ->
 
     %%    return hard-coded values until the roaming protocol is updated
     #http_protocol{
-        protocol_version = pv_1_1,
         flow_type = FlowType,
         endpoint = hpr_route:lns(Route),
         dedupe_timeout = DedupeTimeout,
