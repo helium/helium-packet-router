@@ -31,7 +31,6 @@ handle_packet(Packet) ->
     Start = erlang:system_time(millisecond),
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
     PacketType = hpr_packet_up:type(Packet),
-    lager:debug([{packet_type, PacketType}], "handle_packet"),
 
     {Type, _} = PacketType,
     lager:md([

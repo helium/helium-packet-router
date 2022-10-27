@@ -558,7 +558,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     SendPacketFun = fun(DevAddr, FrameCount) ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_uplink(
-            ?UNCONFIRMED_UP,
+            test_utils:unconfirmed_up(),
             PubKeyBin,
             SigFun,
             DevAddr,
@@ -645,7 +645,7 @@ http_uplink_packet_test(_Config) ->
     SendPacketFun = fun(DevAddr) ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_uplink(
-            ?UNCONFIRMED_UP,
+            test_utils:unconfirmed_up(),
             PubKeyBin,
             SigFun,
             DevAddr,
@@ -830,7 +830,7 @@ http_multiple_gateways_test(_Config) ->
     SendPacketFun = fun(PubKeyBin, DevAddr, RSSI, SigFun) ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_uplink(
-            ?UNCONFIRMED_UP,
+            test_utils:unconfirmed_up(),
             PubKeyBin,
             SigFun,
             DevAddr,
@@ -965,7 +965,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
     SendPacketFun = fun(PubKeyBin, DevAddr, RSSI, SigFun) ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_uplink(
-            ?UNCONFIRMED_UP,
+            test_utils:unconfirmed_up(),
             PubKeyBin,
             SigFun,
             DevAddr,
@@ -1044,7 +1044,7 @@ http_overlapping_devaddr_test(_Config) ->
 
     GatewayTime = erlang:system_time(millisecond),
     PacketUp = test_utils:frame_packet_uplink(
-        ?UNCONFIRMED_UP,
+        test_utils:unconfirmed_up(),
         PubKeyBin,
         SigFun,
         ?DEVADDR_COMCAST,
@@ -1109,7 +1109,7 @@ http_uplink_packet_late_test(_Config) ->
     SendPacketFun = fun(PubKeyBin, DevAddr, SigFun) ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_uplink(
-            ?UNCONFIRMED_UP,
+            test_utils:unconfirmed_up(),
             PubKeyBin,
             SigFun,
             DevAddr,

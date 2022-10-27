@@ -117,7 +117,7 @@ port(Server) ->
 protocol(Server) ->
     Server#config_server_v1_pb.protocol.
 
--spec http_roaming_flow_type(Route :: route()) -> sync | async | integer() | undefined.
+-spec http_roaming_flow_type(Route :: route()) -> sync | async.
 http_roaming_flow_type(Route) ->
     Server = Route#config_route_v1_pb.server,
     {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,

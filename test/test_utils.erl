@@ -8,7 +8,8 @@
     frame_packet_uplink/6,
     frame_packet_join/5,
     wait_until/1, wait_until/3,
-    match_map/2
+    match_map/2,
+    unconfirmed_up/0
 ]).
 
 -include("hpr.hrl").
@@ -192,6 +193,8 @@ frame_payload_join(DevEUI, AppEUI) ->
             DevEUI:64/integer-unsigned-little, DevNonce:2/binary>>,
     MIC = crypto:macN(cmac, aes_128_cbc, AppKey, Payload0, 4),
     <<Payload0/binary, MIC:4/binary>>.
+
+unconfirmed_up() -> ?UNCONFIRMED_UP.
 
 %% ------------------------------------------------------------------
 %% Lorawan Utils

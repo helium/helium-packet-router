@@ -297,12 +297,13 @@ type_test() ->
             })
         )
     ),
+    UnconfirmedUp = test_utils:unconfirmed_up(),
     ?assertEqual(
         {uplink, 1},
         ?MODULE:type(
             ?MODULE:new(#{
                 payload =>
-                    <<?UNCONFIRMED_UP:3, 0:3, 1:2, 16#00000001:32/integer-unsigned-little, 0:1, 0:1,
+                    <<UnconfirmedUp:3, 0:3, 1:2, 16#00000001:32/integer-unsigned-little, 0:1, 0:1,
                         0:1, 0:1, 1:4, 2:16/little-unsigned-integer,
                         (crypto:strong_rand_bytes(1))/binary, 2:8/integer,
                         (crypto:strong_rand_bytes(20))/binary>>
