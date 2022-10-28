@@ -55,6 +55,8 @@ config_list(["config", "ls"], [], []) ->
     MkRow = fun(Route) ->
         Server = hpr_route:server(Route),
         [
+            {" ID ", hpr_route:id(Route)},
+            {" Nonce ", hpr_route:nonce(Route)},
             {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" OUI ", hpr_route:oui(Route)},
             {" Protocol ", hpr_route:protocol_type(Server)},
