@@ -75,6 +75,8 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
 
     %% OUI 4
     %% ========================================================
+    %% - ID :: 48088786-5465-4115-92de-5214a88e9a75
+    %% - Nonce :: 1
     %% - Net ID :: C00053 (124781673)
     %% - Max Copies :: 1337
     %% - Server :: Host:Port
@@ -110,6 +112,8 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
         EUIInfo = [EUIHeader | EUIs],
 
         Info = [
+            io_lib:format("- ID         :: ~s~n", [hpr_route:id(Route)]),
+            io_lib:format("- Nonce      :: ~w~n", [hpr_route:nonce(Route)]),
             io_lib:format("- Net ID     :: ~s (~p)~n", [hpr_utils:net_id_display(NetID), NetID]),
             io_lib:format("- Max Copies :: ~p~n", [hpr_route:max_copies(Route)]),
             io_lib:format("- Server     :: ~s~n", [hpr_route:lns(Route)]),

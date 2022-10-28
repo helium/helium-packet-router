@@ -168,8 +168,8 @@ upload(
     Compressed = zlib:gzip(Packets),
 
     MD = [
-        {filename, FileName},
-        {bucket, Bucket},
+        {filename, erlang:binary_to_list(FileName)},
+        {bucket, erlang:binary_to_list(Bucket)},
         {packet_cnt, erlang:length(Packets)},
         {gzip_bytes, erlang:size(Compressed)},
         {bytes, Size}
