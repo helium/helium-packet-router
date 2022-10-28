@@ -102,9 +102,11 @@ lookup_eui(AppEUI, DevEUI) ->
 %% CLI Functions
 %% ------------------------------------------------------------------
 
+-spec all_routes() -> list(hpr_route:route()).
 all_routes() ->
-    ets:tab2list(?ROUTE_ETS).
+    [Route || {_ID, Route} <- ets:tab2list(?ROUTE_ETS)].
 
+-spec oui_routes(OUI :: non_neg_integer()) -> list(hpr_route:route()).
 oui_routes(OUI) ->
     [Route || Route <- ets:tab2list(?ROUTE_ETS), OUI == hpr_route:oui(Route)].
 
