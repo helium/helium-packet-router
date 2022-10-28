@@ -75,8 +75,17 @@ to_record(PacketMap, Rx2) ->
     (client_packet_router_pb:window_v1_pb() | map()) -> packet_router_pb:window_v1_pb().
 window(undefined) ->
     undefined;
-window(#window_v1_pb{} = Window) ->
-    Window;
+window(#window_v1_pb{
+    timestamp = Timestamp,
+    frequency = Frequency,
+    datarate = Datarate
+}) ->
+    WindowMap = #{
+        timestamp => Timestamp,
+        frequency => Frequency,
+        datarate => Datarate
+    },
+    window(WindowMap);
 window(WindowMap) ->
     Template = #window_v1_pb{},
     #window_v1_pb{
