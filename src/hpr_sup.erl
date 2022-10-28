@@ -56,12 +56,14 @@ init([]) ->
         {port, 3000}
     ],
 
-    ConfigWorkerConfig = application:get_env(hpr, config_worker, #{}),
+    ConfigWorkerConfig = application:get_env(?APP, config_worker, #{}),
+    PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
         ?ELLI_WORKER(hpr_metrics_handler, [ElliConfig]),
         ?WORKER(hpr_config_worker, [ConfigWorkerConfig]),
+        ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
         ?SUP(hpr_gwmp_sup, []),
         ?WORKER(hpr_router_connection_manager, []),
         ?WORKER(hpr_router_stream_manager, [
