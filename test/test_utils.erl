@@ -25,6 +25,7 @@ init_per_testcase(TestCase, Config) ->
 
 end_per_testcase(_TestCase, Config) ->
     application:stop(?APP),
+    application:stop(throttle),
     Config.
 
 -spec join_packet_up(
