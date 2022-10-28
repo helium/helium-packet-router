@@ -143,16 +143,17 @@ encode_packet(Packet, PacketRoute) ->
 setup_aws(#{
     aws_key := AccessKey,
     aws_secret := Secret,
-    aws_region := Region,
+    aws_region := <<"local">>,
     local_port := LocalPort,
     local_host := LocalHost
 }) ->
-    case Region of
-        <<"local">> ->
-            aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
-        _ ->
-            aws_client:make_client(AccessKey, Secret, Region)
-    end.
+    aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
+setup_aws(#{
+    aws_key := AccessKey,
+    aws_secret := Secret,
+    aws_region := Region
+}) ->
+    aws_client:make_client(AccessKey, Secret, Region).
 
 -spec upload(state()) -> state().
 upload(#state{current_packets = []} = State) ->
