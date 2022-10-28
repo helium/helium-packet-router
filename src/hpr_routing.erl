@@ -117,11 +117,8 @@ deliver_packet(_OtherProtocol, _Packet, _Route) ->
 throttle_check(Packet) ->
     Gateway = hpr_packet_up:gateway(Packet),
     case throttle:check(?GATEWAY_THROTTLE, Gateway) of
-        {limit_exceeded, _, _} ->
-            false;
-        X ->
-            lager:info("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, X]),
-            true
+        {limit_exceeded, _, _} -> false;
+        _ -> true
     end.
 
 -spec packet_type_check(Packet :: hpr_packet_up:packet()) -> boolean().
