@@ -5,7 +5,7 @@
     handle_packet/1
 ]).
 
--define(GATEWAY_THROTTLE, hpr_routing_gateway_throttle).
+-define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
 -type hpr_routing_response() :: ok | {error, any()}.
@@ -14,7 +14,7 @@
 
 -spec init() -> ok.
 init() ->
-    GatewayRateLimit = application:get_env(router, gateway_rate_limit, ?DEFAULT_GATEWAY_THROTTLE),
+    GatewayRateLimit = application:get_env(hpr, gateway_rate_limit, ?DEFAULT_GATEWAY_THROTTLE),
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     ok.
 

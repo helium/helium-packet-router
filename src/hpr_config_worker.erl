@@ -2,13 +2,13 @@
 
 -behaviour(gen_server).
 
+-include("hpr.hrl").
+
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/1,
-    tmp_load/0,
-    tmp_save/1
+    start_link/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -28,7 +28,7 @@
     port :: integer(),
     connection :: grpc_client:connection() | undefined,
     stream :: grpc_client:stream() | undefined,
-    file_backup_path :: string() | undefined
+    file_backup_path :: path()
 }).
 
 -type config_worker_opts() :: #{
@@ -36,6 +36,7 @@
     port := integer() | string(),
     file_backup_path => string()
 }.
+-type path() :: string() | undefined.
 
 -define(SERVER, ?MODULE).
 -define(CONNECT, connect).
@@ -48,10 +49,6 @@
 %% ------------------------------------------------------------------
 
 -spec start_link(config_worker_opts()) -> any().
-start_link(#{host := ""}) ->
-    %% TODO: Remove once HCS running
-    ok = tmp_load(),
-    ignore;
 start_link(#{host := Host, port := Port} = Args) when is_list(Host) andalso is_number(Port) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []);
 start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso is_list(PortStr) ->
@@ -60,32 +57,6 @@ start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso i
     );
 start_link(_) ->
     ignore.
-
-%% TODO: Remove once HCS running
--spec tmp_load() -> ok.
-tmp_load() ->
-    ConfigWorkerConf = application:get_env(hpr, config_worker, #{}),
-    BackupFilePath = maps:get(file_backup_path, ConfigWorkerConf),
-    maybe_init_from_file(#state{host = "", port = 80, file_backup_path = BackupFilePath}),
-    ok.
-
-%% TODO: Remove once HCS running
--spec tmp_save(NewRoutes :: [client_config_pb:route_v1_pb()]) -> ok.
-tmp_save(NewRoutes) ->
-    ConfigWorkerConf = application:get_env(hpr, config_worker, #{}),
-    BackupFilePath = maps:get(file_backup_path, ConfigWorkerConf),
-    Map =
-        case file:read_file(BackupFilePath) of
-            {ok, Binary} ->
-                #{routes := OldRoutes} = erlang:binary_to_term(Binary),
-                #{routes => lists:usort(OldRoutes ++ NewRoutes)};
-            {error, Reason} ->
-                lager:warning("failed to read to file ~p", [Reason]),
-                #{routes => NewRoutes}
-        end,
-    ok = hpr_config:update_routes(Map),
-    ok = file:write_file(BackupFilePath, erlang:term_to_binary(Map)),
-    ok.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -101,7 +72,7 @@ init(#{host := Host, port := Port} = Args) ->
         file_backup_path = Path
     },
     lager:info("starting config worker ~s:~w file=~s", [Host, Port, Path]),
-    ok = maybe_init_from_file(State),
+    ok = maybe_init_from_file(Path),
     {ok, State, {continue, ?CONNECT}}.
 
 handle_continue(?CONNECT, #state{host = Host, port = Port} = State) ->
@@ -121,20 +92,26 @@ handle_continue(
     } = State
 ) ->
     {ok, Stream} = grpc_client:new_stream(
-        Connection, 'helium.config.config_service', route_updates, client_config_pb
+        Connection, 'helium.config.route', stream, client_config_pb
     ),
-    %% Sending Route Request
-    RouteReq = #{},
-    ok = grpc_client:send_last(Stream, RouteReq),
+    %% Sending Route Stream Request
+    {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin, erlang:system_time(millisecond)),
+    SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
+    ok = grpc_client:send_last(Stream, hpr_route_stream_req:to_map(SignedRouteStreamReq)),
     lager:info("stream initialized"),
     {noreply, State#state{stream = Stream}, {continue, ?RCV_CFG_UPDATE}};
-handle_continue(?RCV_CFG_UPDATE, #state{connection = Connection, stream = Stream} = State) ->
+handle_continue(
+    ?RCV_CFG_UPDATE,
+    #state{connection = Connection, stream = Stream, file_backup_path = Path} = State
+) ->
     case grpc_client:rcv(Stream, ?RCV_TIMEOUT) of
         {headers, _Headers} ->
             {noreply, State, {continue, ?RCV_CFG_UPDATE}};
-        {data, RoutesResV1} ->
+        {data, RouteStreamRes} ->
             lager:info("got router update"),
-            ok = process_routes_update(RoutesResV1, State),
+            ok = process_route_stream_res(hpr_route_stream_res:from_map(RouteStreamRes), Path),
             {noreply, State, {continue, ?RCV_CFG_UPDATE}};
         eof ->
             lager:warning("got eof"),
@@ -165,40 +142,81 @@ terminate(_Reason, #state{connection = Connection}) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec maybe_init_from_file(#state{}) -> ok.
-maybe_init_from_file(#state{file_backup_path = undefined}) ->
+-spec process_route_stream_res(
+    RouteStreamRes :: hpr_route_stream_res:route_stream_res(), Path :: path()
+) -> ok.
+process_route_stream_res(RouteStreamRes, State) ->
+    Route = hpr_route_stream_res:route(RouteStreamRes),
+    case hpr_route_stream_res:action(RouteStreamRes) of
+        delete ->
+            hpr_config:delete_route(Route);
+        _ ->
+            hpr_config:insert_route(Route)
+    end,
+    case maybe_cache_response(RouteStreamRes, State) of
+        {error, Reason} -> lager:error("failed to write to file ~p", [Reason]);
+        ok -> ok
+    end.
+
+-spec maybe_cache_response(RouteStreamRes :: hpr_route_stream_res:route_stream_res(), path()) ->
+    ok | {error, any()}.
+maybe_cache_response(_RouteStreamRes, undefined) ->
     ok;
-maybe_init_from_file(#state{file_backup_path = Path}) ->
+maybe_cache_response(RouteStreamRes, Path) ->
+    case open_backup_file(Path) of
+        {error, _Reason} ->
+            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
+        {ok, Map0} ->
+            Route = hpr_route_stream_res:route(RouteStreamRes),
+            ID = hpr_route:id(Route),
+            Map1 =
+                case hpr_route_stream_res:action(RouteStreamRes) of
+                    delete ->
+                        maps:remove(ID, Map0);
+                    _ ->
+                        Map0#{ID => Route}
+                end,
+            Binary = erlang:term_to_binary(Map1),
+            file:write_file(Path, Binary)
+    end.
+
+-spec maybe_init_from_file(path()) -> ok.
+maybe_init_from_file(undefined) ->
+    ok;
+maybe_init_from_file(Path) ->
     ok = filelib:ensure_dir(Path),
+    case open_backup_file(Path) of
+        {error, enoent} ->
+            lager:warning("file does not exist creating"),
+            ok = file:write_file(Path, erlang:term_to_binary(#{}));
+        {error, _Reason} ->
+            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
+        {ok, Map} ->
+            maps:foreach(
+                fun(_ID, Route) ->
+                    hpr_config:insert_route(Route)
+                end,
+                Map
+            )
+    end.
+
+-spec open_backup_file(Path :: string()) -> {ok, map()} | {error, any()}.
+open_backup_file(Path) ->
     case file:read_file(Path) of
+        {error, _Reason} = Error ->
+            Error;
         {ok, Binary} ->
             try erlang:binary_to_term(Binary) of
-                #{routes := Routes} = LastRoutesResV1 when is_list(Routes) ->
-                    ok = hpr_config:update_routes(LastRoutesResV1);
+                Map when is_map(Map) ->
+                    {ok, Map};
                 _ ->
-                    ok = file:write_file(Path, erlang:term_to_binary(#{routes => []})),
-                    lager:warning("binary_to_term failed, fixing")
+                    ok = file:write_file(Path, erlang:term_to_binary(#{})),
+                    lager:warning("binary_to_term failed, fixing"),
+                    {ok, #{}}
             catch
                 _E:_R ->
-                    ok = file:write_file(Path, erlang:term_to_binary(#{routes => []})),
-                    lager:warning("binary_to_term crash ~p ~p, fixing", [_E, _R])
-            end;
-        {error, Reason} ->
-            lager:warning("failed to read to file ~p", [Reason])
+                    ok = file:write_file(Path, erlang:term_to_binary(#{})),
+                    lager:warning("binary_to_term crash ~p ~p, fixing", [_E, _R]),
+                    {ok, #{}}
+            end
     end.
-
--spec process_routes_update(client_config_pb:routes_res_v1_pb(), #state{}) -> ok.
-process_routes_update(RoutesResV1, State) ->
-    ok = hpr_config:update_routes(RoutesResV1),
-    case maybe_cache_response(RoutesResV1, State) of
-        ok -> ok;
-        {error, Reason} -> lager:error("failed to write to file ~p", [Reason])
-    end.
-
--spec maybe_cache_response(RoutesResV1 :: client_config_pb:routes_res_v1_pb(), #state{}) ->
-    ok | {error, any()}.
-maybe_cache_response(_RoutesResV1, #state{file_backup_path = undefined}) ->
-    ok;
-maybe_cache_response(RoutesResV1, #state{file_backup_path = Path}) ->
-    Binary = erlang:term_to_binary(RoutesResV1),
-    file:write_file(Path, Binary).
