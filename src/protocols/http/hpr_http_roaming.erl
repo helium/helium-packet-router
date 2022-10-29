@@ -47,11 +47,10 @@
 -type gateway_time() :: non_neg_integer().
 
 -type downlink() :: {
-    ResponseStream :: hpr_router_stream_manager:gateway_stream(),
+    ResponseStream :: gateway_stream(),
     Response :: any()
 }.
 
--type transaction_id() :: integer().
 -type region() :: atom().
 -type token() :: binary().
 -type dest_url() :: binary().
@@ -62,9 +61,11 @@
 -record(packet, {
     packet_up :: hpr_packet_up:packet(),
     gateway_time :: gateway_time(),
-    response_stream :: hpr_router_stream_manager:gateway_stream()
+    response_stream :: gateway_stream()
 }).
 -type packet() :: #packet{}.
+
+-type gateway_stream() :: pid().
 
 -type downlink_packet() :: hpr_packet_down:packet().
 
@@ -73,7 +74,8 @@
     packet/0,
     gateway_time/0,
     downlink/0,
-    downlink_packet/0
+    downlink_packet/0,
+    gateway_stream/0
 ]).
 
 %% ------------------------------------------------------------------
@@ -83,7 +85,7 @@
 -spec new_packet(
     PacketUp :: hpr_packet_up:packet(),
     GatewayTime :: gateway_time(),
-    GatewayStream :: hpr_router_stream_manager:gateway_stream()
+    GatewayStream :: gateway_stream()
 ) -> #packet{}.
 new_packet(PacketUp, GatewayTime, GatewayStream) ->
     #packet{
@@ -116,15 +118,16 @@ make_uplink_payload(
     Payload = hpr_packet_up:payload(PacketUp),
     PacketTime = hpr_packet_up:timestamp(PacketUp),
 
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Region = hpr_packet_up:region(PacketUp),
     DataRate = hpr_packet_up:datarate(PacketUp),
     Frequency = hpr_packet_up:frequency_mhz(PacketUp),
 
     {RoutingKey, RoutingValue} = routing_key_and_value(PacketUp),
 
-    Token = make_uplink_token(TransactionID, Region, PacketTime, Destination, FlowType),
+    Token = make_uplink_token(PubKeyBin, Region, PacketTime, Destination, FlowType),
 
-    ok = hpr_http_roaming_utils:insert_handler(TransactionID, ResponseStream),
+    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, ResponseStream),
 
     VersionBase = #{
         'ProtocolVersion' => <<"1.1">>,
@@ -195,7 +198,7 @@ handle_prstart_ans(#{
         <<"FNSULToken">> := Token
     } = DLMeta
 }) ->
-    {ok, TransactionID, Region, PacketTime, _, _} = parse_uplink_token(Token),
+    {ok, PubKeyBin, Region, PacketTime, _, _} = parse_uplink_token(Token),
 
     DownlinkPacket = hpr_packet_down:new_downlink(
         hpr_http_roaming_utils:hexstring_to_binary(Payload),
@@ -205,7 +208,7 @@ handle_prstart_ans(#{
         rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
     ),
 
-    case hpr_http_roaming_utils:lookup_handler(TransactionID) of
+    case hpr_http_roaming_utils:lookup_handler(PubKeyBin) of
         {error, _} = Err -> Err;
         {ok, ResponseStream} -> {join_accept, {ResponseStream, DownlinkPacket}}
     end;
@@ -225,7 +228,7 @@ handle_prstart_ans(#{
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, TransactionID, Region, PacketTime, _, _} ->
+        {ok, PubKeyBin, Region, PacketTime, _, _} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
 
             DownlinkPacket = hpr_packet_down:new_downlink(
@@ -236,7 +239,7 @@ handle_prstart_ans(#{
                 undefined
             ),
 
-            case hpr_http_roaming_utils:lookup_handler(TransactionID) of
+            case hpr_http_roaming_utils:lookup_handler(PubKeyBin) of
                 {error, _} = Err -> Err;
                 {ok, ResponseStream} -> {join_accept, {ResponseStream, DownlinkPacket}}
             end
@@ -302,7 +305,7 @@ handle_xmitdata_req(#{
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, TransactionID, Region, PacketTime, DestURL, FlowType} ->
+        {ok, PubKeyBin, Region, PacketTime, DestURL, FlowType} ->
             DataRate1 = hpr_lorawan:index_to_datarate(Region, DR1),
 
             Delay1 =
@@ -319,7 +322,7 @@ handle_xmitdata_req(#{
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?RX2_DELAY)
             ),
 
-            case hpr_http_roaming_utils:lookup_handler(TransactionID) of
+            case hpr_http_roaming_utils:lookup_handler(PubKeyBin) of
                 {error, _} = Err ->
                     Err;
                 {ok, ResponseStream} ->
@@ -355,7 +358,7 @@ handle_xmitdata_req(#{
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, TransactionID, Region, PacketTime, DestURL, FlowType} ->
+        {ok, PubKeyBin, Region, PacketTime, DestURL, FlowType} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
 
             Delay1 =
@@ -382,7 +385,7 @@ handle_xmitdata_req(#{
                 undefined
             ),
 
-            case hpr_http_roaming_utils:lookup_handler(TransactionID) of
+            case hpr_http_roaming_utils:lookup_handler(PubKeyBin) of
                 {error, _} = Err ->
                     Err;
                 {ok, ResponseStream} ->
@@ -391,6 +394,8 @@ handle_xmitdata_req(#{
             end
     end.
 
+-spec rx2_from_dlmetadata(DownlinkMetadata :: map(), non_neg_integer(), region(), non_neg_integer()) ->
+    undefined | packet_router_pb:window_v1_pb().
 rx2_from_dlmetadata(
     #{
         <<"DataRate2">> := DR,
@@ -420,10 +425,12 @@ rx2_from_dlmetadata(_, _, _, _) ->
 %% Tokens
 %% ------------------------------------------------------------------
 
--spec make_uplink_token(transaction_id(), region(), non_neg_integer(), binary(), atom()) -> token().
-make_uplink_token(TransactionID, Region, PacketTime, DestURL, FlowType) ->
+-spec make_uplink_token(
+    PubKeyBin :: libp2p_crypto:pubkey_bin(), region(), non_neg_integer(), binary(), atom()
+) -> token().
+make_uplink_token(PubKeyBin, Region, PacketTime, DestURL, FlowType) ->
     Parts = [
-        erlang:integer_to_binary(TransactionID),
+        PubKeyBin,
         erlang:atom_to_binary(Region),
         erlang:integer_to_binary(PacketTime),
         DestURL,
@@ -434,18 +441,18 @@ make_uplink_token(TransactionID, Region, PacketTime, DestURL, FlowType) ->
     hpr_http_roaming_utils:binary_to_hexstring(Token1).
 
 -spec parse_uplink_token(token()) ->
-    {ok, transaction_id(), region(), non_neg_integer(), dest_url(), flow_type()} | {error, any()}.
+    {ok, libp2p_crypto:pubkey_bin(), region(), non_neg_integer(), dest_url(), flow_type()}
+    | {error, any()}.
 parse_uplink_token(<<"0x", Token/binary>>) ->
     parse_uplink_token(Token);
 parse_uplink_token(Token) ->
     Bin = binary:decode_hex(Token),
     case binary:split(Bin, ?TOKEN_SEP, [global]) of
-        [TransactionIDBin, RegionBin, PacketTimeBin, DestURLBin, FlowTypeBin] ->
-            TransactionID = erlang:binary_to_integer(TransactionIDBin),
+        [PubKeyBin, RegionBin, PacketTimeBin, DestURLBin, FlowTypeBin] ->
             Region = erlang:binary_to_existing_atom(RegionBin),
             PacketTime = erlang:binary_to_integer(PacketTimeBin),
             FlowType = erlang:binary_to_existing_atom(FlowTypeBin),
-            {ok, TransactionID, Region, PacketTime, DestURLBin, FlowType};
+            {ok, PubKeyBin, Region, PacketTime, DestURLBin, FlowType};
         _ ->
             {error, malformed_token}
     end.

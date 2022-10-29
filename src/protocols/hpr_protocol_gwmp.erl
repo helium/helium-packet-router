@@ -77,9 +77,7 @@ packet_up_to_push_data(Up, GatewayTime) ->
                 calendar:system_time_to_universal_time(GatewayTime, millisecond)
             ),
             tmst => hpr_packet_up:timestamp(Up) band 16#FFFF_FFFF,
-            freq => list_to_float(
-                float_to_list(hpr_packet_up:frequency_mhz(Up), [{decimals, 4}, compact])
-            ),
+            freq => hpr_packet_up:frequency_mhz(Up),
             rfch => 0,
             modu => <<"LORA">>,
             codr => <<"4/5">>,

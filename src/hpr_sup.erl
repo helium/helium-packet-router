@@ -51,9 +51,15 @@ init([]) ->
     ok = hpr_max_copies:init(),
     ok = hpr_http_roaming_utils:init_ets(),
 
-    ElliConfig = [
+    ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
         {port, 3000}
+    ],
+
+    HttpRoamingDownlink = application:get_env(?APP, http_roaming_downlink_port, 8090),
+    ElliConfigRoamingDownlink = [
+        {callback, hpr_http_roaming_downlink_handler},
+        {port, HttpRoamingDownlink}
     ],
 
     ConfigWorkerConfig = application:get_env(?APP, config_worker, #{}),
@@ -61,7 +67,8 @@ init([]) ->
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
-        ?ELLI_WORKER(hpr_metrics_handler, [ElliConfig]),
+        ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
+        ?ELLI_WORKER(hpr_http_roaming_downlink_handler, [ElliConfigRoamingDownlink]),
         ?WORKER(hpr_config_worker, [ConfigWorkerConfig]),
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
         ?SUP(hpr_gwmp_sup, []),

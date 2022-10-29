@@ -60,10 +60,10 @@ rssi(Packet) ->
 frequency(Packet) ->
     Packet#packet_router_packet_up_v1_pb.frequency.
 
--spec frequency_mhz(Packet :: packet()) ->
-    float() | integer() | infinity | '-infinity' | nan | undefined.
+-spec frequency_mhz(Packet :: packet()) -> float().
 frequency_mhz(Packet) ->
-    Packet#packet_router_packet_up_v1_pb.frequency / 1_000_000.
+    Mhz = Packet#packet_router_packet_up_v1_pb.frequency / 1000000,
+    list_to_float(float_to_list(Mhz, [{decimals, 4}, compact])).
 
 -spec datarate(Packet :: packet()) -> atom().
 datarate(Packet) ->

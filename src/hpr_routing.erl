@@ -35,7 +35,6 @@ handle_packet(Packet) ->
     {Type, _} = PacketType,
     lager:md([
         {gateway, GatewayName},
-        {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))},
         {packet_type, Type}
     ]),
     lager:debug("received packet"),
@@ -51,7 +50,6 @@ handle_packet(Packet) ->
             Error;
         ok ->
             Routes = find_routes(PacketType),
-            lager:debug("Routes: ~p", [Routes]),
             ok = maybe_deliver_packet(Packet, Routes),
             hpr_metrics:observe_packet_up(PacketType, ok, erlang:length(Routes), Start),
             ok
@@ -63,19 +61,15 @@ handle_packet(Packet) ->
 
 -spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
 find_routes({join_req, {AppEUI, DevEUI}}) ->
-    lager:debug(
+    lager:md(
         [
             {app_eui, hpr_utils:int_to_hex(AppEUI)},
             {dev_eui, hpr_utils:int_to_hex(DevEUI)}
-        ],
-        "handling join"
+        ]
     ),
     hpr_config:lookup_eui(AppEUI, DevEUI);
 find_routes({uplink, DevAddr}) ->
-    lager:debug(
-        [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
-        "handling uplink"
-    ),
+    lager:debug([{devaddr, hpr_utils:int_to_hex(DevAddr)}]),
     hpr_config:lookup_devaddr(DevAddr).
 
 -spec maybe_deliver_packet(

@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 05. Oct 2022 11:31 AM
 %%%-------------------------------------------------------------------
--module(hpr_http_roaming_protocol_SUITE).
+-module(hpr_protocol_http_roaming_SUITE).
 -author("jonathanruttenberg").
 
 -include("../src/grpc/autogen/server/packet_router_pb.hrl").
@@ -64,11 +64,13 @@ end_per_testcase(_TestCase, _Config) ->
 %%--------------------------------------------------------------------
 
 class_c_downlink_test(_Config) ->
-    TransactionID = 2176,
-    hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
 
     Token = hpr_http_roaming:make_uplink_token(
-        TransactionID,
+        PubKeyBin,
         'US915',
         erlang:system_time(millisecond),
         <<"www.example.com">>,
@@ -100,10 +102,12 @@ class_c_downlink_test(_Config) ->
 
 chirpstack_join_accept_test(_Config) ->
     TransactionID = 473719436,
-    hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
 
     Token = hpr_http_roaming:make_uplink_token(
-        TransactionID,
+        PubKeyBin,
         'US915',
         erlang:system_time(millisecond),
         <<"www.example.com">>,
@@ -146,12 +150,13 @@ chirpstack_join_accept_test(_Config) ->
     ok.
 
 rx1_timestamp_test(_Config) ->
-    TransactionID = 17,
-    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
 
     PacketTime = 0,
     Token = hpr_http_roaming:make_uplink_token(
-        TransactionID,
+        PubKeyBin,
         'US915',
         PacketTime,
         <<"www.example.com">>,
@@ -200,8 +205,9 @@ rx1_timestamp_test(_Config) ->
     ok.
 
 rx1_downlink_test(_Config) ->
-    TransactionID = 17,
-    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
 
     Payload = <<"0x60c04e26e020000000a754ba934840c3bc120989b532ee4613e06e3dd5d95d9d1ceb9e20b1f2">>,
     RXDelay = 2,
@@ -209,7 +215,7 @@ rx1_downlink_test(_Config) ->
     DataRate = 10,
 
     Token = hpr_http_roaming:make_uplink_token(
-        TransactionID,
+        PubKeyBin,
         'US915',
         erlang:system_time(millisecond),
         <<"www.example.com">>,
@@ -248,7 +254,7 @@ rx1_downlink_test(_Config) ->
         PayloadFromDownlinkPacket
     ),
     FrequencyFromDownlinkPacket = hpr_packet_down:rx1_frequency(DownlinkPacket),
-    ?assertEqual(true, (925100000 == FrequencyFromDownlinkPacket)),
+    ?assertMatch({A, B} when A == B, {925100000, FrequencyFromDownlinkPacket}),
 
     DatarateFromDownlinkPacket = hpr_packet_down:rx1_datarate(DownlinkPacket),
     ?assertEqual(
@@ -259,11 +265,12 @@ rx1_downlink_test(_Config) ->
     ok.
 
 rx2_downlink_test(_Config) ->
-    TransactionID = 17,
-    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
 
     Token = hpr_http_roaming:make_uplink_token(
-        TransactionID,
+        PubKeyBin,
         'US915',
         erlang:system_time(millisecond),
         <<"www.example.com">>,
@@ -308,6 +315,5 @@ rx2_downlink_test(_Config) ->
     ),
 
     FrequencyFromDownlinkPacket = hpr_packet_down:rx2_frequency(DownlinkPacket),
-    ?assertEqual(true, (923_300_000 == FrequencyFromDownlinkPacket)),
-
+    ?assertMatch({A, B} when A == B, {923_300_000, FrequencyFromDownlinkPacket}),
     ok.

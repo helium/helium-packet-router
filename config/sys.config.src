@@ -12,7 +12,8 @@
             host => "${HPR_CONFIG_WORKER_HOST}",
             port => "${HPR_CONFIG_WORKER_PORT}",
             file_backup_path => "/var/data/config_worker.backup"
-        }}
+        }},
+        {http_roaming_downlink_port, 8090}
     ]},
     {grpcbox, [
         {servers, [

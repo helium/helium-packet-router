@@ -63,18 +63,9 @@ start_link(Args) ->
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
     GatewayTime :: hpr_http_roaming:gateway_time(),
-    GatewayStream :: hpr_router_stream_manager:gateway_stream()
+    GatewayStream :: hpr_http_roaming:gateway_stream()
 ) -> ok | {error, any()}.
 handle_packet(Pid, PacketUp, GatewayTime, GatewayStream) ->
-    lager:debug(
-        [
-            {pid, Pid},
-            {packet_up, PacketUp},
-            {gateway_time, GatewayTime},
-            {gateway_stream, GatewayStream}
-        ],
-        "handle_packet"
-    ),
     gen_server:cast(Pid, {handle_packet, PacketUp, GatewayTime, GatewayStream}).
 
 %% ------------------------------------------------------------------
@@ -93,7 +84,7 @@ init(Args) ->
     lager:debug("~p init with ~p", [?MODULE, Args]),
     {ok, #state{
         net_id = NetID,
-        address = <<Address/binary, <<"/">>/binary, <<"uplink">>/binary>>,
+        address = Address,
         transaction_id = next_transaction_id(),
         send_data_timer = DedupeTimeout,
         flow_type = FlowType,
@@ -178,7 +169,7 @@ next_transaction_id() ->
 -spec do_handle_packet(
     PacketUp :: hpr_packet_up:packet(),
     GatewayTime :: hpr_http_roaming:gateway_time(),
-    GatewayStream :: hpr_router_stream_manager:gateway_stream(),
+    GatewayStream :: hpr_http_roaming:gateway_stream(),
     State :: #state{}
 ) -> {ok, #state{}}.
 do_handle_packet(
@@ -211,8 +202,7 @@ send_data(
         Address,
         FlowType
     ),
-    RoundedFloats = semtech_udp:round_to_fourth_decimal_all_float_values(Data),
-    Data1 = jsx:encode(RoundedFloats),
+    Data1 = jsx:encode(Data),
 
     Headers =
         case Auth of

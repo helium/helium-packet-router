@@ -20,7 +20,8 @@
     protocol/1,
     http_roaming_flow_type/1,
     protocol_type/1,
-    http_roaming_dedupe_timeout/1
+    http_roaming_dedupe_timeout/1,
+    http_roaming_path/1
 ]).
 
 -type route() :: #config_route_v1_pb{}.
@@ -89,7 +90,13 @@ lns(Route) ->
     Server = ?MODULE:server(Route),
     Host = ?MODULE:host(Server),
     Port = ?MODULE:port(Server),
-    <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary>>.
+    case Server#config_server_v1_pb.protocol of
+        {http_roaming, RoamingProtocol} ->
+            Path = RoamingProtocol#config_protocol_http_roaming_v1_pb.path,
+            <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary, Path/binary>>;
+        _ ->
+            <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary>>
+    end.
 
 -spec gwmp_region_lns(Region :: atom(), Route :: route()) ->
     {Address :: string(), Port :: inet:port_number()}.
@@ -128,6 +135,16 @@ http_roaming_dedupe_timeout(Route) ->
     Server = Route#config_route_v1_pb.server,
     {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
     HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.dedupe_timeout.
+
+-spec http_roaming_path(Route :: route()) -> binary().
+http_roaming_path(Route) ->
+    Server = Route#config_route_v1_pb.server,
+    case Server#config_server_v1_pb.protocol of
+        {http_roaming, HttpRoamingProtocol} ->
+            HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.path;
+        _ ->
+            <<>>
+    end.
 
 -spec protocol_type(Server :: server()) -> protocol_type().
 protocol_type(Server) ->

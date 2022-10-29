@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 06. Oct 2022 2:11 PM
 %%%-------------------------------------------------------------------
--module(hpr_http_roaming_packet_SUITE).
+-module(hpr_protocol_http_roaming_packet_SUITE).
 -author("jonathanruttenberg").
 
 -define(TRANSACTION_ETS, hpr_http_roaming_transaction_ets).
@@ -38,13 +38,7 @@
     handle_event/3
 ]).
 
--export([
-    http_rcv/1
-]).
-
 -include_lib("eunit/include/eunit.hrl").
-
--include("lorawan_vars.hrl").
 
 %% NetIDs
 -define(NET_ID_ACTILITY, 16#000002).
@@ -158,7 +152,7 @@ http_sync_uplink_join_test(_Config) ->
         #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
         _Request,
         {200, RespBody}
-    } = ?MODULE:http_rcv(
+    } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => fun erlang:is_binary/1,
@@ -198,7 +192,7 @@ http_sync_uplink_join_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -259,7 +253,7 @@ http_sync_downlink_test(_Config) ->
     TransactionID = 23,
 
     Token = hpr_http_roaming:make_uplink_token(
-        TransactionID,
+        PubKeyBin,
         'US915',
         DownlinkTimestamp,
         <<"http://127.0.0.1:3002/uplink">>,
@@ -272,7 +266,7 @@ http_sync_downlink_test(_Config) ->
     %% NOTE: We need to insert the transaction and handler here because we're
     %% only simulating downlinks. In a normal flow, these details would be
     %% filled during the uplink process.
-    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
 
     downlink_test_route(sync),
 
@@ -397,7 +391,7 @@ http_async_uplink_join_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, async},
+        {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, async},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -448,7 +442,7 @@ http_async_downlink_test(_Config) ->
 
     %% 2. insert response handler
     TransactionID = 23,
-    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
 
     %%    insert route
     downlink_test_route(async),
@@ -460,7 +454,7 @@ http_async_downlink_test(_Config) ->
     DownlinkDatr = 'SF10BW125',
 
     Token = hpr_http_roaming:make_uplink_token(
-        TransactionID,
+        PubKeyBin,
         'US915',
         DownlinkTimestamp,
         <<"http://127.0.0.1:3002/uplink">>,
@@ -580,7 +574,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     %% First packet is purchased and sent to Roamer
     {
         ok,
-        #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        #{<<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
         _Request,
         {200, _RespBody}
     } = http_rcv(
@@ -621,7 +615,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -665,7 +659,7 @@ http_uplink_packet_test(_Config) ->
 
     {
         ok,
-        #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        #{<<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
         _Request,
         {200, _RespBody}
     } = http_rcv(
@@ -705,7 +699,7 @@ http_uplink_packet_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -719,9 +713,12 @@ http_class_c_downlink_test(_Config) ->
     ok = start_forwarder_listener(),
     ok = start_roamer_listener(#{callback_args => #{flow_type => async}}),
 
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
     %% 1. insert handler and config
     TransactionID = 2176,
-    ok = hpr_http_roaming_utils:insert_handler(TransactionID, self()),
+    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
     downlink_test_route(async),
 
     %% 2. send downlink
@@ -731,7 +728,7 @@ http_class_c_downlink_test(_Config) ->
     DownlinkDatr = 'SF10BW125',
 
     Token = hpr_http_roaming:make_uplink_token(
-        TransactionID,
+        PubKeyBin,
         'US915',
         DownlinkTimestamp,
         <<"http://127.0.0.1:3002/uplink">>,
@@ -855,7 +852,7 @@ http_multiple_gateways_test(_Config) ->
 
     {
         ok,
-        #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        #{<<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
         _Request,
         {200, _RespBody}
     } =
@@ -907,7 +904,7 @@ http_multiple_gateways_test(_Config) ->
 
     %% Gateway with better RSSI should be chosen
     ?assertMatch(
-        {ok, TransactionID, 'US915', PacketTime1, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin1, 'US915', PacketTime1, <<"127.0.0.1:3002/uplink">>, sync},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -1132,7 +1129,7 @@ http_uplink_packet_late_test(_Config) ->
 
     {
         ok,
-        #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        #{<<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
         _Request,
         {200, _RespBody}
     } = http_rcv(
@@ -1175,7 +1172,7 @@ http_uplink_packet_late_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, TransactionID, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin1, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -1201,7 +1198,8 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId) ->
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,
-            protocol => {http_roaming, #{flow_type => FlowType}}
+            protocol => {http_roaming, #{flow_type => FlowType,
+                path => <<"/uplink">>}}
         }
     },
     Route = hpr_route:new(RouteMap),
@@ -1237,7 +1235,8 @@ uplink_test_route(InputMap) ->
             protocol =>
                 {http_roaming, #{
                     flow_type => FlowType,
-                    dedupe_timeout => DedupeTimeout
+                    dedupe_timeout => DedupeTimeout,
+                    path => <<"/uplink">>
                 }}
         }
     },
@@ -1409,7 +1408,7 @@ message_type_from_uplink_ok(_MessageType, _FlowType) ->
 
 -spec flow_type_from(UplinkToken :: binary()) -> sync | async.
 flow_type_from(UplinkToken) ->
-    {ok, _TransactionID, _Region, _PacketTime, _DestURLBin, FlowType} =
+    {ok, _PubKeyBin, _Region, _PacketTime, _DestURLBin, FlowType} =
         hpr_http_roaming:parse_uplink_token(UplinkToken),
     FlowType.
 

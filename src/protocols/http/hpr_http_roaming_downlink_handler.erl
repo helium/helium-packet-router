@@ -87,7 +87,7 @@ handle_event(Event, _Data, _Args) ->
 %% Response Stream =====================================================
 
 -spec send_response(
-    ResponseStream :: hpr_router_stream_manager:gateway_stream(),
+    ResponseStream :: hpr_http_roaming:gateway_stream(),
     DownlinkPacket :: hpr_packet_down:downlink_packet()
 ) -> ok.
 send_response(ResponseStream, DownlinkPacket) ->

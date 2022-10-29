@@ -20,8 +20,7 @@
     mac/1,
     identifier/1,
     identifier_to_atom/1,
-    json_data/1,
-    round_to_fourth_decimal_all_float_values/1
+    json_data/1
 ]).
 
 %%%-------------------------------------------------------------------
@@ -36,8 +35,7 @@
     RXPK :: map()
 ) -> binary().
 push_data(Token, MAC, RXPK) ->
-    RoundedFloats = round_to_fourth_decimal_all_float_values(RXPK),
-    BinJSX = jsx:encode(#{rxpk => [RoundedFloats]}),
+    BinJSX = jsx:encode(#{rxpk => [RXPK]}),
     <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_DATA:8/integer-unsigned, MAC:8/binary,
         BinJSX/binary>>.
 
@@ -48,9 +46,7 @@ push_data(Token, MAC, RXPK) ->
     Stat :: map()
 ) -> binary().
 push_data(Token, MAC, RXPK, Stat) ->
-    RoundedFloats = round_to_fourth_decimal_all_float_values(RXPK),
-    RoundedFloats2 = round_to_fourth_decimal_all_float_values(Stat),
-    BinJSX = jsx:encode(#{rxpk => [RoundedFloats], stat => RoundedFloats2}),
+    BinJSX = jsx:encode(#{rxpk => [RXPK], stat => Stat}),
     <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PUSH_DATA:8/integer-unsigned, MAC:8/binary,
         BinJSX/binary>>.
 
@@ -85,44 +81,6 @@ pull_ack(Token) ->
 
 %%%-------------------------------------------------------------------
 %% @doc
-%% This is a function for custom float encoding to JSON
-%% It prevents float mangling by rounding to the 4th decimal
-%% which makes things easier for the LNS
-%% @end
-%%%-------------------------------------------------------------------
--spec round_to_fourth_decimal(Float :: float()) -> any().
-round_to_fourth_decimal(Float) ->
-    io_lib:format("~.4f", [Float]).
-
--spec round_to_fourth_decimal_all_float_values(MapOrList :: map() | list()) -> map() | list().
-round_to_fourth_decimal_all_float_values(MapOrList) when
-    is_map(MapOrList); is_list(MapOrList)
-->
-    Fun = fun(_Key, Value) ->
-        case Value of
-            [] ->
-                [];
-            List when is_list(List) ->
-                lists:map(fun round_to_fourth_decimal_all_float_values/1, List);
-            MapValue when is_map(MapValue) ->
-                round_to_fourth_decimal_all_float_values(MapValue);
-            Float when is_float(Float) ->
-                erlang:list_to_float(round_to_fourth_decimal(Float));
-            _Other ->
-                Value
-        end
-    end,
-    case MapOrList of
-        List when is_list(MapOrList) ->
-            lists:map(fun round_to_fourth_decimal_all_float_values/1, List);
-        Map when is_map(MapOrList) ->
-            maps:map(Fun, Map)
-    end;
-round_to_fourth_decimal_all_float_values(Other) ->
-    Other.
-
-%%%-------------------------------------------------------------------
-%% @doc
 %% That packet type is used by the server to send RF packets and associated
 %% metadata that will have to be emitted by the gateway.
 %% @end
@@ -132,8 +90,7 @@ round_to_fourth_decimal_all_float_values(Other) ->
     Map :: map()
 ) -> binary().
 pull_resp(Token, Map) ->
-    RoundedFloats = round_to_fourth_decimal_all_float_values(Map),
-    BinJSX = jsx:encode(#{txpk => RoundedFloats}),
+    BinJSX = jsx:encode(#{txpk => Map}),
     <<?PROTOCOL_2:8/integer-unsigned, Token/binary, ?PULL_RESP:8/integer-unsigned, BinJSX/binary>>.
 
 %%%-------------------------------------------------------------------
@@ -444,24 +401,4 @@ json_data_test() ->
     ),
     ok.
 
-encode_with_float_formatter_test() ->
-    RoundedFloats1 =
-        round_to_fourth_decimal_all_float_values([#{<<"pi">> => 3.000967890987654321}]),
-    ?assertEqual(
-        <<"[{\"pi\":3.001}]">>,
-        jsx:encode(RoundedFloats1)
-    ),
-    RoundedFloats2 =
-        round_to_fourth_decimal_all_float_values([#{<<"pi">> => 3.000467890987654321}]),
-    ?assertEqual(
-        <<"[{\"pi\":3.0005}]">>,
-        jsx:encode(RoundedFloats2)
-    ),
-    RoundedFloats3 =
-        round_to_fourth_decimal_all_float_values([#{<<"pi">> => 905.299987}]),
-    ?assertEqual(
-        <<"[{\"pi\":905.3}]">>,
-        jsx:encode(RoundedFloats3)
-    ),
-    ok.
 -endif.

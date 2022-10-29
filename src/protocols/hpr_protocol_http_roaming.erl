@@ -15,7 +15,7 @@
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
-    GatewayStream :: hpr_router_stream_manager:gateway_stream(),
+    GatewayStream :: hpr_http_roaming:gateway_stream(),
     Route :: hpr_route:route()
 ) -> ok | {error, any()}.
 send(PacketUp, GatewayStream, Route) ->

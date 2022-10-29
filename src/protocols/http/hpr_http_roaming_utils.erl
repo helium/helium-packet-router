@@ -51,7 +51,7 @@ hexstring(Num, Length) ->
     Inter1 = string:pad(Inter0, Length, leading, $0),
     erlang:iolist_to_binary([<<"0x">>, Inter1]).
 
--spec format_time(integer()) -> calendar:datetime() | calendar:timestamp().
+-spec format_time(integer()) -> binary().
 format_time(Time) ->
     iso8601:format(calendar:system_time_to_universal_time(Time, millisecond)).
 
@@ -85,21 +85,22 @@ init_ets() ->
     ok.
 
 -spec insert_handler(
-    TransactionID :: integer(), ResponseStream :: hpr_router_stream_manager:gateway_stream()
+    PubKeyBin :: libp2p_crypto:pubkey_bin(),
+    ResponseStream :: hpr_http_roaming:gateway_stream()
 ) -> ok.
-insert_handler(TransactionID, ResponseStream) ->
-    true = ets:insert(?RESPONSE_STREAM_ETS, {TransactionID, ResponseStream}),
+insert_handler(PubKeyBin, ResponseStream) ->
+    true = ets:insert(?RESPONSE_STREAM_ETS, {PubKeyBin, ResponseStream}),
     ok.
 
--spec delete_handler(TransactionID :: integer()) -> ok.
-delete_handler(TransactionID) ->
-    true = ets:delete(?RESPONSE_STREAM_ETS, TransactionID),
+-spec delete_handler(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
+delete_handler(PubKeyBin) ->
+    true = ets:delete(?RESPONSE_STREAM_ETS, PubKeyBin),
     ok.
 
--spec lookup_handler(TransactionID :: integer()) ->
-    {ok, ResponseStream :: hpr_router_stream_manager:gateway_stream()} | {error, any()}.
-lookup_handler(TransactionID) ->
-    case ets:lookup(?RESPONSE_STREAM_ETS, TransactionID) of
+-spec lookup_handler(PubKeyBin :: libp2p_crypto:pubkey_bin()) ->
+    {ok, ResponseStream :: hpr_http_roaming:gateway_stream()} | {error, any()}.
+lookup_handler(PubKeyBin) ->
+    case ets:lookup(?RESPONSE_STREAM_ETS, PubKeyBin) of
         [{_, ResponseStream}] -> {ok, ResponseStream};
-        [] -> {error, {not_found, TransactionID}}
+        [] -> {error, {not_found, PubKeyBin}}
     end.
