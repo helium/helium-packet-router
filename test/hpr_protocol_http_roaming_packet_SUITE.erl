@@ -128,7 +128,7 @@ http_sync_uplink_join_test(_Config) ->
         {ok, PacketUp, GatewayTime}
     end,
 
-    join_test_route(DevEUI, AppEUI, sync),
+    join_test_route(DevEUI, AppEUI, sync, <<"route1">>),
 
     lager:debug(
         [
@@ -341,7 +341,7 @@ http_async_uplink_join_test(_Config) ->
     end,
 
     %% 2. load Roamer into the config
-    join_test_route(DevEUI, AppEUI, async),
+    join_test_route(DevEUI, AppEUI, async, <<"route1">>),
 
     %% 3. send packet
     {ok, PacketUp, GatewayTime} = SendPacketFun(),
@@ -929,8 +929,8 @@ http_multiple_joins_same_dest_test(_Config) ->
         #{timestamp => GatewayTime}
     ),
 
-    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ACTILITY),
-    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ORANGE),
+    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ACTILITY, <<"route1">>),
+    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ORANGE, <<"route2">>),
 
     ok = start_uplink_listener(#{port => 3002, callback_args => #{forward => self()}}),
 
@@ -1060,11 +1060,13 @@ http_overlapping_devaddr_test(_Config) ->
 
     %% Overlapping Devaddrs, but going to different endpoints
     uplink_test_route(#{
+        id => <<"route1">>,
         net_id => ?NET_ID_COMCAST,
         dedupe_timeout => 50,
         devaddr_ranges => [DevAddrRangeSingle]
     }),
     uplink_test_route(#{
+        id => <<"route2">>,
         net_id => ?NET_ID_COMCAST,
         dedupe_timeout => 50,
         devaddr_ranges => [DevAddrInRange],
@@ -1181,11 +1183,12 @@ http_uplink_packet_late_test(_Config) ->
 
     ok.
 
-join_test_route(DevEUI, AppEUI, FlowType) ->
-    join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY).
+join_test_route(DevEUI, AppEUI, FlowType, RouteId) ->
+    join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY, RouteId).
 
-join_test_route(DevEUI, AppEUI, FlowType, NetId) ->
+join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
     RouteMap = #{
+        id => RouteId,
         net_id => NetId,
         devaddr_ranges => [],
         euis => [
@@ -1209,9 +1212,10 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId) ->
     hpr_config:insert_route(Route).
 
 uplink_test_route() ->
-    uplink_test_route(#{}).
+    uplink_test_route(#{id => <<"route1">>}).
 
 uplink_test_route(InputMap) ->
+    RouteId = maps:get(id, InputMap, <<"route1">>),
     NetId = maps:get(net_id, InputMap, ?NET_ID_ACTILITY),
     DevAddrRanges = maps:get(
         devaddr_ranges,
@@ -1228,6 +1232,7 @@ uplink_test_route(InputMap) ->
     Port = maps:get(port, InputMap, 3002),
 
     RouteMap = #{
+        id => RouteId,
         net_id => NetId,
         devaddr_ranges => DevAddrRanges,
         euis => [],

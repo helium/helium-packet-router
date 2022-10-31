@@ -101,8 +101,8 @@ lns(Route) ->
     Host = ?MODULE:host(Server),
     Port = ?MODULE:port(Server),
     case Server#config_server_v1_pb.protocol of
-        {http_roaming, RoamingProtocol} ->
-            Path = RoamingProtocol#config_protocol_http_roaming_v1_pb.path,
+        {http_roaming, _RoamingProtocol} ->
+            Path = http_roaming_path(Route),
             <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary, Path/binary>>;
         _ ->
             <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary>>
@@ -151,7 +151,9 @@ http_roaming_path(Route) ->
     Server = Route#config_route_v1_pb.server,
     case Server#config_server_v1_pb.protocol of
         {http_roaming, HttpRoamingProtocol} ->
-            HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.path;
+            erlang:list_to_binary(
+                HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.path
+            );
         _ ->
             <<>>
     end.
