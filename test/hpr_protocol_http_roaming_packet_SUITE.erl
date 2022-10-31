@@ -1198,8 +1198,11 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId) ->
         server => #{
             host => <<"127.0.0.1">>,
             port => 3002,
-            protocol => {http_roaming, #{flow_type => FlowType,
-                path => <<"/uplink">>}}
+            protocol =>
+                {http_roaming, #{
+                    flow_type => FlowType,
+                    path => <<"/uplink">>
+                }}
         }
     },
     Route = hpr_route:new(RouteMap),

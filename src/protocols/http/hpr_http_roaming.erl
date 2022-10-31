@@ -394,7 +394,9 @@ handle_xmitdata_req(#{
             end
     end.
 
--spec rx2_from_dlmetadata(DownlinkMetadata :: map(), non_neg_integer(), region(), non_neg_integer()) ->
+-spec rx2_from_dlmetadata(
+    DownlinkMetadata :: map(), non_neg_integer(), region(), non_neg_integer()
+) ->
     undefined | packet_router_pb:window_v1_pb().
 rx2_from_dlmetadata(
     #{

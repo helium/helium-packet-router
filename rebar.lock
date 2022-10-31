@@ -62,7 +62,7 @@
  {<<"hackney">>,{pkg,<<"hackney">>,<<"1.17.0">>},0},
  {<<"helium_proto">>,
   {git,"https://github.com/helium/proto.git",
-       {ref,"41735d24b6c9a5a83d5a7572fad3e87d85ddb7a4"}},
+       {ref,"6c306560e65ebd078c8a280d0372de965f370c62"}},
   0},
  {<<"hpack">>,{pkg,<<"hpack_erl">>,<<"0.2.3">>},2},
  {<<"http2_client">>,
