@@ -514,6 +514,7 @@ test_route(Host, Port) ->
 
 test_route(Host, Port, RegionMapping) ->
     hpr_route:new(#{
+        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 1337,
         devaddr_ranges => [],
         euis => [],
@@ -523,7 +524,8 @@ test_route(Host, Port, RegionMapping) ->
             port => Port,
             protocol => {gwmp, #{mapping => RegionMapping}}
         },
-        max_copies => 1
+        max_copies => 1,
+        nonce => 1
     }).
 
 expect_pull_data(Socket, Reason) ->

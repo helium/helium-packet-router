@@ -1,6 +1,6 @@
 -module(hpr_packet_up).
 
--include("../grpc/autogen/server/packet_router_pb.hrl").
+-include("../autogen/server/packet_router_pb.hrl").
 
 -export([
     payload/1,

@@ -46,6 +46,22 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
+    KeyFileName = application:get_env(hpr, key, "/var/data/hpr.key"),
+    ok = filelib:ensure_dir(KeyFileName),
+    Key =
+        case libp2p_crypto:load_keys(KeyFileName) of
+            {ok, #{secret := PrivKey, public := PubKey}} ->
+                {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)};
+            {error, enoent} ->
+                KeyMap =
+                    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(
+                        ecc_compact
+                    ),
+                ok = libp2p_crypto:save_keys(KeyMap, KeyFileName),
+                {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)}
+        end,
+    ok = persistent_term:put(?HPR_KEY, Key),
+
     ok = hpr_routing:init(),
     ok = hpr_config:init(),
     ok = hpr_max_copies:init(),

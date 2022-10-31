@@ -23,13 +23,17 @@
 -define(RFU, 2#110).
 -define(PRIORITY, 2#111).
 
-init_per_testcase(_TestCase, Config) ->
+init_per_testcase(TestCase, Config) ->
     %% Start HPR
+    BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
+    KeyFilePath = filename:join(BaseDir, "hpr.key"),
+    ok = application:set_env(hpr, key, KeyFilePath),
     application:ensure_all_started(?APP),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
     application:stop(?APP),
+    application:stop(throttle),
     Config.
 
 -spec join_packet_up(
