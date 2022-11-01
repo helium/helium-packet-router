@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author jonathanruttenberg
-%%% @copyright (C) 2022, <COMPANY>
+%%% @copyright (C) 2022, Nova Labs
 %%% @doc
 %%%
 %%% @end
@@ -32,7 +32,7 @@ send(PacketUp, GatewayStream, Route) ->
     of
         {error, worker_not_started, _} = Err ->
             lager:error(
-                "failed to start http connector for ~p: ~p",
+                "failed to start http connector for ~s: ~p",
                 [hpr_utils:gateway_name(PubKeyBin), Err]
             ),
             {error, worker_not_started};

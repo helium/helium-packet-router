@@ -106,8 +106,6 @@ http_sync_uplink_join_test(_Config) ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
-
     ok = start_uplink_listener(),
 
     DevEUIBin = <<"00BBCCDDEEFF0011">>,
@@ -310,7 +308,6 @@ http_sync_downlink_test(_Config) ->
     ok.
 
 http_async_uplink_join_test(_Config) ->
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
     %%
     %% Forwarder : HPR
     %% Roamer    : partner-lns
@@ -525,8 +522,6 @@ http_async_downlink_test(_Config) ->
     ok.
 
 http_uplink_packet_no_roaming_agreement_test(_Config) ->
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
-
     %% When receiving a response that there is no roaming agreement for a NetID,
     %% we should stop purchasing for that NetID.
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
@@ -627,8 +622,6 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     ok.
 
 http_uplink_packet_test(_Config) ->
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
-
     %% One Gateway is going to be sending all the packets.
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
@@ -812,8 +805,6 @@ http_class_c_downlink_test(_Config) ->
     ok.
 
 http_multiple_gateways_test(_Config) ->
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
-
     #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
     PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
@@ -918,8 +909,6 @@ http_multiple_joins_same_dest_test(_Config) ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
-
     GatewayTime = erlang:system_time(millisecond),
     PacketUp = test_utils:frame_packet_join(
         PubKeyBin,
@@ -947,8 +936,6 @@ http_multiple_joins_same_dest_test(_Config) ->
     ok.
 
 http_multiple_gateways_single_shot_test(_Config) ->
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
-
     #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
     PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
@@ -1033,8 +1020,6 @@ http_multiple_gateways_single_shot_test(_Config) ->
     ok.
 
 http_overlapping_devaddr_test(_Config) ->
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
-
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
@@ -1094,8 +1079,6 @@ http_uplink_packet_late_test(_Config) ->
     %% if they missed the dedupe window.
 
     ok = start_uplink_listener(),
-
-    {ok, _Pid} = hpr_http_roaming_sup:start_link(),
 
     #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),

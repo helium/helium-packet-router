@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author jonathanruttenberg
-%%% @copyright (C) 2022, <COMPANY>
+%%% @copyright (C) 2022, Nova Labs
 %%% @doc
 %%%
 %%% @end
@@ -32,6 +32,7 @@
 
 -define(NO_ROAMING_AGREEMENT, <<"NoRoamingAgreement">>).
 
+%% Default Delays
 -define(JOIN1_DELAY, 5_000_000).
 -define(JOIN2_DELAY, 6_000_000).
 -define(RX2_DELAY, 2_000_000).

@@ -67,7 +67,8 @@ class_c_downlink_test(_Config) ->
     #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    Self = self(),
+    hpr_http_roaming_utils:insert_handler(PubKeyBin, Self),
 
     Token = hpr_http_roaming:make_uplink_token(
         PubKeyBin,
@@ -95,7 +96,6 @@ class_c_downlink_test(_Config) ->
         <<"TransactionID">> => rand:uniform(16#FFFF_FFFF)
     },
 
-    Self = self(),
     ?assertMatch({downlink, #{}, {Self, _}, _Dest}, hpr_http_roaming:handle_message(Input)),
 
     ok.

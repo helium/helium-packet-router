@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author jonathanruttenberg
-%%% @copyright (C) 2022, <COMPANY>
+%%% @copyright (C) 2022, Nova Labs
 %%% @doc
 %%%
 %%% @end
@@ -26,7 +26,7 @@
 handle(Req, Args) ->
     Method = elli_request:method(Req),
     Host = elli_request:get_header(<<"Host">>, Req),
-    lager:info("request from [host: ~p]", [Host]),
+    lager:info("request from [host: ~s]", [Host]),
 
     lager:debug("request: ~p", [{Method, elli_request:path(Req), Req, Args}]),
     Body = elli_request:body(Req),
@@ -44,7 +44,7 @@ handle(Req, Args) ->
             {200, [], <<"downlink sent: 1">>};
         {downlink, PayloadResponse, {ResponseStream, DownlinkPacket}, {Endpoint, FlowType}} ->
             lager:debug(
-                "sending downlink [response_stream: ~p] [response: ~p]",
+                "sending downlink [response_stream: ~p] [response: ~s]",
                 [ResponseStream, PayloadResponse]
             ),
             ok = send_response(ResponseStream, DownlinkPacket),
@@ -54,7 +54,7 @@ handle(Req, Args) ->
                 async ->
                     spawn(fun() ->
                         Res = hackney:post(Endpoint, [], jsx:encode(PayloadResponse), [with_body]),
-                        lager:debug("async downlink response ~p, Endpoint: ~p", [Res, Endpoint])
+                        lager:debug("async downlink response ~s, Endpoint: ~s", [Res, Endpoint])
                     end),
                     {200, [], <<"downlink sent: 2">>}
             end

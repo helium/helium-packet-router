@@ -88,6 +88,7 @@ init([]) ->
         ?WORKER(hpr_config_worker, [ConfigWorkerConfig]),
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
         ?SUP(hpr_gwmp_sup, []),
+        ?SUP(hpr_http_roaming_sup, []),
         ?WORKER(hpr_router_connection_manager, []),
         ?WORKER(hpr_router_stream_manager, [
             'helium.packet_router.packet', route, client_packet_router_pb
