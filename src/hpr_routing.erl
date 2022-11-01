@@ -61,7 +61,7 @@ find_routes({join_req, {AppEUI, DevEUI}}) ->
     ),
     hpr_config:lookup_eui(AppEUI, DevEUI);
 find_routes({uplink, DevAddr}) ->
-    lager:debug([{devaddr, hpr_utils:int_to_hex(DevAddr)}]),
+    lager:md([{devaddr, hpr_utils:int_to_hex(DevAddr)}]),
     hpr_config:lookup_devaddr(DevAddr).
 
 -spec maybe_deliver_packet(
