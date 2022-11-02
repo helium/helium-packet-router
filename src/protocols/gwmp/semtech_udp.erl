@@ -302,7 +302,7 @@ pull_resp_test() ->
     Token0 = token(),
     Map0 = #{
         imme => true,
-        freq => 864.123456,
+        freq => 864.1235,
         rfch => 0,
         powe => 14,
         modu => <<"LORA">>,
