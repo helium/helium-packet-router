@@ -108,7 +108,7 @@ all_routes() ->
 
 -spec oui_routes(OUI :: non_neg_integer()) -> list(hpr_route:route()).
 oui_routes(OUI) ->
-    [Route || Route <- ets:tab2list(?ROUTE_ETS), OUI == hpr_route:oui(Route)].
+    [Route || {_ID, Route} <- ets:tab2list(?ROUTE_ETS), OUI == hpr_route:oui(Route)].
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
