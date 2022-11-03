@@ -56,12 +56,12 @@ get_connection(Lns) ->
                 {error, _} = Error ->
                     Error;
                 {ok, Conn} = OK ->
-                    #{http_connection := Pid} = Conn,
-                    ok = ?MODULE:monitor(Pid, Lns),
-                    ets:insert(?CONNECTION_TAB, #connection{
+                    true = ets:insert(?CONNECTION_TAB, #connection{
                         lns = binary:copy(Lns),
                         connection = Conn
                     }),
+                    #{http_connection := Pid} = Conn,
+                    ok = ?MODULE:monitor(Pid, Lns),
                     OK
             end
     end.
