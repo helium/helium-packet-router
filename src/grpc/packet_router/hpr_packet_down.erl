@@ -113,6 +113,7 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
         }
     },
     hpr_packet_down:to_record(PacketMap, Rx2).
+
 %% ------------------------------------------------------------------
 % EUnit tests
 %% ------------------------------------------------------------------
@@ -121,19 +122,18 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-all_test_() ->
-    [
-        ?_test(test_window()),
-        ?_test(test_to_record())
-    ].
+-define(FAKE_TIMESTAMP, 1).
+-define(FAKE_FREQUENCY , 2).
+-define(FAKE_DATARATE , 'SF12BW125').
+-define(FAKE_PAYLOAD , <<"fake payload">>).
 
-test_window() ->
+window_test() ->
     ?assertEqual(undefined, window(undefined)),
     ?assertEqual(#window_v1_pb{}, window(#{})),
     ?assertEqual(ok, packet_router_pb:verify_msg(window(fake_window()), window_v1_pb)),
     ?assertEqual(ok, packet_router_pb:verify_msg(window(#{}), window_v1_pb)).
 
-test_to_record() ->
+to_record_test() ->
     ?assertEqual(#packet_router_packet_down_v1_pb{}, to_record(#{})),
 
     ?assertEqual(
@@ -141,22 +141,73 @@ test_to_record() ->
     ),
     ?assertEqual(ok, packet_router_pb:verify_msg(to_record(#{}), packet_router_packet_down_v1_pb)).
 
+to_record_2_test() ->
+    ?assertEqual(#packet_router_packet_down_v1_pb{}, to_record(#{}, undefined)),
+
+    ?assertEqual(ok, packet_router_pb:verify_msg(to_record(fake_packet(), window(fake_window())))),
+
+    ?assertEqual(ok, packet_router_pb:verify_msg(to_record(#{}, #window_v1_pb{}))).
+
+rx1_frequency_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_FREQUENCY, rx1_frequency(PacketDown)).
+
+rx2_frequency_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_FREQUENCY, rx2_frequency(PacketDown)).
+
+payload_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_PAYLOAD, payload(PacketDown)).
+
+rx1_timestamp_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_TIMESTAMP, rx1_timestamp(PacketDown)).
+
+rx1_datarate_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_DATARATE, rx1_datarate(PacketDown)).
+
+rx2_datarate_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_DATARATE, rx2_datarate(PacketDown)).
+
+new_downlink_test() ->
+    PacketDown = new_downlink(
+        ?FAKE_PAYLOAD,
+        ?FAKE_TIMESTAMP,
+        ?FAKE_FREQUENCY,
+        ?FAKE_DATARATE,
+        window(fake_window())),
+    ?assertEqual(#packet_router_packet_down_v1_pb{
+        payload = ?FAKE_PAYLOAD,
+        rx1 = #window_v1_pb{
+            timestamp = ?FAKE_TIMESTAMP,
+            frequency = ?FAKE_FREQUENCY,
+            datarate = ?FAKE_DATARATE
+        },
+        rx2 = #window_v1_pb{
+            timestamp = ?FAKE_TIMESTAMP,
+            frequency = ?FAKE_FREQUENCY,
+            datarate = ?FAKE_DATARATE
+        }}, PacketDown).
+
 %% ------------------------------------------------------------------
 % EUnit private functions
 %% ------------------------------------------------------------------
 
 fake_window() ->
     WindowMap = #{
-        timestamp => 1,
-        frequency => 1.0,
-        datarate => 'SF12BW125'
+        timestamp => ?FAKE_TIMESTAMP,
+        frequency => ?FAKE_FREQUENCY,
+        datarate => ?FAKE_DATARATE
     },
     ?assertEqual(ok, client_packet_router_pb:verify_msg(WindowMap, window_v1_pb)),
     WindowMap.
 
 fake_packet() ->
     PacketMap = #{
-        payload => <<"fake payload">>,
+        payload => ?FAKE_PAYLOAD,
         rx1 => fake_window(),
         rx2 => fake_window()
     },
@@ -164,5 +215,13 @@ fake_packet() ->
         ok, client_packet_router_pb:verify_msg(PacketMap, packet_router_packet_down_v1_pb)
     ),
     PacketMap.
+
+fake_downlink() ->
+    new_downlink(
+        ?FAKE_PAYLOAD,
+        ?FAKE_TIMESTAMP,
+        ?FAKE_FREQUENCY,
+        ?FAKE_DATARATE,
+        window(fake_window())).
 
 -endif.
