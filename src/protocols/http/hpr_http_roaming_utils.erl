@@ -104,3 +104,41 @@ lookup_handler(PubKeyBin) ->
         [{_, ResponseStream}] -> {ok, ResponseStream};
         [] -> {error, {not_found, PubKeyBin}}
     end.
+
+%% ------------------------------------------------------------------
+% EUnit tests
+%% ------------------------------------------------------------------
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+hexstring_test() ->
+    Number = 7,
+    EncodedNumber = <<"0x000007">>,
+    ResultNumber = hexstring(Number),
+    ?assertEqual(EncodedNumber, ResultNumber),
+
+    Binary = <<"f">>,
+    EncodedBinary = <<"0x66">>,
+    ResultBinary = hexstring(Binary),
+    ?assertEqual(EncodedBinary, ResultBinary),
+
+    NotSupported = [1, 5],
+    ?assertThrow({unknown_hexstring_conversion, _}, hexstring(NotSupported)).
+
+binary_to_hexstring_test() ->
+    Binary = <<"join_accept_payload">>,
+    EncodedBinary = <<"0x6A6F696E5F6163636570745F7061796C6F6164">>,
+    ?assertEqual(EncodedBinary, binary_to_hexstring(Binary)).
+
+format_time_test() ->
+    Now = 1667507573316,
+    Formatted = <<"2022-11-03T20:32:53Z">>,
+
+    ?assertEqual(Formatted, format_time(Now)).
+
+uint32_test() ->
+    ?assertEqual(16#ffffffff, uint32(16#1ffffffff)).
+
+-endif.
