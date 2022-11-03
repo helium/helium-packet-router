@@ -58,7 +58,7 @@ bad_signature_test(_Config) ->
     JoinPacketBadSig = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
+    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, self())),
     ok.
 
 gateway_limit_exceeded_test(_Config) ->
@@ -75,7 +75,7 @@ gateway_limit_exceeded_test(_Config) ->
         fun(_) ->
             erlang:spawn(
                 fun() ->
-                    R = hpr_routing:handle_packet(JoinPacketUpValid),
+                    R = hpr_routing:handle_packet(JoinPacketUpValid, self()),
                     Self ! {gateway_limit_exceeded_test, R}
                 end
             )
@@ -93,7 +93,7 @@ invalid_packet_type_test(_Config) ->
         gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid)
+        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid, self())
     ),
     ok.
 
@@ -127,7 +127,7 @@ join_req_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, self())),
 
     Received1 =
         {Self,
@@ -142,7 +142,7 @@ join_req_test(_Config) ->
     UplinkPacketUp = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, self())),
 
     Received2 =
         {Self,
@@ -211,9 +211,9 @@ max_copies_test(_Config) ->
         gateway => Gateway3, sig_fun => SigFun3, devaddr => DevAddr, fcnt => 1
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, self())),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2, self())),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3, self())),
 
     Self = self(),
     Received1 =
@@ -239,7 +239,7 @@ max_copies_test(_Config) ->
         gateway => Gateway3, sig_fun => SigFun3, devaddr => DevAddr, fcnt => 2
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4, self())),
 
     Received3 =
         {Self,

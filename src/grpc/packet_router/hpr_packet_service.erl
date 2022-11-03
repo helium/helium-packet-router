@@ -19,12 +19,9 @@ init(_RPC, StreamState) ->
 -spec route(hpr_packet_up:packet(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 route(PacketUp, StreamState) ->
-    case hpr_routing:handle_packet(PacketUp) of
-        ok ->
-            {ok, StreamState};
-        {error, Err} ->
-            {grpc_error, {2, erlang:iolist_to_binary(io_lib:print(Err))}}
-    end.
+    Self = self(),
+    _ = erlang:spawn(hpr_routing, handle_packet, [PacketUp, Self]),
+    {ok, StreamState}.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({packet_down, PacketDown}, StreamState) ->

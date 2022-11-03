@@ -2,7 +2,7 @@
 
 -export([
     init/0,
-    handle_packet/1
+    handle_packet/2
 ]).
 
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
@@ -18,13 +18,14 @@ init() ->
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     ok.
 
--spec handle_packet(Packet :: hpr_packet_up:packet()) -> hpr_routing_response().
-handle_packet(Packet) ->
+-spec handle_packet(Packet :: hpr_packet_up:packet(), StreamPid :: pid()) -> hpr_routing_response().
+handle_packet(Packet, StreamPid) ->
     Start = erlang:system_time(millisecond),
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
     PacketType = hpr_packet_up:type(Packet),
     {Type, _} = PacketType,
     lager:md([
+        {stream, StreamPid},
         {gateway, GatewayName},
         {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))},
         {packet_type, Type}
@@ -42,7 +43,7 @@ handle_packet(Packet) ->
             Error;
         ok ->
             Routes = find_routes(PacketType),
-            ok = maybe_deliver_packet(Packet, Routes),
+            ok = maybe_deliver_packet(Packet, StreamPid, Routes),
             hpr_metrics:observe_packet_up(PacketType, ok, erlang:length(Routes), Start),
             ok
     end.
@@ -70,11 +71,12 @@ find_routes({uplink, DevAddr}) ->
 
 -spec maybe_deliver_packet(
     Packet :: hpr_packet_up:packet(),
+    StreamPid :: pid(),
     Routes :: [hpr_route:route()]
 ) -> ok.
-maybe_deliver_packet(_Packet, []) ->
+maybe_deliver_packet(_Packet, _StreamPid, []) ->
     ok;
-maybe_deliver_packet(Packet, [Route | Routes]) ->
+maybe_deliver_packet(Packet, StreamPid, [Route | Routes]) ->
     Server = hpr_route:server(Route),
     Protocol = hpr_route:protocol(Server),
     lager:debug(
@@ -93,7 +95,7 @@ maybe_deliver_packet(Packet, [Route | Routes]) ->
         {error, Reason} ->
             lager:debug("not sending ~p", [Reason]);
         ok ->
-            case deliver_packet(Protocol, Packet, Route) of
+            case deliver_packet(Protocol, Packet, StreamPid, Route) of
                 ok ->
                     ok = hpr_packet_reporter:report_packet(Packet, Route),
                     ok;
@@ -101,16 +103,19 @@ maybe_deliver_packet(Packet, [Route | Routes]) ->
                     lager:warning([{protocol, Protocol}], "error ~p", [Reason])
             end
     end,
-    maybe_deliver_packet(Packet, Routes).
+    maybe_deliver_packet(Packet, StreamPid, Routes).
 
 -spec deliver_packet(
-    hpr_route:protocol(), Packet :: hpr_packet_up:packet(), Route :: hpr_route:route()
+    hpr_route:protocol(),
+    Packet :: hpr_packet_up:packet(),
+    StreamPid :: pid(),
+    Route :: hpr_route:route()
 ) -> hpr_routing_response().
-deliver_packet({packet_router, _}, Packet, Route) ->
-    hpr_protocol_router:send(Packet, self(), Route);
-deliver_packet({gwmp, _}, Packet, Route) ->
-    hpr_protocol_gwmp:send(Packet, self(), Route);
-deliver_packet(_OtherProtocol, _Packet, _Route) ->
+deliver_packet({packet_router, _}, Packet, StreamPid, Route) ->
+    hpr_protocol_router:send(Packet, StreamPid, Route);
+deliver_packet({gwmp, _}, Packet, StreamPid, Route) ->
+    hpr_protocol_gwmp:send(Packet, StreamPid, Route);
+deliver_packet(_OtherProtocol, _Packet, _StreamPid, _Route) ->
     lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
