@@ -110,9 +110,9 @@ test_cleanup() ->
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
-    timer:sleep(10),
+    timer:sleep(50),
     ?assertEqual(ok, ?MODULE:cleanup(10)),
-    timer:sleep(10),
+    timer:sleep(50),
 
     ?assertEqual(0, ets:info(?ETS, size)),
 
@@ -127,13 +127,13 @@ test_scheduled_cleanup() ->
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
-    timer:sleep(10),
+    timer:sleep(50),
 
     %% This will cleanup in 25ms
     ?assertEqual(ok, scheduled_cleanup(25)),
     ?assertEqual(2, ets:info(?ETS, size)),
 
-    timer:sleep(30),
+    timer:sleep(50),
     ?assertEqual(0, ets:info(?ETS, size)),
 
     ok.
