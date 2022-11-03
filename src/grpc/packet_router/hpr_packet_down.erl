@@ -123,9 +123,9 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
 -include_lib("eunit/include/eunit.hrl").
 
 -define(FAKE_TIMESTAMP, 1).
--define(FAKE_FREQUENCY , 2).
--define(FAKE_DATARATE , 'SF12BW125').
--define(FAKE_PAYLOAD , <<"fake payload">>).
+-define(FAKE_FREQUENCY, 2).
+-define(FAKE_DATARATE, 'SF12BW125').
+-define(FAKE_PAYLOAD, <<"fake payload">>).
 
 window_test() ->
     ?assertEqual(undefined, window(undefined)),
@@ -178,19 +178,24 @@ new_downlink_test() ->
         ?FAKE_TIMESTAMP,
         ?FAKE_FREQUENCY,
         ?FAKE_DATARATE,
-        window(fake_window())),
-    ?assertEqual(#packet_router_packet_down_v1_pb{
-        payload = ?FAKE_PAYLOAD,
-        rx1 = #window_v1_pb{
-            timestamp = ?FAKE_TIMESTAMP,
-            frequency = ?FAKE_FREQUENCY,
-            datarate = ?FAKE_DATARATE
+        window(fake_window())
+    ),
+    ?assertEqual(
+        #packet_router_packet_down_v1_pb{
+            payload = ?FAKE_PAYLOAD,
+            rx1 = #window_v1_pb{
+                timestamp = ?FAKE_TIMESTAMP,
+                frequency = ?FAKE_FREQUENCY,
+                datarate = ?FAKE_DATARATE
+            },
+            rx2 = #window_v1_pb{
+                timestamp = ?FAKE_TIMESTAMP,
+                frequency = ?FAKE_FREQUENCY,
+                datarate = ?FAKE_DATARATE
+            }
         },
-        rx2 = #window_v1_pb{
-            timestamp = ?FAKE_TIMESTAMP,
-            frequency = ?FAKE_FREQUENCY,
-            datarate = ?FAKE_DATARATE
-        }}, PacketDown).
+        PacketDown
+    ).
 
 %% ------------------------------------------------------------------
 % EUnit private functions
@@ -222,6 +227,7 @@ fake_downlink() ->
         ?FAKE_TIMESTAMP,
         ?FAKE_FREQUENCY,
         ?FAKE_DATARATE,
-        window(fake_window())).
+        window(fake_window())
+    ).
 
 -endif.
