@@ -160,8 +160,12 @@ upload(#state{current_packets = []} = State) ->
     lager:info("nothing to upload"),
     State;
 upload(
-    #state{aws_client = AWSClient, bucket = Bucket, current_packets = Packets, current_size = Size} =
-        State
+    #state{
+        aws_client = AWSClient,
+        bucket = Bucket,
+        current_packets = Packets,
+        current_size = Size
+    } = State
 ) ->
     Timestamp = erlang:system_time(millisecond),
     FileName = erlang:list_to_binary("packetreport." ++ erlang:integer_to_list(Timestamp) ++ ".gz"),
