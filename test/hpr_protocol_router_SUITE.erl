@@ -11,7 +11,8 @@
     grpc_connection_refused_test/1,
     grpc_full_flow_send_test/1,
     grpc_full_flow_connection_refused_test/1,
-    grpc_full_flow_downlink_test/1
+    grpc_full_flow_downlink_test/1,
+    server_crash_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -33,7 +34,8 @@ all() ->
         grpc_full_flow_send_test,
         grpc_full_flow_connection_refused_test,
         grpc_full_flow_downlink_test,
-        grpc_full_flow_connection_refused_test
+        grpc_full_flow_connection_refused_test,
+        server_crash_test
     ].
 
 %%--------------------------------------------------------------------
@@ -294,6 +296,56 @@ grpc_full_flow_connection_refused_test(_Config) ->
     ?assertEqual(1, meck:num_calls(hpr_packet_service, route, '_')),
 
     ok = gen_server:stop(ServerPid),
+
+    ok.
+
+server_crash_test(_Config) ->
+    PacketUp = test_packet(),
+    Route = test_route(),
+
+    %% Insert the matching route for the test packet
+    ok = hpr_config:insert_route(test_route()),
+
+    %% Startup a test server
+    {ok, ServerPid} = grpcbox:start_server(#{
+        grpc_opts => #{
+            service_protos => [packet_router_pb],
+            services => #{'helium.packet_router.packet' => test_hpr_packet_service}
+        },
+        listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
+    }),
+
+    %% Interceptor
+    Self = self(),
+    application:set_env(
+        hpr,
+        packet_service_route_fun,
+        fun(Packet, Socket) ->
+            Self ! {server_crash_test, Packet},
+            Socket
+        end
+    ),
+
+    _ = hpr_protocol_router:send(PacketUp, self(), Route),
+
+    ok =
+        receive
+            {server_crash_test, RcvPacket} ->
+                ?assertEqual(RcvPacket, PacketUp)
+        after timer:seconds(2) ->
+            ct:fail(no_msg_rcvd)
+        end,
+
+    ok = gen_server:stop(ServerPid),
+
+    ?assert(erlang:is_pid(erlang:whereis(hpr_router_connection_manager))),
+    ?assert(erlang:is_process_alive(erlang:whereis(hpr_router_connection_manager))),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            [] =:= ets:tab2list(hpr_router_connection_manager_tab)
+        end
+    ),
 
     ok.
 
