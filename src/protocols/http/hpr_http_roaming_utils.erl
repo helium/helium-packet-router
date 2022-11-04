@@ -141,4 +141,35 @@ format_time_test() ->
 uint32_test() ->
     ?assertEqual(16#ffffffff, uint32(16#1ffffffff)).
 
+hexstring_to_binary_test() ->
+    ZeroX = <<"0x66">>,
+    DecodedBinary = <<"f">>,
+
+    EncodedBinary = <<"0x6A6F696E5F6163636570745F7061796C6F6164">>,
+    Binary = <<"join_accept_payload">>,
+
+    NotSupported = [1, 5],
+
+    ?assertEqual(DecodedBinary, hexstring_to_binary(ZeroX)),
+
+    ?assertEqual(Binary, hexstring_to_binary(EncodedBinary)),
+
+    ?assertThrow({invalid_hexstring_binary, _}, hexstring_to_binary(NotSupported)).
+
+hexstring_to_int_test() ->
+    ZeroX = <<"0x66">>,
+    ZXInt = 16#66,
+
+    Encoded = <<"66">>,
+    Integer = ZXInt,
+
+    ?assertEqual(ZXInt, hexstring_to_int(ZeroX)),
+
+    ?assertEqual(Integer, hexstring_to_int(Encoded)).
+
+hexstring_2_test() ->
+    DevEUI = 0,
+    Encoded = <<"0x0000000000000000">>,
+    ?assertEqual(Encoded, hexstring(DevEUI, 16)).
+
 -endif.
