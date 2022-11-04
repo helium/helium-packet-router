@@ -246,7 +246,7 @@ grpc_full_flow_send_test(_Config) ->
     ?assertEqual(
         1,
         meck:num_calls(hpr_packet_service, route, '_'),
-        "we should only attempt to senda packet 1 time, even if it failed"
+        "we should only attempt to send a packet 1 time, even if it failed"
     ),
 
     ok = gen_server:stop(ServerPid),

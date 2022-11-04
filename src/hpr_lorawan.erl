@@ -24,4 +24,4 @@ index_to_datarate(Region, DRIndex) ->
 -spec datarate_to_index(atom(), atom()) -> integer().
 datarate_to_index(Region, DR) ->
     Plan = lora_plan:region_to_plan(Region),
-    lora_plan:datarate_to_index(Plan, erlang:atom_to_list(DR)).
+    lora_plan:datarate_to_index(Plan, DR).
