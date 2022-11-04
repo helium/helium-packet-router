@@ -40,7 +40,7 @@
  {<<"erl_base58">>,{pkg,<<"erl_base58">>,<<"0.0.1">>},1},
  {<<"erlang_lorawan">>,
   {git,"https://github.com/helium/erlang-lorawan.git",
-       {ref,"248b59e827872fe3c2c2536fcaf9e1ab6803a084"}},
+       {ref,"29704ae1b29386993bfcf69d1ae4fc04d8502f0e"}},
   0},
  {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"1.6.0">>},1},
  {<<"getopt">>,{pkg,<<"getopt">>,<<"1.0.1">>},2},
