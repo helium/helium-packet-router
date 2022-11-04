@@ -63,8 +63,9 @@ init([GatewayStream, RouterStream]) ->
     | {stop, {error, any()}, #state{}}.
 handle_continue(relay, State) ->
     case grpc_client:rcv(State#state.router_stream) of
-        {data, Reply} ->
-            State#state.gateway_stream ! {router_reply, Reply},
+        {data, Map} ->
+            PacketDown = hpr_packet_down:to_record(Map),
+            ok = hpr_packet_service:packet_down(State#state.gateway_stream, PacketDown),
             {noreply, State, {continue, relay}};
         {headers, _} ->
             {noreply, State, {continue, relay}};
@@ -112,7 +113,7 @@ test_relay_data() ->
     ?assertEqual({noreply, State, {continue, relay}}, Reply),
     ?assertEqual(1, meck:num_calls(grpc_client, rcv, 1)),
     RelayMessage = receive_relay(),
-    ?assertEqual(fake_data(), RelayMessage).
+    ?assertEqual(hpr_packet_down:to_record(fake_data()), RelayMessage).
 
 test_relay_headers() ->
     meck:new(grpc_client),
@@ -147,7 +148,7 @@ test_relay_error() ->
 % ------------------------------------------------------------------------------
 
 fake_data() ->
-    #{fake => data}.
+    #{payload => <<"data">>}.
 
 fake_stream() ->
     Self = self(),
@@ -157,7 +158,7 @@ fake_stream() ->
             receive
                 {'DOWN', _, process, Self, _} ->
                     ok;
-                {router_reply, _} = Reply ->
+                {packet_down, _} = Reply ->
                     Self ! Reply,
                     Loop();
                 Msg ->
@@ -178,7 +179,7 @@ fake_monitor() ->
 
 receive_relay() ->
     receive
-        {router_reply, Message} ->
+        {packet_down, Message} ->
             Message
     after 50 ->
         timeout
