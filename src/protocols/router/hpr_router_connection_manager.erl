@@ -25,14 +25,9 @@
 -type endpoint() :: {tcp | ssl, string(), non_neg_integer()}.
 -type from() :: {pid(), any()}.
 
--record(state, {}).
-
--record(connection, {
-    lns :: lns(),
-    connection :: grpc_client:connection()
+-record(state, {
+    conns = #{} :: #{lns() => grpc_client:connection()}
 }).
-
--define(CONNECTION_TAB, hpr_router_connection_manager_tab).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -46,12 +41,7 @@ start_link() ->
 %% new connection if one doesn't exist.
 -spec get_connection(Lns :: lns()) -> {ok, grpc_client:connection()} | {error, any()}.
 get_connection(Lns) ->
-    case ets:lookup(?CONNECTION_TAB, Lns) of
-        [ConnectionRecord] ->
-            {ok, ConnectionRecord#connection.connection};
-        [] ->
-            gen_server:call(?MODULE, {connect, Lns})
-    end.
+    gen_server:call(?MODULE, {get_connection, Lns}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -59,25 +49,27 @@ get_connection(Lns) ->
 
 -spec init([]) -> {ok, #state{}}.
 init([]) ->
-    _ = ets:new(?CONNECTION_TAB, [public, named_table, set, {keypos, #connection.lns}]),
     {ok, #state{}}.
 
 -spec handle_call(Msg :: any(), from(), #state{}) ->
     {reply, {ok, grpc_client:connection()} | {error, any()}, #state{}}
     | {stop, {unimplemented_call, any()}, #state{}}.
-handle_call({connect, Lns}, _From, State) ->
-    {Transport, Host, Port} = decode_lns(Lns),
-    case grpc_client:connect(Transport, Host, Port, []) of
-        {error, _} = Error ->
-            {reply, Error, State};
-        {ok, Conn} = OK ->
-            true = ets:insert(?CONNECTION_TAB, #connection{
-                lns = binary:copy(Lns),
-                connection = Conn
-            }),
-            #{http_connection := Pid} = Conn,
-            _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Lns}}]),
-            {reply, OK, State}
+handle_call({get_connection, Lns}, _From, #state{conns = Conns} = State) ->
+    case maps:get(Lns, Conns, undefined) of
+        undefined ->
+            {Transport, Host, Port} = decode_lns(Lns),
+            case grpc_client:connect(Transport, Host, Port, []) of
+                {error, _} = Error ->
+                    {reply, Error, State};
+                {ok, Conn} = OK ->
+                    #{http_connection := Pid} = Conn,
+                    _Ref = erlang:monitor(process, Pid, [{tag, {'DOWN', Lns}}]),
+                    lager:info("connected to ~s via ~p", [Lns, Pid]),
+                    {reply, OK, State#state{conns = Conns#{Lns => Conn}}}
+            end;
+        Conn ->
+            lager:info("connection for ~s found", [Lns]),
+            {reply, {ok, Conn}, State}
     end;
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
@@ -89,17 +81,15 @@ handle_cast(Msg, State) ->
 
 -spec handle_info({{'DOWN', lns()}, reference(), process, pid(), any()}, #state{}) ->
     {noreply, #state{}}.
-handle_info({{'DOWN', Lns}, _Mon, process, _Pid, _ExitReason}, State) ->
+handle_info({{'DOWN', Lns}, _Mon, process, _Pid, _ExitReason}, #state{conns = Conns} = State) ->
     lager:info("connection ~p to ~s went down ~p", [_Pid, Lns, _ExitReason]),
-    true = ets:delete(?CONNECTION_TAB, Lns),
-    {noreply, State};
+    {noreply, State#state{conns = maps:remove(Lns, Conns)}};
 handle_info({'EXIT', _Pid, _Reason}, State) ->
     lager:info("connection ~p exited ~p", [_Pid, _Reason]),
     {noreply, State}.
 
 terminate(_Reason, #state{}) ->
     lager:error("terminate ~p", [_Reason]),
-    _ = ets:delete(?CONNECTION_TAB),
     ok.
 
 %% ------------------------------------------------------------------
@@ -194,7 +184,8 @@ test_dead_http_connection() ->
 
     ok = test_utils:wait_until(
         fun() ->
-            [] =:= ets:tab2list(?CONNECTION_TAB)
+            State = sys:get_state(?MODULE),
+            0 =:= maps:size(State#state.conns)
         end
     ),
 

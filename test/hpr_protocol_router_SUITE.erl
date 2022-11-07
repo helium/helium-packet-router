@@ -343,7 +343,8 @@ server_crash_test(_Config) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            [] =:= ets:tab2list(hpr_router_connection_manager_tab)
+            {state, Conns} = sys:get_state(hpr_router_connection_manager),
+            0 =:= maps:size(Conns)
         end
     ),
 
