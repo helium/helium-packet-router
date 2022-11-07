@@ -7,8 +7,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/0,
-    get_connection/1,
-    monitor/2
+    get_connection/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -51,24 +50,8 @@ get_connection(Lns) ->
         [ConnectionRecord] ->
             {ok, ConnectionRecord#connection.connection};
         [] ->
-            {Transport, Host, Port} = decode_lns(Lns),
-            case grpc_client:connect(Transport, Host, Port, []) of
-                {error, _} = Error ->
-                    Error;
-                {ok, Conn} = OK ->
-                    true = ets:insert(?CONNECTION_TAB, #connection{
-                        lns = binary:copy(Lns),
-                        connection = Conn
-                    }),
-                    #{http_connection := Pid} = Conn,
-                    ok = ?MODULE:monitor(Pid, Lns),
-                    OK
-            end
+            gen_server:call(?MODULE, {connect, Lns})
     end.
-
--spec monitor(Pid :: pid(), Lns :: lns()) -> ok.
-monitor(Pid, Lns) ->
-    ok = gen_server:cast(?MODULE, {monitor, Pid, Lns}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -79,15 +62,28 @@ init([]) ->
     _ = ets:new(?CONNECTION_TAB, [public, named_table, set, {keypos, #connection.lns}]),
     {ok, #state{}}.
 
--spec handle_call(Msg :: any(), from(), #state{}) -> {stop, {unimplemented_call, any()}, #state{}}.
+-spec handle_call(Msg :: any(), from(), #state{}) ->
+    {reply, {ok, grpc_client:connection()} | {error, any()}, #state{}}
+    | {stop, {unimplemented_call, any()}, #state{}}.
+handle_call({connect, Lns}, _From, State) ->
+    {Transport, Host, Port} = decode_lns(Lns),
+    case grpc_client:connect(Transport, Host, Port, []) of
+        {error, _} = Error ->
+            {reply, Error, State};
+        {ok, Conn} = OK ->
+            true = ets:insert(?CONNECTION_TAB, #connection{
+                lns = binary:copy(Lns),
+                connection = Conn
+            }),
+            #{http_connection := Pid} = Conn,
+            _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Lns}}]),
+            {reply, OK, State}
+    end;
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
 -spec handle_cast(Msg :: any(), #state{}) ->
     {noreply, #state{}} | {stop, {unimplemented_cast, any()}, #state{}}.
-handle_cast({monitor, Pid, Lns}, State) ->
-    _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Lns}}]),
-    {noreply, State};
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
