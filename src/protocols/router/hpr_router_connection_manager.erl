@@ -17,7 +17,8 @@
     init/1,
     handle_call/3,
     handle_cast/2,
-    handle_info/2
+    handle_info/2,
+    terminate/2
 ]).
 
 -type lns() :: binary().
@@ -25,15 +26,8 @@
 -type from() :: {pid(), any()}.
 
 -record(state, {
-    connection_table :: ets:tab()
+    conns = #{} :: #{lns() => grpc_client:connection()}
 }).
-
--record(connection, {
-    lns :: lns(),
-    connection :: grpc_client:connection()
-}).
-
--define(CONNECTION_TAB, hpr_router_connection_manager_tab).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -47,8 +41,7 @@ start_link() ->
 %% new connection if one doesn't exist.
 -spec get_connection(Lns :: lns()) -> {ok, grpc_client:connection()} | {error, any()}.
 get_connection(Lns) ->
-    DecodedLns = decode_lns(Lns),
-    gen_server:call(?MODULE, {get_connection, Lns, DecodedLns}).
+    gen_server:call(?MODULE, {get_connection, Lns}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -56,75 +49,53 @@ get_connection(Lns) ->
 
 -spec init([]) -> {ok, #state{}}.
 init([]) ->
-    Tab = init_ets(),
-    {
-        ok,
-        #state{
-            connection_table = Tab
-        }
-    }.
+    process_flag(trap_exit, true),
+    {ok, #state{}}.
 
--spec handle_call({get_connection, lns(), endpoint()}, from(), #state{}) ->
-    {reply, {ok, grpc_client:connection()} | {error, any()}, #state{}}.
-handle_call({get_connection, Lns, Endpoint}, _From, State) ->
-    {reply, do_get_connection(Lns, Endpoint, State#state.connection_table), State}.
+-spec handle_call(Msg :: any(), from(), #state{}) ->
+    {reply, {ok, grpc_client:connection()} | {error, any()}, #state{}}
+    | {stop, {unimplemented_call, any()}, #state{}}.
+handle_call({get_connection, Lns}, _From, #state{conns = Conns} = State) ->
+    case maps:get(Lns, Conns, undefined) of
+        undefined ->
+            {Transport, Host, Port} = decode_lns(Lns),
+            case grpc_client:connect(Transport, Host, Port, []) of
+                {error, _} = Error ->
+                    {reply, Error, State};
+                {ok, Conn} = OK ->
+                    #{http_connection := Pid} = Conn,
+                    _Ref = erlang:monitor(process, Pid, [{tag, {'DOWN', Lns}}]),
+                    lager:info("connected to ~s via ~p", [Lns, Pid]),
+                    {reply, OK, State#state{conns = Conns#{Lns => Conn}}}
+            end;
+        Conn ->
+            lager:info("connection for ~s found", [Lns]),
+            {reply, {ok, Conn}, State}
+    end;
+handle_call(Msg, _From, State) ->
+    {stop, {unimplemented_call, Msg}, State}.
 
--spec handle_cast(Msg, #state{}) -> {stop, {unimplemented_cast, Msg}, #state{}}.
+-spec handle_cast(Msg :: any(), #state{}) ->
+    {noreply, #state{}} | {stop, {unimplemented_cast, any()}, #state{}}.
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
 -spec handle_info({{'DOWN', lns()}, reference(), process, pid(), any()}, #state{}) ->
     {noreply, #state{}}.
-handle_info({{'DOWN', Lns}, _Mon, process, _Pid, _ExitReason}, State) ->
-    ets:delete(State#state.connection_table, Lns),
+handle_info({{'DOWN', Lns}, _Mon, process, _Pid, _ExitReason}, #state{conns = Conns} = State) ->
+    lager:info("connection ~p to ~s went down ~p", [_Pid, Lns, _ExitReason]),
+    {noreply, State#state{conns = maps:remove(Lns, Conns)}};
+handle_info({'EXIT', _Pid, _Reason}, State) ->
+    lager:info("connection ~p exited ~p", [_Pid, _Reason]),
     {noreply, State}.
+
+terminate(_Reason, #state{}) ->
+    lager:error("terminate ~p", [_Reason]),
+    ok.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
--spec init_ets() -> ets:tab().
-init_ets() ->
-    init_ets([]).
-
--spec init_ets(list()) -> ets:tab().
-init_ets(Options) ->
-    % [#connection{}]
-    ets:new(
-        ?CONNECTION_TAB,
-        Options ++ [set, {keypos, #connection.lns}]
-    ).
-
--spec do_get_connection(lns(), endpoint(), ets:tab()) ->
-    {ok, grpc_client:connection()} | {error, any()}.
-% If necessary, create connection.
-do_get_connection(Lns, Endpoint, ConnectionTab) ->
-    case ets:lookup(ConnectionTab, Lns) of
-        [] ->
-            GrpcConnection = grpc_client_connect(Endpoint),
-            monitor_grpc_client_connection(Lns, GrpcConnection),
-            insert_connection(ConnectionTab, Lns, GrpcConnection);
-        [ConnectionRecord] ->
-            %% TODO: Handle the connection being dead
-            {ok, ConnectionRecord#connection.connection}
-    end.
-
--spec grpc_client_connect(endpoint()) ->
-    {ok, grpc_client:connection()} | {error, any()}.
-grpc_client_connect({Transport, Host, Port}) ->
-    grpc_client:connect(Transport, Host, Port, []).
-
--spec insert_connection
-    (ets:tab(), lns(), {ok, grpc_client:connection()}) -> {ok, grpc_client:connection()};
-    (ets:tab(), lns(), {error, any()}) -> {error, any()}.
-insert_connection(ConnectionTab, Lns, {ok, GrpcClientConnection}) ->
-    ets:insert(ConnectionTab, #connection{
-        lns = binary:copy(Lns),
-        connection = GrpcClientConnection
-    }),
-    {ok, GrpcClientConnection};
-insert_connection(_, _, {error, Error}) ->
-    {error, Error}.
 
 -spec decode_lns(lns()) -> endpoint().
 decode_lns(Lns) ->
@@ -136,18 +107,6 @@ decode_lns_parts([Address, Port]) ->
     {erlang:binary_to_list(Address), erlang:binary_to_integer(Port)};
 decode_lns_parts(_) ->
     error(invalid_lns).
-
--spec monitor_grpc_client_connection
-    (lns(), {ok, grpc_client:connection()}) -> ok;
-    (lns(), {error, any()}) -> ok.
-% monitor the http process in the grpc_client connection. Include the Lns in
-% 'DOWN' message tag to make it easier to locate the connection in ets.
-monitor_grpc_client_connection(Lns, {ok, GrpcConnection}) ->
-    #{http_connection := HttpPid} = GrpcConnection,
-    erlang:monitor(process, HttpPid, [{tag, {'DOWN', Lns}}]),
-    ok;
-monitor_grpc_client_connection(_, {error, _}) ->
-    ok.
 
 %% ------------------------------------------------------------------
 % EUnit tests
@@ -165,23 +124,24 @@ all_test_() ->
         ]}}.
 
 setup() ->
-    init_ets([named_table, public]).
+    ok.
 
 foreach_setup() ->
-    reset_ets(),
+    ?MODULE:start_link(),
     ok.
 
 foreach_cleanup(ok) ->
+    ok = gen_server:stop(?MODULE),
     meck:unload(),
     ok.
 
 test_get_connection() ->
     meck:new(grpc_client),
-    Lns = <<"lns">>,
+
+    Lns = <<"localhost:8080">>,
     Transport = tcp,
-    Host = <<"1,2,3,4">>,
-    Port = 1234,
-    Endpoint = {Transport, Host, Port},
+    Host = "localhost",
+    Port = 8080,
     FakeGrpcConnection = fake_grpc_connection(),
 
     meck:expect(
@@ -192,46 +152,57 @@ test_get_connection() ->
     ),
 
     % first get makes connection
-    {ok, GrpcConnection0} =
-        do_get_connection(Lns, Endpoint, ?CONNECTION_TAB),
+    {ok, GrpcConnection0} = get_connection(Lns),
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)),
     ?assertEqual(FakeGrpcConnection, GrpcConnection0),
 
     % second reservation doesn't reconnect and returns the same connection
-    {ok, GrpcConnection1} =
-        do_get_connection(Lns, Endpoint, ?CONNECTION_TAB),
+    {ok, GrpcConnection1} = get_connection(Lns),
     ?assertEqual(FakeGrpcConnection, GrpcConnection1),
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)).
 
 test_dead_http_connection() ->
     meck:new(grpc_client),
-    Lns = <<"lns">>,
+    Lns = <<"localhost:8080">>,
     Transport = tcp,
-    Host = <<"1,2,3,4">>,
-    Port = 1234,
-    Endpoint = {Transport, Host, Port},
-    FakeHttpConnectionPid = fake_http_connection_pid(),
-    FakeGrpcConnection = fake_grpc_connection(FakeHttpConnectionPid),
+    Host = "localhost",
+    Port = 8080,
+    FakeHttpConnectionPid0 = fake_http_connection_pid(),
+    FakeGrpcConnection0 = fake_grpc_connection(FakeHttpConnectionPid0),
 
     meck:expect(
         grpc_client,
         connect,
         [Transport, Host, Port, []],
-        {ok, FakeGrpcConnection}
+        {ok, FakeGrpcConnection0}
     ),
 
-    {ok, _} =
-        do_get_connection(Lns, Endpoint, ?CONNECTION_TAB),
+    {ok, GrpcConnection0} = get_connection(Lns),
     ?assertEqual(1, meck:num_calls(grpc_client, connect, 4)),
 
     % kill connection
-    FakeHttpConnectionPid ! stop,
-    Msg =
-        receive
-            M -> M
-        after 50 -> timeout
-        end,
-    ?assertMatch({{'DOWN', Lns}, _Mon, process, _Pid, _ExitReason}, Msg).
+    FakeHttpConnectionPid0 ! stop,
+
+    ok = test_utils:wait_until(
+        fun() ->
+            State = sys:get_state(?MODULE),
+            0 =:= maps:size(State#state.conns)
+        end
+    ),
+
+    FakeHttpConnectionPid1 = fake_http_connection_pid(),
+    FakeGrpcConnection1 = fake_grpc_connection(FakeHttpConnectionPid1),
+    meck:expect(
+        grpc_client,
+        connect,
+        [Transport, Host, Port, []],
+        {ok, FakeGrpcConnection1}
+    ),
+
+    % second reservation doesn't reconnect and returns the same connection
+    {ok, GrpcConnection1} = get_connection(Lns),
+    ?assertNotEqual(GrpcConnection0, GrpcConnection1),
+    ?assertEqual(2, meck:num_calls(grpc_client, connect, 4)).
 
 % ------------------------------------------------------------------------------
 % EUnit test utils
@@ -252,8 +223,5 @@ fake_http_connection_pid() ->
             end
         end
     ).
-
-reset_ets() ->
-    ets:delete_all_objects(?CONNECTION_TAB).
 
 -endif.

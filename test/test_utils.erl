@@ -28,6 +28,41 @@ init_per_testcase(TestCase, Config) ->
     BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
     KeyFilePath = filename:join(BaseDir, "hpr.key"),
     ok = application:set_env(hpr, key, KeyFilePath),
+
+    FormatStr = [
+        "[",
+        date,
+        " ",
+        time,
+        "] ",
+        pid,
+        " [",
+        severity,
+        "] [",
+        {module, ""},
+        {function, [":", function], ""},
+        {line, [":", line], ""},
+        "] ",
+        message,
+        "\n"
+    ],
+    case os:getenv("CT_LAGER", "NONE") of
+        "DEBUG" ->
+            ok = application:set_env(lager, handlers, [
+                {lager_console_backend, [
+                    {level, debug},
+                    {formatter_config, FormatStr}
+                ]},
+                {lager_file_backend, [
+                    {file, "hpr.log"},
+                    {level, debug},
+                    {formatter_config, FormatStr}
+                ]}
+            ]);
+        _ ->
+            ok
+    end,
+
     application:ensure_all_started(?APP),
     Config.
 

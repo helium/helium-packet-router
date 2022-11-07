@@ -189,7 +189,10 @@ test_insert_route() ->
     GotDevaddrRows0 = lists:sort(ets:tab2list(?DEVADDRS_ETS)),
     GotEUIRows0 = lists:sort(ets:tab2list(?EUIS_ETS)),
 
-    ?assertEqual(ExpectedDevaddrRows0, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevaddrRows0]),
+    ?assertEqual(
+        ExpectedDevaddrRows0,
+        [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevaddrRows0]
+    ),
     ?assertEqual(ExpectedEUIRows0, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotEUIRows0]),
 
     ID = hpr_route:id(Route),
@@ -224,7 +227,10 @@ test_insert_route() ->
     GotDevaddrRows1 = lists:sort(ets:tab2list(?DEVADDRS_ETS)),
     GotEUIRows1 = lists:sort(ets:tab2list(?EUIS_ETS)),
 
-    ?assertEqual(ExpectedDevaddrRows1, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevaddrRows1]),
+    ?assertEqual(
+        ExpectedDevaddrRows1,
+        [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevaddrRows1]
+    ),
     ?assertEqual(ExpectedEUIRows1, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotEUIRows1]),
     ?assertEqual([{ID, UpdatedRoute}], ets:lookup(?ROUTE_ETS, ID)),
     ok.
