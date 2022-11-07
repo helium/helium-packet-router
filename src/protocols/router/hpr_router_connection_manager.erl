@@ -49,6 +49,7 @@ get_connection(Lns) ->
 
 -spec init([]) -> {ok, #state{}}.
 init([]) ->
+    process_flag(trap_exit, true),
     {ok, #state{}}.
 
 -spec handle_call(Msg :: any(), from(), #state{}) ->
