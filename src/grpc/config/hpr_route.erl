@@ -20,7 +20,10 @@
     host/1,
     port/1,
     protocol/1,
-    protocol_type/1
+    http_roaming_flow_type/1,
+    protocol_type/1,
+    http_roaming_dedupe_timeout/1,
+    http_roaming_path/1
 ]).
 
 -type route() :: #config_route_v1_pb{}.
@@ -97,7 +100,13 @@ lns(Route) ->
     Server = ?MODULE:server(Route),
     Host = ?MODULE:host(Server),
     Port = ?MODULE:port(Server),
-    <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary>>.
+    case Server#config_server_v1_pb.protocol of
+        {http_roaming, _RoamingProtocol} ->
+            Path = http_roaming_path(Route),
+            <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary, Path/binary>>;
+        _ ->
+            <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary>>
+    end.
 
 -spec gwmp_region_lns(Region :: atom(), Route :: route()) ->
     {Address :: string(), Port :: inet:port_number()}.
@@ -124,6 +133,30 @@ port(Server) ->
 -spec protocol(Server :: server()) -> protocol().
 protocol(Server) ->
     Server#config_server_v1_pb.protocol.
+
+-spec http_roaming_flow_type(Route :: route()) -> sync | async.
+http_roaming_flow_type(Route) ->
+    Server = Route#config_route_v1_pb.server,
+    {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
+    HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.flow_type.
+
+-spec http_roaming_dedupe_timeout(Route :: route()) -> non_neg_integer() | undefined.
+http_roaming_dedupe_timeout(Route) ->
+    Server = Route#config_route_v1_pb.server,
+    {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
+    HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.dedupe_timeout.
+
+-spec http_roaming_path(Route :: route()) -> binary().
+http_roaming_path(Route) ->
+    Server = Route#config_route_v1_pb.server,
+    case Server#config_server_v1_pb.protocol of
+        {http_roaming, HttpRoamingProtocol} ->
+            erlang:list_to_binary(
+                HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.path
+            );
+        _ ->
+            <<>>
+    end.
 
 -spec protocol_type(Server :: server()) -> protocol_type().
 protocol_type(Server) ->

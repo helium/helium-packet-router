@@ -23,11 +23,11 @@ handle_packet(Packet, StreamPid) ->
     Start = erlang:system_time(millisecond),
     GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
     PacketType = hpr_packet_up:type(Packet),
+
     {Type, _} = PacketType,
     lager:md([
         {stream, StreamPid},
         {gateway, GatewayName},
-        {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(Packet))},
         {packet_type, Type}
     ]),
     lager:debug("received packet"),
@@ -54,19 +54,15 @@ handle_packet(Packet, StreamPid) ->
 
 -spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
 find_routes({join_req, {AppEUI, DevEUI}}) ->
-    lager:debug(
+    lager:md(
         [
             {app_eui, hpr_utils:int_to_hex(AppEUI)},
             {dev_eui, hpr_utils:int_to_hex(DevEUI)}
-        ],
-        "handling join"
+        ]
     ),
     hpr_config:lookup_eui(AppEUI, DevEUI);
 find_routes({uplink, DevAddr}) ->
-    lager:debug(
-        [{devaddr, hpr_utils:int_to_hex(DevAddr)}],
-        "handling uplink"
-    ),
+    lager:md([{devaddr, hpr_utils:int_to_hex(DevAddr)}]),
     hpr_config:lookup_devaddr(DevAddr).
 
 -spec maybe_deliver_packet(
@@ -93,7 +89,7 @@ maybe_deliver_packet(Packet, StreamPid, [Route | Routes]) ->
     >>),
     case hpr_max_copies:update_counter(Key, hpr_route:max_copies(Route)) of
         {error, Reason} ->
-            lager:debug("not sending ~p", [Reason]);
+            lager:debug("not sending ~p, Route: ~p", [Reason, Route]);
         ok ->
             case deliver_packet(Protocol, Packet, StreamPid, Route) of
                 ok ->
@@ -115,6 +111,8 @@ deliver_packet({packet_router, _}, Packet, StreamPid, Route) ->
     hpr_protocol_router:send(Packet, StreamPid, Route);
 deliver_packet({gwmp, _}, Packet, StreamPid, Route) ->
     hpr_protocol_gwmp:send(Packet, StreamPid, Route);
+deliver_packet({http_roaming, _}, Packet, StreamPid, Route) ->
+    hpr_protocol_http_roaming:send(Packet, StreamPid, Route);
 deliver_packet(_OtherProtocol, _Packet, _StreamPid, _Route) ->
     lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
 

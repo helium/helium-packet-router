@@ -19,9 +19,10 @@
         jsx,
         iso8601,
         xxhash,
+        elli,
+        hackney,
         prometheus,
         recon,
-        elli,
         observer_cli
     ]},
     {env, []},

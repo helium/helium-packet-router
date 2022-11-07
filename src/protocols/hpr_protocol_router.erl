@@ -3,8 +3,8 @@
 -export([send/3]).
 
 -spec send(
-    Packet :: hpr_packet_up:packet(),
-    GatewayStream :: pid(),
+    PacketUp :: hpr_packet_up:packet(),
+    GatewayStream :: hpr_router_stream_manager:gateway_stream(),
     Route :: hpr_route:route()
 ) -> ok | {error, any()}.
 send(PacketUp, GatewayStream, Route) ->

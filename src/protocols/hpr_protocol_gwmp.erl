@@ -9,10 +9,10 @@
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    Stream :: pid(),
-    Routes :: hpr_route:route()
+    GatewayStream :: pid(),
+    Route :: hpr_route:route()
 ) -> ok | {error, any()}.
-send(PacketUp, Stream, Route) ->
+send(PacketUp, GatewayStream, Route) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
 
     case hpr_gwmp_sup:maybe_start_worker(Gateway, #{}) of
@@ -22,7 +22,7 @@ send(PacketUp, Stream, Route) ->
             PushData = ?MODULE:packet_up_to_push_data(PacketUp, erlang:system_time(millisecond)),
             Region = hpr_packet_up:region(PacketUp),
             Dest = hpr_route:gwmp_region_lns(Region, Route),
-            try hpr_gwmp_worker:push_data(Pid, PushData, Stream, Dest) of
+            try hpr_gwmp_worker:push_data(Pid, PushData, GatewayStream, Dest) of
                 _ -> ok
             catch
                 Type:Err:Stack ->
@@ -77,9 +77,7 @@ packet_up_to_push_data(Up, GatewayTime) ->
                 calendar:system_time_to_universal_time(GatewayTime, millisecond)
             ),
             tmst => hpr_packet_up:timestamp(Up) band 16#FFFF_FFFF,
-            freq => list_to_float(
-                float_to_list(hpr_packet_up:frequency_mhz(Up), [{decimals, 4}, compact])
-            ),
+            freq => hpr_packet_up:frequency_mhz(Up),
             rfch => 0,
             modu => <<"LORA">>,
             codr => <<"4/5">>,

@@ -60,10 +60,10 @@ rssi(Packet) ->
 frequency(Packet) ->
     Packet#packet_router_packet_up_v1_pb.frequency.
 
--spec frequency_mhz(Packet :: packet()) ->
-    float() | integer() | infinity | '-infinity' | nan | undefined.
+-spec frequency_mhz(Packet :: packet()) -> float().
 frequency_mhz(Packet) ->
-    Packet#packet_router_packet_up_v1_pb.frequency / 1_000_000.
+    Mhz = Packet#packet_router_packet_up_v1_pb.frequency / 1000000,
+    list_to_float(float_to_list(Mhz, [{decimals, 4}, compact])).
 
 -spec datarate(Packet :: packet()) -> atom().
 datarate(Packet) ->
@@ -302,12 +302,13 @@ type_test() ->
             })
         )
     ),
+    UnconfirmedUp = test_utils:unconfirmed_up(),
     ?assertEqual(
         {uplink, 1},
         ?MODULE:type(
             ?MODULE:new(#{
                 payload =>
-                    <<?UNCONFIRMED_UP:3, 0:3, 1:2, 16#00000001:32/integer-unsigned-little, 0:1, 0:1,
+                    <<UnconfirmedUp:3, 0:3, 1:2, 16#00000001:32/integer-unsigned-little, 0:1, 0:1,
                         0:1, 0:1, 1:4, 2:16/little-unsigned-integer,
                         (crypto:strong_rand_bytes(1))/binary, 2:8/integer,
                         (crypto:strong_rand_bytes(20))/binary>>
