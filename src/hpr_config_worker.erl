@@ -23,12 +23,20 @@
     terminate/2
 ]).
 
+-ifdef(TEST).
+-define(BACKOFF_MIN, timer:seconds(1)).
+-else.
+-define(BACKOFF_MIN, timer:seconds(10)).
+-endif.
+-define(BACKOFF_MAX, timer:minutes(5)).
+
 -record(state, {
     host :: string(),
     port :: integer(),
     connection :: grpc_client:connection() | undefined,
     stream :: grpc_client:stream() | undefined,
-    file_backup_path :: path()
+    file_backup_path :: path(),
+    conn_backoff :: backoff:backoff()
 }).
 
 -type config_worker_opts() :: #{
@@ -42,7 +50,7 @@
 -define(CONNECT, connect).
 -define(INIT_STREAM, init_stream).
 -define(RCV_CFG_UPDATE, receive_config_update).
--define(RCV_TIMEOUT, timer:seconds(1)).
+-define(RCV_TIMEOUT, timer:seconds(5)).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -64,26 +72,32 @@ start_link(_) ->
 
 init(#{host := Host, port := Port} = Args) ->
     Path = maps:get(file_backup_path, Args, undefined),
+    Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
     State = #state{
         host = Host,
         port = Port,
         connection = undefined,
         stream = undefined,
-        file_backup_path = Path
+        file_backup_path = Path,
+        conn_backoff = Backoff
     },
     lager:info("starting config worker ~s:~w file=~s", [Host, Port, Path]),
     ok = maybe_init_from_file(Path),
     {ok, State, {continue, ?CONNECT}}.
 
-handle_continue(?CONNECT, #state{host = Host, port = Port} = State) ->
+handle_continue(?CONNECT, #state{host = Host, port = Port, conn_backoff = Backoff0} = State) ->
+    lager:info("connecting"),
     case grpc_client:connect(tcp, Host, Port) of
         {ok, Connection} ->
             lager:info("connected"),
-            {noreply, State#state{connection = Connection}, {continue, ?INIT_STREAM}};
+            {_, Backoff1} = backoff:succeed(Backoff0),
+            {noreply, State#state{connection = Connection, conn_backoff = Backoff1},
+                {continue, ?INIT_STREAM}};
         {error, _E} ->
-            lager:error("failed to connect ~p", [_E]),
-            timer:sleep(timer:seconds(1)),
-            {noreply, State, {continue, ?CONNECT}}
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            lager:error("failed to connect ~pm sleeping ~wms", [_E, Delay]),
+            timer:sleep(Delay),
+            {noreply, State#state{conn_backoff = Backoff1}, {continue, ?CONNECT}}
     end;
 handle_continue(
     ?INIT_STREAM,
@@ -94,6 +108,7 @@ handle_continue(
     {ok, Stream} = grpc_client:new_stream(
         Connection, 'helium.config.route', stream, client_config_pb
     ),
+    %% TODO: IMplement backoff
     %% Sending Route Stream Request
     {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
@@ -104,7 +119,9 @@ handle_continue(
     {noreply, State#state{stream = Stream}, {continue, ?RCV_CFG_UPDATE}};
 handle_continue(
     ?RCV_CFG_UPDATE,
-    #state{connection = Connection, stream = Stream, file_backup_path = Path} = State
+    #state{
+        connection = Connection, stream = Stream, file_backup_path = Path, conn_backoff = Backoff0
+    } = State
 ) ->
     case grpc_client:rcv(Stream, ?RCV_TIMEOUT) of
         {headers, _Headers} ->
@@ -114,11 +131,15 @@ handle_continue(
             ok = process_route_stream_res(hpr_route_stream_res:from_map(RouteStreamRes), Path),
             {noreply, State, {continue, ?RCV_CFG_UPDATE}};
         eof ->
-            lager:warning("got eof"),
-            _ = grpc_client:stop_connection(Connection),
-            {noreply, State, {continue, ?CONNECT}};
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            lager:warning("got eof, sleeping for ~wms", [Delay]),
+            _ = catch grpc_client:stop_connection(Connection),
+            timer:sleep(Delay),
+            {noreply, State#state{conn_backoff = Backoff1}, {continue, ?CONNECT}};
         {error, timeout} ->
-            {noreply, State, {continue, ?RCV_CFG_UPDATE}};
+            lager:debug("rcv timeout"),
+            {_, Backoff1} = backoff:succeed(Backoff0),
+            {noreply, State#state{conn_backoff = Backoff1}, {continue, ?RCV_CFG_UPDATE}};
         {error, E} ->
             lager:error("failed to rcv ~p", [E]),
             {stop, {error, E}}
@@ -131,11 +152,12 @@ handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
 handle_info(_Msg, State) ->
+    lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.
 
 terminate(_Reason, #state{connection = Connection}) ->
     lager:error("terminate ~p", [_Reason]),
-    _ = grpc_client:stop_connection(Connection),
+    _ = catch grpc_client:stop_connection(Connection),
     ok.
 
 %% ------------------------------------------------------------------

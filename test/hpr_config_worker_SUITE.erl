@@ -12,7 +12,8 @@
 -export([
     create_route_test/1,
     update_route_test/1,
-    delete_route_test/1
+    delete_route_test/1,
+    backoff_test/1
 ]).
 
 -define(PORT, 8085).
@@ -31,7 +32,8 @@ all() ->
     [
         create_route_test,
         update_route_test,
-        delete_route_test
+        delete_route_test,
+        backoff_test
     ].
 
 %%--------------------------------------------------------------------
@@ -67,7 +69,11 @@ init_per_testcase(TestCase, Config) ->
 end_per_testcase(TestCase, Config) ->
     meck:unload(),
     test_utils:end_per_testcase(TestCase, Config),
-    ok = gen_server:stop(proplists:get_value(server_pid, Config)),
+    ServerPid = proplists:get_value(server_pid, Config),
+    case erlang:is_process_alive(ServerPid) of
+        true -> ok = gen_server:stop(ServerPid);
+        false -> ok
+    end,
     application:set_env(hpr, config_worker, #{}),
     ok.
 
@@ -303,6 +309,32 @@ delete_route_test(Config) ->
     ?assertEqual(0, ets:info(hpr_config_routes, size)),
 
     ok.
+
+backoff_test(Config) ->
+    %% Let it startup
+    timer:sleep(100),
+
+    ServerPid = proplists:get_value(server_pid, Config),
+
+    meck:new(backoff, [passthrough]),
+
+    gen_server:stop(ServerPid),
+
+    ?assertEqual(1, meck:num_calls(backoff, fail, 1)),
+
+    %% We sleep 3s the BACKOFF_MIN is 1s so we should get another 2 tries
+    timer:sleep(3000),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            3 == meck:num_calls(backoff, fail, 1)
+        end
+    ),
+
+    meck:unload(backoff),
+
+    ok.
+
 %% ===================================================================
 %% Helpers
 %% ===================================================================
