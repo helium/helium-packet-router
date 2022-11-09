@@ -73,9 +73,10 @@ grpc_test(_Config) ->
     application:set_env(
         hpr,
         packet_service_route_fun,
-        fun(Packet, Socket) ->
+        fun(Env, StreamState) ->
+            {packet, Packet} = hpr_envelope_up:data(Env),
             Self ! {test_route, Packet},
-            Socket
+            StreamState
         end
     ),
 
@@ -105,7 +106,7 @@ grpc_connection_refused_test(_Config) ->
 
 grpc_full_flow_downlink_test(_Config) ->
     %% Startup our server
-    {ok, ServerPid} = grpcbox:start_server(#{
+    {ok, HPRPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [packet_router_pb],
             services => #{'helium.packet_router.packet' => hpr_packet_service}
@@ -113,7 +114,7 @@ grpc_full_flow_downlink_test(_Config) ->
         listen_opts => #{port => ?SERVER_PORT, ip => {0, 0, 0, 0}}
     }),
     %% Startup test server for receiving
-    {ok, TestServerPid} = grpcbox:start_server(#{
+    {ok, RouterServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [packet_router_pb],
             services => #{'helium.packet_router.packet' => test_hpr_packet_service}
@@ -127,18 +128,22 @@ grpc_full_flow_downlink_test(_Config) ->
     Timestamp = erlang:system_time(millisecond) band 16#FFFF_FFFF,
     DataRate = 'SF11BW125',
     Frequency = 904_100_000,
-    Down = hpr_packet_down:to_record(#{
-        payload => Payload,
-        rx1 => #{
-            timestamp => Timestamp,
-            frequency => Frequency,
-            datarate => DataRate
-        }
-    }),
+    EnvDown = hpr_envelope_down:new(
+        hpr_packet_down:to_record(#{
+            payload => Payload,
+            rx1 => #{
+                timestamp => Timestamp,
+                frequency => Frequency,
+                datarate => DataRate
+            }
+        })
+    ),
     application:set_env(
         hpr,
         packet_service_route_fun,
-        fun(_PacketUp, Socket) -> {ok, Down, Socket} end
+        fun(_Env, StreamState) ->
+            {ok, EnvDown, StreamState}
+        end
     ),
 
     %% Connect to our server
@@ -150,34 +155,40 @@ grpc_full_flow_downlink_test(_Config) ->
         client_packet_router_pb
     ),
     %% Send a packet that expects a downlink
-    ok = grpc_client:send(Stream, hpr_packet_up:to_map(test_packet())),
+    EnvUpMap = hpr_envelope_up:to_map(hpr_envelope_up:new(test_packet())),
+    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, EnvUpMap]),
+    ok = grpc_client:send(Stream, EnvUpMap),
 
     %% Throw away the headers
     ?assertMatch({headers, _}, grpc_client:rcv(Stream, 500)),
 
     {data, Response} = grpc_client:rcv(Stream, 500),
+    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, Response]),
     ?assert(
         test_utils:match_map(
             #{
-                payload => Payload,
-                rx1 => #{
-                    timestamp => Timestamp,
-                    frequency => Frequency,
-                    datarate => DataRate
-                }
+                data =>
+                    {packet, #{
+                        payload => Payload,
+                        rx1 => #{
+                            timestamp => Timestamp,
+                            frequency => Frequency,
+                            datarate => DataRate
+                        }
+                    }}
             },
             Response
         )
     ),
 
-    ok = gen_server:stop(ServerPid),
-    ok = gen_server:stop(TestServerPid),
+    ok = gen_server:stop(HPRPid),
+    ok = gen_server:stop(RouterServerPid),
 
     ok.
 
 grpc_full_flow_send_test(_Config) ->
     Packet = test_packet(),
-    PacketMap = hpr_packet_up:to_map(Packet),
+    EnvMap = hpr_envelope_up:to_map(hpr_envelope_up:new(Packet)),
     %% Startup our server
     {ok, ServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
@@ -201,9 +212,10 @@ grpc_full_flow_send_test(_Config) ->
     application:set_env(
         hpr,
         packet_service_route_fun,
-        fun(PacketUp, Socket) ->
-            Self ! {test_route, PacketUp},
-            Socket
+        fun(Env, StreamState) ->
+            {packet, Packet} = hpr_envelope_up:data(Env),
+            Self ! {test_route, Packet},
+            StreamState
         end
     ),
 
@@ -218,7 +230,7 @@ grpc_full_flow_send_test(_Config) ->
         route,
         client_packet_router_pb
     ),
-    ok = grpc_client:send(Stream, PacketMap),
+    ok = grpc_client:send(Stream, EnvMap),
 
     ok =
         receive
@@ -239,7 +251,7 @@ grpc_full_flow_send_test(_Config) ->
     ok = gen_server:stop(TestServerPid),
     ok = meck:reset(hpr_packet_service),
 
-    ok = grpc_client:send(Stream, PacketMap),
+    ok = grpc_client:send(Stream, EnvMap),
     ok =
         receive
             {test_route, _} -> ct:fail(expected_no_packet)
@@ -258,7 +270,7 @@ grpc_full_flow_send_test(_Config) ->
 
 grpc_full_flow_connection_refused_test(_Config) ->
     Packet = test_packet(),
-    PacketMap = hpr_packet_up:to_map(Packet),
+    EnvMap = hpr_envelope_up:to_map(hpr_envelope_up:new(Packet)),
     %% Startup our server
     {ok, ServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
@@ -278,7 +290,7 @@ grpc_full_flow_connection_refused_test(_Config) ->
         route,
         client_packet_router_pb
     ),
-    ok = grpc_client:send(Stream, PacketMap),
+    ok = grpc_client:send(Stream, EnvMap),
 
     %% ===================================================================
     %% The test server is not started in this test. I'm not sure this test is
@@ -286,7 +298,7 @@ grpc_full_flow_connection_refused_test(_Config) ->
     %% grpcbox recalls its service handler when something fails.
 
     meck:new(hpr_packet_service, [passthrough]),
-    ok = grpc_client:send(Stream, PacketMap),
+    ok = grpc_client:send(Stream, EnvMap),
     ok =
         receive
             {test_route, _} -> ct:fail(expected_no_packet)
@@ -320,9 +332,10 @@ server_crash_test(_Config) ->
     application:set_env(
         hpr,
         packet_service_route_fun,
-        fun(Packet, Socket) ->
+        fun(Env, StreamState) ->
+            {packet, Packet} = hpr_envelope_up:data(Env),
             Self ! {server_crash_test, Packet},
-            Socket
+            StreamState
         end
     ),
 

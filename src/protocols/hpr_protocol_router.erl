@@ -11,14 +11,15 @@ send(PacketUp, GatewayStream, Route) ->
     LNS = hpr_route:lns(Route),
     case hpr_router_stream_manager:get_stream(GatewayStream, LNS) of
         {ok, RouterStream} ->
-            PacketUpMap = hpr_packet_up:to_map(PacketUp),
-            ok = grpc_client:send(RouterStream, PacketUpMap);
+            Env = hpr_envelope_up:new(PacketUp),
+            EnvMap = hpr_envelope_up:to_map(Env),
+            ok = grpc_client:send(RouterStream, EnvMap);
         {error, _} = Err ->
             Err
     end.
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).
@@ -44,7 +45,7 @@ per_testcase_cleanup(ok) ->
 % send/3: happy path
 test_send() ->
     HprPacketUp = test_utils:join_packet_up(#{}),
-    HprPacketUpMap = hpr_packet_up:to_map(HprPacketUp),
+    EnvMap = hpr_envelope_up:to_map(hpr_envelope_up:new(HprPacketUp)),
     Stream = self(),
     GatewayStream = self(),
     Host = <<"example-lns.com">>,
@@ -70,7 +71,7 @@ test_send() ->
         [GatewayStream, <<Host/binary, ":", (integer_to_binary(Port))/binary>>],
         {ok, Stream}
     ),
-    meck:expect(grpc_client, send, [Stream, HprPacketUpMap], ok),
+    meck:expect(grpc_client, send, [Stream, EnvMap], ok),
 
     ResponseValue = send(HprPacketUp, Stream, Route),
 

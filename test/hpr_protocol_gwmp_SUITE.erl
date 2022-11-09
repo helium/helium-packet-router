@@ -145,22 +145,25 @@ single_lns_downlink_test(_Config) ->
 
     %% receive the PacketRouterPacketDownV1 sent to grcp_stream
     receive
-        {packet_down, #packet_router_packet_down_v1_pb{
-            payload = Payload,
-            rx1 = #window_v1_pb{
-                timestamp = Timestamp,
-                frequency = Frequency,
-                datarate = Datarate
-            }
+        {envelope_down, #envelope_down_v1_pb{
+            data =
+                {packet, #packet_router_packet_down_v1_pb{
+                    payload = Payload,
+                    rx1 = #window_v1_pb{
+                        timestamp = Timestamp,
+                        frequency = Frequency,
+                        datarate = Datarate
+                    }
+                }}
         }} ->
             ?assert(erlang:is_integer(Timestamp)),
             ?assertEqual(Data, base64:encode(Payload)),
             ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
             ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
             ok;
-        {packet_down, Other} ->
-            ct:fail({rcvd_bad_packet_down, Other})
-    after timer:seconds(2) -> ct:fail(no_packet_down)
+        {envelope_down, Other} ->
+            ct:fail({rcvd_bad_envelope_down, Other})
+    after timer:seconds(2) -> ct:fail(no_envelope_down)
     end,
 
     %% expect the ack for our downlink
@@ -209,22 +212,25 @@ single_lns_class_c_downlink_test(_Config) ->
 
     %% receive the PacketRouterPacketDownV1 sent to grcp_stream
     receive
-        {packet_down, #packet_router_packet_down_v1_pb{
-            payload = Payload,
-            rx1 = #window_v1_pb{
-                timestamp = Timestamp,
-                frequency = Frequency,
-                datarate = Datarate
-            }
+        {envelope_down, #envelope_down_v1_pb{
+            data =
+                {packet, #packet_router_packet_down_v1_pb{
+                    payload = Payload,
+                    rx1 = #window_v1_pb{
+                        timestamp = Timestamp,
+                        frequency = Frequency,
+                        datarate = Datarate
+                    }
+                }}
         }} ->
             ?assertEqual(0, Timestamp, "0ms means immediate"),
             ?assertEqual(Data, base64:encode(Payload)),
             ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
             ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
             ok;
-        {packet_down, Other} ->
-            ct:fail({rcvd_bad_packet_down, Other})
-    after timer:seconds(2) -> ct:fail(no_packet_down)
+        {envelope_down, Other} ->
+            ct:fail({rcvd_bad_envelope_down, Other})
+    after timer:seconds(2) -> ct:fail(no_envelope_down)
     end,
 
     %% expect the ack for our downlink

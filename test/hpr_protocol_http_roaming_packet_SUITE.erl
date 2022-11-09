@@ -346,7 +346,10 @@ http_async_uplink_join_test(_Config) ->
     PacketTime = hpr_packet_up:timestamp(PacketUp),
 
     %% 4. Roamer receive http uplink
-    {ok, #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}}} = roamer_expect_uplink_data(
+    {ok, #{
+        <<"TransactionID">> := TransactionID,
+        <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
+    }} = roamer_expect_uplink_data(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => fun erlang:is_binary/1,

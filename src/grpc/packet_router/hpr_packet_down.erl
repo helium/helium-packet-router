@@ -3,10 +3,10 @@
 -include("../autogen/server/packet_router_pb.hrl").
 
 -export([
-    to_record/1,
     rx1_frequency/1,
     rx2_frequency/1,
     window/1,
+    to_record/1,
     to_record/2,
     payload/1,
     rx1_timestamp/1,
@@ -52,6 +52,7 @@ rx1_datarate(PacketDown) ->
 rx2_datarate(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.datarate.
 
+% TODO
 -spec to_record(packet_map() | map()) -> packet().
 to_record(PacketMap) ->
     Template = #packet_router_packet_down_v1_pb{},
@@ -99,6 +100,7 @@ window(TS, FrequencyHz, DataRate) ->
     },
     hpr_packet_down:window(WindowMap).
 
+%% TODO
 -spec new_downlink(
     Payload :: binary(),
     Timestamp :: non_neg_integer(),
@@ -121,7 +123,7 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
     hpr_packet_down:to_record(PacketMap, Rx2).
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).

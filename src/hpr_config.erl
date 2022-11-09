@@ -132,7 +132,7 @@ remove_euis_dev_ranges(Route) ->
     hpr_route:euis(hpr_route:devaddr_ranges(Route, []), []).
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).

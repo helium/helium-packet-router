@@ -64,11 +64,9 @@ init([GatewayStream, RouterStream]) ->
 handle_continue(relay, State) ->
     case grpc_client:rcv(State#state.router_stream) of
         {data, Map} ->
-            PacketDown = hpr_packet_down:to_record(Map),
-
             lager:debug("sending router downlink.  pid: ~p", [State#state.gateway_stream]),
-
-            ok = hpr_packet_service:packet_down(State#state.gateway_stream, PacketDown),
+            EnvDown = hpr_envelope_down:to_record(Map),
+            ok = hpr_packet_service:envelope_down(State#state.gateway_stream, EnvDown),
             {noreply, State, {continue, relay}};
         {headers, _} ->
             {noreply, State, {continue, relay}};
@@ -87,7 +85,7 @@ handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).
@@ -116,7 +114,7 @@ test_relay_data() ->
     ?assertEqual({noreply, State, {continue, relay}}, Reply),
     ?assertEqual(1, meck:num_calls(grpc_client, rcv, 1)),
     RelayMessage = receive_relay(),
-    ?assertEqual(hpr_packet_down:to_record(fake_data()), RelayMessage).
+    ?assertEqual(hpr_envelope_down:to_record(fake_data()), RelayMessage).
 
 test_relay_headers() ->
     meck:new(grpc_client),
@@ -151,7 +149,7 @@ test_relay_error() ->
 % ------------------------------------------------------------------------------
 
 fake_data() ->
-    #{payload => <<"data">>}.
+    #{data => {packet, #{payload => <<"data">>}}}.
 
 fake_stream() ->
     Self = self(),
@@ -161,7 +159,7 @@ fake_stream() ->
             receive
                 {'DOWN', _, process, Self, _} ->
                     ok;
-                {packet_down, _} = Reply ->
+                {envelope_down, _} = Reply ->
                     Self ! Reply,
                     Loop();
                 Msg ->
@@ -182,7 +180,7 @@ fake_monitor() ->
 
 receive_relay() ->
     receive
-        {packet_down, Message} ->
+        {envelope_down, Message} ->
             Message
     after 50 ->
         timeout

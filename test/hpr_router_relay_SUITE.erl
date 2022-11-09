@@ -52,7 +52,7 @@ end_per_testcase(_TestCase, _Config) ->
 relay_test(_Config) ->
     GatewayStream = fake_gateway_stream(self()),
     RouterStream = fake_stream(),
-    FakeData = #{payload => <<"fake data">>},
+    FakeData = #{data => {packet, #{payload => <<"fake data">>}}},
 
     meck:expect(
         grpc_client,
@@ -77,7 +77,7 @@ relay_test(_Config) ->
     ?assertEqual(1, meck:num_calls(grpc_client, stop_stream, 1)),
 
     Data = receive_next(),
-    ?assertEqual({packet_down, hpr_packet_down:to_record(FakeData)}, Data),
+    ?assertEqual({envelope_down, hpr_envelope_down:to_record(FakeData)}, Data),
     ?assertNot(erlang:is_process_alive(RelayPid)),
     ?assert(erlang:is_process_alive(GatewayStream)),
     ?assertNot(erlang:is_process_alive(RouterStream)).

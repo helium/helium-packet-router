@@ -118,6 +118,7 @@ encode(#packet_router_packet_up_v1_pb{} = Packet) ->
 decode(BinaryPacket) ->
     packet_router_pb:decode_msg(BinaryPacket, packet_router_packet_up_v1_pb).
 
+% TODO
 -spec to_map(packet()) -> packet_map().
 to_map(PacketRecord) ->
     #{
@@ -196,7 +197,7 @@ sign(Packet, SigFun) ->
 -endif.
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 -ifdef(TEST).
 
