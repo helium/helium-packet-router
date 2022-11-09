@@ -14,10 +14,10 @@
             port => "${HPR_CONFIG_WORKER_PORT}",
             file_backup_path => "/var/data/config_worker.backup"
         }},
-        {http_roaming_downlink_port, 8085}
+        {http_roaming_downlink_port, 8090}
     ]},
     {grpcbox, [
-        {listen_opts, #{port => 8083, ip => {0, 0, 0, 0}}},
+        {listen_opts, #{port => 8080, ip => {0, 0, 0, 0}}},
         {servers, [
             #{
                 grpc_opts => #{
@@ -28,7 +28,7 @@
                 },
                 transport_opts => #{ssl => false},
                 listen_opts => #{
-                    port => 8083,
+                    port => 8080,
                     ip => {0, 0, 0, 0}
                 },
                 pool_opts => #{size => 500},

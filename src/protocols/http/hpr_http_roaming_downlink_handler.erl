@@ -91,6 +91,6 @@ handle_event(Event, _Data, _Args) ->
     DownlinkPacket :: hpr_packet_down:downlink_packet()
 ) -> ok.
 send_response(ResponseStream, DownlinkPacket) ->
-    lager:debug("sending response: ~p, pid: ~p", [DownlinkPacket, ResponseStream]),
+    lager:debug("sending http_roaming downlink.  pid: ~p", [ResponseStream]),
     hpr_packet_service:packet_down(ResponseStream, DownlinkPacket),
     ok.

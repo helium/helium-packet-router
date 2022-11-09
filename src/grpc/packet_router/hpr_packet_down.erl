@@ -91,7 +91,10 @@ window(WindowMap) ->
 window(TS, FrequencyHz, DataRate) ->
     WindowMap = #{
         timestamp => TS,
+
+        %%        the protobuf encoding requires that the frequency is an integer, rather than a float in exponential notation
         frequency => round(FrequencyHz),
+
         datarate => DataRate
     },
     hpr_packet_down:window(WindowMap).
@@ -108,7 +111,10 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
         payload => Payload,
         rx1 => #{
             timestamp => Timestamp,
+
+            %%        the protobuf encoding requires that the frequency is an integer, rather than a float in exponential notation
             frequency => round(FrequencyHz),
+
             datarate => DataRate
         }
     },
