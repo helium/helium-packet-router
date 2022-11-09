@@ -66,7 +66,7 @@ handle_continue(relay, State) ->
         {data, Map} ->
             lager:debug("sending router downlink.  pid: ~p", [State#state.gateway_stream]),
             EnvDown = hpr_envelope_down:to_record(Map),
-            ok = hpr_packet_service:envelope_down(State#state.gateway_stream, EnvDown),
+            ok = hpr_packet_service:send_envelope_down(State#state.gateway_stream, EnvDown),
             {noreply, State, {continue, relay}};
         {headers, _} ->
             {noreply, State, {continue, relay}};
