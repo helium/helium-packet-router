@@ -91,7 +91,10 @@ window(WindowMap) ->
 window(TS, FrequencyHz, DataRate) ->
     WindowMap = #{
         timestamp => TS,
-        frequency => FrequencyHz,
+
+        %%        the protobuf encoding requires that the frequency is an integer, rather than a float in exponential notation
+        frequency => round(FrequencyHz),
+
         datarate => DataRate
     },
     hpr_packet_down:window(WindowMap).
@@ -108,7 +111,10 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
         payload => Payload,
         rx1 => #{
             timestamp => Timestamp,
-            frequency => FrequencyHz,
+
+            %%        the protobuf encoding requires that the frequency is an integer, rather than a float in exponential notation
+            frequency => round(FrequencyHz),
+
             datarate => DataRate
         }
     },
@@ -195,6 +201,20 @@ new_downlink_test() ->
             }
         },
         PacketDown
+    ).
+
+%%  A frequency specified in exponential form is expected to break the encoding
+%% because of the way protobuf converts integers to binary.
+encoding_test() ->
+    ?assertError(
+        badarith,
+        packet_router_pb:encode_msg(
+            {packet_router_packet_down_v1_pb,
+                <<32, 120, 27, 32, 121, 54, 203, 110, 31, 45, 232, 6, 197, 16, 15, 132, 203, 12,
+                    255, 166, 46, 81, 160, 71, 139, 27, 16, 13, 91, 244, 192, 244, 69>>,
+                {window_v1_pb, 3188801119, 9.257e8, 'SF10BW500'},
+                {window_v1_pb, 3189801119, 9.233e8, 'SF12BW500'}}
+        )
     ).
 
 %% ------------------------------------------------------------------

@@ -65,6 +65,9 @@ handle_continue(relay, State) ->
     case grpc_client:rcv(State#state.router_stream) of
         {data, Map} ->
             PacketDown = hpr_packet_down:to_record(Map),
+
+            lager:debug("sending router downlink.  pid: ~p", [State#state.gateway_stream]),
+
             ok = hpr_packet_service:packet_down(State#state.gateway_stream, PacketDown),
             {noreply, State, {continue, relay}};
         {headers, _} ->

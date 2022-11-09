@@ -17,6 +17,7 @@
         {http_roaming_downlink_port, 8090}
     ]},
     {grpcbox, [
+        {listen_opts, #{port => 8080, ip => {0, 0, 0, 0}}},
         {servers, [
             #{
                 grpc_opts => #{
