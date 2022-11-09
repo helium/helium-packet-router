@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author jonathanruttenberg
-%%% @copyright (C) 2022, <COMPANY>
+%%% @copyright (C) 2022, Nova Labs
 %%% @doc
 %%%
 %%% @end
@@ -1488,7 +1488,8 @@ start_roamer_listener(Options) ->
 
 gateway_expect_downlink(ExpectFn) ->
     receive
-        {packet_down, PacketDown} ->
+        {envelope_down, EnvDown} ->
+            {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
             ExpectFn(PacketDown)
     after 1000 -> ct:fail(gateway_expect_downlink_timeout)
     end.

@@ -88,9 +88,10 @@ handle_event(Event, _Data, _Args) ->
 
 -spec send_response(
     ResponseStream :: hpr_http_roaming:gateway_stream(),
-    DownlinkPacket :: hpr_packet_down:downlink_packet()
+    PacketDown :: hpr_packet_down:downlink_packet()
 ) -> ok.
-send_response(ResponseStream, DownlinkPacket) ->
+send_response(ResponseStream, PacketDown) ->
     lager:debug("sending http_roaming downlink.  pid: ~p", [ResponseStream]),
-    hpr_packet_service:packet_down(ResponseStream, DownlinkPacket),
+    EnvDown = hpr_envelope_down:new(PacketDown),
+    ok = hpr_packet_service:send_envelope_down(ResponseStream, EnvDown),
     ok.
