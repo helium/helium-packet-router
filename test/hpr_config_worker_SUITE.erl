@@ -15,7 +15,7 @@
     delete_route_test/1
 ]).
 
--define(PORT, 8085).
+-define(PORT, 8083).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS

@@ -37,6 +37,7 @@ all() ->
         server_crash_test
     ].
 
+-define(SERVER_PORT, 8081).
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
@@ -109,7 +110,7 @@ grpc_full_flow_downlink_test(_Config) ->
             service_protos => [packet_router_pb],
             services => #{'helium.packet_router.packet' => hpr_packet_service}
         },
-        listen_opts => #{port => 8080, ip => {0, 0, 0, 0}}
+        listen_opts => #{port => ?SERVER_PORT, ip => {0, 0, 0, 0}}
     }),
     %% Startup test server for receiving
     {ok, TestServerPid} = grpcbox:start_server(#{
@@ -141,7 +142,7 @@ grpc_full_flow_downlink_test(_Config) ->
     ),
 
     %% Connect to our server
-    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
+    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", ?SERVER_PORT),
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.packet_router.packet',
@@ -183,7 +184,7 @@ grpc_full_flow_send_test(_Config) ->
             service_protos => [packet_router_pb],
             services => #{'helium.packet_router.packet' => hpr_packet_service}
         },
-        listen_opts => #{port => 8080, ip => {0, 0, 0, 0}}
+        listen_opts => #{port => ?SERVER_PORT, ip => {0, 0, 0, 0}}
     }),
 
     %% Startup test server for receiving
@@ -210,7 +211,7 @@ grpc_full_flow_send_test(_Config) ->
     ok = hpr_config:insert_route(test_route()),
     meck:new(hpr_packet_service, [passthrough]),
 
-    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
+    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", ?SERVER_PORT),
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.packet_router.packet',
@@ -264,13 +265,13 @@ grpc_full_flow_connection_refused_test(_Config) ->
             service_protos => [packet_router_pb],
             services => #{'helium.packet_router.packet' => hpr_packet_service}
         },
-        listen_opts => #{port => 8080, ip => {0, 0, 0, 0}}
+        listen_opts => #{port => ?SERVER_PORT, ip => {0, 0, 0, 0}}
     }),
 
     %% Insert the matching route for the test packet
     ok = hpr_config:insert_route(test_route()),
 
-    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
+    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", ?SERVER_PORT),
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.packet_router.packet',

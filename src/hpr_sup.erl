@@ -72,7 +72,7 @@ init([]) ->
         {port, 3000}
     ],
 
-    HttpRoamingDownlink = application:get_env(?APP, http_roaming_downlink_port, 8090),
+    HttpRoamingDownlink = application:get_env(?APP, http_roaming_downlink_port, 8085),
     ElliConfigRoamingDownlink = [
         {callback, hpr_http_roaming_downlink_handler},
         {port, HttpRoamingDownlink}

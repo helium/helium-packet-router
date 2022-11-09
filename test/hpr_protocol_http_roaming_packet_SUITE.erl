@@ -1485,7 +1485,7 @@ start_roamer_listener(Options) ->
 
 gateway_expect_downlink(ExpectFn) ->
     receive
-        {http_reply, PacketDown} ->
+        {packet_down, PacketDown} ->
             ExpectFn(PacketDown)
     after 1000 -> ct:fail(gateway_expect_downlink_timeout)
     end.
