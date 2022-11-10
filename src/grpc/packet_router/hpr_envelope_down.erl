@@ -28,6 +28,7 @@ to_map(Env) ->
         envelope_down_v1_pb
     ).
 
+-spec to_record(map()) -> envelope().
 to_record(MapEnv) ->
     packet_router_pb:decode_msg(
         client_packet_router_pb:encode_msg(MapEnv, envelope_down_v1_pb),
