@@ -10,6 +10,14 @@
     verify/1
 ]).
 
+-ifdef(TEST).
+
+-export([
+    sign/2
+]).
+
+-endif.
+
 -type register() :: #packet_router_register_v1_pb{}.
 
 -export_type([register/0]).
@@ -49,6 +57,22 @@ verify(Reg) ->
     end.
 
 %% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec sign(Reg :: register(), SigFun :: fun()) -> register().
+sign(Reg, SigFun) ->
+    RegEncoded = packet_router_pb:encode_msg(Reg#packet_router_register_v1_pb{
+        signature = <<>>
+    }),
+    Reg#packet_router_register_v1_pb{
+        signature = SigFun(RegEncoded)
+    }.
+
+-endif.
+
+%% ------------------------------------------------------------------
 %% EUnit tests
 %% ------------------------------------------------------------------
 -ifdef(TEST).
@@ -81,10 +105,7 @@ verify_test() ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
     Reg = ?MODULE:new(Gateway),
-    RegEncoded = packet_router_pb:encode_msg(Reg),
-    RegSigned = Reg#packet_router_register_v1_pb{
-        signature = SigFun(RegEncoded)
-    },
+    RegSigned = ?MODULE:sign(Reg, SigFun),
     ?assert(verify(RegSigned)),
     ok.
 
