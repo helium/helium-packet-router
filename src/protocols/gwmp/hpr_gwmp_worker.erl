@@ -306,8 +306,7 @@ handle_pull_resp(Data, DataSrc, PubKeyBin, Socket, Stream) ->
     %% Send downlink to grpc handler
     PacketDown = hpr_protocol_gwmp:txpk_to_packet_down(Data),
     lager:debug("sending gwmp downlink.  pid: ~p", [Stream]),
-    EnvDown = hpr_envelope_down:new(PacketDown),
-    ok = hpr_packet_service:send_envelope_down(Stream, EnvDown),
+    ok = hpr_packet_service:send_downlink(Stream, PacketDown),
     %% Ack the downlink
     Token = semtech_udp:token(Data),
     send_tx_ack(Token, PubKeyBin, Socket, DataSrc),

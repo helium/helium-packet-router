@@ -1488,8 +1488,7 @@ start_roamer_listener(Options) ->
 
 gateway_expect_downlink(ExpectFn) ->
     receive
-        {envelope_down, EnvDown} ->
-            {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
+        {downlink, PacketDown} ->
             ExpectFn(PacketDown)
     after 1000 -> ct:fail(gateway_expect_downlink_timeout)
     end.

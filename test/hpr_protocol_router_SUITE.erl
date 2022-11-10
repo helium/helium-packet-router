@@ -156,14 +156,12 @@ grpc_full_flow_downlink_test(_Config) ->
     ),
     %% Send a packet that expects a downlink
     EnvUpMap = hpr_envelope_up:to_map(hpr_envelope_up:new(test_packet())),
-    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, EnvUpMap]),
     ok = grpc_client:send(Stream, EnvUpMap),
 
     %% Throw away the headers
     ?assertMatch({headers, _}, grpc_client:rcv(Stream, 500)),
 
     {data, Response} = grpc_client:rcv(Stream, 500),
-    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, Response]),
     ?assert(
         test_utils:match_map(
             #{
@@ -212,8 +210,8 @@ grpc_full_flow_send_test(_Config) ->
     application:set_env(
         hpr,
         packet_service_route_fun,
-        fun(Env, StreamState) ->
-            {packet, Packet} = hpr_envelope_up:data(Env),
+        fun(EnvUp, StreamState) ->
+            {packet, Packet} = hpr_envelope_up:data(EnvUp),
             Self ! {test_route, Packet},
             StreamState
         end
