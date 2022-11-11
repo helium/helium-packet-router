@@ -21,7 +21,7 @@
 
 -record(state, {
     monitor_process :: pid(),
-    gateway_stream :: hpr_router_stream_manager:gateway_stream(),
+    pubkey_bin :: libp2p_crypto:pubkey_bin(),
     router_stream :: grpc_client:client_stream()
 }).
 
@@ -30,19 +30,20 @@
 %% ------------------------------------------------------------------
 
 -spec start(
-    hpr_router_stream_manager:gateway_stream(),
+    libp2p_crypto:pubkey_bin(),
     grpc_client:client_stream()
 ) -> {ok, pid()}.
 %% @doc Start this service.
-start(GatewayStream, RouterStream) ->
-    gen_server:start(?MODULE, [GatewayStream, RouterStream], []).
+start(PubKeyBin, RouterStream) ->
+    gen_server:start(?MODULE, [PubKeyBin, RouterStream], []).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
 -spec init(list()) -> {ok, #state{}, {continue, relay}}.
-init([GatewayStream, RouterStream]) ->
+init([PubKeyBin, RouterStream]) ->
+    {ok, GatewayStream} = hpr_packet_service:locate(PubKeyBin),
     {ok, MonitorPid} =
         hpr_router_relay_monitor:start(
             self(), GatewayStream, RouterStream
@@ -51,7 +52,7 @@ init([GatewayStream, RouterStream]) ->
         ok,
         #state{
             monitor_process = MonitorPid,
-            gateway_stream = GatewayStream,
+            pubkey_bin = PubKeyBin,
             router_stream = RouterStream
         },
         {continue, relay}
@@ -61,13 +62,13 @@ init([GatewayStream, RouterStream]) ->
     {noreply, #state{}, {continue, relay}}
     | {stop, normal, #state{}}
     | {stop, {error, any()}, #state{}}.
-handle_continue(relay, State) ->
-    case grpc_client:rcv(State#state.router_stream) of
+handle_continue(relay, #state{router_stream = RouterStream, pubkey_bin = PubKeyBin} = State) ->
+    case grpc_client:rcv(RouterStream) of
         {data, Map} ->
-            lager:debug("sending router downlink.  pid: ~p", [State#state.gateway_stream]),
+            lager:debug("sending router downlink to : ~p", [hpr_utils:gateway_name(PubKeyBin)]),
             EnvDown = hpr_envelope_down:to_record(Map),
             {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
-            ok = hpr_packet_service:send_packet_down(State#state.gateway_stream, PacketDown),
+            _ = hpr_packet_service:send_packet_down(PubKeyBin, PacketDown),
             {noreply, State, {continue, relay}};
         {headers, _} ->
             {noreply, State, {continue, relay}};
@@ -108,11 +109,17 @@ foreach_cleanup(ok) ->
     meck:unload().
 
 test_relay_data() ->
-    meck:new(grpc_client),
     State = state(),
     PacketDownMap = #{payload => <<"data">>},
     EnvDownMap = #{data => {packet, PacketDownMap}},
+    Self = self(),
+    meck:new(grpc_client),
     meck:expect(grpc_client, rcv, [State#state.router_stream], {data, EnvDownMap}),
+    meck:new(hpr_packet_service),
+    meck:expect(hpr_packet_service, send_packet_down, fun(_, _) ->
+        Self ! {packet_down, hpr_packet_down:to_record(PacketDownMap)},
+        ok
+    end),
     Reply = handle_continue(relay, State),
     ?assertEqual({noreply, State, {continue, relay}}, Reply),
     ?assertEqual(1, meck:num_calls(grpc_client, rcv, 1)),
@@ -120,8 +127,8 @@ test_relay_data() ->
     ?assertEqual(hpr_packet_down:to_record(PacketDownMap), RelayMessage).
 
 test_relay_headers() ->
-    meck:new(grpc_client),
     State = state(),
+    meck:new(grpc_client),
     meck:expect(grpc_client, rcv, [State#state.router_stream], {headers, #{fake => headers}}),
     Reply = handle_continue(relay, State),
     ?assertEqual({noreply, State, {continue, relay}}, Reply),
@@ -129,8 +136,8 @@ test_relay_headers() ->
     ?assertEqual(empty, check_messages()).
 
 test_relay_eof() ->
-    meck:new(grpc_client),
     State = state(),
+    meck:new(grpc_client),
     meck:expect(grpc_client, rcv, [State#state.router_stream], eof),
     Reply = handle_continue(relay, State),
     ?assertEqual({stop, normal, State}, Reply),
@@ -138,8 +145,8 @@ test_relay_eof() ->
     ?assertEqual(empty, check_messages()).
 
 test_relay_error() ->
-    meck:new(grpc_client),
     State = state(),
+    meck:new(grpc_client),
     Error = {error, fake_error},
     meck:expect(grpc_client, rcv, [State#state.router_stream], Error),
     Reply = handle_continue(relay, State),
@@ -196,7 +203,7 @@ check_messages() ->
 state() ->
     #state{
         monitor_process = fake_monitor(),
-        gateway_stream = fake_stream(),
+        pubkey_bin = <<"PubKeyBin">>,
         router_stream = fake_stream()
     }.
 

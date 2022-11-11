@@ -28,7 +28,7 @@
     parse_uplink_token/1
 ]).
 
--export([new_packet/3]).
+-export([new_packet/2]).
 
 -define(NO_ROAMING_AGREEMENT, <<"NoRoamingAgreement">>).
 
@@ -48,8 +48,8 @@
 -type gateway_time() :: non_neg_integer().
 
 -type downlink() :: {
-    ResponseStream :: gateway_stream(),
-    Response :: any()
+    PubKeyBin :: libp2p_crypto:pubkey_bin(),
+    PacketDown :: hpr_packet_down:downlink_packet()
 }.
 
 -type region() :: atom().
@@ -61,12 +61,9 @@
 
 -record(packet, {
     packet_up :: hpr_packet_up:packet(),
-    gateway_time :: gateway_time(),
-    response_stream :: gateway_stream()
+    gateway_time :: gateway_time()
 }).
 -type packet() :: #packet{}.
-
--type gateway_stream() :: pid().
 
 -type downlink_packet() :: hpr_packet_down:packet().
 
@@ -75,8 +72,7 @@
     packet/0,
     gateway_time/0,
     downlink/0,
-    downlink_packet/0,
-    gateway_stream/0
+    downlink_packet/0
 ]).
 
 %% ------------------------------------------------------------------
@@ -85,14 +81,12 @@
 
 -spec new_packet(
     PacketUp :: hpr_packet_up:packet(),
-    GatewayTime :: gateway_time(),
-    GatewayStream :: gateway_stream()
+    GatewayTime :: gateway_time()
 ) -> #packet{}.
-new_packet(PacketUp, GatewayTime, GatewayStream) ->
+new_packet(PacketUp, GatewayTime) ->
     #packet{
         packet_up = PacketUp,
-        gateway_time = GatewayTime,
-        response_stream = GatewayStream
+        gateway_time = GatewayTime
     }.
 
 -spec make_uplink_payload(
@@ -113,8 +107,7 @@ make_uplink_payload(
 ) ->
     #packet{
         packet_up = PacketUp,
-        gateway_time = GatewayTime,
-        response_stream = ResponseStream
+        gateway_time = GatewayTime
     } = select_best(Uplinks),
     Payload = hpr_packet_up:payload(PacketUp),
     PacketTime = hpr_packet_up:timestamp(PacketUp),
@@ -127,8 +120,6 @@ make_uplink_payload(
     {RoutingKey, RoutingValue} = routing_key_and_value(PacketUp),
 
     Token = make_uplink_token(PubKeyBin, Region, PacketTime, Destination, FlowType),
-
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, ResponseStream),
 
     VersionBase = #{
         'ProtocolVersion' => <<"1.1">>,
@@ -208,11 +199,7 @@ handle_prstart_ans(#{
         hpr_lorawan:index_to_datarate(Region, DR),
         rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
     ),
-
-    case hpr_http_roaming_utils:lookup_handler(PubKeyBin) of
-        {error, _} = Err -> Err;
-        {ok, ResponseStream} -> {join_accept, {ResponseStream, DownlinkPacket}}
-    end;
+    {join_accept, {PubKeyBin, DownlinkPacket}};
 handle_prstart_ans(#{
     <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
     <<"MessageType">> := <<"PRStartAns">>,
@@ -231,7 +218,6 @@ handle_prstart_ans(#{
             Err;
         {ok, PubKeyBin, Region, PacketTime, _, _} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
-
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 hpr_http_roaming_utils:uint32(PacketTime + ?JOIN2_DELAY),
@@ -239,11 +225,7 @@ handle_prstart_ans(#{
                 DataRate,
                 undefined
             ),
-
-            case hpr_http_roaming_utils:lookup_handler(PubKeyBin) of
-                {error, _} = Err -> Err;
-                {ok, ResponseStream} -> {join_accept, {ResponseStream, DownlinkPacket}}
-            end
+            {join_accept, {PubKeyBin, DownlinkPacket}}
     end;
 handle_prstart_ans(#{
     <<"MessageType">> := <<"PRStartAns">>,
@@ -308,13 +290,11 @@ handle_xmitdata_req(#{
             Err;
         {ok, PubKeyBin, Region, PacketTime, DestURL, FlowType} ->
             DataRate1 = hpr_lorawan:index_to_datarate(Region, DR1),
-
             Delay1 =
                 case Delay0 of
                     N when N < 2 -> 1;
                     N -> N
                 end,
-
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 hpr_http_roaming_utils:uint32(PacketTime + (Delay1 * ?RX1_DELAY)),
@@ -322,14 +302,7 @@ handle_xmitdata_req(#{
                 DataRate1,
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?RX2_DELAY)
             ),
-
-            case hpr_http_roaming_utils:lookup_handler(PubKeyBin) of
-                {error, _} = Err ->
-                    Err;
-                {ok, ResponseStream} ->
-                    {downlink, PayloadResponse, {ResponseStream, DownlinkPacket},
-                        {DestURL, FlowType}}
-            end
+            {downlink, PayloadResponse, {PubKeyBin, DownlinkPacket}, {DestURL, FlowType}}
     end;
 %% Class C ==========================================
 handle_xmitdata_req(#{
@@ -361,13 +334,11 @@ handle_xmitdata_req(#{
             Err;
         {ok, PubKeyBin, Region, PacketTime, DestURL, FlowType} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
-
             Delay1 =
                 case Delay0 of
                     N when N < 2 -> 1;
                     N -> N
                 end,
-
             Timeout =
                 case DeviceClass of
                     <<"C">> ->
@@ -377,7 +348,6 @@ handle_xmitdata_req(#{
                             PacketTime + (Delay1 * ?RX1_DELAY) + ?RX1_DELAY
                         )
                 end,
-
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 Timeout,
@@ -385,14 +355,7 @@ handle_xmitdata_req(#{
                 DataRate,
                 undefined
             ),
-
-            case hpr_http_roaming_utils:lookup_handler(PubKeyBin) of
-                {error, _} = Err ->
-                    Err;
-                {ok, ResponseStream} ->
-                    {downlink, PayloadResponse, {ResponseStream, DownlinkPacket},
-                        {DestURL, FlowType}}
-            end
+            {downlink, PayloadResponse, {PubKeyBin, DownlinkPacket}, {DestURL, FlowType}}
     end.
 
 -spec rx2_from_dlmetadata(

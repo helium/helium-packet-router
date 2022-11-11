@@ -9,7 +9,9 @@
 ]).
 
 -export([
-    send_packet_down/2
+    send_packet_down/2,
+    locate/1,
+    register/1
 ]).
 
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
@@ -21,19 +23,18 @@ init(_RPC, StreamState) ->
 -spec route(hpr_envelope_up:envelope(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | {stop, grpcbox_stream:t()}.
 route(EnvUp, StreamState) ->
-    Self = self(),
     case hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
-            _ = erlang:spawn(hpr_routing, handle_packet, [PacketUp, Self]),
+            _ = erlang:spawn(hpr_routing, handle_packet, [PacketUp]),
             {ok, StreamState};
         {register, Reg} ->
-            PubkeyBin = hpr_register:gateway(Reg),
+            PubKeyBin = hpr_register:gateway(Reg),
             case hpr_register:verify(Reg) of
                 false ->
                     lager:info("failed to verify"),
                     {stop, StreamState};
                 true ->
-                    true = gproc:add_local_name(?REG_KEY(PubkeyBin)),
+                    ok = ?MODULE:register(PubKeyBin),
                     {ok, StreamState}
             end
     end.
@@ -46,28 +47,34 @@ handle_info(_Msg, StreamState) ->
     StreamState.
 
 -spec send_packet_down(
-    PubkeyBin :: libp2p_crypto:pubkey_bin() | Pid :: pid(), PacketDown :: hpr_envelope_down:packet()
+    PubKeyBin :: libp2p_crypto:pubkey_bin(), PacketDown :: hpr_envelope_down:packet()
 ) -> ok | {error, not_found}.
-send_packet_down(Pid, PacketDown) when is_pid(Pid) ->
-    case erlang:is_process_alive(Pid) of
-        true ->
-            Pid ! {packet_down, PacketDown};
-        false ->
-            lager:warning("failed to send envelope_down to stream ~p", [Pid])
-    end,
-    ok;
-send_packet_down(PubkeyBin, PacketDown) ->
-    case gproc:lookup_local_name(?REG_KEY(PubkeyBin)) of
-        Pid when is_pid(Pid) ->
+send_packet_down(PubKeyBin, PacketDown) ->
+    case ?MODULE:locate(PubKeyBin) of
+        {ok, Pid} ->
             Pid ! {packet_down, PacketDown},
             ok;
-        undefined ->
+        {error, not_found} = Err ->
             lager:warning(
-                [{gateway, hpr_utils:gateway_name(PubkeyBin)}],
+                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
                 "failed to send PacketDown to stream"
             ),
+            Err
+    end.
+
+-spec locate(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> {ok, pid()} | {error, not_found}.
+locate(PubKeyBin) ->
+    case gproc:lookup_local_name(?REG_KEY(PubKeyBin)) of
+        Pid when is_pid(Pid) ->
+            {ok, Pid};
+        undefined ->
             {error, not_found}
     end.
+
+-spec register(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
+register(PubKeyBin) ->
+    true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
+    ok.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
@@ -82,14 +89,13 @@ init_test() ->
 
 route_packet_test() ->
     meck:new(hpr_routing, [passthrough]),
-    Self = self(),
     PacketUp = hpr_packet_up:new(#{}),
     EnvUp = hpr_envelope_up:new(PacketUp),
-    meck:expect(hpr_routing, handle_packet, [PacketUp, Self], ok),
+    meck:expect(hpr_routing, handle_packet, [PacketUp], ok),
 
     ?assertEqual({ok, stream_state}, ?MODULE:route(EnvUp, stream_state)),
 
-    ?assertEqual(1, meck:num_calls(hpr_routing, handle_packet, 2)),
+    ?assertEqual(1, meck:num_calls(hpr_routing, handle_packet, 1)),
 
     meck:unload(hpr_routing),
     ok.
@@ -135,7 +141,7 @@ send_packet_down_test() ->
     application:ensure_all_started(gproc),
 
     #{public := PubKey0} = libp2p_crypto:generate_keys(ecc_compact),
-    PubkeyBin0 = libp2p_crypto:pubkey_to_bin(PubKey0),
+    PubKeyBin0 = libp2p_crypto:pubkey_to_bin(PubKey0),
     PacketDown = hpr_packet_down:new_downlink(
         <<"data">>,
         1,
@@ -144,9 +150,9 @@ send_packet_down_test() ->
         undefined
     ),
 
-    ?assertEqual({error, not_found}, ?MODULE:send_packet_down(PubkeyBin0, PacketDown)),
-    ?assert(gproc:add_local_name(?REG_KEY(PubkeyBin0))),
-    ?assertEqual(ok, ?MODULE:send_packet_down(PubkeyBin0, PacketDown)),
+    ?assertEqual({error, not_found}, ?MODULE:send_packet_down(PubKeyBin0, PacketDown)),
+    ?assert(gproc:add_local_name(?REG_KEY(PubKeyBin0))),
+    ?assertEqual(ok, ?MODULE:send_packet_down(PubKeyBin0, PacketDown)),
 
     receive
         {packet_down, PacketDownRcv} ->
@@ -156,20 +162,20 @@ send_packet_down_test() ->
     end,
 
     #{public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
-    PubkeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+    PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
     Pid = erlang:spawn(
         fun() ->
-            true = gproc:add_local_name(?REG_KEY(PubkeyBin1)),
+            true = gproc:add_local_name(?REG_KEY(PubKeyBin1)),
             receive
                 stop -> ok
             end
         end
     ),
     timer:sleep(10),
-    ?assertEqual(ok, ?MODULE:send_packet_down(PubkeyBin1, PacketDown)),
+    ?assertEqual(ok, ?MODULE:send_packet_down(PubKeyBin1, PacketDown)),
     Pid ! stop,
     timer:sleep(10),
-    ?assertEqual({error, not_found}, ?MODULE:send_packet_down(PubkeyBin1, PacketDown)),
+    ?assertEqual({error, not_found}, ?MODULE:send_packet_down(PubKeyBin1, PacketDown)),
 
     application:stop(gproc),
     ok.

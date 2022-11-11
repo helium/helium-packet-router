@@ -22,13 +22,6 @@
     hexstring/2
 ]).
 
--export([
-    init_ets/0,
-    insert_handler/2,
-    delete_handler/1,
-    lookup_handler/1
-]).
-
 -spec binary_to_hexstring(binary()) -> binary().
 binary_to_hexstring(ID) ->
     <<"0x", (binary:encode_hex(ID))/binary>>.
@@ -72,38 +65,6 @@ hexstring_to_int(<<"0x", Num/binary>>) ->
     erlang:binary_to_integer(Num, 16);
 hexstring_to_int(Bin) ->
     erlang:binary_to_integer(Bin, 16).
-
--spec init_ets() -> ok.
-init_ets() ->
-    ?RESPONSE_STREAM_ETS = ets:new(?RESPONSE_STREAM_ETS, [
-        public,
-        named_table,
-        set,
-        {read_concurrency, true},
-        {write_concurrency, true}
-    ]),
-    ok.
-
--spec insert_handler(
-    PubKeyBin :: libp2p_crypto:pubkey_bin(),
-    ResponseStream :: hpr_http_roaming:gateway_stream()
-) -> ok.
-insert_handler(PubKeyBin, ResponseStream) ->
-    true = ets:insert(?RESPONSE_STREAM_ETS, {PubKeyBin, ResponseStream}),
-    ok.
-
--spec delete_handler(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
-delete_handler(PubKeyBin) ->
-    true = ets:delete(?RESPONSE_STREAM_ETS, PubKeyBin),
-    ok.
-
--spec lookup_handler(PubKeyBin :: libp2p_crypto:pubkey_bin()) ->
-    {ok, ResponseStream :: hpr_http_roaming:gateway_stream()} | {error, any()}.
-lookup_handler(PubKeyBin) ->
-    case ets:lookup(?RESPONSE_STREAM_ETS, PubKeyBin) of
-        [{_, ResponseStream}] -> {ok, ResponseStream};
-        [] -> {error, {not_found, PubKeyBin}}
-    end.
 
 %% ------------------------------------------------------------------
 %% EUnit tests

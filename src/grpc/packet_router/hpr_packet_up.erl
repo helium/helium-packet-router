@@ -182,7 +182,7 @@ new(Opts) ->
         region = maps:get(region, Opts, 'US915'),
         hold_time = maps:get(hold_time, Opts, 0),
         gateway = maps:get(gateway, Opts, <<"gateway">>),
-        signature = maps:get(gateway, Opts, <<"signature">>)
+        signature = maps:get(signature, Opts, <<"signature">>)
     }.
 
 -spec sign(Packet :: packet(), SigFun :: fun()) -> packet().

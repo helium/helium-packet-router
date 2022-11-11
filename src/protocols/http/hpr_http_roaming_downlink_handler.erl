@@ -17,8 +17,7 @@
 %% Downlink API
 -export([
     handle/2,
-    handle_event/3,
-    send_response/2
+    handle_event/3
 ]).
 
 %% Downlink Handler ==================================================
@@ -38,25 +37,37 @@ handle(Req, Args) ->
         {error, _} = Err ->
             lager:error("dowlink handle message error ~p", [Err]),
             {500, [], <<"An error occurred">>};
-        {join_accept, {ResponseStream, DownlinkPacket}} ->
-            lager:debug("sending downlink [response_stream: ~p]", [ResponseStream]),
-            ok = send_response(ResponseStream, DownlinkPacket),
-            {200, [], <<"downlink sent: 1">>};
-        {downlink, PayloadResponse, {ResponseStream, DownlinkPacket}, {Endpoint, FlowType}} ->
+        {join_accept, {PubKeyBin, PacketDown}} ->
+            lager:debug("sending downlink [gateway: ~p]", [hpr_utils:gateway_name(PubKeyBin)]),
+            case hpr_packet_service:send_packet_down(PubKeyBin, PacketDown) of
+                ok ->
+                    {200, [], <<"downlink sent: 1">>};
+                {error, not_found} ->
+                    {404, [], <<"Not Found">>}
+            end;
+        {downlink, PayloadResponse, {PubKeyBin, PacketDown}, {Endpoint, FlowType}} ->
             lager:debug(
-                "sending downlink [response_stream: ~p] [response: ~s]",
-                [ResponseStream, PayloadResponse]
+                "sending downlink [gateway: ~p] [response: ~s]",
+                [hpr_utils:gateway_name(PubKeyBin), PayloadResponse]
             ),
-            ok = send_response(ResponseStream, DownlinkPacket),
-            case FlowType of
-                sync ->
-                    {200, [], jsx:encode(PayloadResponse)};
-                async ->
-                    spawn(fun() ->
-                        Res = hackney:post(Endpoint, [], jsx:encode(PayloadResponse), [with_body]),
-                        lager:debug("async downlink response ~s, Endpoint: ~s", [Res, Endpoint])
-                    end),
-                    {200, [], <<"downlink sent: 2">>}
+            case hpr_packet_service:send_packet_down(PubKeyBin, PacketDown) of
+                {error, not_found} ->
+                    {404, [], <<"Not Found">>};
+                ok ->
+                    case FlowType of
+                        sync ->
+                            {200, [], jsx:encode(PayloadResponse)};
+                        async ->
+                            spawn(fun() ->
+                                Res = hackney:post(Endpoint, [], jsx:encode(PayloadResponse), [
+                                    with_body
+                                ]),
+                                lager:debug("async downlink response ~s, Endpoint: ~s", [
+                                    Res, Endpoint
+                                ])
+                            end),
+                            {200, [], <<"downlink sent: 2">>}
+                    end
             end
     end.
 
@@ -81,16 +92,4 @@ handle_event(Event, _Data, _Args) ->
         true -> lager:error("~p ~p ~p", [Event, _Data, _Args]);
         false -> lager:debug("~p ~p ~p", [Event, _Data, _Args])
     end,
-
-    ok.
-
-%% Response Stream =====================================================
-
--spec send_response(
-    ResponseStream :: hpr_http_roaming:gateway_stream(),
-    PacketDown :: hpr_packet_down:downlink_packet()
-) -> ok.
-send_response(ResponseStream, PacketDown) ->
-    lager:debug("sending http_roaming downlink.  pid: ~p", [ResponseStream]),
-    ok = hpr_packet_service:send_packet_down(ResponseStream, PacketDown),
     ok.

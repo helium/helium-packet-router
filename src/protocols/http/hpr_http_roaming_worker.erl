@@ -18,7 +18,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    handle_packet/4
+    handle_packet/3
 ]).
 
 %% ------------------------------------------------------------------
@@ -62,11 +62,10 @@ start_link(Args) ->
 -spec handle_packet(
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
-    GatewayTime :: hpr_http_roaming:gateway_time(),
-    GatewayStream :: hpr_http_roaming:gateway_stream()
+    GatewayTime :: hpr_http_roaming:gateway_time()
 ) -> ok | {error, any()}.
-handle_packet(Pid, PacketUp, GatewayTime, GatewayStream) ->
-    gen_server:cast(Pid, {handle_packet, PacketUp, GatewayTime, GatewayStream}).
+handle_packet(Pid, PacketUp, GatewayTime) ->
+    gen_server:cast(Pid, {handle_packet, PacketUp, GatewayTime}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -96,28 +95,28 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(
-    {handle_packet, PacketUp, GatewayTime, GatewayStream},
+    {handle_packet, PacketUp, GatewayTime},
     #state{send_data_timer = 0, shutdown_timer_ref = ShutdownTimerRef0} = State
 ) ->
     {ok, StateWithPacket} = do_handle_packet(
-        PacketUp, GatewayTime, GatewayStream, State
+        PacketUp, GatewayTime, State
     ),
     ok = send_data(StateWithPacket),
     {ok, ShutdownTimerRef1} = maybe_schedule_shutdown(ShutdownTimerRef0),
     {noreply, State#state{shutdown_timer_ref = ShutdownTimerRef1}};
 handle_cast(
-    {handle_packet, PacketUp, GatewayTime, GatewayStream},
+    {handle_packet, PacketUp, GatewayTime},
     #state{
         should_shutdown = false,
         send_data_timer = Timeout,
         send_data_timer_ref = TimerRef0
     } = State0
 ) ->
-    {ok, State1} = do_handle_packet(PacketUp, GatewayTime, GatewayStream, State0),
+    {ok, State1} = do_handle_packet(PacketUp, GatewayTime, State0),
     {ok, TimerRef1} = maybe_schedule_send_data(Timeout, TimerRef0),
     {noreply, State1#state{send_data_timer_ref = TimerRef1}};
 handle_cast(
-    {handle_packet, _PacketUp, _PacketTime, _GatewayStream},
+    {handle_packet, _PacketUp, _PacketTime},
     #state{
         should_shutdown = true,
         shutdown_timer_ref = ShutdownTimerRef0,
@@ -169,15 +168,14 @@ next_transaction_id() ->
 -spec do_handle_packet(
     PacketUp :: hpr_packet_up:packet(),
     GatewayTime :: hpr_http_roaming:gateway_time(),
-    GatewayStream :: hpr_http_roaming:gateway_stream(),
     State :: #state{}
 ) -> {ok, #state{}}.
 do_handle_packet(
-    PacketUp, GatewayTime, GatewayStream, #state{packets = Packets} = State
+    PacketUp, GatewayTime, #state{packets = Packets} = State
 ) ->
     State1 = State#state{
         packets = [
-            hpr_http_roaming:new_packet(PacketUp, GatewayTime, GatewayStream) | Packets
+            hpr_http_roaming:new_packet(PacketUp, GatewayTime) | Packets
         ]
     },
     {ok, State1}.
@@ -225,10 +223,9 @@ send_data(
                         {error, Err} ->
                             lager:error("error handling response: ~p", [Err]),
                             ok;
-                        {join_accept, {GatewayStream, DownlinkPacket}} ->
-                            hpr_http_roaming_downlink_handler:send_response(
-                                GatewayStream, DownlinkPacket
-                            );
+                        {join_accept, {PubKeyBin, PacketDown}} ->
+                            _ = hpr_packet_service:send_packet_down(PubKeyBin, PacketDown),
+                            ok;
                         ok ->
                             ok
                     end;

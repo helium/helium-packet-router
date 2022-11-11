@@ -122,7 +122,7 @@ http_sync_uplink_join_test(_Config) ->
             #{timestamp => GatewayTime}
         ),
 
-        ok = hpr_routing:handle_packet(PacketUp, self()),
+        ok = hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -333,7 +333,7 @@ http_async_uplink_join_test(_Config) ->
             AppEUI,
             #{timestamp => GatewayTime}
         ),
-        ok = hpr_routing:handle_packet(PacketUp, self()),
+        ok = hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -557,7 +557,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
             FrameCount,
             #{timestamp => GatewayTime}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -642,7 +642,7 @@ http_uplink_packet_test(_Config) ->
             0,
             #{timestamp => GatewayTime}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -828,7 +828,7 @@ http_multiple_gateways_test(_Config) ->
             0,
             #{timestamp => GatewayTime, rssi => RSSI}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -926,7 +926,7 @@ http_multiple_joins_same_dest_test(_Config) ->
 
     ok = start_uplink_listener(#{port => 3002, callback_args => #{forward => self()}}),
 
-    ok = hpr_routing:handle_packet(PacketUp, self()),
+    ok = hpr_routing:handle_packet(PacketUp),
 
     {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
 
@@ -959,7 +959,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
             0,
             #{timestamp => GatewayTime, rssi => RSSI}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
     uplink_test_route(#{dedupe_timeout => 0}),
@@ -1064,7 +1064,7 @@ http_overlapping_devaddr_test(_Config) ->
     ok = start_uplink_listener(#{port => 3002}),
     ok = start_uplink_listener(#{port => 3003}),
 
-    hpr_routing:handle_packet(PacketUp, self()),
+    hpr_routing:handle_packet(PacketUp),
 
     {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
     {ok, #{<<"ReceiverID">> := ReceiverTwo}, _, _} = http_rcv(),
@@ -1101,7 +1101,7 @@ http_uplink_packet_late_test(_Config) ->
             0,
             #{timestamp => GatewayTime}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 

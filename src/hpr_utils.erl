@@ -10,9 +10,9 @@
     net_id_display/1
 ]).
 
--spec gateway_name(PubkeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
-gateway_name(PubkeyBin) when is_binary(PubkeyBin) ->
-    B58 = libp2p_crypto:bin_to_b58(PubkeyBin),
+-spec gateway_name(PubKeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
+gateway_name(PubKeyBin) when is_binary(PubKeyBin) ->
+    B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
     gateway_name(B58);
 gateway_name(B58) when is_list(B58) ->
     {ok, Name} = erl_angry_purple_tiger:animal_name(B58),

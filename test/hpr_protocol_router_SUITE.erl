@@ -81,7 +81,7 @@ grpc_test(_Config) ->
     ),
 
     %% Send packet and route directly through interface
-    _ = hpr_protocol_router:send(PacketUp, self(), Route),
+    _ = hpr_protocol_router:send(PacketUp, Route),
 
     ok =
         receive
@@ -99,7 +99,7 @@ grpc_connection_refused_test(_Config) ->
 
     ?assertEqual(
         {error, econnrefused},
-        hpr_protocol_router:send(PacketUp, self(), Route)
+        hpr_protocol_router:send(PacketUp, Route)
     ),
 
     ok.
@@ -155,7 +155,8 @@ grpc_full_flow_downlink_test(_Config) ->
         client_packet_router_pb
     ),
     %% Send a packet that expects a downlink
-    EnvUpMap = hpr_envelope_up:to_map(hpr_envelope_up:new(test_packet())),
+    PacketUp = test_packet(),
+    EnvUpMap = hpr_envelope_up:to_map(hpr_envelope_up:new(PacketUp)),
     ok = grpc_client:send(Stream, EnvUpMap),
 
     %% Throw away the headers
@@ -337,7 +338,7 @@ server_crash_test(_Config) ->
         end
     ),
 
-    _ = hpr_protocol_router:send(PacketUp, self(), Route),
+    _ = hpr_protocol_router:send(PacketUp, Route),
 
     ok =
         receive
@@ -366,6 +367,10 @@ server_crash_test(_Config) ->
 %% ===================================================================
 
 test_packet() ->
+    PubKeyBin =
+        <<0, 106, 152, 166, 157, 156, 48, 101, 22, 212, 221, 120, 200, 146, 186, 112, 220, 64, 11,
+            194, 219, 213, 8, 12, 240, 111, 23, 167, 28, 57, 242, 244, 222>>,
+    ok = hpr_packet_service:register(PubKeyBin),
     {
         packet_router_packet_up_v1_pb,
         <<0, 55, 148, 187, 74, 220, 108, 33, 11, 133, 65, 148, 104, 147, 177, 26, 124, 43, 169, 155,
@@ -377,8 +382,7 @@ test_packet() ->
         5.5,
         'US915',
         0,
-        <<0, 106, 152, 166, 157, 156, 48, 101, 22, 212, 221, 120, 200, 146, 186, 112, 220, 64, 11,
-            194, 219, 213, 8, 12, 240, 111, 23, 167, 28, 57, 242, 244, 222>>,
+        PubKeyBin,
         <<48, 70, 2, 33, 0, 138, 89, 109, 110, 139, 188, 36, 99, 176, 239, 254, 141, 73, 13, 204,
             110, 139, 248, 200, 250, 209, 218, 168, 183, 92, 190, 212, 202, 17, 78, 250, 95, 2, 33,
             0, 142, 149, 198, 0, 113, 83, 115, 99, 67, 245, 98, 243, 147, 71, 12, 112, 78, 181, 25,
