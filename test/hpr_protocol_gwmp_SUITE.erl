@@ -145,7 +145,7 @@ single_lns_downlink_test(_Config) ->
 
     %% receive the PacketRouterPacketDownV1 sent to grcp_stream
     receive
-        {downlink, #packet_router_packet_down_v1_pb{
+        {packet_down, #packet_router_packet_down_v1_pb{
             payload = Payload,
             rx1 = #window_v1_pb{
                 timestamp = Timestamp,
@@ -158,9 +158,9 @@ single_lns_downlink_test(_Config) ->
             ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
             ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
             ok;
-        {downlink, Other} ->
-            ct:fail({rcvd_bad_downlink, Other})
-    after timer:seconds(2) -> ct:fail(no_downlink)
+        {packet_down, Other} ->
+            ct:fail({rcvd_bad_dpacket_down, Other})
+    after timer:seconds(2) -> ct:fail(no_dpacket_down)
     end,
 
     %% expect the ack for our downlink
@@ -209,7 +209,7 @@ single_lns_class_c_downlink_test(_Config) ->
 
     %% receive the PacketRouterPacketDownV1 sent to grcp_stream
     receive
-        {downlink, #packet_router_packet_down_v1_pb{
+        {packet_down, #packet_router_packet_down_v1_pb{
             payload = Payload,
             rx1 = #window_v1_pb{
                 timestamp = Timestamp,
@@ -222,9 +222,9 @@ single_lns_class_c_downlink_test(_Config) ->
             ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
             ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
             ok;
-        {downlink, Other} ->
-            ct:fail({rcvd_bad_downlink, Other})
-    after timer:seconds(2) -> ct:fail(no_downlink)
+        {packet_down, Other} ->
+            ct:fail({rcvd_bad_packet_down, Other})
+    after timer:seconds(2) -> ct:fail(no_packet_down)
     end,
 
     %% expect the ack for our downlink

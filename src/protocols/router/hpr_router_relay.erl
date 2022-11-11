@@ -67,7 +67,7 @@ handle_continue(relay, State) ->
             lager:debug("sending router downlink.  pid: ~p", [State#state.gateway_stream]),
             EnvDown = hpr_envelope_down:to_record(Map),
             {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
-            ok = hpr_packet_service:send_downlink(State#state.gateway_stream, PacketDown),
+            ok = hpr_packet_service:send_packet_down(State#state.gateway_stream, PacketDown),
             {noreply, State, {continue, relay}};
         {headers, _} ->
             {noreply, State, {continue, relay}};
@@ -110,12 +110,14 @@ foreach_cleanup(ok) ->
 test_relay_data() ->
     meck:new(grpc_client),
     State = state(),
-    meck:expect(grpc_client, rcv, [State#state.router_stream], {data, fake_data()}),
+    PacketDownMap = #{payload => <<"data">>},
+    EnvDownMap = #{data => {packet, PacketDownMap}},
+    meck:expect(grpc_client, rcv, [State#state.router_stream], {data, EnvDownMap}),
     Reply = handle_continue(relay, State),
     ?assertEqual({noreply, State, {continue, relay}}, Reply),
     ?assertEqual(1, meck:num_calls(grpc_client, rcv, 1)),
     RelayMessage = receive_relay(),
-    ?assertEqual(hpr_packet_down:to_record(fake_data()), RelayMessage).
+    ?assertEqual(hpr_packet_down:to_record(PacketDownMap), RelayMessage).
 
 test_relay_headers() ->
     meck:new(grpc_client),
@@ -149,9 +151,6 @@ test_relay_error() ->
 % EUnit test utils
 % ------------------------------------------------------------------------------
 
-fake_data() ->
-    #{payload => <<"data">>}.
-
 fake_stream() ->
     Self = self(),
     spawn(
@@ -160,7 +159,7 @@ fake_stream() ->
             receive
                 {'DOWN', _, process, Self, _} ->
                     ok;
-                {downlink, _} = Reply ->
+                {packet_down, _} = Reply ->
                     Self ! Reply,
                     Loop();
                 Msg ->
@@ -181,8 +180,8 @@ fake_monitor() ->
 
 receive_relay() ->
     receive
-        {downlink, Message} ->
-            Message
+        {packet_down, PacketDown} ->
+            PacketDown
     after 50 ->
         timeout
     end.

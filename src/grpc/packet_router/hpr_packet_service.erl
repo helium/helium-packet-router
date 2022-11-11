@@ -9,7 +9,7 @@
 ]).
 
 -export([
-    send_downlink/2
+    send_packet_down/2
 ]).
 
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
@@ -27,33 +27,47 @@ route(EnvUp, StreamState) ->
             _ = erlang:spawn(hpr_routing, handle_packet, [PacketUp, Self]),
             {ok, StreamState};
         {register, Reg} ->
-            Gateway = hpr_register:gateway(Reg),
+            PubkeyBin = hpr_register:gateway(Reg),
             case hpr_register:verify(Reg) of
                 false ->
                     lager:info("failed to verify"),
                     {stop, StreamState};
                 true ->
-                    true = gproc:add_local_name(?REG_KEY(Gateway)),
+                    true = gproc:add_local_name(?REG_KEY(PubkeyBin)),
                     {ok, StreamState}
             end
     end.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info({downlink, PacketDown}, StreamState) ->
+handle_info({packet_down, PacketDown}, StreamState) ->
     EnvDown = hpr_envelope_down:new(PacketDown),
     grpcbox_stream:send(false, EnvDown, StreamState);
 handle_info(_Msg, StreamState) ->
     StreamState.
 
--spec send_downlink(Pid :: pid(), EnvDown :: hpr_envelope_down:packet()) -> ok.
-send_downlink(Pid, EnvDown) ->
+-spec send_packet_down(
+    PubkeyBin :: libp2p_crypto:pubkey_bin() | Pid :: pid(), PacketDown :: hpr_envelope_down:packet()
+) -> ok | {error, not_found}.
+send_packet_down(Pid, PacketDown) when is_pid(Pid) ->
     case erlang:is_process_alive(Pid) of
         true ->
-            Pid ! {downlink, EnvDown};
+            Pid ! {packet_down, PacketDown};
         false ->
             lager:warning("failed to send envelope_down to stream ~p", [Pid])
     end,
-    ok.
+    ok;
+send_packet_down(PubkeyBin, PacketDown) ->
+    case gproc:lookup_local_name(?REG_KEY(PubkeyBin)) of
+        Pid when is_pid(Pid) ->
+            Pid ! {packet_down, PacketDown},
+            ok;
+        undefined ->
+            lager:warning(
+                [{gateway, hpr_utils:gateway_name(PubkeyBin)}],
+                "failed to send PacketDown to stream"
+            ),
+            {error, not_found}
+    end.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
@@ -110,11 +124,54 @@ handle_info_test() ->
     EnvDown = hpr_envelope_down:new(PacketDown),
     meck:expect(grpcbox_stream, send, [false, EnvDown, stream_state], stream_state),
 
-    ?assertEqual(stream_state, ?MODULE:handle_info({downlink, PacketDown}, stream_state)),
+    ?assertEqual(stream_state, ?MODULE:handle_info({packet_down, PacketDown}, stream_state)),
     ?assertEqual(stream_state, ?MODULE:handle_info(msg, stream_state)),
     ?assertEqual(1, meck:num_calls(grpcbox_stream, send, 3)),
 
     meck:unload(grpcbox_stream),
+    ok.
+
+send_packet_down_test() ->
+    application:ensure_all_started(gproc),
+
+    #{public := PubKey0} = libp2p_crypto:generate_keys(ecc_compact),
+    PubkeyBin0 = libp2p_crypto:pubkey_to_bin(PubKey0),
+    PacketDown = hpr_packet_down:new_downlink(
+        <<"data">>,
+        1,
+        2,
+        'SF12BW125',
+        undefined
+    ),
+
+    ?assertEqual({error, not_found}, ?MODULE:send_packet_down(PubkeyBin0, PacketDown)),
+    ?assert(gproc:add_local_name(?REG_KEY(PubkeyBin0))),
+    ?assertEqual(ok, ?MODULE:send_packet_down(PubkeyBin0, PacketDown)),
+
+    receive
+        {packet_down, PacketDownRcv} ->
+            ?assertEqual(PacketDown, PacketDownRcv)
+    after 50 ->
+        ?assertEqual(PacketDown, timeout)
+    end,
+
+    #{public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    PubkeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+    Pid = erlang:spawn(
+        fun() ->
+            true = gproc:add_local_name(?REG_KEY(PubkeyBin1)),
+            receive
+                stop -> ok
+            end
+        end
+    ),
+    timer:sleep(10),
+    ?assertEqual(ok, ?MODULE:send_packet_down(PubkeyBin1, PacketDown)),
+    Pid ! stop,
+    timer:sleep(10),
+    ?assertEqual({error, not_found}, ?MODULE:send_packet_down(PubkeyBin1, PacketDown)),
+
+    application:stop(gproc),
     ok.
 
 -endif.

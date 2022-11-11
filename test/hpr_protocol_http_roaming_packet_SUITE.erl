@@ -1488,9 +1488,9 @@ start_roamer_listener(Options) ->
 
 gateway_expect_downlink(ExpectFn) ->
     receive
-        {downlink, PacketDown} ->
+        {packet_down, PacketDown} ->
             ExpectFn(PacketDown)
-    after 1000 -> ct:fail(gateway_expect_downlink_timeout)
+    after 1000 -> ct:fail(gateway_expect_packet_down_timeout)
     end.
 
 -spec http_rcv() -> {ok, any()}.

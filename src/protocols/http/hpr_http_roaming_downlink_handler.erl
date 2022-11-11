@@ -92,5 +92,5 @@ handle_event(Event, _Data, _Args) ->
 ) -> ok.
 send_response(ResponseStream, PacketDown) ->
     lager:debug("sending http_roaming downlink.  pid: ~p", [ResponseStream]),
-    ok = hpr_packet_service:send_downlink(ResponseStream, PacketDown),
+    ok = hpr_packet_service:send_packet_down(ResponseStream, PacketDown),
     ok.
