@@ -7,6 +7,7 @@
 ]).
 
 -export([
+    full_test/1,
     single_lns_test/1,
     multi_lns_test/1,
     single_lns_downlink_test/1,
@@ -34,6 +35,7 @@
 %%--------------------------------------------------------------------
 all() ->
     [
+        full_test,
         single_lns_test,
         multi_lns_test,
         single_lns_downlink_test,
@@ -61,6 +63,35 @@ end_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
+
+full_test(_Config) ->
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    Route = test_route(1777),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+
+    %% Send packet and route directly through interface
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
+
+    PacketUp =
+        case hpr_test_gateway:receive_send_packet(GatewayPid) of
+            {ok, EnvUp} ->
+                {packet, PUp} = hpr_envelope_up:data(EnvUp),
+                PUp;
+            {error, timeout} ->
+                ct:fail(receive_send_packet)
+        end,
+
+    %% Initial PULL_DATA
+    {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
+    %% PUSH_DATA
+    {ok, Data} = expect_push_data(RcvSocket, router_push_data),
+    ok = verify_push_data(PacketUp, Data),
+
+    ok = gen_udp:close(RcvSocket),
+    ok = gen_server:stop(GatewayPid),
+
+    ok.
 
 single_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
@@ -515,9 +546,9 @@ test_route(Host, Port) ->
 test_route(Host, Port, RegionMapping) ->
     hpr_route:new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1337,
-        devaddr_ranges => [],
-        euis => [],
+        net_id => 0,
+        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
+        euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
         oui => 42,
         server => #{
             host => Host,
