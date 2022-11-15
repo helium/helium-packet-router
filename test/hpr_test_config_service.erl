@@ -1,4 +1,4 @@
--module(test_config_service).
+-module(hpr_test_config_service).
 
 -behaviour(helium_config_route_bhvr).
 
