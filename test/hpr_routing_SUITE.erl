@@ -104,7 +104,7 @@ join_req_test(_Config) ->
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -133,7 +133,6 @@ join_req_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
@@ -148,7 +147,6 @@ join_req_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
@@ -185,7 +183,7 @@ max_copies_test(_Config) ->
     ok = hpr_config:insert_route(Route),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
     #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
@@ -220,7 +218,6 @@ max_copies_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
@@ -228,7 +225,6 @@ max_copies_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp2,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
@@ -245,7 +241,6 @@ max_copies_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp4,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
