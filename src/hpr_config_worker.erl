@@ -131,11 +131,9 @@ handle_continue(
             ok = process_route_stream_res(hpr_route_stream_res:from_map(RouteStreamRes), Path),
             {noreply, State, {continue, ?RCV_CFG_UPDATE}};
         eof ->
-            {Delay, Backoff1} = backoff:fail(Backoff0),
-            lager:warning("got eof, sleeping for ~wms", [Delay]),
+            lager:warning("got eof"),
             _ = catch grpc_client:stop_connection(Connection),
-            timer:sleep(Delay),
-            {noreply, State#state{conn_backoff = Backoff1}, {continue, ?CONNECT}};
+            {noreply, State, {continue, ?CONNECT}};
         {error, timeout} ->
             lager:debug("rcv timeout"),
             {_, Backoff1} = backoff:succeed(Backoff0),
