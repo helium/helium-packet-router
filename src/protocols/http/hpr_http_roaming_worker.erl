@@ -224,7 +224,7 @@ send_data(
                             lager:error("error handling response: ~p", [Err]),
                             ok;
                         {join_accept, {PubKeyBin, PacketDown}} ->
-                            _ = hpr_packet_service:send_packet_down(PubKeyBin, PacketDown),
+                            _ = hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown),
                             ok;
                         ok ->
                             ok

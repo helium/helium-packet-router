@@ -16,7 +16,8 @@
 -export([
     init/1,
     handle_call/3,
-    handle_cast/2
+    handle_cast/2,
+    handle_info/2
 ]).
 
 -type lns() :: binary().
@@ -90,6 +91,21 @@ handle_call(
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
+handle_info({{'DOWN', {PubKeyBin, Lns} = Key}, _, process, RouterStream, Reason}, State) ->
+    lager:info(
+        [
+            {gateway, hpr_utils:gateway_name(PubKeyBin)},
+            {lns, Lns}
+        ],
+        "stream ~p went down ~p",
+        [RouterStream, Reason]
+    ),
+    true = ets:delete(?STREAM_TAB, Key),
+    {noreply, State};
+handle_info(_Msg, State) ->
+    lager:warning("unknown handle_info ~p", [_Msg]),
+    {noreply, State}.
+
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
@@ -103,7 +119,7 @@ init_ets(Options) ->
     % [#stream{}]
     ets:new(
         ?STREAM_TAB,
-        Options ++ [set, {keypos, #stream.gateway_router_map}]
+        Options ++ [public, named_table, set, {keypos, #stream.gateway_router_map}]
     ).
 
 %% @doc Return exising stream. Create a new stream if there isn't one.
@@ -112,8 +128,18 @@ init_ets(Options) ->
 do_get_stream(PubKeyBin, Lns, Service, Rpc, DecodeModule, StreamTab) ->
     case ets:lookup(StreamTab, {PubKeyBin, Lns}) of
         [] ->
-            RouterStream = grpc_stream_connect(Lns, Service, Rpc, DecodeModule),
-            setup_stream(StreamTab, PubKeyBin, Lns, RouterStream);
+            case grpc_stream_connect(Lns, Service, Rpc, DecodeModule) of
+                {error, _} = Error ->
+                    Error;
+                {ok, RouterStreamPid} ->
+                    {ok, _RelayPid} = hpr_router_relay:start(PubKeyBin, RouterStreamPid),
+                    ets:insert(StreamTab, #stream{
+                        gateway_router_map = {PubKeyBin, Lns},
+                        router_stream = RouterStreamPid
+                    }),
+                    _ = erlang:monitor(process, RouterStreamPid, [{tag, {'DOWN', {PubKeyBin, Lns}}}]),
+                    {ok, RouterStreamPid}
+            end;
         [StreamRecord] ->
             {ok, StreamRecord#stream.router_stream}
     end.
@@ -132,25 +158,6 @@ maybe_create_grpc_stream({ok, GrpcConnection}, Service, Rpc, DecodeModule) ->
     grpc_client:new_stream(GrpcConnection, Service, Rpc, DecodeModule);
 maybe_create_grpc_stream({error, _} = Error, _, _, _) ->
     Error.
-
--spec setup_stream
-    (ets:tab(), libp2p_crypto:pubkey_bin(), lns(), {ok, grpc_client:client_stream()}) ->
-        {ok, grpc_client:client_stream()};
-    (ets:tab(), libp2p_crypto:pubkey_bin(), lns(), {error, Reason}) -> {error, Reason}.
-setup_stream(StreamTab, PubKeyBin, Lns, {ok, RouterStream}) ->
-    start_relay(PubKeyBin, RouterStream),
-    ets:insert(StreamTab, #stream{
-        gateway_router_map = {PubKeyBin, Lns},
-        router_stream = RouterStream
-    }),
-    {ok, RouterStream};
-setup_stream(_, _, _, {error, _} = Error) ->
-    Error.
-
--spec start_relay(libp2p_crypto:pubkey_bin(), grpc_client:client_stream()) -> ok.
-start_relay(PubKeyBin, RouterStream) ->
-    {ok, _RelayPid} = hpr_router_relay:start(PubKeyBin, RouterStream),
-    ok.
 
 %% ------------------------------------------------------------------
 %% EUnit tests

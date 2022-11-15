@@ -39,7 +39,7 @@ handle(Req, Args) ->
             {500, [], <<"An error occurred">>};
         {join_accept, {PubKeyBin, PacketDown}} ->
             lager:debug("sending downlink [gateway: ~p]", [hpr_utils:gateway_name(PubKeyBin)]),
-            case hpr_packet_service:send_packet_down(PubKeyBin, PacketDown) of
+            case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                 ok ->
                     {200, [], <<"downlink sent: 1">>};
                 {error, not_found} ->
@@ -50,7 +50,7 @@ handle(Req, Args) ->
                 "sending downlink [gateway: ~p] [response: ~s]",
                 [hpr_utils:gateway_name(PubKeyBin), PayloadResponse]
             ),
-            case hpr_packet_service:send_packet_down(PubKeyBin, PacketDown) of
+            case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                 {error, not_found} ->
                     {404, [], <<"Not Found">>};
                 ok ->

@@ -23,7 +23,7 @@
                 grpc_opts => #{
                     service_protos => [packet_router_pb],
                     services => #{
-                        'helium.packet_router.packet' => hpr_packet_service
+                        'helium.packet_router.packet' => hpr_packet_router_service
                     }
                 },
                 transport_opts => #{ssl => false},

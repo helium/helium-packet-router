@@ -112,6 +112,8 @@ http_sync_uplink_join_test(_Config) ->
     DevEUI = erlang:binary_to_integer(DevEUIBin, 16),
     AppEUI = erlang:binary_to_integer(<<"1122334455667788">>, 16),
 
+    ok = hpr_packet_router_service:register(PubKeyBin),
+
     SendPacketFun = fun() ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_join(
@@ -264,7 +266,7 @@ http_sync_downlink_test(_Config) ->
     %% NOTE: We need to insert the transaction and handler here because we're
     %% only simulating downlinks. In a normal flow, these details would be
     %% filled during the uplink process.
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     downlink_test_route(sync),
 
@@ -323,6 +325,8 @@ http_async_uplink_join_test(_Config) ->
     DevEUIBin = <<"AABBCCDDEEFF0011">>,
     DevEUI = erlang:binary_to_integer(DevEUIBin, 16),
     AppEUI = erlang:binary_to_integer(<<"1122334455667788">>, 16),
+
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     SendPacketFun = fun() ->
         GatewayTime = erlang:system_time(millisecond),
@@ -442,7 +446,7 @@ http_async_downlink_test(_Config) ->
 
     %% 2. insert response handler
     TransactionID = 23,
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     %%    insert route
     downlink_test_route(async),
@@ -546,6 +550,8 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
             }
         }
     }),
+
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     SendPacketFun = fun(DevAddr, FrameCount) ->
         GatewayTime = erlang:system_time(millisecond),
@@ -714,7 +720,7 @@ http_class_c_downlink_test(_Config) ->
 
     %% 1. insert handler and config
     TransactionID = 2176,
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
     downlink_test_route(async),
 
     %% 2. send downlink

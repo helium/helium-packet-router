@@ -561,7 +561,7 @@ fake_join_up_packet() ->
     PubKeyBin =
         <<1, 154, 70, 24, 151, 192, 204, 57, 167, 252, 250, 139, 253, 71, 222, 143, 87, 111, 170,
             125, 26, 173, 134, 204, 181, 85, 5, 55, 163, 222, 154, 89, 114>>,
-    ok = hpr_packet_service:register(PubKeyBin),
+    ok = hpr_packet_router_service:register(PubKeyBin),
     #packet_router_packet_up_v1_pb{
         payload =
             <<0, 139, 222, 157, 101, 233, 17, 95, 30, 219, 224, 30, 233, 253, 104, 189, 10, 37, 23,

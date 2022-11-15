@@ -1,4 +1,4 @@
--module(hpr_packet_service).
+-module(hpr_packet_router_service).
 
 -behaviour(helium_packet_router_packet_bhvr).
 
@@ -41,6 +41,7 @@ route(EnvUp, StreamState) ->
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({packet_down, PacketDown}, StreamState) ->
+    lager:debug("received packet_down"),
     EnvDown = hpr_envelope_down:new(PacketDown),
     grpcbox_stream:send(false, EnvDown, StreamState);
 handle_info(_Msg, StreamState) ->
@@ -52,6 +53,11 @@ handle_info(_Msg, StreamState) ->
 send_packet_down(PubKeyBin, PacketDown) ->
     case ?MODULE:locate(PubKeyBin) of
         {ok, Pid} ->
+            lager:debug(
+                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                "send_packet_down to ~p",
+                [Pid]
+            ),
             Pid ! {packet_down, PacketDown},
             ok;
         {error, not_found} = Err ->
@@ -73,6 +79,13 @@ locate(PubKeyBin) ->
 
 -spec register(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
 register(PubKeyBin) ->
+    lager:info(
+        [
+            {gateway, hpr_utils:gateway_name(PubKeyBin)},
+            {pid, self()}
+        ],
+        "register"
+    ),
     true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
     ok.
 

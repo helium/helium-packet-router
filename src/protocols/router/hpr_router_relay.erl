@@ -43,7 +43,7 @@ start(PubKeyBin, RouterStream) ->
 
 -spec init(list()) -> {ok, #state{}, {continue, relay}}.
 init([PubKeyBin, RouterStream]) ->
-    {ok, GatewayStream} = hpr_packet_service:locate(PubKeyBin),
+    {ok, GatewayStream} = hpr_packet_router_service:locate(PubKeyBin),
     {ok, MonitorPid} =
         hpr_router_relay_monitor:start(
             self(), GatewayStream, RouterStream
@@ -68,7 +68,7 @@ handle_continue(relay, #state{router_stream = RouterStream, pubkey_bin = PubKeyB
             lager:debug("sending router downlink to : ~p", [hpr_utils:gateway_name(PubKeyBin)]),
             EnvDown = hpr_envelope_down:to_record(Map),
             {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
-            _ = hpr_packet_service:send_packet_down(PubKeyBin, PacketDown),
+            _ = hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown),
             {noreply, State, {continue, relay}};
         {headers, _} ->
             {noreply, State, {continue, relay}};
@@ -115,8 +115,8 @@ test_relay_data() ->
     Self = self(),
     meck:new(grpc_client),
     meck:expect(grpc_client, rcv, [State#state.router_stream], {data, EnvDownMap}),
-    meck:new(hpr_packet_service),
-    meck:expect(hpr_packet_service, send_packet_down, fun(_, _) ->
+    meck:new(hpr_packet_router_service),
+    meck:expect(hpr_packet_router_service, send_packet_down, fun(_, _) ->
         Self ! {packet_down, hpr_packet_down:to_record(PacketDownMap)},
         ok
     end),

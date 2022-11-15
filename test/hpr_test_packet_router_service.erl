@@ -1,4 +1,4 @@
--module(test_hpr_packet_service).
+-module(hpr_test_packet_router_service).
 
 -behaviour(helium_packet_router_packet_bhvr).
 
