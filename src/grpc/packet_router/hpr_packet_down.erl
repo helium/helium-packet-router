@@ -52,7 +52,6 @@ rx1_datarate(PacketDown) ->
 rx2_datarate(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.datarate.
 
-% TODO
 -spec to_record(packet_map() | map()) -> packet().
 to_record(PacketMap) ->
     Template = #packet_router_packet_down_v1_pb{},
@@ -100,7 +99,6 @@ window(TS, FrequencyHz, DataRate) ->
     },
     hpr_packet_down:window(WindowMap).
 
-%% TODO
 -spec new_downlink(
     Payload :: binary(),
     Timestamp :: non_neg_integer(),
