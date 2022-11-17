@@ -61,7 +61,7 @@ md(PacketUp) ->
                 {stream, StreamPid},
                 {gateway, GatewayName},
                 {packet_type, FType},
-                {phash, hpr_packet_up:phash(PacketUp)}
+                {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
             ]);
         {join_req, {AppEUI, DevEUI}} ->
             lager:md([
@@ -70,7 +70,7 @@ md(PacketUp) ->
                 {app_eui, hpr_utils:int_to_hex(AppEUI)},
                 {dev_eui, hpr_utils:int_to_hex(DevEUI)},
                 {packet_type, join_req},
-                {phash, hpr_packet_up:phash(PacketUp)}
+                {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
             ]);
         {uplink, DevAddr} ->
             lager:md([
@@ -78,7 +78,7 @@ md(PacketUp) ->
                 {gateway, GatewayName},
                 {devaddr, hpr_utils:int_to_hex(DevAddr)},
                 {packet_type, uplink},
-                {phash, hpr_packet_up:phash(PacketUp)}
+                {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
             ])
     end.
 
