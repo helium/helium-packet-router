@@ -190,8 +190,8 @@ single_lns_downlink_test(_Config) ->
             ?assertEqual(erlang:binary_to_existing_atom(Datr), Datarate),
             ok;
         {packet_down, Other} ->
-            ct:fail({rcvd_bad_dpacket_down, Other})
-    after timer:seconds(2) -> ct:fail(no_dpacket_down)
+            ct:fail({rcvd_bad_packet_down, Other})
+    after timer:seconds(2) -> ct:fail(no_packet_down)
     end,
 
     %% expect the ack for our downlink
