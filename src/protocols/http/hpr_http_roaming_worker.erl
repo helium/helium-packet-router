@@ -234,7 +234,8 @@ send_data(
                             end
                     catch
                         Type:Err:Stack ->
-                            lager:error("error decoding sync res ~p", [{Type, Err, Stack}]),
+                            lager:error("error decoding sync res ~p", [Res]),
+                            lager:error("~p", [{Type, Err, Stack}]),
                             ok
                     end;
                 async ->
