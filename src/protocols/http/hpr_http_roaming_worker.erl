@@ -218,15 +218,23 @@ send_data(
                     %% All uplinks are PRStartReq. We will only ever receive a
                     %% PRStartAns from that. XMitDataReq downlinks come out of
                     %% band to the HTTP listener.
-                    Decoded = jsx:decode(Res),
-                    case hpr_http_roaming:handle_prstart_ans(Decoded) of
-                        {error, Err} ->
-                            lager:error("error handling response: ~p", [Err]),
-                            ok;
-                        {join_accept, {PubKeyBin, PacketDown}} ->
-                            _ = hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown),
-                            ok;
-                        ok ->
+                    try jsx:decode(Res) of
+                        Decoded ->
+                            case hpr_http_roaming:handle_prstart_ans(Decoded) of
+                                {error, Err} ->
+                                    lager:error("error handling response: ~p", [Err]),
+                                    ok;
+                                {join_accept, {PubKeyBin, PacketDown}} ->
+                                    _ = hpr_packet_router_service:send_packet_down(
+                                        PubKeyBin, PacketDown
+                                    ),
+                                    ok;
+                                ok ->
+                                    ok
+                            end
+                    catch
+                        Type:Err:Stack ->
+                            lager:error("error decoding sync res ~p", [{Type, Err, Stack}]),
                             ok
                     end;
                 async ->
