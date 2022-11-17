@@ -21,19 +21,14 @@ init() ->
 -spec handle_packet(Packet :: hpr_packet_up:packet()) -> hpr_routing_response().
 handle_packet(Packet) ->
     Start = erlang:system_time(millisecond),
-    GatewayName = hpr_utils:gateway_name(hpr_packet_up:gateway(Packet)),
-    PacketType = hpr_packet_up:type(Packet),
-    {Type, _} = PacketType,
-    lager:md([
-        {gateway, GatewayName},
-        {packet_type, Type}
-    ]),
+    ok = md(Packet),
     lager:debug("received packet"),
     Checks = [
         {fun hpr_packet_up:verify/1, bad_signature},
         {fun throttle_check/1, gateway_limit_exceeded},
         {fun packet_type_check/1, invalid_packet_type}
     ],
+    PacketType = hpr_packet_up:type(Packet),
     case execute_checks(Packet, Checks) of
         {error, _Reason} = Error ->
             lager:error("packet failed verification: ~p", [_Reason]),
@@ -51,17 +46,46 @@ handle_packet(Packet) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
+-spec md(PacketUp :: hpr_packet_up:packet()) -> ok.
+md(PacketUp) ->
+    Gateway = hpr_packet_up:gateway(PacketUp),
+    GatewayName = hpr_utils:gateway_name(Gateway),
+    StreamPid =
+        case hpr_packet_router_service:locate(Gateway) of
+            {ok, Pid} -> Pid;
+            {error, _} -> undefined
+        end,
+    case hpr_packet_up:type(PacketUp) of
+        {undefined, FType} ->
+            lager:md([
+                {stream, StreamPid},
+                {gateway, GatewayName},
+                {packet_type, FType},
+                {phash, hpr_packet_up:phash(PacketUp)}
+            ]);
+        {join_req, {AppEUI, DevEUI}} ->
+            lager:md([
+                {stream, StreamPid},
+                {gateway, GatewayName},
+                {app_eui, hpr_utils:int_to_hex(AppEUI)},
+                {dev_eui, hpr_utils:int_to_hex(DevEUI)},
+                {packet_type, join_req},
+                {phash, hpr_packet_up:phash(PacketUp)}
+            ]);
+        {uplink, DevAddr} ->
+            lager:md([
+                {stream, StreamPid},
+                {gateway, GatewayName},
+                {devaddr, hpr_utils:int_to_hex(DevAddr)},
+                {packet_type, uplink},
+                {phash, hpr_packet_up:phash(PacketUp)}
+            ])
+    end.
+
 -spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
 find_routes({join_req, {AppEUI, DevEUI}}) ->
-    lager:md(
-        [
-            {app_eui, hpr_utils:int_to_hex(AppEUI)},
-            {dev_eui, hpr_utils:int_to_hex(DevEUI)}
-        ]
-    ),
     hpr_config:lookup_eui(AppEUI, DevEUI);
 find_routes({uplink, DevAddr}) ->
-    lager:md([{devaddr, hpr_utils:int_to_hex(DevAddr)}]),
     hpr_config:lookup_devaddr(DevAddr).
 
 -spec maybe_deliver_packet(
