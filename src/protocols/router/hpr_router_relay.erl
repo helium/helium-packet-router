@@ -48,6 +48,11 @@ init([PubKeyBin, RouterStream]) ->
         hpr_router_relay_monitor:start(
             self(), GatewayStream, RouterStream
         ),
+    lager:md([
+        {gateway, hpr_utils:gateway_name(PubKeyBin)},
+        {router_stream, RouterStream},
+        {monitor_pid, MonitorPid}
+    ]),
     {
         ok,
         #state{
@@ -65,7 +70,7 @@ init([PubKeyBin, RouterStream]) ->
 handle_continue(relay, #state{router_stream = RouterStream, pubkey_bin = PubKeyBin} = State) ->
     case grpc_client:rcv(RouterStream) of
         {data, Map} ->
-            lager:debug("sending router downlink to : ~p", [hpr_utils:gateway_name(PubKeyBin)]),
+            lager:debug("sending router downlink"),
             EnvDown = hpr_envelope_down:to_record(Map),
             {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
             _ = hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown),

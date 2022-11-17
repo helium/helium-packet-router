@@ -47,8 +47,8 @@ handle(Req, Args) ->
             end;
         {downlink, PayloadResponse, {PubKeyBin, PacketDown}, {Endpoint, FlowType}} ->
             lager:debug(
-                "sending downlink [gateway: ~p] [response: ~s]",
-                [hpr_utils:gateway_name(PubKeyBin), PayloadResponse]
+                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                "sending downlink"
             ),
             case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                 {error, not_found} ->

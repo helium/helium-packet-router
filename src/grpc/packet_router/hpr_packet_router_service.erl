@@ -53,18 +53,11 @@ handle_info(_Msg, StreamState) ->
 send_packet_down(PubKeyBin, PacketDown) ->
     case ?MODULE:locate(PubKeyBin) of
         {ok, Pid} ->
-            lager:debug(
-                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                "send_packet_down to ~p",
-                [Pid]
-            ),
+            lager:debug("send_packet_down to ~p", [Pid]),
             Pid ! {packet_down, PacketDown},
             ok;
         {error, not_found} = Err ->
-            lager:warning(
-                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                "failed to send PacketDown to stream"
-            ),
+            lager:warning("failed to send PacketDown to stream: not_found"),
             Err
     end.
 
@@ -79,13 +72,8 @@ locate(PubKeyBin) ->
 
 -spec register(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
 register(PubKeyBin) ->
-    lager:info(
-        [
-            {gateway, hpr_utils:gateway_name(PubKeyBin)},
-            {pid, self()}
-        ],
-        "register"
-    ),
+    lager:md([{gateway, hpr_utils:gateway_name(PubKeyBin)}]),
+    lager:info("register"),
     true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
     ok.
 
