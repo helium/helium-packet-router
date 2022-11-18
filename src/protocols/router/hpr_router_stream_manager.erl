@@ -16,18 +16,14 @@
 -export([
     init/1,
     handle_call/3,
-    handle_cast/2
+    handle_cast/2,
+    handle_info/2
 ]).
 
 -type lns() :: binary().
 -type from() :: {pid(), any()}.
 -type service() :: atom().
 -type rpc() :: atom().
--type gateway_stream() :: pid().
-
--export_type([
-    gateway_stream/0
-]).
 
 -record(state, {
     stream_table :: ets:tab(),
@@ -37,7 +33,7 @@
 }).
 
 -record(stream, {
-    gateway_router_map :: {gateway_stream(), lns()},
+    gateway_router_map :: {libp2p_crypto:pubkey_bin(), lns()},
     router_stream :: grpc_client:client_stream()
 }).
 
@@ -52,12 +48,12 @@
 start_link(Service, Rpc, DecodeModule) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Service, Rpc, DecodeModule], []).
 
--spec get_stream(GatewayStream :: gateway_stream(), Lns :: lns()) ->
+-spec get_stream(PubKeyBin :: libp2p_crypto:pubkey_bin(), Lns :: lns()) ->
     {ok, grpc_client:client_stream()} | {error, any()}.
-%% @doc Get a stream for GatewayStream to the Router at Lns or create a new
+%% @doc Get a stream for PubKeyBin to the Router at Lns or create a new
 %% stream if this one doesn't exist.
-get_stream(GatewayStream, Lns) ->
-    gen_server:call(?MODULE, {get_stream, GatewayStream, Lns}).
+get_stream(PubKeyBin, Lns) ->
+    gen_server:call(?MODULE, {get_stream, PubKeyBin, Lns}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -76,20 +72,39 @@ init([Service, Rpc, DecodeModule]) ->
         }
     }.
 
--spec handle_call({get_stream, pid(), lns()}, from(), #state{}) ->
+-spec handle_call({get_stream, libp2p_crypto:pubkey_bin(), lns()}, from(), #state{}) ->
     {reply, {ok, grpc_client:client_stream()} | {error, any()}, #state{}}.
-handle_call({get_stream, GatewayStream, Lns}, _From, State) ->
+handle_call(
+    {get_stream, PubKeyBin, Lns},
+    _From,
     #state{
         stream_table = StreamTab,
         service = Service,
         rpc = Rpc,
         decode_module = DecodeModule
-    } = State,
-    {reply, do_get_stream(GatewayStream, Lns, Service, Rpc, DecodeModule, StreamTab), State}.
+    } = State
+) ->
+    Reply = do_get_stream(PubKeyBin, Lns, Service, Rpc, DecodeModule, StreamTab),
+    {reply, Reply, State}.
 
 -spec handle_cast(Msg, #state{}) -> {stop, {unimplemented_cast, Msg}, #state{}}.
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
+
+handle_info({{'DOWN', {PubKeyBin, Lns} = Key}, _, process, RouterStream, Reason}, State) ->
+    lager:info(
+        [
+            {gateway, hpr_utils:gateway_name(PubKeyBin)},
+            {lns, Lns}
+        ],
+        "stream ~p went down ~p",
+        [RouterStream, Reason]
+    ),
+    true = ets:delete(?STREAM_TAB, Key),
+    {noreply, State};
+handle_info(_Msg, State) ->
+    lager:warning("unknown handle_info ~p", [_Msg]),
+    {noreply, State}.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -104,17 +119,27 @@ init_ets(Options) ->
     % [#stream{}]
     ets:new(
         ?STREAM_TAB,
-        Options ++ [set, {keypos, #stream.gateway_router_map}]
+        Options ++ [public, named_table, set, {keypos, #stream.gateway_router_map}]
     ).
 
 %% @doc Return exising stream. Create a new stream if there isn't one.
--spec do_get_stream(gateway_stream(), lns(), service(), rpc(), module(), ets:tab()) ->
+-spec do_get_stream(libp2p_crypto:pubkey_bin(), lns(), service(), rpc(), module(), ets:tab()) ->
     {ok, grpc_client:client_stream()} | {error, any()}.
-do_get_stream(GatewayStream, Lns, Service, Rpc, DecodeModule, StreamTab) ->
-    case ets:lookup(StreamTab, {GatewayStream, Lns}) of
+do_get_stream(PubKeyBin, Lns, Service, Rpc, DecodeModule, StreamTab) ->
+    case ets:lookup(StreamTab, {PubKeyBin, Lns}) of
         [] ->
-            RouterStream = grpc_stream_connect(Lns, Service, Rpc, DecodeModule),
-            setup_stream(StreamTab, GatewayStream, Lns, RouterStream);
+            case grpc_stream_connect(Lns, Service, Rpc, DecodeModule) of
+                {error, _} = Error ->
+                    Error;
+                {ok, RouterStreamPid} ->
+                    {ok, _RelayPid} = hpr_router_relay:start(PubKeyBin, RouterStreamPid),
+                    ets:insert(StreamTab, #stream{
+                        gateway_router_map = {PubKeyBin, Lns},
+                        router_stream = RouterStreamPid
+                    }),
+                    _ = erlang:monitor(process, RouterStreamPid, [{tag, {'DOWN', {PubKeyBin, Lns}}}]),
+                    {ok, RouterStreamPid}
+            end;
         [StreamRecord] ->
             {ok, StreamRecord#stream.router_stream}
     end.
@@ -134,27 +159,8 @@ maybe_create_grpc_stream({ok, GrpcConnection}, Service, Rpc, DecodeModule) ->
 maybe_create_grpc_stream({error, _} = Error, _, _, _) ->
     Error.
 
--spec setup_stream
-    (ets:tab(), gateway_stream(), lns(), {ok, grpc_client:client_stream()}) ->
-        {ok, grpc_client:client_stream()};
-    (ets:tab(), gateway_stream(), lns(), {error, Reason}) -> {error, Reason}.
-setup_stream(StreamTab, GatewayStream, Lns, {ok, RouterStream}) ->
-    start_relay(GatewayStream, RouterStream),
-    ets:insert(StreamTab, #stream{
-        gateway_router_map = {GatewayStream, Lns},
-        router_stream = RouterStream
-    }),
-    {ok, RouterStream};
-setup_stream(_, _, _, {error, _} = Error) ->
-    Error.
-
--spec start_relay(gateway_stream(), grpc_client:client_stream()) -> ok.
-start_relay(GatewayStream, RouterStream) ->
-    {ok, _RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
-    ok.
-
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).
@@ -182,7 +188,7 @@ test_get_stream() ->
     meck:new(grpc_client),
     meck:new(hpr_router_connection_manager),
     meck:new(hpr_router_relay),
-    GatewayStream = self(),
+    PubKeyBin = <<"PubKeyBin">>,
     Lns1 = <<"1fakelns">>,
     Lns2 = <<"2fakelns">>,
     Service = fake_service,
@@ -204,12 +210,12 @@ test_get_stream() ->
         {ok, FakeGrpcStream}
     ),
     meck:expect(
-        hpr_router_relay, start, [GatewayStream, FakeGrpcStream], {ok, self()}
+        hpr_router_relay, start, [PubKeyBin, FakeGrpcStream], {ok, self()}
     ),
 
     % First get_stream opens connection and stream.
     {ok, GrpcStream0} = do_get_stream(
-        GatewayStream, Lns1, Service, Rpc, DecodeModule, ?STREAM_TAB
+        PubKeyBin, Lns1, Service, Rpc, DecodeModule, ?STREAM_TAB
     ),
 
     ?assertEqual(FakeGrpcStream, GrpcStream0),
@@ -218,14 +224,14 @@ test_get_stream() ->
 
     % second get_stream doesn't reconnect
     {ok, _GrpcStream1} = do_get_stream(
-        GatewayStream, Lns1, Service, Rpc, DecodeModule, ?STREAM_TAB
+        PubKeyBin, Lns1, Service, Rpc, DecodeModule, ?STREAM_TAB
     ),
     ?assertEqual(1, meck:num_calls(hpr_router_connection_manager, get_connection, 1)),
     ?assertEqual(1, meck:num_calls(grpc_client, new_stream, 4)),
 
     % different Lns with the same gateway connects again
     {ok, _GrpcStream2} = do_get_stream(
-        GatewayStream, Lns2, Service, Rpc, DecodeModule, ?STREAM_TAB
+        PubKeyBin, Lns2, Service, Rpc, DecodeModule, ?STREAM_TAB
     ),
     ?assertEqual(2, meck:num_calls(hpr_router_connection_manager, get_connection, 1)),
     ?assertEqual(2, meck:num_calls(grpc_client, new_stream, 4)).

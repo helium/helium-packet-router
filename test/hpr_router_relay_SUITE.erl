@@ -37,12 +37,14 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(_TestCase, Config) ->
+    application:ensure_all_started(gproc),
     Config.
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
 end_per_testcase(_TestCase, _Config) ->
+    application:stop(gproc),
     meck:unload().
 
 %%--------------------------------------------------------------------
@@ -50,15 +52,17 @@ end_per_testcase(_TestCase, _Config) ->
 %%--------------------------------------------------------------------
 
 relay_test(_Config) ->
-    GatewayStream = fake_gateway_stream(self()),
+    PubKeyBin = <<"PubKeyBin">>,
+    GatewayStream = fake_gateway_stream(self(), PubKeyBin),
     RouterStream = fake_stream(),
-    FakeData = #{payload => <<"fake data">>},
+    DownMap = #{payload => <<"fake data">>},
+    EnvDownMap = #{data => {packet, DownMap}},
 
     meck:expect(
         grpc_client,
         rcv,
         [RouterStream],
-        meck:seq([{data, FakeData}, eof])
+        meck:seq([{data, EnvDownMap}, eof])
     ),
     meck:expect(
         grpc_client,
@@ -70,20 +74,21 @@ relay_test(_Config) ->
         end
     ),
 
-    {ok, RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
+    {ok, RelayPid} = hpr_router_relay:start(PubKeyBin, RouterStream),
     timer:sleep(50),
 
     ?assertEqual(2, meck:num_calls(grpc_client, rcv, 1)),
     ?assertEqual(1, meck:num_calls(grpc_client, stop_stream, 1)),
 
     Data = receive_next(),
-    ?assertEqual({packet_down, hpr_packet_down:to_record(FakeData)}, Data),
+    ?assertEqual({packet_down, hpr_packet_down:to_record(DownMap)}, Data),
     ?assertNot(erlang:is_process_alive(RelayPid)),
     ?assert(erlang:is_process_alive(GatewayStream)),
     ?assertNot(erlang:is_process_alive(RouterStream)).
 
 gateway_exits_test(_Config) ->
-    GatewayStream = fake_stream(),
+    PubKeyBin = <<"PubKeyBin">>,
+    GatewayStream = fake_stream(PubKeyBin),
     RouterStream = fake_stream(),
 
     meck:expect(
@@ -102,7 +107,7 @@ gateway_exits_test(_Config) ->
         end
     ),
 
-    {ok, RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
+    {ok, RelayPid} = hpr_router_relay:start(PubKeyBin, RouterStream),
     GatewayStream ! stop,
     timer:sleep(50),
 
@@ -112,7 +117,8 @@ gateway_exits_test(_Config) ->
     ?assertNot(erlang:is_process_alive(RouterStream)).
 
 router_exits_test(_Config) ->
-    GatewayStream = fake_stream(),
+    PubKeyBin = <<"PubKeyBin">>,
+    GatewayStream = fake_stream(PubKeyBin),
     RouterStream = fake_stream(),
 
     meck:expect(
@@ -131,7 +137,7 @@ router_exits_test(_Config) ->
         end
     ),
 
-    {ok, RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
+    {ok, RelayPid} = hpr_router_relay:start(PubKeyBin, RouterStream),
     RouterStream ! stop,
     timer:sleep(50),
 
@@ -141,7 +147,8 @@ router_exits_test(_Config) ->
     ?assertNot(erlang:is_process_alive(RouterStream)).
 
 relay_exits_test(_Config) ->
-    GatewayStream = fake_stream(),
+    PubKeyBin = <<"PubKeyBin">>,
+    GatewayStream = fake_stream(PubKeyBin),
     RouterStream = fake_stream(),
 
     meck:expect(
@@ -160,7 +167,7 @@ relay_exits_test(_Config) ->
         end
     ),
 
-    {ok, RelayPid} = hpr_router_relay:start(GatewayStream, RouterStream),
+    {ok, RelayPid} = hpr_router_relay:start(PubKeyBin, RouterStream),
     exit(RelayPid, crash),
     timer:sleep(50),
 
@@ -176,9 +183,16 @@ relay_exits_test(_Config) ->
 fake_stream() ->
     spawn(fun() -> wait_for_stop() end).
 
-fake_gateway_stream(Receiver) ->
+fake_stream(PubKeyBin) ->
+    spawn(fun() ->
+        ok = hpr_packet_router_service:register(PubKeyBin),
+        wait_for_stop()
+    end).
+
+fake_gateway_stream(Receiver, PubKeyBin) ->
     spawn(
         fun() ->
+            ok = hpr_packet_router_service:register(PubKeyBin),
             Receiver ! receive_next(),
             wait_for_stop()
         end

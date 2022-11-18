@@ -3,10 +3,10 @@
 -include("../autogen/server/packet_router_pb.hrl").
 
 -export([
-    to_record/1,
     rx1_frequency/1,
     rx2_frequency/1,
     window/1,
+    to_record/1,
     to_record/2,
     payload/1,
     rx1_timestamp/1,
@@ -121,7 +121,7 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
     hpr_packet_down:to_record(PacketMap, Rx2).
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).

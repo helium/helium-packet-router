@@ -1,24 +1,25 @@
 -module(hpr_protocol_router).
 
--export([send/3]).
+-export([send/2]).
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
-    GatewayStream :: hpr_router_stream_manager:gateway_stream(),
     Route :: hpr_route:route()
 ) -> ok | {error, any()}.
-send(PacketUp, GatewayStream, Route) ->
+send(PacketUp, Route) ->
+    Gateway = hpr_packet_up:gateway(PacketUp),
     LNS = hpr_route:lns(Route),
-    case hpr_router_stream_manager:get_stream(GatewayStream, LNS) of
+    case hpr_router_stream_manager:get_stream(Gateway, LNS) of
         {ok, RouterStream} ->
-            PacketUpMap = hpr_packet_up:to_map(PacketUp),
-            ok = grpc_client:send(RouterStream, PacketUpMap);
+            Env = hpr_envelope_up:new(PacketUp),
+            EnvMap = hpr_envelope_up:to_map(Env),
+            ok = grpc_client:send(RouterStream, EnvMap);
         {error, _} = Err ->
             Err
     end.
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).
@@ -43,10 +44,10 @@ per_testcase_cleanup(ok) ->
 
 % send/3: happy path
 test_send() ->
-    HprPacketUp = test_utils:join_packet_up(#{}),
-    HprPacketUpMap = hpr_packet_up:to_map(HprPacketUp),
+    PubKeyBin = <<"PubKeyBin">>,
+    HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
+    EnvMap = hpr_envelope_up:to_map(hpr_envelope_up:new(HprPacketUp)),
     Stream = self(),
-    GatewayStream = self(),
     Host = <<"example-lns.com">>,
     Port = 4321,
     Route = hpr_route:new(#{
@@ -67,12 +68,12 @@ test_send() ->
     meck:expect(
         hpr_router_stream_manager,
         get_stream,
-        [GatewayStream, <<Host/binary, ":", (integer_to_binary(Port))/binary>>],
+        [PubKeyBin, <<Host/binary, ":", (integer_to_binary(Port))/binary>>],
         {ok, Stream}
     ),
-    meck:expect(grpc_client, send, [Stream, HprPacketUpMap], ok),
+    meck:expect(grpc_client, send, [Stream, EnvMap], ok),
 
-    ResponseValue = send(HprPacketUp, Stream, Route),
+    ResponseValue = send(HprPacketUp, Route),
 
     ?assertEqual(ok, ResponseValue),
     ?assertEqual(1, meck:num_calls(hpr_router_stream_manager, get_stream, 2)),

@@ -1,6 +1,6 @@
 -module(hpr_protocol_gwmp).
 
--export([send/3]).
+-export([send/2]).
 
 -export([
     packet_up_to_push_data/2,
@@ -9,12 +9,10 @@
 
 -spec send(
     Packet :: hpr_packet_up:packet(),
-    GatewayStream :: pid(),
     Route :: hpr_route:route()
 ) -> ok | {error, any()}.
-send(PacketUp, GatewayStream, Route) ->
+send(PacketUp, Route) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
-
     case hpr_gwmp_sup:maybe_start_worker(Gateway, #{}) of
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
@@ -22,7 +20,7 @@ send(PacketUp, GatewayStream, Route) ->
             PushData = ?MODULE:packet_up_to_push_data(PacketUp, erlang:system_time(millisecond)),
             Region = hpr_packet_up:region(PacketUp),
             Dest = hpr_route:gwmp_region_lns(Region, Route),
-            try hpr_gwmp_worker:push_data(Pid, PushData, GatewayStream, Dest) of
+            try hpr_gwmp_worker:push_data(Pid, PushData, Dest) of
                 _ -> ok
             catch
                 Type:Err:Stack ->
@@ -101,7 +99,7 @@ packet_up_to_push_data(Up, GatewayTime) ->
     {Token, Data}.
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).

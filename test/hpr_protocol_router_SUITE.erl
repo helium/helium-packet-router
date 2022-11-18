@@ -7,11 +7,9 @@
 ]).
 
 -export([
-    grpc_test/1,
-    grpc_connection_refused_test/1,
-    grpc_full_flow_send_test/1,
-    grpc_full_flow_connection_refused_test/1,
-    grpc_full_flow_downlink_test/1,
+    basic_test/1,
+    connection_refused_test/1,
+    downlink_test/1,
     server_crash_test/1
 ]).
 
@@ -29,11 +27,9 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        grpc_test,
-        grpc_connection_refused_test,
-        grpc_full_flow_send_test,
-        grpc_full_flow_downlink_test,
-        grpc_full_flow_connection_refused_test,
+        basic_test,
+        connection_refused_test,
+        downlink_test,
         server_crash_test
     ].
 
@@ -55,15 +51,12 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-grpc_test(_Config) ->
-    PacketUp = test_packet(),
-    Route = test_route(),
-
-    %% Startup a test server
+basic_test(_Config) ->
+    %% Startup Router server
     {ok, ServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [packet_router_pb],
-            services => #{'helium.packet_router.packet' => test_hpr_packet_service}
+            services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
         },
         listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
     }),
@@ -73,270 +66,151 @@ grpc_test(_Config) ->
     application:set_env(
         hpr,
         packet_service_route_fun,
-        fun(Packet, Socket) ->
-            Self ! {test_route, Packet},
-            Socket
+        fun(Env, StreamState) ->
+            {packet, Packet} = hpr_envelope_up:data(Env),
+            Self ! {packet_up, Packet},
+            StreamState
         end
     ),
 
+    Route = test_route(),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+
     %% Send packet and route directly through interface
-    _ = hpr_protocol_router:send(PacketUp, self(), Route),
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
+
+    PacketUp =
+        case hpr_test_gateway:receive_send_packet(GatewayPid) of
+            {ok, EnvUp} ->
+                {packet, PUp} = hpr_envelope_up:data(EnvUp),
+                PUp;
+            {error, timeout} ->
+                ct:fail(receive_send_packet)
+        end,
 
     ok =
         receive
-            {test_route, _Packet} -> ?assertEqual(_Packet, PacketUp)
+            {packet_up, RvcPacketUp} -> ?assertEqual(RvcPacketUp, PacketUp)
         after timer:seconds(2) -> ct:fail(no_msg_rcvd)
         end,
 
+    ok = gen_server:stop(GatewayPid),
     ok = gen_server:stop(ServerPid),
 
     ok.
 
-grpc_connection_refused_test(_Config) ->
-    PacketUp = test_packet(),
+connection_refused_test(_Config) ->
+    PacketUp = test_utils:uplink_packet_up(#{}),
     Route = test_route(),
 
     ?assertEqual(
         {error, econnrefused},
-        hpr_protocol_router:send(PacketUp, self(), Route)
+        hpr_protocol_router:send(PacketUp, Route)
     ),
 
     ok.
 
-grpc_full_flow_downlink_test(_Config) ->
-    %% Startup our server
-    {ok, ServerPid} = grpcbox:start_server(#{
+downlink_test(_Config) ->
+    %% Startup Router server
+    {ok, RouterServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [packet_router_pb],
-            services => #{'helium.packet_router.packet' => hpr_packet_service}
-        },
-        listen_opts => #{port => ?SERVER_PORT, ip => {0, 0, 0, 0}}
-    }),
-    %% Startup test server for receiving
-    {ok, TestServerPid} = grpcbox:start_server(#{
-        grpc_opts => #{
-            service_protos => [packet_router_pb],
-            services => #{'helium.packet_router.packet' => test_hpr_packet_service}
+            services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
         },
         listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
     }),
-    ok = hpr_config:insert_route(test_route()),
+
+    Route = test_route(),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
 
     %% Queue up a downlink from the testing server
-    Payload = base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
-    Timestamp = erlang:system_time(millisecond) band 16#FFFF_FFFF,
-    DataRate = 'SF11BW125',
-    Frequency = 904_100_000,
-    Down = hpr_packet_down:to_record(#{
-        payload => Payload,
-        rx1 => #{
-            timestamp => Timestamp,
-            frequency => Frequency,
-            datarate => DataRate
-        }
-    }),
+    EnvDown = hpr_envelope_down:new(
+        hpr_packet_down:to_record(#{
+            payload => base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
+            rx1 => #{
+                timestamp => erlang:system_time(millisecond) band 16#FFFF_FFFF,
+                frequency => 904_100_000,
+                datarate => 'SF11BW125'
+            }
+        })
+    ),
     application:set_env(
         hpr,
         packet_service_route_fun,
-        fun(_PacketUp, Socket) -> {ok, Down, Socket} end
+        fun(_Env, StreamState) ->
+            {ok, EnvDown, StreamState}
+        end
     ),
 
-    %% Connect to our server
-    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", ?SERVER_PORT),
-    {ok, Stream} = grpc_client:new_stream(
-        Connection,
-        'helium.packet_router.packet',
-        route,
-        client_packet_router_pb
-    ),
-    %% Send a packet that expects a downlink
-    ok = grpc_client:send(Stream, hpr_packet_up:to_map(test_packet())),
+    %% Send packet and route directly through interface
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
 
-    %% Throw away the headers
-    ?assertMatch({headers, _}, grpc_client:rcv(Stream, 500)),
-
-    {data, Response} = grpc_client:rcv(Stream, 500),
-    ?assert(
-        test_utils:match_map(
-            #{
-                payload => Payload,
-                rx1 => #{
-                    timestamp => Timestamp,
-                    frequency => Frequency,
-                    datarate => DataRate
-                }
-            },
-            Response
-        )
-    ),
-
-    ok = gen_server:stop(ServerPid),
-    ok = gen_server:stop(TestServerPid),
+    case hpr_test_gateway:receive_env_down(GatewayPid) of
+        {ok, GotEnvDown} ->
+            ?assertEqual(EnvDown, GotEnvDown);
+        {error, timeout} ->
+            ct:fail(receive_env_down)
+    end,
+    ok = gen_server:stop(RouterServerPid),
+    ok = gen_server:stop(GatewayPid),
 
     ok.
 
-grpc_full_flow_send_test(_Config) ->
-    Packet = test_packet(),
-    PacketMap = hpr_packet_up:to_map(Packet),
-    %% Startup our server
-    {ok, ServerPid} = grpcbox:start_server(#{
+server_crash_test(_Config) ->
+    %% Startup Router server
+    {ok, RouterServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [packet_router_pb],
-            services => #{'helium.packet_router.packet' => hpr_packet_service}
-        },
-        listen_opts => #{port => ?SERVER_PORT, ip => {0, 0, 0, 0}}
-    }),
-
-    %% Startup test server for receiving
-    {ok, TestServerPid} = grpcbox:start_server(#{
-        grpc_opts => #{
-            service_protos => [packet_router_pb],
-            services => #{'helium.packet_router.packet' => test_hpr_packet_service}
+            services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
         },
         listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
     }),
 
-    %% Forward messages to ourselves
+    %% Interceptor
     Self = self(),
     application:set_env(
         hpr,
         packet_service_route_fun,
-        fun(PacketUp, Socket) ->
-            Self ! {test_route, PacketUp},
-            Socket
+        fun(Env, StreamState) ->
+            {packet, Packet} = hpr_envelope_up:data(Env),
+            Self ! {packet_up, Packet},
+            StreamState
         end
     ),
 
-    %% Insert the matching route for the test packet
-    ok = hpr_config:insert_route(test_route()),
-    meck:new(hpr_packet_service, [passthrough]),
+    Route = test_route(),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
 
-    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", ?SERVER_PORT),
-    {ok, Stream} = grpc_client:new_stream(
-        Connection,
-        'helium.packet_router.packet',
-        route,
-        client_packet_router_pb
-    ),
-    ok = grpc_client:send(Stream, PacketMap),
+    %% Send packet and route directly through interface
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
 
-    ok =
-        receive
-            {test_route, P} -> ?assertEqual(P, Packet)
-        after 250 -> ct:fail(no_packet_delivered)
+    PacketUp =
+        case hpr_test_gateway:receive_send_packet(GatewayPid) of
+            {ok, EnvUp} ->
+                {packet, PUp} = hpr_envelope_up:data(EnvUp),
+                PUp;
+            {error, timeout} ->
+                ct:fail(receive_send_packet)
         end,
 
-    ?assertEqual(
-        1,
-        meck:num_calls(hpr_packet_service, route, '_'),
-        "we should only attempt to send a packet 1 time"
-    ),
+    receive
+        {packet_up, RvcPacketUp} -> ?assertEqual(RvcPacketUp, PacketUp)
+    after timer:seconds(2) -> ct:fail(no_msg_rcvd)
+    end,
 
     %% ===================================================================
     %% We're stopping the test server to make sure we don't try to deliver
     %% multiple times for a connection we cannot make or has gone down.
     %% Also, resetting the mock to make sure route is called once.
-    ok = gen_server:stop(TestServerPid),
-    ok = meck:reset(hpr_packet_service),
+    ok = gen_server:stop(RouterServerPid),
 
-    ok = grpc_client:send(Stream, PacketMap),
-    ok =
-        receive
-            {test_route, _} -> ct:fail(expected_no_packet)
-        after 250 -> ok
-        end,
+    %% Send another packet
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{fcnt => 2}),
 
-    ?assertEqual(
-        1,
-        meck:num_calls(hpr_packet_service, route, '_'),
-        "we should only attempt to send a packet 1 time, even if it failed"
-    ),
-
-    ok = gen_server:stop(ServerPid),
-
-    ok.
-
-grpc_full_flow_connection_refused_test(_Config) ->
-    Packet = test_packet(),
-    PacketMap = hpr_packet_up:to_map(Packet),
-    %% Startup our server
-    {ok, ServerPid} = grpcbox:start_server(#{
-        grpc_opts => #{
-            service_protos => [packet_router_pb],
-            services => #{'helium.packet_router.packet' => hpr_packet_service}
-        },
-        listen_opts => #{port => ?SERVER_PORT, ip => {0, 0, 0, 0}}
-    }),
-
-    %% Insert the matching route for the test packet
-    ok = hpr_config:insert_route(test_route()),
-
-    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", ?SERVER_PORT),
-    {ok, Stream} = grpc_client:new_stream(
-        Connection,
-        'helium.packet_router.packet',
-        route,
-        client_packet_router_pb
-    ),
-    ok = grpc_client:send(Stream, PacketMap),
-
-    %% ===================================================================
-    %% The test server is not started in this test. I'm not sure this test is
-    %% accurate yet. But it is here for when we understand more about why
-    %% grpcbox recalls its service handler when something fails.
-
-    meck:new(hpr_packet_service, [passthrough]),
-    ok = grpc_client:send(Stream, PacketMap),
-    ok =
-        receive
-            {test_route, _} -> ct:fail(expected_no_packet)
-        after 250 -> ok
-        end,
-
-    ?assertEqual(1, meck:num_calls(hpr_packet_service, route, '_')),
-
-    ok = gen_server:stop(ServerPid),
-
-    ok.
-
-server_crash_test(_Config) ->
-    PacketUp = test_packet(),
-    Route = test_route(),
-
-    %% Insert the matching route for the test packet
-    ok = hpr_config:insert_route(test_route()),
-
-    %% Startup a test server
-    {ok, ServerPid} = grpcbox:start_server(#{
-        grpc_opts => #{
-            service_protos => [packet_router_pb],
-            services => #{'helium.packet_router.packet' => test_hpr_packet_service}
-        },
-        listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
-    }),
-
-    %% Interceptor
-    Self = self(),
-    application:set_env(
-        hpr,
-        packet_service_route_fun,
-        fun(Packet, Socket) ->
-            Self ! {server_crash_test, Packet},
-            Socket
-        end
-    ),
-
-    _ = hpr_protocol_router:send(PacketUp, self(), Route),
-
-    ok =
-        receive
-            {server_crash_test, RcvPacket} ->
-                ?assertEqual(RcvPacket, PacketUp)
-        after timer:seconds(2) ->
-            ct:fail(no_msg_rcvd)
-        end,
-
-    ok = gen_server:stop(ServerPid),
+    receive
+        {packet_up, Something} -> ct:fail(Something)
+    after timer:seconds(2) -> ok
+    end,
 
     ?assert(erlang:is_pid(erlang:whereis(hpr_router_connection_manager))),
     ?assert(erlang:is_process_alive(erlang:whereis(hpr_router_connection_manager))),
@@ -347,38 +221,17 @@ server_crash_test(_Config) ->
             0 =:= maps:size(Conns)
         end
     ),
-
     ok.
 
 %% ===================================================================
 %% Helpers
 %% ===================================================================
 
-test_packet() ->
-    {
-        packet_router_packet_up_v1_pb,
-        <<0, 55, 148, 187, 74, 220, 108, 33, 11, 133, 65, 148, 104, 147, 177, 26, 124, 43, 169, 155,
-            182, 228, 95>>,
-        1664302882470,
-        0,
-        904700012,
-        'SF10BW125',
-        5.5,
-        'US915',
-        0,
-        <<0, 106, 152, 166, 157, 156, 48, 101, 22, 212, 221, 120, 200, 146, 186, 112, 220, 64, 11,
-            194, 219, 213, 8, 12, 240, 111, 23, 167, 28, 57, 242, 244, 222>>,
-        <<48, 70, 2, 33, 0, 138, 89, 109, 110, 139, 188, 36, 99, 176, 239, 254, 141, 73, 13, 204,
-            110, 139, 248, 200, 250, 209, 218, 168, 183, 92, 190, 212, 202, 17, 78, 250, 95, 2, 33,
-            0, 142, 149, 198, 0, 113, 83, 115, 99, 67, 245, 98, 243, 147, 71, 12, 112, 78, 181, 25,
-            153, 65, 66, 240, 124, 85, 151, 38, 207, 172, 107, 9, 218>>
-    }.
-
 test_route() ->
     hpr_route:new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 12582995,
-        devaddr_ranges => [#{start_addr => 0, end_addr => 4294967295}],
+        net_id => 0,
+        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
         euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
         oui => 4020,
         server => #{
@@ -386,6 +239,6 @@ test_route() ->
             port => 8082,
             protocol => {packet_router, #{}}
         },
-        max_copies => 1,
+        max_copies => 2,
         nonce => 1
     }).

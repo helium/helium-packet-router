@@ -1,6 +1,6 @@
 -module(hpr_packet_report).
 
--include("../grpc/autogen/server/packet_router_pb.hrl").
+-include("../autogen/server/packet_router_pb.hrl").
 
 -export([
     gateway_timestamp_ms/1,
@@ -129,7 +129,7 @@ new(Opts) ->
 -endif.
 
 %% ------------------------------------------------------------------
-% EUnit tests
+%% EUnit tests
 %% ------------------------------------------------------------------
 -ifdef(TEST).
 

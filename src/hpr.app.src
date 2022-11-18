@@ -23,7 +23,8 @@
         hackney,
         prometheus,
         recon,
-        observer_cli
+        observer_cli,
+        gproc
     ]},
     {env, []},
     {modules, []},

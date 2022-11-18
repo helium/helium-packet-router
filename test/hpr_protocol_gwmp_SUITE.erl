@@ -7,6 +7,7 @@
 ]).
 
 -export([
+    full_test/1,
     single_lns_test/1,
     multi_lns_test/1,
     single_lns_downlink_test/1,
@@ -34,6 +35,7 @@
 %%--------------------------------------------------------------------
 all() ->
     [
+        full_test,
         single_lns_test,
         multi_lns_test,
         single_lns_downlink_test,
@@ -62,6 +64,35 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
+full_test(_Config) ->
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    Route = test_route(1777),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+
+    %% Send packet and route directly through interface
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
+
+    PacketUp =
+        case hpr_test_gateway:receive_send_packet(GatewayPid) of
+            {ok, EnvUp} ->
+                {packet, PUp} = hpr_envelope_up:data(EnvUp),
+                PUp;
+            {error, timeout} ->
+                ct:fail(receive_send_packet)
+        end,
+
+    %% Initial PULL_DATA
+    {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
+    %% PUSH_DATA
+    {ok, Data} = expect_push_data(RcvSocket, router_push_data),
+    ok = verify_push_data(PacketUp, Data),
+
+    ok = gen_udp:close(RcvSocket),
+    ok = gen_server:stop(GatewayPid),
+
+    ok.
+
 single_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
@@ -69,7 +100,7 @@ single_lns_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_protocol_gwmp:send(PacketUp, self(), Route),
+    hpr_protocol_gwmp:send(PacketUp, Route),
     %% Initial PULL_DATA
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
     %% PUSH_DATA
@@ -90,17 +121,17 @@ multi_lns_test(_Config) ->
     {ok, RcvSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to route 1
-    hpr_protocol_gwmp:send(PacketUp, self(), Route1),
+    hpr_protocol_gwmp:send(PacketUp, Route1),
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket1, route1_pull_data),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data),
 
     %% Same packet to route 2
-    hpr_protocol_gwmp:send(PacketUp, self(), Route2),
+    hpr_protocol_gwmp:send(PacketUp, Route2),
     {ok, _Token2, _MAC2} = expect_pull_data(RcvSocket2, route2_pull_data),
     {ok, _} = expect_push_data(RcvSocket2, route2_push_data),
 
     %% Another packet to route 1
-    hpr_protocol_gwmp:send(PacketUp, self(), Route1),
+    hpr_protocol_gwmp:send(PacketUp, Route1),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data_repeat),
     ok = no_more_messages(),
 
@@ -117,7 +148,7 @@ single_lns_downlink_test(_Config) ->
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
-    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route1),
+    _ = hpr_protocol_gwmp:send(PacketUp, Route1),
 
     %% Eat the pull_data
     {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
@@ -181,7 +212,7 @@ single_lns_class_c_downlink_test(_Config) ->
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
-    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route1),
+    _ = hpr_protocol_gwmp:send(PacketUp, Route1),
 
     %% Eat the pull_data
     {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
@@ -250,7 +281,7 @@ multi_lns_downlink_test(_Config) ->
     {ok, LNSSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to LNS 1
-    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route1),
+    _ = hpr_protocol_gwmp:send(PacketUp, Route1),
     {ok, _Token, _Data} = expect_pull_data(LNSSocket1, downlink_test_initiate_connection_lns1),
     %% Receive the uplink from LNS 1 (mostly to get the return address)
     {ok, UDPWorkerAddress} =
@@ -262,7 +293,7 @@ multi_lns_downlink_test(_Config) ->
         end,
 
     %% Send packet to LNS 2
-    _ = hpr_protocol_gwmp:send(PacketUp, self(), Route2),
+    _ = hpr_protocol_gwmp:send(PacketUp, Route2),
     {ok, _Token2, _Data2} = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
     {ok, _} = expect_push_data(LNSSocket2, route2_push_data),
 
@@ -300,12 +331,12 @@ multi_gw_single_lns_test(_Config) ->
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send the packet from the first hotspot
-    hpr_protocol_gwmp:send(PacketUp1, self(), Route),
+    hpr_protocol_gwmp:send(PacketUp1, Route),
     {ok, _Token, _Data} = expect_pull_data(RcvSocket, first_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, first_gw_push_data),
 
     %% Send the same packet from the second hotspot
-    hpr_protocol_gwmp:send(PacketUp2, self(), Route),
+    hpr_protocol_gwmp:send(PacketUp2, Route),
     {ok, _Token2, _Data2} = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
 
@@ -322,7 +353,7 @@ pull_data_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route),
 
     %% Initial PULL_DATA
     {ok, Token, MAC} = expect_pull_data(RcvSocket, route_pull_data),
@@ -339,7 +370,7 @@ pull_ack_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route),
 
     %% Initial PULL_DATA, grab the address and port for responding
     {ok, Token, Address, Port} =
@@ -356,7 +387,7 @@ pull_ack_test(_Config) ->
     {ok, WorkerPid} = hpr_gwmp_sup:lookup_worker(PubKeyBin),
     ?assertEqual(
         1,
-        maps:size(element(6, sys:get_state(WorkerPid))),
+        maps:size(element(5, sys:get_state(WorkerPid))),
         "1 outstanding pull_data"
     ),
 
@@ -366,7 +397,7 @@ pull_ack_test(_Config) ->
 
     %% pull_data has been acked
     ok = test_utils:wait_until(fun() ->
-        [acknowledged] == maps:values(element(6, sys:get_state(WorkerPid)))
+        [acknowledged] == maps:values(element(5, sys:get_state(WorkerPid)))
     end),
 
     %% ===================================================================
@@ -375,11 +406,11 @@ pull_ack_test(_Config) ->
 
     %% Sending the same packet again shouldn't matter here, we only want to
     %% trigger the push_data/pull_data logic.
-    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route),
 
     ?assertEqual(
         #{{{127, 0, 0, 1}, 1777} => acknowledged},
-        element(6, sys:get_state(WorkerPid)),
+        element(5, sys:get_state(WorkerPid)),
         "0 outstanding pull_data"
     ),
 
@@ -405,7 +436,7 @@ pull_ack_hostname_test(_Config) ->
     Route = test_route(erlang:list_to_binary(TestURL), 1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
-    hpr_protocol_gwmp:send(PacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route),
 
     %% Initial PULL_DATA, grab the address and port for responding
     {ok, Token, Address, Port} =
@@ -422,7 +453,7 @@ pull_ack_hostname_test(_Config) ->
     {ok, WorkerPid} = hpr_gwmp_sup:lookup_worker(PubKeyBin),
     ?assertEqual(
         1,
-        maps:size(element(6, sys:get_state(WorkerPid))),
+        maps:size(element(5, sys:get_state(WorkerPid))),
         "1 outstanding pull_data"
     ),
 
@@ -432,7 +463,7 @@ pull_ack_hostname_test(_Config) ->
 
     %% pull_data has been acked
     ok = test_utils:wait_until(fun() ->
-        [acknowledged] == maps:values(element(6, sys:get_state(WorkerPid)))
+        [acknowledged] == maps:values(element(5, sys:get_state(WorkerPid)))
     end),
 
     %% ensure url was resolved
@@ -474,12 +505,12 @@ region_port_redirect_test(_Config) ->
     CNPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = CNPubKeyBin, region = 'CN470'},
 
     %% US send packet
-    hpr_protocol_gwmp:send(USPacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(USPacketUp, Route),
     {ok, _, _} = expect_pull_data(USSocket, us_redirected_pull_data),
     {ok, _} = expect_push_data(USSocket, us_redirected_push_data),
 
     %% EU send packet
-    hpr_protocol_gwmp:send(EUPacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(EUPacketUp, Route),
     {ok, _, _} = expect_pull_data(EUSocket, eu_redirected_pull_data),
     {ok, _} = expect_push_data(EUSocket, eu_redirected_push_data),
 
@@ -491,7 +522,7 @@ region_port_redirect_test(_Config) ->
     end,
 
     %% Send from the last region to make sure fallback port is chosen
-    hpr_protocol_gwmp:send(CNPacketUp, unused_test_stream_handler, Route),
+    hpr_protocol_gwmp:send(CNPacketUp, Route),
     {ok, _, _} = expect_pull_data(FallbackSocket, fallback_pull_data),
     {ok, _} = expect_push_data(FallbackSocket, fallback_push_data),
 
@@ -515,9 +546,9 @@ test_route(Host, Port) ->
 test_route(Host, Port, RegionMapping) ->
     hpr_route:new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1337,
-        devaddr_ranges => [],
-        euis => [],
+        net_id => 0,
+        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
+        euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
         oui => 42,
         server => #{
             host => Host,
@@ -558,6 +589,10 @@ no_more_messages() ->
 
 %% Pulled from a virtual-device session
 fake_join_up_packet() ->
+    PubKeyBin =
+        <<1, 154, 70, 24, 151, 192, 204, 57, 167, 252, 250, 139, 253, 71, 222, 143, 87, 111, 170,
+            125, 26, 173, 134, 204, 181, 85, 5, 55, 163, 222, 154, 89, 114>>,
+    ok = hpr_packet_router_service:register(PubKeyBin),
     #packet_router_packet_up_v1_pb{
         payload =
             <<0, 139, 222, 157, 101, 233, 17, 95, 30, 219, 224, 30, 233, 253, 104, 189, 10, 37, 23,
@@ -569,9 +604,7 @@ fake_join_up_packet() ->
         snr = 5.5,
         region = 'US915',
         hold_time = 0,
-        gateway =
-            <<1, 154, 70, 24, 151, 192, 204, 57, 167, 252, 250, 139, 253, 71, 222, 143, 87, 111,
-                170, 125, 26, 173, 134, 204, 181, 85, 5, 55, 163, 222, 154, 89, 114>>,
+        gateway = PubKeyBin,
         signature =
             <<29, 184, 117, 202, 112, 159, 1, 47, 91, 121, 185, 105, 107, 72, 122, 119, 202, 112,
                 128, 43, 48, 31, 128, 255, 102, 166, 200, 105, 130, 39, 131, 148, 46, 112, 145, 235,

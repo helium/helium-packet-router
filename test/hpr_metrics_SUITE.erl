@@ -60,7 +60,7 @@ packet_up_histogram_test(_Config) ->
     JoinPacketUp = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUp, self())),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUp)),
 
     ?assertNotEqual(
         undefined,

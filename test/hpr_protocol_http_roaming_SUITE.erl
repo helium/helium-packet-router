@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author jonathanruttenberg
-%%% @copyright (C) 2022, <COMPANY>
+%%% @copyright (C) 2022, Nova Labs
 %%% @doc
 %%%
 %%% @end
@@ -49,15 +49,14 @@ all() ->
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
-init_per_testcase(_TestCase, Config) ->
-    ok = hpr_http_roaming_utils:init_ets(),
-    Config.
+init_per_testcase(TestCase, Config) ->
+    test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
-end_per_testcase(_TestCase, _Config) ->
-    ok.
+end_per_testcase(TestCase, Config) ->
+    test_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASES
@@ -67,8 +66,7 @@ class_c_downlink_test(_Config) ->
     #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    Self = self(),
-    hpr_http_roaming_utils:insert_handler(PubKeyBin, Self),
+    hpr_packet_router_service:register(PubKeyBin),
 
     Token = hpr_http_roaming:make_uplink_token(
         PubKeyBin,
@@ -96,7 +94,7 @@ class_c_downlink_test(_Config) ->
         <<"TransactionID">> => rand:uniform(16#FFFF_FFFF)
     },
 
-    ?assertMatch({downlink, #{}, {Self, _}, _Dest}, hpr_http_roaming:handle_message(Input)),
+    ?assertMatch({downlink, #{}, {PubKeyBin, _}, _Dest}, hpr_http_roaming:handle_message(Input)),
 
     ok.
 
@@ -104,7 +102,7 @@ chirpstack_join_accept_test(_Config) ->
     TransactionID = 473719436,
     #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    hpr_packet_router_service:register(PubKeyBin),
 
     Token = hpr_http_roaming:make_uplink_token(
         PubKeyBin,
@@ -144,15 +142,14 @@ chirpstack_join_accept_test(_Config) ->
         <<"TransactionID">> => TransactionID,
         <<"VSExtension">> => #{}
     },
-    Self = self(),
-    ?assertMatch({join_accept, {Self, _}}, hpr_http_roaming:handle_message(A)),
+    ?assertMatch({join_accept, {PubKeyBin, _}}, hpr_http_roaming:handle_message(A)),
 
     ok.
 
 rx1_timestamp_test(_Config) ->
     #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     PacketTime = 0,
     Token = hpr_http_roaming:make_uplink_token(
@@ -207,7 +204,7 @@ rx1_timestamp_test(_Config) ->
 rx1_downlink_test(_Config) ->
     #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     Payload = <<"0x60c04e26e020000000a754ba934840c3bc120989b532ee4613e06e3dd5d95d9d1ceb9e20b1f2">>,
     RXDelay = 2,
@@ -242,10 +239,9 @@ rx1_downlink_test(_Config) ->
         }
     },
 
-    {downlink, _Output, {Pid, DownlinkPacket}, _Dest} = hpr_http_roaming:handle_xmitdata_req(
+    {downlink, _Output, {PubKeyBin, DownlinkPacket}, _Dest} = hpr_http_roaming:handle_xmitdata_req(
         Input
     ),
-    ?assertEqual(Pid, self()),
 
     PayloadFromDownlinkPacket = hpr_packet_down:payload(DownlinkPacket),
 
@@ -267,7 +263,7 @@ rx1_downlink_test(_Config) ->
 rx2_downlink_test(_Config) ->
     #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     Token = hpr_http_roaming:make_uplink_token(
         PubKeyBin,
@@ -301,10 +297,9 @@ rx2_downlink_test(_Config) ->
         }
     },
 
-    {downlink, _Output, {Pid, DownlinkPacket}, _Dest} = hpr_http_roaming:handle_xmitdata_req(
+    {downlink, _Output, {PubKeyBin, DownlinkPacket}, _Dest} = hpr_http_roaming:handle_xmitdata_req(
         Input
     ),
-    ?assertEqual(Pid, self()),
 
     DatarateFromDownlinkPacket =
         hpr_packet_down:rx2_datarate(DownlinkPacket),

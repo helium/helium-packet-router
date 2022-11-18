@@ -20,10 +20,10 @@ test: | $(grpc_services_directory)
 	$(REBAR) fmt --verbose --check "{src,include,test}/**/*.{hrl,erl,app.src}" --exclude-files "src/grpc/autogen/**/*"
 	$(REBAR) fmt --verbose --check "config/{ct,sys,grpc_server_gen,grpc_client_gen}.{config,config.src}"
 	$(REBAR) xref
-	$(REBAR) eunit -v
-	$(REBAR) ct --readable=true
 	$(REBAR) dialyzer
 	$(REBAR) release
+	$(REBAR) eunit -v
+	$(REBAR) ct --readable=true
 
 test-aws:
 	docker compose -f docker-compose-ct.yaml up -d;

@@ -58,7 +58,7 @@ bad_signature_test(_Config) ->
     JoinPacketBadSig = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, self())),
+    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
     ok.
 
 gateway_limit_exceeded_test(_Config) ->
@@ -75,7 +75,7 @@ gateway_limit_exceeded_test(_Config) ->
         fun(_) ->
             erlang:spawn(
                 fun() ->
-                    R = hpr_routing:handle_packet(JoinPacketUpValid, self()),
+                    R = hpr_routing:handle_packet(JoinPacketUpValid),
                     Self ! {gateway_limit_exceeded_test, R}
                 end
             )
@@ -93,7 +93,7 @@ invalid_packet_type_test(_Config) ->
         gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid, self())
+        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid)
     ),
     ok.
 
@@ -104,7 +104,7 @@ join_req_test(_Config) ->
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -127,13 +127,12 @@ join_req_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, self())),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
     Received1 =
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
@@ -142,13 +141,12 @@ join_req_test(_Config) ->
     UplinkPacketUp = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, self())),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
 
     Received2 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
@@ -185,7 +183,7 @@ max_copies_test(_Config) ->
     ok = hpr_config:insert_route(Route),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
     #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
@@ -211,16 +209,15 @@ max_copies_test(_Config) ->
         gateway => Gateway3, sig_fun => SigFun3, devaddr => DevAddr, fcnt => 1
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, self())),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2, self())),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3, self())),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3)),
 
     Self = self(),
     Received1 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
@@ -228,7 +225,6 @@ max_copies_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp2,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},
@@ -239,13 +235,12 @@ max_copies_test(_Config) ->
         gateway => Gateway3, sig_fun => SigFun3, devaddr => DevAddr, fcnt => 2
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4, self())),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4)),
 
     Received3 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp4,
-                Self,
                 hpr_config:remove_euis_dev_ranges(Route)
             ]},
             ok},

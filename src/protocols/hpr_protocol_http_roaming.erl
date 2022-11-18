@@ -11,14 +11,13 @@
 
 -include("hpr_http_roaming.hrl").
 
--export([send/3]).
+-export([send/2]).
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
-    GatewayStream :: hpr_http_roaming:gateway_stream(),
     Route :: hpr_route:route()
 ) -> ok | {error, any()}.
-send(PacketUp, GatewayStream, Route) ->
+send(PacketUp, Route) ->
     WorkerKey = worker_key_from(PacketUp, Route),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
@@ -39,7 +38,7 @@ send(PacketUp, GatewayStream, Route) ->
         {ok, WorkerPid} ->
             GatewayTime = hpr_packet_up:timestamp(PacketUp),
             hpr_http_roaming_worker:handle_packet(
-                WorkerPid, PacketUp, GatewayTime, GatewayStream
+                WorkerPid, PacketUp, GatewayTime
             ),
             ok
     end.

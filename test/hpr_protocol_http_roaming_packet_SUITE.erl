@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author jonathanruttenberg
-%%% @copyright (C) 2022, <COMPANY>
+%%% @copyright (C) 2022, Nova Labs
 %%% @doc
 %%%
 %%% @end
@@ -112,6 +112,8 @@ http_sync_uplink_join_test(_Config) ->
     DevEUI = erlang:binary_to_integer(DevEUIBin, 16),
     AppEUI = erlang:binary_to_integer(<<"1122334455667788">>, 16),
 
+    ok = hpr_packet_router_service:register(PubKeyBin),
+
     SendPacketFun = fun() ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_join(
@@ -122,7 +124,7 @@ http_sync_uplink_join_test(_Config) ->
             #{timestamp => GatewayTime}
         ),
 
-        ok = hpr_routing:handle_packet(PacketUp, self()),
+        ok = hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -264,7 +266,7 @@ http_sync_downlink_test(_Config) ->
     %% NOTE: We need to insert the transaction and handler here because we're
     %% only simulating downlinks. In a normal flow, these details would be
     %% filled during the uplink process.
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     downlink_test_route(sync),
 
@@ -324,6 +326,8 @@ http_async_uplink_join_test(_Config) ->
     DevEUI = erlang:binary_to_integer(DevEUIBin, 16),
     AppEUI = erlang:binary_to_integer(<<"1122334455667788">>, 16),
 
+    ok = hpr_packet_router_service:register(PubKeyBin),
+
     SendPacketFun = fun() ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_join(
@@ -333,7 +337,7 @@ http_async_uplink_join_test(_Config) ->
             AppEUI,
             #{timestamp => GatewayTime}
         ),
-        ok = hpr_routing:handle_packet(PacketUp, self()),
+        ok = hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -346,7 +350,10 @@ http_async_uplink_join_test(_Config) ->
     PacketTime = hpr_packet_up:timestamp(PacketUp),
 
     %% 4. Roamer receive http uplink
-    {ok, #{<<"TransactionID">> := TransactionID, <<"ULMetaData">> := #{<<"FNSULToken">> := Token}}} = roamer_expect_uplink_data(
+    {ok, #{
+        <<"TransactionID">> := TransactionID,
+        <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
+    }} = roamer_expect_uplink_data(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => fun erlang:is_binary/1,
@@ -439,7 +446,7 @@ http_async_downlink_test(_Config) ->
 
     %% 2. insert response handler
     TransactionID = 23,
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
 
     %%    insert route
     downlink_test_route(async),
@@ -544,6 +551,8 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
         }
     }),
 
+    ok = hpr_packet_router_service:register(PubKeyBin),
+
     SendPacketFun = fun(DevAddr, FrameCount) ->
         GatewayTime = erlang:system_time(millisecond),
         PacketUp = test_utils:frame_packet_uplink(
@@ -554,7 +563,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
             FrameCount,
             #{timestamp => GatewayTime}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -639,7 +648,7 @@ http_uplink_packet_test(_Config) ->
             0,
             #{timestamp => GatewayTime}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -711,7 +720,7 @@ http_class_c_downlink_test(_Config) ->
 
     %% 1. insert handler and config
     TransactionID = 2176,
-    ok = hpr_http_roaming_utils:insert_handler(PubKeyBin, self()),
+    ok = hpr_packet_router_service:register(PubKeyBin),
     downlink_test_route(async),
 
     %% 2. send downlink
@@ -825,7 +834,7 @@ http_multiple_gateways_test(_Config) ->
             0,
             #{timestamp => GatewayTime, rssi => RSSI}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -923,7 +932,7 @@ http_multiple_joins_same_dest_test(_Config) ->
 
     ok = start_uplink_listener(#{port => 3002, callback_args => #{forward => self()}}),
 
-    ok = hpr_routing:handle_packet(PacketUp, self()),
+    ok = hpr_routing:handle_packet(PacketUp),
 
     {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
 
@@ -956,7 +965,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
             0,
             #{timestamp => GatewayTime, rssi => RSSI}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
     uplink_test_route(#{dedupe_timeout => 0}),
@@ -1061,7 +1070,7 @@ http_overlapping_devaddr_test(_Config) ->
     ok = start_uplink_listener(#{port => 3002}),
     ok = start_uplink_listener(#{port => 3003}),
 
-    hpr_routing:handle_packet(PacketUp, self()),
+    hpr_routing:handle_packet(PacketUp),
 
     {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
     {ok, #{<<"ReceiverID">> := ReceiverTwo}, _, _} = http_rcv(),
@@ -1098,7 +1107,7 @@ http_uplink_packet_late_test(_Config) ->
             0,
             #{timestamp => GatewayTime}
         ),
-        hpr_routing:handle_packet(PacketUp, self()),
+        hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
 
@@ -1487,7 +1496,7 @@ gateway_expect_downlink(ExpectFn) ->
     receive
         {packet_down, PacketDown} ->
             ExpectFn(PacketDown)
-    after 1000 -> ct:fail(gateway_expect_downlink_timeout)
+    after 1000 -> ct:fail(gateway_expect_packet_down_timeout)
     end.
 
 -spec http_rcv() -> {ok, any()}.

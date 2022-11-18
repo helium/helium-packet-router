@@ -43,7 +43,7 @@ init_per_testcase(TestCase, Config) ->
     {ok, ServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [config_pb],
-            services => #{'helium.config.route' => test_config_service}
+            services => #{'helium.config.route' => hpr_test_config_service}
         },
         listen_opts => #{port => ?PORT, ip => {0, 0, 0, 0}}
     }),
@@ -97,7 +97,7 @@ create_route_test(Config) ->
         nonce => 1
     },
     Route = hpr_route:new(RouteMap),
-    ok = test_config_service:route_stream_resp(
+    ok = hpr_test_config_service:route_stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => RouteMap
         })
@@ -152,7 +152,7 @@ update_route_test(Config) ->
         nonce => 1
     },
     Route1 = hpr_route:new(Route1Map),
-    ok = test_config_service:route_stream_resp(
+    ok = hpr_test_config_service:route_stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => Route1Map
         })
@@ -189,7 +189,7 @@ update_route_test(Config) ->
         nonce => 2
     },
     Route2 = hpr_route:new(Route2Map),
-    ok = test_config_service:route_stream_resp(
+    ok = hpr_test_config_service:route_stream_resp(
         hpr_route_stream_res:from_map(#{
             action => update, route => Route2Map
         })
@@ -245,7 +245,7 @@ delete_route_test(Config) ->
         nonce => 1
     },
     Route1 = hpr_route:new(Route1Map),
-    ok = test_config_service:route_stream_resp(
+    ok = hpr_test_config_service:route_stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => Route1Map
         })
@@ -274,7 +274,7 @@ delete_route_test(Config) ->
 
     %% Delete our Route
 
-    ok = test_config_service:route_stream_resp(
+    ok = hpr_test_config_service:route_stream_resp(
         hpr_route_stream_res:from_map(#{
             action => delete, route => Route1Map
         })
