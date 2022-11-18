@@ -108,7 +108,6 @@ handle_continue(
     {ok, Stream} = grpc_client:new_stream(
         Connection, 'helium.config.route', stream, client_config_pb
     ),
-    %% TODO: IMplement backoff
     %% Sending Route Stream Request
     {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
