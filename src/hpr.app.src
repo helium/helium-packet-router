@@ -24,7 +24,8 @@
         prometheus,
         recon,
         observer_cli,
-        gproc
+        gproc,
+        backoff
     ]},
     {env, []},
     {modules, []},
