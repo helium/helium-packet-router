@@ -1,4 +1,4 @@
--module(hpr_config_worker).
+-module(hpr_route_worker).
 
 -behaviour(gen_server).
 
@@ -39,7 +39,7 @@
     conn_backoff :: backoff:backoff()
 }).
 
--type config_worker_opts() :: #{
+-type route_worker_opts() :: #{
     host := string(),
     port := integer() | string(),
     file_backup_path => string()
@@ -56,7 +56,7 @@
 %% API Function Definitions
 %% ------------------------------------------------------------------
 
--spec start_link(config_worker_opts()) -> any().
+-spec start_link(route_worker_opts()) -> any().
 start_link(#{host := Host, port := Port} = Args) when is_list(Host) andalso is_number(Port) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []);
 start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso is_list(PortStr) ->

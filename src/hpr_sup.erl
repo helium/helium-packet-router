@@ -77,14 +77,14 @@ init([]) ->
         {port, HttpRoamingDownlink}
     ],
 
-    ConfigWorkerConfig = application:get_env(?APP, config_worker, #{}),
+    RouteWorkerConfig = application:get_env(?APP, route_worker, #{}),
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
         ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
         ?ELLI_WORKER(hpr_http_roaming_downlink_handler, [ElliConfigRoamingDownlink]),
-        ?WORKER(hpr_config_worker, [ConfigWorkerConfig]),
+        ?WORKER(hpr_route_worker, [RouteWorkerConfig]),
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
         ?SUP(hpr_gwmp_sup, []),
         ?SUP(hpr_http_roaming_sup, []),

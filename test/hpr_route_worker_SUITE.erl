@@ -1,4 +1,4 @@
--module(hpr_config_worker_SUITE).
+-module(hpr_route_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/grpc/autogen/server/config_pb.hrl").
@@ -52,8 +52,8 @@ init_per_testcase(TestCase, Config) ->
 
     %% Setup config worker
     BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
-    FilePath = filename:join(BaseDir, "config_worker.backup"),
-    application:set_env(hpr, config_worker, #{
+    FilePath = filename:join(BaseDir, "route_worker.backup"),
+    application:set_env(hpr, route_worker, #{
         host => "localhost",
         port => ?PORT,
         file_backup_path => FilePath
@@ -74,7 +74,7 @@ end_per_testcase(TestCase, Config) ->
         true -> ok = gen_server:stop(ServerPid);
         false -> ok
     end,
-    application:set_env(hpr, config_worker, #{}),
+    application:set_env(hpr, route_worker, #{}),
     ok.
 
 %%--------------------------------------------------------------------

@@ -38,7 +38,7 @@
     conn_backoff :: backoff:backoff()
 }).
 
--type config_worker_opts() :: #{
+-type config_conn_worker_opts() :: #{
     host := string(),
     port := integer() | string()
 }.
@@ -53,7 +53,7 @@
 %% API Function Definitions
 %% ------------------------------------------------------------------
 
--spec start_link(config_worker_opts()) -> any().
+-spec start_link(config_conn_worker_opts()) -> any().
 start_link(#{host := Host, port := Port} = Args) when is_list(Host) andalso is_number(Port) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []);
 start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso is_list(PortStr) ->
