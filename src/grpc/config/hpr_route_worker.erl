@@ -31,19 +31,12 @@
 -define(BACKOFF_MAX, timer:minutes(5)).
 
 -record(state, {
-    host :: string(),
-    port :: integer(),
     connection :: grpc_client:connection() | undefined,
     stream :: grpc_client:stream() | undefined,
     file_backup_path :: path(),
     conn_backoff :: backoff:backoff()
 }).
 
--type route_worker_opts() :: #{
-    host := string(),
-    port := integer() | string(),
-    file_backup_path => string()
-}.
 -type path() :: string() | undefined.
 
 -define(SERVER, ?MODULE).
@@ -56,48 +49,44 @@
 %% API Function Definitions
 %% ------------------------------------------------------------------
 
--spec start_link(route_worker_opts()) -> any().
-start_link(#{host := Host, port := Port} = Args) when is_list(Host) andalso is_number(Port) ->
-    gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []);
-start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso is_list(PortStr) ->
+-spec start_link(map()) -> any().
+start_link(Args) ->
     gen_server:start_link(
-        {local, ?SERVER}, ?SERVER, Args#{port := erlang:list_to_integer(PortStr)}, []
-    );
-start_link(_) ->
-    ignore.
+        {local, ?SERVER}, ?SERVER, Args, []
+    ).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
-init(#{host := Host, port := Port} = Args) ->
+init(Args) ->
     Path = maps:get(file_backup_path, Args, undefined),
     Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
     State = #state{
-        host = Host,
-        port = Port,
         connection = undefined,
         stream = undefined,
         file_backup_path = Path,
         conn_backoff = Backoff
     },
-    lager:info("starting config worker ~s:~w file=~s", [Host, Port, Path]),
+    lager:info("starting config worker file=~s", [Path]),
     ok = maybe_init_from_file(Path),
     {ok, State, {continue, ?CONNECT}}.
 
-handle_continue(?CONNECT, #state{host = Host, port = Port, conn_backoff = Backoff0} = State) ->
+handle_continue(?CONNECT, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    case grpc_client:connect(tcp, Host, Port) of
-        {ok, Connection} ->
+    case hpr_config_conn_worker:get_connection() of
+        undefined ->
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            lager:error("failed to get connection sleeping ~wms", [Delay]),
+            timer:sleep(Delay),
+            {noreply, State#state{conn_backoff = Backoff1}, {continue, ?CONNECT}};
+        Connection ->
+            #{http_connection := Pid} = Connection,
+            _Ref = erlang:monitor(process, Pid, [{tag, {'DOWN', ?MODULE}}]),
             lager:info("connected"),
             {_, Backoff1} = backoff:succeed(Backoff0),
             {noreply, State#state{connection = Connection, conn_backoff = Backoff1},
-                {continue, ?INIT_STREAM}};
-        {error, _E} ->
-            {Delay, Backoff1} = backoff:fail(Backoff0),
-            lager:error("failed to connect ~pm sleeping ~wms", [_E, Delay]),
-            timer:sleep(Delay),
-            {noreply, State#state{conn_backoff = Backoff1}, {continue, ?CONNECT}}
+                {continue, ?INIT_STREAM}}
     end;
 handle_continue(
     ?INIT_STREAM,
@@ -148,6 +137,10 @@ handle_call(Msg, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
+handle_info({{'DOWN', ?MODULE}, _Mon, process, _Pid, _ExitReason}, State) ->
+    lager:info("connection ~p went down ~p", [_Pid, _ExitReason]),
+    self() ! ?CONNECT,
+    {noreply, State#state{connection = undefined}, {continue, ?CONNECT}};
 handle_info(_Msg, State) ->
     lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.

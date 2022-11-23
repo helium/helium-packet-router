@@ -47,6 +47,9 @@ start_link() ->
 
 init([]) ->
     KeyFileName = application:get_env(hpr, key, "/var/data/hpr.key"),
+
+    lager:info("KeyFileName ~s", [KeyFileName]),
+
     ok = filelib:ensure_dir(KeyFileName),
     Key =
         case libp2p_crypto:load_keys(KeyFileName) of
@@ -63,7 +66,6 @@ init([]) ->
     ok = persistent_term:put(?HPR_KEY, Key),
 
     ok = hpr_routing:init(),
-    ok = hpr_config:init(),
     ok = hpr_max_copies:init(),
 
     ElliConfigMetrics = [
@@ -77,17 +79,21 @@ init([]) ->
         {port, HttpRoamingDownlink}
     ],
 
-    RouteWorkerConfig = application:get_env(?APP, route_worker, #{}),
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
         ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
-        ?ELLI_WORKER(hpr_http_roaming_downlink_handler, [ElliConfigRoamingDownlink]),
-        ?WORKER(hpr_route_worker, [RouteWorkerConfig]),
+
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
+
+        ?SUP(hpr_config_service_sup, []),
+
         ?SUP(hpr_gwmp_sup, []),
+
         ?SUP(hpr_http_roaming_sup, []),
+        ?ELLI_WORKER(hpr_http_roaming_downlink_handler, [ElliConfigRoamingDownlink]),
+
         ?WORKER(hpr_router_connection_manager, []),
         ?WORKER(hpr_router_stream_manager, [
             'helium.packet_router.packet', route, client_packet_router_pb

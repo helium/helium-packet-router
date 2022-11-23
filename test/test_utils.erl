@@ -23,11 +23,15 @@
 -define(RFU, 2#110).
 -define(PRIORITY, 2#111).
 
+-define(CONFIG_SERVICE_PORT, 8085).
+
 init_per_testcase(TestCase, Config) ->
-    %% Start HPR
-    BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
-    KeyFilePath = filename:join(BaseDir, "hpr.key"),
-    ok = application:set_env(hpr, key, KeyFilePath),
+    Suite = proplists:get_value(suite, proplists:get_value(tc_group_properties, Config)),
+    BaseDir = filename:join([Suite, TestCase]),
+    KeyFilePath = filename:join([BaseDir, "hpr.key"]),
+    ok = application:set_env(hpr, key, KeyFilePath, [{persistent, true}]),
+
+    ct:pal("BaseDir ~p", [BaseDir]),
 
     FormatStr = [
         "[",
@@ -46,29 +50,76 @@ init_per_testcase(TestCase, Config) ->
         message,
         "\n"
     ],
+    ok = application:set_env(lager, log_root, BaseDir),
     case os:getenv("CT_LAGER", "NONE") of
         "DEBUG" ->
-            ok = application:set_env(lager, handlers, [
-                {lager_console_backend, [
-                    {level, debug},
-                    {formatter_config, FormatStr}
-                ]},
-                {lager_file_backend, [
-                    {file, "hpr.log"},
-                    {level, debug},
-                    {formatter_config, FormatStr}
-                ]}
-            ]);
+            ok = application:set_env(
+                lager,
+                handlers,
+                [
+                    {lager_console_backend, [
+                        {level, debug},
+                        {formatter_config, FormatStr}
+                    ]},
+                    {lager_file_backend, [
+                        {file, "hpr.log"},
+                        {level, debug},
+                        {formatter_config, FormatStr}
+                    ]}
+                ]
+            );
         _ ->
-            ok
+            ok = application:set_env(
+                lager,
+                handlers,
+                [
+                    {lager_file_backend, [
+                        {file, "hpr.log"},
+                        {level, debug},
+                        {formatter_config, FormatStr}
+                    ]}
+                ]
+            )
     end,
+    _ = application:ensure_all_started(lager),
+
+    %% Startup a config service test server
+    _ = application:ensure_all_started(grpcbox),
+    {ok, ServerPid} = grpcbox:start_server(#{
+        grpc_opts => #{
+            service_protos => [config_pb],
+            services => #{'helium.config.route' => hpr_test_config_service}
+        },
+        listen_opts => #{port => ?CONFIG_SERVICE_PORT, ip => {0, 0, 0, 0}}
+    }),
+
+    %% Setup route worker
+    FilePath = filename:join([BaseDir, "route_worker.backup"]),
+    application:set_env(
+        hpr,
+        config_service,
+        #{
+            host => "localhost",
+            port => ?CONFIG_SERVICE_PORT,
+            route => #{
+                file_backup_path => FilePath
+            }
+        },
+        [{persistent, true}]
+    ),
 
     application:ensure_all_started(?APP),
-    Config.
+    [{config_service_pid, ServerPid}, {router_worker_file_backup_path, FilePath} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     application:stop(?APP),
     application:stop(throttle),
+    application:stop(lager),
+    ServerPid = proplists:get_value(config_service_pid, Config),
+    case erlang:is_process_alive(ServerPid) of
+        true -> ok = gen_server:stop(ServerPid);
+        false -> ok
+    end,
     Config.
 
 -spec join_packet_up(

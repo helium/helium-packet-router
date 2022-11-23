@@ -17,7 +17,6 @@
 %% ------------------------------------------------------------------
 -export([
     init/1,
-    handle_continue/2,
     handle_call/3,
     handle_cast/2,
     handle_info/2,
@@ -59,9 +58,7 @@ start_link(#{host := Host, port := Port} = Args) when is_list(Host) andalso is_n
 start_link(#{host := Host, port := PortStr} = Args) when is_list(Host) andalso is_list(PortStr) ->
     gen_server:start_link(
         {local, ?SERVER}, ?SERVER, Args#{port := erlang:list_to_integer(PortStr)}, []
-    );
-start_link(_) ->
-    ignore.
+    ).
 
 -spec get_connection() -> grpc_client:connection() | undefined.
 get_connection() ->
@@ -80,9 +77,19 @@ init(#{host := Host, port := Port}) ->
         conn_backoff = Backoff
     },
     lager:info("starting config connection worker ~s:~w", [Host, Port]),
-    {ok, State, {continue, ?CONNECT}}.
+    self() ! ?CONNECT,
+    {ok, State}.
 
-handle_continue(?CONNECT, #state{host = Host, port = Port, conn_backoff = Backoff0} = State) ->
+handle_call(get_connection, _From, #state{connection = Connection} = State) ->
+    {reply, Connection, State};
+handle_call(_Msg, _From, State) ->
+    lager:warning("unimplemented_call ~p", [_Msg]),
+    {reply, ok, State}.
+
+handle_cast(Msg, State) ->
+    {stop, {unimplemented_cast, Msg}, State}.
+
+handle_info(?CONNECT, #state{host = Host, port = Port, conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
     case grpc_client:connect(tcp, Host, Port) of
         {ok, Connection} ->
@@ -94,22 +101,13 @@ handle_continue(?CONNECT, #state{host = Host, port = Port, conn_backoff = Backof
         {error, _E} ->
             {Delay, Backoff1} = backoff:fail(Backoff0),
             lager:error("failed to connect ~pm sleeping ~wms", [_E, Delay]),
-            timer:sleep(Delay),
+            _ = erlang:send_after(Delay, self(), ?CONNECT),
             {noreply, State#state{conn_backoff = Backoff1}}
-    end.
-
-handle_call(get_connection, _From, #state{connection = Connection} = State) ->
-    {reply, Connection, State};
-handle_call(_Msg, _From, State) ->
-    lager:warning("unimplemented_call ~p", [_Msg]),
-    {reply, ok, State}.
-
-handle_cast(Msg, State) ->
-    {stop, {unimplemented_cast, Msg}, State}.
-
+    end;
 handle_info({{'DOWN', ?MODULE}, _Mon, process, _Pid, _ExitReason}, State) ->
     lager:info("connection ~p went down ~p", [_Pid, _ExitReason]),
-    {noreply, State#state{connection = undefined}, {continue, ?CONNECT}};
+    self() ! ?CONNECT,
+    {noreply, State#state{connection = undefined}};
 handle_info(_Msg, State) ->
     lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.
@@ -118,7 +116,3 @@ terminate(_Reason, #state{connection = Connection}) ->
     lager:error("terminate ~p", [_Reason]),
     _ = catch grpc_client:stop_connection(Connection),
     ok.
-
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------

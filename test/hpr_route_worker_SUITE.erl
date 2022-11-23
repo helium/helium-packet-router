@@ -12,11 +12,8 @@
 -export([
     create_route_test/1,
     update_route_test/1,
-    delete_route_test/1,
-    backoff_test/1
+    delete_route_test/1
 ]).
-
--define(PORT, 8085).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -32,36 +29,14 @@ all() ->
     [
         create_route_test,
         update_route_test,
-        delete_route_test,
-        backoff_test
+        delete_route_test
     ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    %% Startup a config service test server
-    _ = application:ensure_all_started(grpcbox),
-    {ok, ServerPid} = grpcbox:start_server(#{
-        grpc_opts => #{
-            service_protos => [config_pb],
-            services => #{'helium.config.route' => hpr_test_config_service}
-        },
-        listen_opts => #{port => ?PORT, ip => {0, 0, 0, 0}}
-    }),
-
-    %% Setup config worker
-    BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
-    FilePath = filename:join(BaseDir, "route_worker.backup"),
-    application:set_env(hpr, route_worker, #{
-        host => "localhost",
-        port => ?PORT,
-        file_backup_path => FilePath
-    }),
-
-    test_utils:init_per_testcase(TestCase, [
-        {server_pid, ServerPid}, {file_backup_path, FilePath} | Config
-    ]).
+    test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
@@ -69,12 +44,6 @@ init_per_testcase(TestCase, Config) ->
 end_per_testcase(TestCase, Config) ->
     meck:unload(),
     test_utils:end_per_testcase(TestCase, Config),
-    ServerPid = proplists:get_value(server_pid, Config),
-    case erlang:is_process_alive(ServerPid) of
-        true -> ok = gen_server:stop(ServerPid);
-        false -> ok
-    end,
-    application:set_env(hpr, route_worker, #{}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -117,7 +86,7 @@ create_route_test(Config) ->
     ),
 
     %% Check backup file
-    FilePath = proplists:get_value(file_backup_path, Config),
+    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
     case file:read_file(FilePath) of
         {ok, Binary} ->
             Map = erlang:binary_to_term(Binary),
@@ -165,7 +134,7 @@ update_route_test(Config) ->
     ),
 
     %% Let time to process new routes
-    FilePath = proplists:get_value(file_backup_path, Config),
+    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
     ok = test_utils:wait_until(
         fun() ->
             case file:read_file(FilePath) of
@@ -258,7 +227,7 @@ delete_route_test(Config) ->
     ),
 
     %% Let time to process new routes
-    FilePath = proplists:get_value(file_backup_path, Config),
+    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
     ok = test_utils:wait_until(
         fun() ->
             case file:read_file(FilePath) of
@@ -307,31 +276,6 @@ delete_route_test(Config) ->
     ?assertEqual(0, ets:info(hpr_config_routes_by_devaddr, size)),
     ?assertEqual(0, ets:info(hpr_config_routes_by_eui, size)),
     ?assertEqual(0, ets:info(hpr_config_routes, size)),
-
-    ok.
-
-backoff_test(Config) ->
-    %% Let it startup
-    timer:sleep(100),
-
-    ServerPid = proplists:get_value(server_pid, Config),
-
-    meck:new(backoff, [passthrough]),
-
-    gen_server:stop(ServerPid),
-
-    ?assertEqual(1, meck:num_calls(backoff, fail, 1)),
-
-    %% We sleep 3s the BACKOFF_MIN is 1s so we should get another 2 tries
-    timer:sleep(3000),
-
-    ok = test_utils:wait_until(
-        fun() ->
-            3 == meck:num_calls(backoff, fail, 1)
-        end
-    ),
-
-    meck:unload(backoff),
 
     ok.
 
