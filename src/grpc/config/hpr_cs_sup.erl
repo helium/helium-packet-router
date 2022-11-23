@@ -1,4 +1,4 @@
--module(hpr_config_service_sup).
+-module(hpr_cs_sup).
 
 -behaviour(supervisor).
 
@@ -23,12 +23,12 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    ok = hpr_config:init(),
+    ok = hpr_route_ets:init(),
 
     ConfigServiceConfig = application:get_env(?APP, config_service, #{}),
     ChildSpecs = [
-        ?WORKER(hpr_config_conn_worker, [ConfigServiceConfig]),
-        ?WORKER(hpr_route_worker, [maps:get(route, ConfigServiceConfig, #{})])
+        ?WORKER(hpr_cs_conn_worker, [ConfigServiceConfig]),
+        ?WORKER(hpr_cs_route_stream_worker, [maps:get(route, ConfigServiceConfig, #{})])
     ],
     {ok, {
         #{

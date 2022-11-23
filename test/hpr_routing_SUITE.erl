@@ -122,7 +122,7 @@ join_req_test(_Config) ->
         max_copies => 1,
         nonce => 1
     }),
-    ok = hpr_config:insert_route(Route),
+    ok = hpr_route_ets:insert_route(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
@@ -133,7 +133,7 @@ join_req_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
-                hpr_config:remove_euis_dev_ranges(Route)
+                hpr_route_ets:remove_euis_dev_ranges(Route)
             ]},
             ok},
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
@@ -147,7 +147,7 @@ join_req_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
-                hpr_config:remove_euis_dev_ranges(Route)
+                hpr_route_ets:remove_euis_dev_ranges(Route)
             ]},
             ok},
     ?assertEqual(
@@ -180,7 +180,7 @@ max_copies_test(_Config) ->
         max_copies => MaxCopies,
         nonce => 1
     }),
-    ok = hpr_config:insert_route(Route),
+    ok = hpr_route_ets:insert_route(Route),
 
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
@@ -218,14 +218,14 @@ max_copies_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
-                hpr_config:remove_euis_dev_ranges(Route)
+                hpr_route_ets:remove_euis_dev_ranges(Route)
             ]},
             ok},
     Received2 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp2,
-                hpr_config:remove_euis_dev_ranges(Route)
+                hpr_route_ets:remove_euis_dev_ranges(Route)
             ]},
             ok},
 
@@ -241,7 +241,7 @@ max_copies_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp4,
-                hpr_config:remove_euis_dev_ranges(Route)
+                hpr_route_ets:remove_euis_dev_ranges(Route)
             ]},
             ok},
 

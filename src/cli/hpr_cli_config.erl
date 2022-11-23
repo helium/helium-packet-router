@@ -45,7 +45,7 @@ config_cmd() ->
     ].
 
 config_list(["config", "ls"], [], []) ->
-    Routes = hpr_config:all_routes(),
+    Routes = hpr_route_ets:all_routes(),
 
     %% | Net ID | OUI | Protocol     | Max Copies | Addr Range Cnt | EUI Cnt |
     %% |--------+-----+--------------+------------+----------------+---------|
@@ -71,7 +71,7 @@ config_list(_, _, _) ->
 
 config_oui_list(["config", "oui", OUIString], [], []) ->
     OUI = erlang:list_to_integer(OUIString),
-    Routes = hpr_config:oui_routes(OUI),
+    Routes = hpr_route_ets:oui_routes(OUI),
 
     %% OUI 4
     %% ========================================================

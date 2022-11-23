@@ -1,4 +1,4 @@
--module(hpr_route_worker_SUITE).
+-module(hpr_cs_route_stream_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/grpc/autogen/server/config_pb.hrl").
@@ -81,7 +81,7 @@ create_route_test(Config) ->
     %% Let time to process new routes
     ok = test_utils:wait_until(
         fun() ->
-            1 =:= ets:info(hpr_config_routes, size)
+            1 =:= ets:info(hpr_route_ets_routes, size)
         end
     ),
 
@@ -97,12 +97,12 @@ create_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual([], hpr_config:lookup_devaddr(16#00000020)),
-    ?assertEqual([], hpr_config:lookup_eui(3, 3)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_eui(1, 100)),
+    ?assertEqual([], hpr_route_ets:lookup_devaddr(16#00000020)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(3, 3)),
     ok.
 
 update_route_test(Config) ->
@@ -149,10 +149,10 @@ update_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 100)),
 
     %% Update our Route
     Route2Map = Route1Map#{
@@ -184,17 +184,17 @@ update_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#0000000B)
+        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#0000000B)
     ),
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#0000000C)
+        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#0000000C)
     ),
-    ?assertEqual([], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_eui(2, 2)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(1, 100)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_eui(2, 2)),
 
     ok.
 
@@ -242,10 +242,10 @@ delete_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 100)),
 
     %% Delete our Route
 
@@ -269,13 +269,13 @@ delete_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [], hpr_config:lookup_devaddr(16#00000005)
+        [], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual([], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual(0, ets:info(hpr_config_routes_by_devaddr, size)),
-    ?assertEqual(0, ets:info(hpr_config_routes_by_eui, size)),
-    ?assertEqual(0, ets:info(hpr_config_routes, size)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(1, 100)),
+    ?assertEqual(0, ets:info(hpr_route_ets_routes_by_devaddr, size)),
+    ?assertEqual(0, ets:info(hpr_route_ets_routes_by_eui, size)),
+    ?assertEqual(0, ets:info(hpr_route_ets_routes, size)),
 
     ok.
 

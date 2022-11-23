@@ -132,8 +132,8 @@ http_sync_uplink_join_test(_Config) ->
 
     lager:debug(
         [
-            {devaddr, ets:tab2list(hpr_config_routes_by_devaddr)},
-            {eui, ets:tab2list(hpr_config_routes_by_eui)}
+            {devaddr, ets:tab2list(hpr_route_ets_routes_by_devaddr)},
+            {eui, ets:tab2list(hpr_route_ets_routes_by_eui)}
         ],
         "config ets"
     ),
@@ -568,7 +568,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     end,
 
     uplink_test_route(),
-    lager:debug("routes by devaddr: ~p", [ets:tab2list(hpr_config_routes_by_devaddr)]),
+    lager:debug("routes by devaddr: ~p", [ets:tab2list(hpr_route_ets_routes_by_devaddr)]),
 
     {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY, 0),
     Payload = hpr_packet_up:payload(PacketUp),
@@ -1201,7 +1201,7 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
         }
     },
     Route = hpr_route:new(RouteMap),
-    hpr_config:insert_route(Route).
+    hpr_route_ets:insert_route(Route).
 
 uplink_test_route() ->
     uplink_test_route(#{id => <<"route1">>}).
@@ -1241,7 +1241,7 @@ uplink_test_route(InputMap) ->
         }
     },
     Route = hpr_route:new(RouteMap),
-    hpr_config:insert_route(Route).
+    hpr_route_ets:insert_route(Route).
 
 downlink_test_route(FlowType) ->
     RouteMap = #{
@@ -1256,7 +1256,7 @@ downlink_test_route(FlowType) ->
         }
     },
     Route = hpr_route:new(RouteMap),
-    hpr_config:insert_route(Route).
+    hpr_route_ets:insert_route(Route).
 
 test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
     DownlinkBody = #{

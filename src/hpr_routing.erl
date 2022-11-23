@@ -84,9 +84,9 @@ md(PacketUp) ->
 
 -spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
 find_routes({join_req, {AppEUI, DevEUI}}) ->
-    hpr_config:lookup_eui(AppEUI, DevEUI);
+    hpr_route_ets:lookup_eui(AppEUI, DevEUI);
 find_routes({uplink, DevAddr}) ->
-    hpr_config:lookup_devaddr(DevAddr).
+    hpr_route_ets:lookup_devaddr(DevAddr).
 
 -spec maybe_deliver_packet(
     Packet :: hpr_packet_up:packet(),

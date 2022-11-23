@@ -1,4 +1,4 @@
--module(hpr_config_conn_worker).
+-module(hpr_cs_conn_worker).
 
 -behaviour(gen_server).
 

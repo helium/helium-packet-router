@@ -1,4 +1,4 @@
--module(hpr_route_worker).
+-module(hpr_cs_route_stream_worker).
 
 -behaviour(gen_server).
 
@@ -74,7 +74,7 @@ init(Args) ->
 
 handle_continue(?CONNECT, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    case hpr_config_conn_worker:get_connection() of
+    case hpr_cs_conn_worker:get_connection() of
         undefined ->
             {Delay, Backoff1} = backoff:fail(Backoff0),
             lager:error("failed to get connection sleeping ~wms", [Delay]),
@@ -161,9 +161,9 @@ process_route_stream_res(RouteStreamRes, State) ->
     Route = hpr_route_stream_res:route(RouteStreamRes),
     case hpr_route_stream_res:action(RouteStreamRes) of
         delete ->
-            hpr_config:delete_route(Route);
+            hpr_route_ets:delete_route(Route);
         _ ->
-            hpr_config:insert_route(Route)
+            hpr_route_ets:insert_route(Route)
     end,
     case maybe_cache_response(RouteStreamRes, State) of
         {error, Reason} -> lager:error("failed to write to file ~p", [Reason]);
@@ -206,7 +206,7 @@ maybe_init_from_file(Path) ->
         {ok, Map} ->
             maps:foreach(
                 fun(_ID, Route) ->
-                    hpr_config:insert_route(Route)
+                    hpr_route_ets:insert_route(Route)
                 end,
                 Map
             )

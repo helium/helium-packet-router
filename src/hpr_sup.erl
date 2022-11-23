@@ -87,7 +87,7 @@ init([]) ->
 
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
 
-        ?SUP(hpr_config_service_sup, []),
+        ?SUP(hpr_cs_sup, []),
 
         ?SUP(hpr_gwmp_sup, []),
 
