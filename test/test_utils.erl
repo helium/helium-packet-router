@@ -88,7 +88,10 @@ init_per_testcase(TestCase, Config) ->
     {ok, ServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [config_pb],
-            services => #{'helium.config.route' => hpr_test_config_service}
+            services => #{
+                'helium.config.route' => hpr_test_config_service_route,
+                'helium.config.session_key_filter' => hpr_test_config_service_session_key_filter
+            }
         },
         listen_opts => #{port => ?CONFIG_SERVICE_PORT, ip => {0, 0, 0, 0}}
     }),

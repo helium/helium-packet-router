@@ -72,7 +72,7 @@ create_route_test(Config) ->
         nonce => 1
     },
     Route = hpr_route:new(RouteMap),
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => RouteMap
         })
@@ -127,7 +127,7 @@ update_route_test(Config) ->
         nonce => 1
     },
     Route1 = hpr_route:new(Route1Map),
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => Route1Map
         })
@@ -164,7 +164,7 @@ update_route_test(Config) ->
         nonce => 2
     },
     Route2 = hpr_route:new(Route2Map),
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => update, route => Route2Map
         })
@@ -220,7 +220,7 @@ delete_route_test(Config) ->
         nonce => 1
     },
     Route1 = hpr_route:new(Route1Map),
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => Route1Map
         })
@@ -249,7 +249,7 @@ delete_route_test(Config) ->
 
     %% Delete our Route
 
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => delete, route => Route1Map
         })

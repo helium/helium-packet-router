@@ -1201,7 +1201,7 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
         }
     },
     Route = hpr_route:new(RouteMap),
-    hpr_route_ets:insert_route(Route).
+    hpr_route_ets:insert(Route).
 
 uplink_test_route() ->
     uplink_test_route(#{id => <<"route1">>}).
@@ -1241,7 +1241,7 @@ uplink_test_route(InputMap) ->
         }
     },
     Route = hpr_route:new(RouteMap),
-    hpr_route_ets:insert_route(Route).
+    hpr_route_ets:insert(Route).
 
 downlink_test_route(FlowType) ->
     RouteMap = #{
@@ -1256,7 +1256,7 @@ downlink_test_route(FlowType) ->
         }
     },
     Route = hpr_route:new(RouteMap),
-    hpr_route_ets:insert_route(Route).
+    hpr_route_ets:insert(Route).
 
 test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
     DownlinkBody = #{

@@ -122,7 +122,7 @@ join_req_test(_Config) ->
         max_copies => 1,
         nonce => 1
     }),
-    ok = hpr_route_ets:insert_route(Route),
+    ok = hpr_route_ets:insert(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
@@ -180,7 +180,7 @@ max_copies_test(_Config) ->
         max_copies => MaxCopies,
         nonce => 1
     }),
-    ok = hpr_route_ets:insert_route(Route),
+    ok = hpr_route_ets:insert(Route),
 
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),

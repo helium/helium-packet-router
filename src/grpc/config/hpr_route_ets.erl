@@ -2,8 +2,8 @@
 
 -export([
     init/0,
-    insert_route/1,
-    delete_route/1,
+    insert/1,
+    delete/1,
     lookup_devaddr/1,
     lookup_eui/2
 ]).
@@ -33,9 +33,9 @@ init() ->
     ?ROUTE_ETS = ets:new(?ROUTE_ETS, [public, named_table, set]),
     ok.
 
--spec insert_route(Route :: hpr_route:route()) -> ok.
-insert_route(Route) ->
-    ok = ?MODULE:delete_route(Route),
+-spec insert(Route :: hpr_route:route()) -> ok.
+insert(Route) ->
+    ok = ?MODULE:delete(Route),
     true = ets:insert(?DEVADDRS_ETS, route_to_devaddr_rows(Route)),
     true = ets:insert(?EUIS_ETS, route_to_eui_rows(Route)),
     true = ets:insert(?ROUTE_ETS, {hpr_route:id(Route), Route}),
@@ -52,8 +52,8 @@ insert_route(Route) ->
     lager:info(RouteFields, "inserting route"),
     ok.
 
--spec delete_route(Route :: hpr_route:route()) -> ok.
-delete_route(Route) ->
+-spec delete(Route :: hpr_route:route()) -> ok.
+delete(Route) ->
     ID = hpr_route:id(Route),
     MS = [
         {
@@ -142,8 +142,8 @@ remove_euis_dev_ranges(Route) ->
 all_test_() ->
     {setup, fun setup/0,
         {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
-            ?_test(test_insert_route()),
-            ?_test(test_delete_route()),
+            ?_test(test_insert()),
+            ?_test(test_delete()),
             ?_test(test_devaddr_lookup()),
             ?_test(test_eui_lookup()),
             ?_test(test_route_to_devaddr_rows()),
@@ -163,7 +163,7 @@ foreach_cleanup(ok) ->
     true = ets:delete(?ROUTE_ETS),
     ok.
 
-test_insert_route() ->
+test_insert() ->
     Route = hpr_route:new(#{
         id => <<"11ea6dfd-3dce-4106-8980-d34007ab689b">>,
         net_id => 0,
@@ -181,7 +181,7 @@ test_insert_route() ->
         max_copies => 1,
         nonce => 1
     }),
-    ok = insert_route(Route),
+    ok = insert(Route),
 
     ExpectedDevaddrRows0 = lists:sort(route_to_devaddr_rows(Route)),
     ExpectedEUIRows0 = lists:sort(route_to_eui_rows(Route)),
@@ -219,7 +219,7 @@ test_insert_route() ->
         nonce => 2
     }),
 
-    ok = insert_route(UpdatedRoute),
+    ok = insert(UpdatedRoute),
 
     ExpectedDevaddrRows1 = lists:sort(route_to_devaddr_rows(UpdatedRoute)),
     ExpectedEUIRows1 = lists:sort(route_to_eui_rows(UpdatedRoute)),
@@ -235,9 +235,9 @@ test_insert_route() ->
     ?assertEqual([{ID, UpdatedRoute}], ets:lookup(?ROUTE_ETS, ID)),
     ok.
 
-test_delete_route() ->
+test_delete() ->
     Route = new_route(),
-    ok = insert_route(Route),
+    ok = insert(Route),
 
     ExpectedDevaddrRows = lists:sort(route_to_devaddr_rows(Route)),
     ExpectedEUIRows = lists:sort(route_to_eui_rows(Route)),
@@ -251,7 +251,7 @@ test_delete_route() ->
     ID = hpr_route:id(Route),
     ?assertEqual([{ID, Route}], ets:lookup(?ROUTE_ETS, ID)),
 
-    ok = delete_route(Route),
+    ok = delete(Route),
 
     ?assertEqual([], ets:tab2list(?DEVADDRS_ETS)),
     ?assertEqual([], ets:tab2list(?EUIS_ETS)),
@@ -261,7 +261,7 @@ test_delete_route() ->
 test_devaddr_lookup() ->
     Route = new_route(),
     CleanedRoute = remove_euis_dev_ranges(Route),
-    ok = insert_route(Route),
+    ok = insert(Route),
 
     ?assertEqual([CleanedRoute], lookup_devaddr(16#00000005)),
     ?assertEqual([], lookup_devaddr(16#0000000B)),
@@ -305,8 +305,8 @@ test_eui_lookup() ->
         nonce => 1
     }),
 
-    ok = insert_route(Route1),
-    ok = insert_route(Route2),
+    ok = insert(Route1),
+    ok = insert(Route2),
     CleanedRoute1 = remove_euis_dev_ranges(Route1),
     CleanedRoute2 = remove_euis_dev_ranges(Route2),
 

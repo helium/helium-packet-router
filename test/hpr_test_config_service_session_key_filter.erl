@@ -1,8 +1,6 @@
--module(hpr_test_config_service).
+-module(hpr_test_config_service_session_key_filter).
 
--behaviour(helium_config_route_bhvr).
-
--include("../src/grpc/autogen/server/config_pb.hrl").
+-behaviour(helium_config_session_key_filter_bhvr).
 
 -export([
     init/2,
@@ -19,7 +17,7 @@
 ]).
 
 -export([
-    route_stream_resp/1
+    stream_resp/1
 ]).
 
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
@@ -30,37 +28,39 @@ init(_RPC, StreamState) ->
     StreamState.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info({route_stream_resp, RouteStreamResp}, StreamState) ->
-    ct:pal("got RouteStreamResp ~p", [RouteStreamResp]),
-    grpcbox_stream:send(false, RouteStreamResp, StreamState);
+handle_info({stream_resp, SKFStreamResp}, StreamState) ->
+    ct:pal("got SKFStreamResp ~p", [SKFStreamResp]),
+    grpcbox_stream:send(false, SKFStreamResp, StreamState);
 handle_info(_Msg, StreamState) ->
     StreamState.
 
-list(_Ctx, _RouteListReq) ->
+list(_Ctx, _SKFListReq) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-get(_Ctx, _RouteListReq) ->
+get(_Ctx, _SKFListReq) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-create(_Ctx, _RouteListReq) ->
+create(_Ctx, _SKFListReq) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-update(_Ctx, _RouteListReq) ->
+update(_Ctx, _SKFListReq) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-delete(_Ctx, _RouteListReq) ->
+delete(_Ctx, _SKFListReq) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-stream(RouteStreamReq, StreamState) ->
-    case hpr_route_stream_req:verify(RouteStreamReq) of
+stream(SKFStreamReq, StreamState) ->
+    case hpr_session_key_filter_stream_req:verify(SKFStreamReq) of
         false ->
             {grpc_error, {7, <<"PERMISSION_DENIED">>}};
         true ->
             {ok, StreamState}
     end.
 
--spec route_stream_resp(RouteStreamResp :: #config_route_stream_res_v1_pb{}) -> ok.
-route_stream_resp(RouteStreamResp) ->
-    ct:pal("route_stream_resp ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
-    ?MODULE ! {route_stream_resp, RouteStreamResp},
+-spec stream_resp(
+    SKFStreamResp :: hpr_session_key_filter_stream_res:session_key_filter_stream_res()
+) -> ok.
+stream_resp(SKFStreamResp) ->
+    ct:pal("stream_resp ~p  @ ~p", [SKFStreamResp, erlang:whereis(?MODULE)]),
+    ?MODULE ! {stream_resp, SKFStreamResp},
     ok.

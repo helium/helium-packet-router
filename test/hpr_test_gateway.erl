@@ -96,7 +96,7 @@ receive_register(GatewayPid) ->
 init(#{forward := Pid, route := Route} = Args) ->
     #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ecc_compact),
     lager:info(maps:to_list(Args), "started"),
-    ok = hpr_route_ets:insert_route(Route),
+    ok = hpr_route_ets:insert(Route),
     self() ! ?CONNECT,
     {ok, #state{
         forward = Pid,
