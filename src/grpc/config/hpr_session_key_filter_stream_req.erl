@@ -3,10 +3,10 @@
 -include("../autogen/server/config_pb.hrl").
 
 -export([
-    new/2,
-    pub_key/1,
-    signature/1,
+    new/1,
     timestamp/1,
+    signer/1,
+    signature/1,
     sign/2,
     verify/1,
     to_map/1
@@ -16,20 +16,20 @@
 
 -export_type([session_key_filter_stream_req/0]).
 
--spec new(PubKeyBin :: binary(), Timestamp :: non_neg_integer()) -> session_key_filter_stream_req().
-new(PubKeyBin, Timestamp) ->
+-spec new(Signer :: libp2p_crypto:pubkey_bin()) -> session_key_filter_stream_req().
+new(Signer) ->
     #config_session_key_filter_stream_req_v1_pb{
-        pub_key = PubKeyBin,
-        timestamp = Timestamp
+        timestamp = erlang:system_time(millisecond),
+        signer = Signer
     }.
-
--spec pub_key(RouteStreamReq :: session_key_filter_stream_req()) -> binary().
-pub_key(RouteStreamReq) ->
-    RouteStreamReq#config_session_key_filter_stream_req_v1_pb.pub_key.
 
 -spec timestamp(RouteStreamReq :: session_key_filter_stream_req()) -> non_neg_integer().
 timestamp(RouteStreamReq) ->
     RouteStreamReq#config_session_key_filter_stream_req_v1_pb.timestamp.
+
+-spec signer(RouteStreamReq :: session_key_filter_stream_req()) -> libp2p_crypto:pubkey_bin().
+signer(RouteStreamReq) ->
+    RouteStreamReq#config_session_key_filter_stream_req_v1_pb.signer.
 
 -spec signature(RouteStreamReq :: session_key_filter_stream_req()) -> binary().
 signature(RouteStreamReq) ->
@@ -56,7 +56,7 @@ verify(RouteStreamReq) ->
     libp2p_crypto:verify(
         EncodedRouteStreamReq,
         ?MODULE:signature(RouteStreamReq),
-        libp2p_crypto:bin_to_pubkey(?MODULE:pub_key(RouteStreamReq))
+        libp2p_crypto:bin_to_pubkey(?MODULE:signer(RouteStreamReq))
     ).
 
 -spec to_map(RouteStreamReq :: session_key_filter_stream_req()) -> map().
@@ -73,51 +73,33 @@ to_map(RouteStreamReq) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-new_test() ->
-    PubKeyBin = <<"PubKeyBin">>,
-    Timestamp = erlang:system_time(millisecond),
-    ?assertEqual(
-        #config_session_key_filter_stream_req_v1_pb{
-            pub_key = PubKeyBin,
-            timestamp = Timestamp
-        },
-        ?MODULE:new(PubKeyBin, Timestamp)
-    ),
-    ok.
-
-pub_key_test() ->
-    PubKeyBin = <<"PubKeyBin">>,
-    Timestamp = erlang:system_time(millisecond),
-    ?assertEqual(
-        PubKeyBin,
-        ?MODULE:pub_key(?MODULE:new(PubKeyBin, Timestamp))
-    ),
-    ok.
-
 timestamp_test() ->
-    PubKeyBin = <<"PubKeyBin">>,
+    Signer = <<"Signer">>,
     Timestamp = erlang:system_time(millisecond),
+    ?assert(Timestamp =< ?MODULE:timestamp(?MODULE:new(Signer))),
+    ok.
+
+signer_test() ->
+    Signer = <<"Signer">>,
     ?assertEqual(
-        Timestamp,
-        ?MODULE:timestamp(?MODULE:new(PubKeyBin, Timestamp))
+        Signer,
+        ?MODULE:signer(?MODULE:new(Signer))
     ),
     ok.
 
 signature_test() ->
-    PubKeyBin = <<"PubKeyBin">>,
-    Timestamp = erlang:system_time(millisecond),
+    Signer = <<"Signer">>,
     ?assertEqual(
         <<>>,
-        ?MODULE:signature(?MODULE:new(PubKeyBin, Timestamp))
+        ?MODULE:signature(?MODULE:new(Signer))
     ),
     ok.
 
 sign_verify_test() ->
     #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    Timestamp = erlang:system_time(millisecond),
-    RouteStreamReq = ?MODULE:new(PubKeyBin, Timestamp),
+    Signer = libp2p_crypto:pubkey_to_bin(PubKey),
+    RouteStreamReq = ?MODULE:new(Signer),
 
     SignedRouteStreamReq = ?MODULE:sign(RouteStreamReq, SigFun),
 
@@ -125,17 +107,11 @@ sign_verify_test() ->
     ok.
 
 to_map_test() ->
-    PubKeyBin = <<"PubKeyBin">>,
-    Timestamp = erlang:system_time(millisecond),
-    Req = ?MODULE:new(PubKeyBin, Timestamp),
-    ?assertEqual(
-        #{
-            pub_key => PubKeyBin,
-            timestamp => Timestamp,
-            signature => <<>>
-        },
-        ?MODULE:to_map(Req)
-    ),
+    Req = ?MODULE:new(<<"Signer">>),
+    Map = ?MODULE:to_map(Req),
+    ?assertEqual(?MODULE:timestamp(Req), maps:get(timestamp, Map)),
+    ?assertEqual(?MODULE:signer(Req), maps:get(signer, Map)),
+    ?assertEqual(?MODULE:signature(Req), maps:get(signature, Map)),
     ok.
 
 -endif.

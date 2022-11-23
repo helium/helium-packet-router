@@ -111,7 +111,7 @@ handle_continue(
     %% Sending Route Stream Request
     {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin, erlang:system_time(millisecond)),
+    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
     SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
     ok = grpc_client:send_last(Stream, hpr_route_stream_req:to_map(SignedRouteStreamReq)),
     lager:info("stream initialized"),
