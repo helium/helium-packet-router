@@ -1,4 +1,4 @@
--module(hpr_cs_session_key_filter_stream_worker).
+-module(hpr_cs_skf_stream_worker).
 
 -behaviour(gen_server).
 
@@ -94,10 +94,10 @@ handle_continue(
     %% Sending SKF Stream Request
     {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    SKFStreamReq = hpr_session_key_filter_stream_req:new(PubKeyBin),
-    SignedSKFStreamReq = hpr_session_key_filter_stream_req:sign(SKFStreamReq, SigFun),
+    SKFStreamReq = hpr_skf_stream_req:new(PubKeyBin),
+    SignedSKFStreamReq = hpr_skf_stream_req:sign(SKFStreamReq, SigFun),
     ok = grpc_client:send_last(
-        Stream, hpr_session_key_filter_stream_req:to_map(SignedSKFStreamReq)
+        Stream, hpr_skf_stream_req:to_map(SignedSKFStreamReq)
     ),
     lager:info("stream initialized"),
     {noreply, State#state{stream = Stream}, {continue, ?RCV_CFG_UPDATE}};
@@ -111,7 +111,7 @@ handle_continue(
         {headers, _Headers} ->
             {noreply, State, {continue, ?RCV_CFG_UPDATE}};
         {data, SKFStreamRes} ->
-            ok = process_res(hpr_session_key_filter_stream_res:from_map(SKFStreamRes)),
+            ok = process_res(hpr_skf_stream_res:from_map(SKFStreamRes)),
             lager:info("got sfk update"),
             {noreply, State, {continue, ?RCV_CFG_UPDATE}};
         eof ->
@@ -151,13 +151,13 @@ terminate(_Reason, #state{connection = Connection}) ->
 %% ------------------------------------------------------------------
 
 -spec process_res(
-    SKFStreamRes :: hpr_session_key_filter_stream_res:session_key_filter_stream_res()
+    SKFStreamRes :: hpr_skf_stream_res:res()
 ) -> ok.
 process_res(SKFStreamRes) ->
-    SKF = hpr_session_key_filter_stream_res:filter(SKFStreamRes),
-    case hpr_session_key_filter_stream_res:action(SKFStreamRes) of
+    SKF = hpr_skf_stream_res:filter(SKFStreamRes),
+    case hpr_skf_stream_res:action(SKFStreamRes) of
         delete ->
-            hpr_session_key_filter_ets:delete(SKF);
+            hpr_skf_ets:delete(SKF);
         _ ->
-            hpr_session_key_filter_ets:insert(SKF)
+            hpr_skf_ets:insert(SKF)
     end.

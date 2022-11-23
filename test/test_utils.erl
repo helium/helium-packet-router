@@ -90,7 +90,7 @@ init_per_testcase(TestCase, Config) ->
             service_protos => [config_pb],
             services => #{
                 'helium.config.route' => hpr_test_config_service_route,
-                'helium.config.session_key_filter' => hpr_test_config_service_session_key_filter
+                'helium.config.session_key_filter' => hpr_test_config_service_skf
             }
         },
         listen_opts => #{port => ?CONFIG_SERVICE_PORT, ip => {0, 0, 0, 0}}

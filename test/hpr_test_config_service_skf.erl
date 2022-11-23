@@ -1,4 +1,4 @@
--module(hpr_test_config_service_session_key_filter).
+-module(hpr_test_config_service_skf).
 
 -behaviour(helium_config_session_key_filter_bhvr).
 
@@ -50,7 +50,7 @@ delete(_Ctx, _SKFListReq) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
 stream(SKFStreamReq, StreamState) ->
-    case hpr_session_key_filter_stream_req:verify(SKFStreamReq) of
+    case hpr_skf_stream_req:verify(SKFStreamReq) of
         false ->
             {grpc_error, {7, <<"PERMISSION_DENIED">>}};
         true ->
@@ -58,7 +58,7 @@ stream(SKFStreamReq, StreamState) ->
     end.
 
 -spec stream_resp(
-    SKFStreamResp :: hpr_session_key_filter_stream_res:session_key_filter_stream_res()
+    SKFStreamResp :: hpr_skf_stream_res:res()
 ) -> ok.
 stream_resp(SKFStreamResp) ->
     ct:pal("stream_resp ~p  @ ~p", [SKFStreamResp, erlang:whereis(?MODULE)]),

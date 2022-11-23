@@ -57,7 +57,7 @@ stream(RouteStreamReq, StreamState) ->
             {ok, StreamState}
     end.
 
--spec stream_resp(RouteStreamResp :: hpr_route_stream_res:route_stream_res()) -> ok.
+-spec stream_resp(RouteStreamResp :: hpr_route_stream_res:res()) -> ok.
 stream_resp(RouteStreamResp) ->
     ct:pal("stream_resp ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
     ?MODULE ! {stream_resp, RouteStreamResp},

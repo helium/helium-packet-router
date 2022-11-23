@@ -1,4 +1,4 @@
--module(hpr_session_key_filter).
+-module(hpr_skf).
 
 -include("../autogen/server/config_pb.hrl").
 
@@ -12,19 +12,19 @@
 
 -endif.
 
--type session_key_filter() :: #config_session_key_filter_v1_pb{}.
+-type skf() :: #config_session_key_filter_v1_pb{}.
 
--export_type([session_key_filter/0]).
+-export_type([skf/0]).
 
--spec devaddr(SessionKeyFilter :: session_key_filter()) -> integer().
+-spec devaddr(SessionKeyFilter :: skf()) -> integer().
 devaddr(SessionKeyFilter) ->
     SessionKeyFilter#config_session_key_filter_v1_pb.devaddr.
 
--spec session_keys(SessionKeyFilter :: session_key_filter()) -> [binary()].
+-spec session_keys(SessionKeyFilter :: skf()) -> [binary()].
 session_keys(SessionKeyFilter) ->
     SessionKeyFilter#config_session_key_filter_v1_pb.session_keys.
 
--spec from_map(SessionKeyFilterMap :: client_config_pb:route_v1_pb()) -> session_key_filter().
+-spec from_map(SessionKeyFilterMap :: client_config_pb:route_v1_pb()) -> skf().
 from_map(SessionKeyFilterMap) ->
     config_pb:decode_msg(
         client_config_pb:encode_msg(SessionKeyFilterMap, session_key_filter_v1_pb),

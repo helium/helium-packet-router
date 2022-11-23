@@ -1,4 +1,4 @@
--module(hpr_session_key_filter_ets).
+-module(hpr_skf_ets).
 
 -export([
     init/0,
@@ -7,17 +7,17 @@
     lookup_devaddr/1
 ]).
 
--define(ETS, hpr_session_key_filter_ets).
+-define(ETS, hpr_skf_ets).
 
 -spec init() -> ok.
 init() ->
     ?ETS = ets:new(?ETS, [public, named_table, set, {read_concurrency, true}]),
     ok.
 
--spec insert(SKF :: hpr_session_key_filter:session_key_filter()) -> ok.
+-spec insert(SKF :: hpr_skf:skf()) -> ok.
 insert(SKF) ->
-    DevAddr = hpr_session_key_filter:devaddr(SKF),
-    Keys = hpr_session_key_filter:session_keys(SKF),
+    DevAddr = hpr_skf:devaddr(SKF),
+    Keys = hpr_skf:session_keys(SKF),
     true = ets:insert(?ETS, {DevAddr, Keys}),
     Fields = [
         {devaddr, hpr_utils:int_to_hex(DevAddr)},
@@ -26,9 +26,9 @@ insert(SKF) ->
     lager:info(Fields, "inserting SKF"),
     ok.
 
--spec delete(SKF :: hpr_session_key_filter:session_key_filter()) -> ok.
+-spec delete(SKF :: hpr_skf:skf()) -> ok.
 delete(SKF) ->
-    DevAddr = hpr_session_key_filter:devaddr(SKF),
+    DevAddr = hpr_skf:devaddr(SKF),
     true = ets:delete(?ETS, DevAddr),
     Fields = [
         {devaddr, hpr_utils:int_to_hex(DevAddr)}

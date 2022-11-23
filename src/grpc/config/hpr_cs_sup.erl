@@ -24,13 +24,13 @@ start_link() ->
 
 init([]) ->
     ok = hpr_route_ets:init(),
-    ok = hpr_session_key_filter_ets:init(),
+    ok = hpr_skf_ets:init(),
 
     ConfigServiceConfig = application:get_env(?APP, config_service, #{}),
     ChildSpecs = [
         ?WORKER(hpr_cs_conn_worker, [ConfigServiceConfig]),
         ?WORKER(hpr_cs_route_stream_worker, [maps:get(route, ConfigServiceConfig, #{})]),
-        ?WORKER(hpr_cs_session_key_filter_stream_worker, [#{}])
+        ?WORKER(hpr_cs_skf_stream_worker, [#{}])
     ],
     {ok, {
         #{

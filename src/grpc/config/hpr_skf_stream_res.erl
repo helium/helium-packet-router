@@ -1,4 +1,4 @@
--module(hpr_session_key_filter_stream_res).
+-module(hpr_skf_stream_res).
 
 -include("../autogen/server/config_pb.hrl").
 
@@ -8,21 +8,21 @@
     from_map/1
 ]).
 
--type session_key_filter_stream_res() :: #config_session_key_filter_stream_res_v1_pb{}.
+-type res() :: #config_session_key_filter_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
 
--export_type([session_key_filter_stream_res/0, action/0]).
+-export_type([res/0, action/0]).
 
--spec action(SessionKeyFilterRes :: session_key_filter_stream_res()) -> action().
+-spec action(SessionKeyFilterRes :: res()) -> action().
 action(SessionKeyFilterRes) ->
     SessionKeyFilterRes#config_session_key_filter_stream_res_v1_pb.action.
 
--spec filter(SessionKeyFilterRes :: session_key_filter_stream_res()) ->
-    hpr_session_key_filter:session_key_filter().
+-spec filter(SessionKeyFilterRes :: res()) ->
+    hpr_skf:skf().
 filter(SessionKeyFilterRes) ->
     SessionKeyFilterRes#config_session_key_filter_stream_res_v1_pb.filter.
 
--spec from_map(Map :: map()) -> session_key_filter_stream_res().
+-spec from_map(Map :: map()) -> res().
 from_map(Map) ->
     config_pb:decode_msg(
         client_config_pb:encode_msg(Map, session_key_filter_stream_res_v1_pb),
@@ -47,7 +47,7 @@ action_test() ->
     ok.
 
 filter_test() ->
-    Filter = hpr_session_key_filter:from_map(#{devaddr => 16#0000001, session_keys => []}),
+    Filter = hpr_skf:from_map(#{devaddr => 16#0000001, session_keys => []}),
     ?assertEqual(
         Filter,
         ?MODULE:filter(#config_session_key_filter_stream_res_v1_pb{
@@ -59,7 +59,7 @@ filter_test() ->
 
 from_map_test() ->
     FilterMap = #{devaddr => 16#0000001, session_keys => []},
-    Filter = hpr_session_key_filter:from_map(#{devaddr => 16#0000001, session_keys => []}),
+    Filter = hpr_skf:from_map(#{devaddr => 16#0000001, session_keys => []}),
     ?assertEqual(
         #config_session_key_filter_stream_res_v1_pb{
             action = create,

@@ -155,7 +155,7 @@ terminate(_Reason, #state{connection = Connection}) ->
 %% ------------------------------------------------------------------
 
 -spec process_route_stream_res(
-    RouteStreamRes :: hpr_route_stream_res:route_stream_res(), Path :: path()
+    RouteStreamRes :: hpr_route_stream_res:res(), Path :: path()
 ) -> ok.
 process_route_stream_res(RouteStreamRes, State) ->
     Route = hpr_route_stream_res:route(RouteStreamRes),
@@ -170,7 +170,7 @@ process_route_stream_res(RouteStreamRes, State) ->
         ok -> ok
     end.
 
--spec maybe_cache_response(RouteStreamRes :: hpr_route_stream_res:route_stream_res(), path()) ->
+-spec maybe_cache_response(RouteStreamRes :: hpr_route_stream_res:res(), path()) ->
     ok | {error, any()}.
 maybe_cache_response(_RouteStreamRes, undefined) ->
     ok;
