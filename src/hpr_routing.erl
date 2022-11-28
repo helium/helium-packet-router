@@ -24,9 +24,10 @@ handle_packet(Packet) ->
     ok = md(Packet),
     lager:debug("received packet"),
     Checks = [
-        {fun hpr_packet_up:verify/1, bad_signature},
         {fun throttle_check/1, gateway_limit_exceeded},
-        {fun packet_type_check/1, invalid_packet_type}
+        {fun packet_type_check/1, invalid_packet_type},
+        {fun hpr_packet_up:verify/1, bad_signature},
+        {fun mic_check/1, invalid_mic}
     ],
     PacketType = hpr_packet_up:type(Packet),
     case execute_checks(Packet, Checks) of
@@ -69,6 +70,8 @@ md(PacketUp) ->
                 {gateway, GatewayName},
                 {app_eui, hpr_utils:int_to_hex(AppEUI)},
                 {dev_eui, hpr_utils:int_to_hex(DevEUI)},
+                {app_eui_int, AppEUI},
+                {dev_eui_int, DevEUI},
                 {packet_type, join_req},
                 {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
             ]);
@@ -77,6 +80,7 @@ md(PacketUp) ->
                 {stream, StreamPid},
                 {gateway, GatewayName},
                 {devaddr, hpr_utils:int_to_hex(DevAddr)},
+                {devaddr_int, DevAddr},
                 {packet_type, uplink},
                 {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
             ])
@@ -151,6 +155,28 @@ packet_type_check(Packet) ->
         {undefined, _} -> false;
         {join_req, _} -> true;
         {uplink, _} -> true
+    end.
+
+-spec mic_check(Packet :: hpr_packet_up:packet()) -> boolean().
+mic_check(Packet) ->
+    case hpr_packet_up:type(Packet) of
+        {undefined, _} ->
+            true;
+        {join_req, _} ->
+            true;
+        {uplink, DevAddr} ->
+            case hpr_skf_ets:lookup_devaddr(DevAddr) of
+                {error, not_found} ->
+                    true;
+                Keys ->
+                    Payload = hpr_packet_up:payload(Packet),
+                    lists:any(
+                        fun(Key) ->
+                            hpr_lorawan:key_matches_mic(Key, Payload)
+                        end,
+                        Keys
+                    )
+            end
     end.
 
 -spec execute_checks(Packet :: hpr_packet_up:packet(), [{fun(), any()}]) -> ok | {error, any()}.
