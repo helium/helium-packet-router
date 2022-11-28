@@ -5,11 +5,8 @@
     end_per_testcase/2,
     join_packet_up/1,
     uplink_packet_up/1,
-    frame_packet_uplink/6,
-    frame_packet_join/5,
     wait_until/1, wait_until/3,
-    match_map/2,
-    unconfirmed_up/0
+    match_map/2
 ]).
 
 -include("hpr.hrl").
@@ -48,7 +45,9 @@ init_per_testcase(TestCase, Config) ->
         {line, [":", line], ""},
         "] ",
         message,
-        "\n"
+        "\n",
+        metadata,
+        "\n#########################\n"
     ],
     ok = application:set_env(lager, log_root, BaseDir),
     case os:getenv("CT_LAGER", "NONE") of
@@ -130,7 +129,7 @@ end_per_testcase(_TestCase, Config) ->
 ) -> hpr_packet_up:packet().
 join_packet_up(Opts0) ->
     DevNonce = maps:get(dev_nonce, Opts0, crypto:strong_rand_bytes(2)),
-    AppKey = maps:get(dev_nonce, Opts0, crypto:strong_rand_bytes(16)),
+    AppKey = maps:get(app_key, Opts0, crypto:strong_rand_bytes(16)),
     MType = ?JOIN_REQ,
     MHDRRFU = 0,
     Major = 0,
@@ -150,7 +149,7 @@ join_packet_up(Opts0) ->
     Opts :: map()
 ) -> hpr_packet_up:packet().
 uplink_packet_up(Opts0) ->
-    MType = ?UNCONFIRMED_UP,
+    MType = maps:get(mtype, Opts0, ?UNCONFIRMED_UP),
     MHDRRFU = 0,
     Major = 0,
     DevAddr = maps:get(devaddr, Opts0, 16#00000000),
@@ -158,15 +157,32 @@ uplink_packet_up(Opts0) ->
     ADRACKReq = 0,
     ACK = 0,
     RFU = 0,
-    FCntLow = maps:get(fcnt, Opts0, 1),
+    FCnt = maps:get(fcnt, Opts0, 1),
     FOptsBin = <<>>,
     FOptsLen = erlang:byte_size(FOptsBin),
     Port = 0,
-    Data = maps:get(data, Opts0, <<"dataandmic">>),
-    Payload =
-        <<MType:3, MHDRRFU:3, Major:2, DevAddr:32/integer-unsigned-little, ADR:1, ADRACKReq:1,
-            ACK:1, RFU:1, FOptsLen:4, FCntLow:16/little-unsigned-integer, FOptsBin:FOptsLen/binary,
+    Body = maps:get(data, Opts0, <<"data">>),
+    AppSessionKey = maps:get(
+        app_session_key,
+        Opts0,
+        crypto:strong_rand_bytes(16)
+    ),
+    Data = reverse(
+        cipher(Body, AppSessionKey, MType band 1, DevAddr, FCnt)
+    ),
+    Payload0 =
+        <<MType:3, MHDRRFU:3, Major:2, DevAddr:32/little-unsigned-integer, ADR:1, ADRACKReq:1,
+            ACK:1, RFU:1, FOptsLen:4, FCnt:16/little-unsigned-integer, FOptsBin:FOptsLen/binary,
             Port:8/integer, Data/binary>>,
+    B0 = b0(MType band 1, DevAddr, FCnt, erlang:byte_size(Payload0)),
+    NwkSessionKey = maps:get(
+        nwk_session_key,
+        Opts0,
+        crypto:strong_rand_bytes(16)
+    ),
+    MIC = crypto:macN(cmac, aes_128_cbc, NwkSessionKey, <<B0/binary, Payload0/binary>>, 4),
+
+    Payload = <<Payload0/binary, MIC:4/binary>>,
     Opts1 = maps:put(payload, maps:get(payload, Opts0, Payload), Opts0),
     PacketUp = hpr_packet_up:new(Opts1),
     SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
@@ -221,83 +237,8 @@ match_map(Expected, Got) when is_map(Got) ->
 match_map(_Expected, _Got) ->
     {false, not_map}.
 
-frame_packet_uplink(MType, PubKeyBin, SigFun, DevAddr, FCnt, Options) ->
-    NwkSessionKey = <<81, 103, 129, 150, 35, 76, 17, 164, 210, 66, 210, 149, 120, 193, 251, 85>>,
-    AppSessionKey = <<245, 16, 127, 141, 191, 84, 201, 16, 111, 172, 36, 152, 70, 228, 52, 95>>,
-    Payload1 = frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt),
-
-    PacketMap = #{
-        payload => Payload1,
-        timestamp => maps:get(timestamp, Options, erlang:system_time(millisecond)),
-        rssi => maps:get(rssi, Options, 0),
-        frequency => 923_300_000,
-        datarate => maps:get(datarate, Options, 'SF8BW125'),
-        snr => maps:get(snr, Options, 0.0),
-        region => 'US915',
-        gateway => PubKeyBin
-    },
-
-    PacketUp = hpr_packet_up:new(PacketMap),
-
-    hpr_packet_up:sign(PacketUp, SigFun).
-
-frame_payload_uplink(MType, DevAddr, NwkSessionKey, AppSessionKey, FCnt) ->
-    MHDRRFU = 0,
-    Major = 0,
-    ADR = 0,
-    ADRACKReq = 0,
-    ACK = 0,
-    RFU = 0,
-    FOptsBin = <<>>,
-    FOptsLen = byte_size(FOptsBin),
-    <<Port:8/integer, Body/binary>> = <<1:8>>,
-    Data = reverse(
-        cipher(Body, AppSessionKey, MType band 1, DevAddr, FCnt)
-    ),
-    FCntSize = 16,
-    Payload0 =
-        <<MType:3, MHDRRFU:3, Major:2, DevAddr:32/little-unsigned-integer, ADR:1, ADRACKReq:1,
-            ACK:1, RFU:1, FOptsLen:4, FCnt:FCntSize/little-unsigned-integer,
-            FOptsBin:FOptsLen/binary, Port:8/integer, Data/binary>>,
-
-    B0 = b0(MType band 1, DevAddr, FCnt, erlang:byte_size(Payload0)),
-
-    MIC = crypto:macN(cmac, aes_128_cbc, NwkSessionKey, <<B0/binary, Payload0/binary>>, 4),
-    <<Payload0/binary, MIC:4/binary>>.
-
-frame_packet_join(PubKeyBin, SigFun, DevEUI, AppEUI, Options) ->
-    Payload1 = frame_payload_join(DevEUI, AppEUI),
-
-    PacketMap = #{
-        payload => Payload1,
-        timestamp => maps:get(timestamp, Options, erlang:system_time(millisecond)),
-        rssi => maps:get(rssi, Options, 0),
-        frequency => 923_300_000,
-        datarate => maps:get(datarate, Options, 'SF8BW125'),
-        snr => maps:get(snr, Options, 0.0),
-        region => 'US915',
-        gateway => PubKeyBin
-    },
-    PacketUp = hpr_packet_up:new(PacketMap),
-
-    hpr_packet_up:sign(PacketUp, SigFun).
-
-frame_payload_join(DevEUI, AppEUI) ->
-    DevNonce = crypto:strong_rand_bytes(2),
-    AppKey = <<245, 16, 127, 141, 191, 84, 201, 16, 111, 172, 36, 152, 70, 228, 52, 95>>,
-    MType = ?JOIN_REQ,
-    MHDRRFU = 0,
-    Major = 0,
-    Payload0 =
-        <<MType:3, MHDRRFU:3, Major:2, AppEUI:64/integer-unsigned-little,
-            DevEUI:64/integer-unsigned-little, DevNonce:2/binary>>,
-    MIC = crypto:macN(cmac, aes_128_cbc, AppKey, Payload0, 4),
-    <<Payload0/binary, MIC:4/binary>>.
-
-unconfirmed_up() -> ?UNCONFIRMED_UP.
-
 %% ------------------------------------------------------------------
-%% Lorawan Utils
+%% Internal Function Definitions
 %% ------------------------------------------------------------------
 
 reverse(Bin) -> reverse(Bin, <<>>).
@@ -319,7 +260,8 @@ cipher(<<LastBlock/binary>>, Key, Dir, DevAddr, FCnt, I, Acc) ->
 
 -spec ai(integer(), binary(), integer(), integer()) -> binary().
 ai(Dir, DevAddr, FCnt, I) ->
-    <<16#01, 0, 0, 0, 0, Dir, DevAddr:4/binary, FCnt:32/little-unsigned-integer, 0, I>>.
+    Bin = <<DevAddr:32/integer-unsigned-big>>,
+    <<16#01, 0, 0, 0, 0, Dir, Bin:4/binary, FCnt:32/little-unsigned-integer, 0, I>>.
 
 -spec binxor(binary(), binary(), binary()) -> binary().
 binxor(<<>>, <<>>, Acc) ->

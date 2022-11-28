@@ -185,12 +185,20 @@ max_copies_test(_Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+
     #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
     Gateway1 = libp2p_crypto:pubkey_to_bin(PubKey1),
 
     UplinkPacketUp1 = test_utils:uplink_packet_up(#{
-        gateway => Gateway1, sig_fun => SigFun1, devaddr => DevAddr, fcnt => 1
+        gateway => Gateway1,
+        sig_fun => SigFun1,
+        devaddr => DevAddr,
+        fcnt => 1,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
     }),
 
     #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
@@ -198,7 +206,12 @@ max_copies_test(_Config) ->
     Gateway2 = libp2p_crypto:pubkey_to_bin(PubKey2),
 
     UplinkPacketUp2 = test_utils:uplink_packet_up(#{
-        gateway => Gateway2, sig_fun => SigFun2, devaddr => DevAddr, fcnt => 1
+        gateway => Gateway2,
+        sig_fun => SigFun2,
+        devaddr => DevAddr,
+        fcnt => 1,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
     }),
 
     #{secret := PrivKey3, public := PubKey3} = libp2p_crypto:generate_keys(ecc_compact),
@@ -206,7 +219,12 @@ max_copies_test(_Config) ->
     Gateway3 = libp2p_crypto:pubkey_to_bin(PubKey3),
 
     UplinkPacketUp3 = test_utils:uplink_packet_up(#{
-        gateway => Gateway3, sig_fun => SigFun3, devaddr => DevAddr, fcnt => 1
+        gateway => Gateway3,
+        sig_fun => SigFun3,
+        devaddr => DevAddr,
+        fcnt => 1,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
     }),
 
     ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
@@ -232,7 +250,12 @@ max_copies_test(_Config) ->
     ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),
 
     UplinkPacketUp4 = test_utils:uplink_packet_up(#{
-        gateway => Gateway3, sig_fun => SigFun3, devaddr => DevAddr, fcnt => 2
+        gateway => Gateway3,
+        sig_fun => SigFun3,
+        devaddr => DevAddr,
+        fcnt => 2,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
     }),
 
     ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4)),

@@ -116,13 +116,13 @@ http_sync_uplink_join_test(_Config) ->
 
     SendPacketFun = fun() ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = test_utils:frame_packet_join(
-            PubKeyBin,
-            SigFun,
-            DevEUI,
-            AppEUI,
-            #{timestamp => GatewayTime}
-        ),
+        PacketUp = test_utils:join_packet_up(#{
+            gateway => PubKeyBin,
+            dev_eui => DevEUI,
+            app_eui => AppEUI,
+            sig_fun => SigFun,
+            timestamp => GatewayTime
+        }),
 
         ok = hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
@@ -330,13 +330,13 @@ http_async_uplink_join_test(_Config) ->
 
     SendPacketFun = fun() ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = test_utils:frame_packet_join(
-            PubKeyBin,
-            SigFun,
-            DevEUI,
-            AppEUI,
-            #{timestamp => GatewayTime}
-        ),
+        PacketUp = test_utils:join_packet_up(#{
+            gateway => PubKeyBin,
+            dev_eui => DevEUI,
+            app_eui => AppEUI,
+            sig_fun => SigFun,
+            timestamp => GatewayTime
+        }),
         ok = hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
@@ -555,14 +555,13 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
 
     SendPacketFun = fun(DevAddr, FrameCount) ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = test_utils:frame_packet_uplink(
-            test_utils:unconfirmed_up(),
-            PubKeyBin,
-            SigFun,
-            DevAddr,
-            FrameCount,
-            #{timestamp => GatewayTime}
-        ),
+        PacketUp = test_utils:uplink_packet_up(#{
+            gateway => PubKeyBin,
+            devaddr => DevAddr,
+            fcnt => FrameCount,
+            sig_fun => SigFun,
+            timestamp => GatewayTime
+        }),
         hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
@@ -640,14 +639,13 @@ http_uplink_packet_test(_Config) ->
 
     SendPacketFun = fun(DevAddr) ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = test_utils:frame_packet_uplink(
-            test_utils:unconfirmed_up(),
-            PubKeyBin,
-            SigFun,
-            DevAddr,
-            0,
-            #{timestamp => GatewayTime}
-        ),
+        PacketUp = test_utils:uplink_packet_up(#{
+            gateway => PubKeyBin,
+            devaddr => DevAddr,
+            fcnt => 0,
+            sig_fun => SigFun,
+            timestamp => GatewayTime
+        }),
         hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
@@ -824,16 +822,21 @@ http_multiple_gateways_test(_Config) ->
 
     ok = start_uplink_listener(),
 
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+
     SendPacketFun = fun(PubKeyBin, DevAddr, RSSI, SigFun) ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = test_utils:frame_packet_uplink(
-            test_utils:unconfirmed_up(),
-            PubKeyBin,
-            SigFun,
-            DevAddr,
-            0,
-            #{timestamp => GatewayTime, rssi => RSSI}
-        ),
+        PacketUp = test_utils:uplink_packet_up(#{
+            gateway => PubKeyBin,
+            devaddr => DevAddr,
+            fcnt => 0,
+            rssi => RSSI,
+            sig_fun => SigFun,
+            timestamp => GatewayTime,
+            app_session_key => AppSessionKey,
+            nwk_session_key => NwkSessionKey
+        }),
         hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
@@ -919,13 +922,13 @@ http_multiple_joins_same_dest_test(_Config) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
     GatewayTime = erlang:system_time(millisecond),
-    PacketUp = test_utils:frame_packet_join(
-        PubKeyBin,
-        SigFun,
-        DevEUI1,
-        AppEUI1,
-        #{timestamp => GatewayTime}
-    ),
+    PacketUp = test_utils:join_packet_up(#{
+        gateway => PubKeyBin,
+        dev_eui => DevEUI1,
+        app_eui => AppEUI1,
+        sig_fun => SigFun,
+        timestamp => GatewayTime
+    }),
 
     join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ACTILITY, <<"route1">>),
     join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ORANGE, <<"route2">>),
@@ -955,16 +958,21 @@ http_multiple_gateways_single_shot_test(_Config) ->
 
     ok = start_uplink_listener(),
 
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+
     SendPacketFun = fun(PubKeyBin, DevAddr, RSSI, SigFun) ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = test_utils:frame_packet_uplink(
-            test_utils:unconfirmed_up(),
-            PubKeyBin,
-            SigFun,
-            DevAddr,
-            0,
-            #{timestamp => GatewayTime, rssi => RSSI}
-        ),
+        PacketUp = test_utils:uplink_packet_up(#{
+            gateway => PubKeyBin,
+            devaddr => DevAddr,
+            fcnt => 0,
+            rssi => RSSI,
+            sig_fun => SigFun,
+            timestamp => GatewayTime,
+            app_session_key => AppSessionKey,
+            nwk_session_key => NwkSessionKey
+        }),
         hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,
@@ -1034,14 +1042,13 @@ http_overlapping_devaddr_test(_Config) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
     GatewayTime = erlang:system_time(millisecond),
-    PacketUp = test_utils:frame_packet_uplink(
-        test_utils:unconfirmed_up(),
-        PubKeyBin,
-        SigFun,
-        ?DEVADDR_COMCAST,
-        0,
-        #{timestamp => GatewayTime}
-    ),
+    PacketUp = test_utils:uplink_packet_up(#{
+        gateway => PubKeyBin,
+        devaddr => ?DEVADDR_COMCAST,
+        fcnt => 0,
+        sig_fun => SigFun,
+        timestamp => GatewayTime
+    }),
 
     DevAddrRangeSingle = #{
         start_addr => 16#45000042,
@@ -1099,14 +1106,13 @@ http_uplink_packet_late_test(_Config) ->
 
     SendPacketFun = fun(PubKeyBin, DevAddr, SigFun) ->
         GatewayTime = erlang:system_time(millisecond),
-        PacketUp = test_utils:frame_packet_uplink(
-            test_utils:unconfirmed_up(),
-            PubKeyBin,
-            SigFun,
-            DevAddr,
-            0,
-            #{timestamp => GatewayTime}
-        ),
+        PacketUp = test_utils:uplink_packet_up(#{
+            gateway => PubKeyBin,
+            devaddr => DevAddr,
+            fcnt => 0,
+            sig_fun => SigFun,
+            timestamp => GatewayTime
+        }),
         hpr_routing:handle_packet(PacketUp),
         {ok, PacketUp, GatewayTime}
     end,

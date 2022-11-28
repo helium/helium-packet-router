@@ -302,7 +302,7 @@ type_test() ->
             })
         )
     ),
-    UnconfirmedUp = test_utils:unconfirmed_up(),
+    UnconfirmedUp = 2#010,
     ?assertEqual(
         {uplink, 1},
         ?MODULE:type(
