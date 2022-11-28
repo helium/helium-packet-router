@@ -168,7 +168,7 @@ mic_check(Packet) ->
             case hpr_skf_ets:lookup_devaddr(DevAddr) of
                 {error, not_found} ->
                     true;
-                Keys ->
+                {ok, Keys} ->
                     Payload = hpr_packet_up:payload(Packet),
                     lists:any(
                         fun(Key) ->

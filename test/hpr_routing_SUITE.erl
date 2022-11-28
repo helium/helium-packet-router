@@ -7,10 +7,11 @@
 ]).
 
 -export([
-    bad_signature_test/1,
-    invalid_packet_type_test/1,
     gateway_limit_exceeded_test/1,
-    join_req_test/1,
+    invalid_packet_type_test/1,
+    bad_signature_test/1,
+    mic_check_test/1,
+    success_test/1,
     max_copies_test/1
 ]).
 
@@ -28,10 +29,11 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        bad_signature_test,
-        invalid_packet_type_test,
         gateway_limit_exceeded_test,
-        join_req_test,
+        invalid_packet_type_test,
+        bad_signature_test,
+        mic_check_test,
+        success_test,
         max_copies_test
     ].
 
@@ -50,16 +52,6 @@ end_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
-
-bad_signature_test(_Config) ->
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
-    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-
-    JoinPacketBadSig = test_utils:join_packet_up(#{
-        gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
-    }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
-    ok.
 
 gateway_limit_exceeded_test(_Config) ->
     %% Limit is DEFAULT_GATEWAY_THROTTLE = 25 per second
@@ -97,69 +89,52 @@ invalid_packet_type_test(_Config) ->
     ),
     ok.
 
-join_req_test(_Config) ->
-    Self = self(),
+bad_signature_test(_Config) ->
+    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    JoinPacketBadSig = test_utils:join_packet_up(#{
+        gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
+    }),
+    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
+    ok.
+
+mic_check_test(_Config) ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
-
-    DevAddr = 16#00000000,
-    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
-    Route = hpr_route:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => NetID,
-        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
-        oui => 1,
-        server => #{
-            host => <<"127.0.0.1">>,
-            port => 80,
-            protocol => {packet_router, #{}}
-        },
-        max_copies => 1,
-        nonce => 1
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+    DevAddr = 16#00000001,
+    PacketUp = test_utils:uplink_packet_up(#{
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey,
+        devaddr => DevAddr,
+        gateway => Gateway,
+        sig_fun => SigFun
     }),
-    ok = hpr_route_ets:insert(Route),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
-    Received1 =
-        {Self,
-            {hpr_protocol_router, send, [
-                JoinPacketUpValid,
-                hpr_route_ets:remove_euis_dev_ranges(Route)
-            ]},
-            ok},
-    ?assertEqual([Received1], meck:history(hpr_protocol_router)),
-
-    UplinkPacketUp = test_utils:uplink_packet_up(#{
-        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
-    }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
-
-    Received2 =
-        {Self,
-            {hpr_protocol_router, send, [
-                UplinkPacketUp,
-                hpr_route_ets:remove_euis_dev_ranges(Route)
-            ]},
-            ok},
-    ?assertEqual(
-        [
-            Received1,
-            Received2
-        ],
-        meck:history(hpr_protocol_router)
+    hpr_skf_ets:insert(
+        hpr_skf:from_map(#{devaddr => DevAddr, session_keys => [crypto:strong_rand_bytes(16)]})
     ),
+    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
 
-    ?assert(meck:validate(hpr_protocol_router)),
-    meck:unload(hpr_protocol_router),
+    hpr_skf_ets:delete(
+        hpr_skf:from_map(#{devaddr => DevAddr, session_keys => [NwkSessionKey]})
+    ),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+
+    hpr_skf_ets:insert(
+        hpr_skf:from_map(#{devaddr => DevAddr, session_keys => [NwkSessionKey]})
+    ),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+
     ok.
 
 max_copies_test(_Config) ->
@@ -269,6 +244,71 @@ max_copies_test(_Config) ->
             ok},
 
     ?assertEqual([Received1, Received2, Received3], meck:history(hpr_protocol_router)),
+
+    ?assert(meck:validate(hpr_protocol_router)),
+    meck:unload(hpr_protocol_router),
+    ok.
+
+success_test(_Config) ->
+    Self = self(),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    Route = hpr_route:new(#{
+        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
+        net_id => NetID,
+        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
+        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
+        oui => 1,
+        server => #{
+            host => <<"127.0.0.1">>,
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1,
+        nonce => 1
+    }),
+    ok = hpr_route_ets:insert(Route),
+
+    JoinPacketUpValid = test_utils:join_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+
+    Received1 =
+        {Self,
+            {hpr_protocol_router, send, [
+                JoinPacketUpValid,
+                hpr_route_ets:remove_euis_dev_ranges(Route)
+            ]},
+            ok},
+    ?assertEqual([Received1], meck:history(hpr_protocol_router)),
+
+    UplinkPacketUp = test_utils:uplink_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
+
+    Received2 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp,
+                hpr_route_ets:remove_euis_dev_ranges(Route)
+            ]},
+            ok},
+    ?assertEqual(
+        [
+            Received1,
+            Received2
+        ],
+        meck:history(hpr_protocol_router)
+    ),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
