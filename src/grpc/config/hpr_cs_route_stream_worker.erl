@@ -108,7 +108,7 @@ handle_continue(
 handle_continue(
     ?RCV_CFG_UPDATE,
     #state{
-        connection = Connection, stream = Stream, file_backup_path = Path, conn_backoff = Backoff0
+        stream = Stream, file_backup_path = Path, conn_backoff = Backoff0
     } = State
 ) ->
     case grpc_client:rcv(Stream, ?RCV_TIMEOUT) of
@@ -120,7 +120,6 @@ handle_continue(
             {noreply, State, {continue, ?RCV_CFG_UPDATE}};
         eof ->
             lager:warning("got eof"),
-            _ = catch grpc_client:stop_connection(Connection),
             {noreply, State, {continue, ?CONNECT}};
         {error, timeout} ->
             lager:debug("rcv timeout"),
