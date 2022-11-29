@@ -24,12 +24,12 @@
 init(_RPC, StreamState) ->
     Self = self(),
     true = erlang:register(?MODULE, self()),
-    ct:pal("init ~p @ ~p", [?MODULE, Self]),
+    lager:notice("init ~p @ ~p", [?MODULE, Self]),
     StreamState.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({stream_resp, SKFStreamResp}, StreamState) ->
-    ct:pal("got SKFStreamResp ~p", [SKFStreamResp]),
+    lager:notice("got SKFStreamResp ~p", [SKFStreamResp]),
     grpcbox_stream:send(false, SKFStreamResp, StreamState);
 handle_info(_Msg, StreamState) ->
     StreamState.
@@ -50,10 +50,13 @@ delete(_Ctx, _SKFListReq) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
 stream(SKFStreamReq, StreamState) ->
+    lager:notice("stream_req ~p", [SKFStreamReq]),
     case hpr_skf_stream_req:verify(SKFStreamReq) of
         false ->
+            lager:notice("PERMISSION_DENIED"),
             {grpc_error, {7, <<"PERMISSION_DENIED">>}};
         true ->
+            lager:notice("OK"),
             {ok, StreamState}
     end.
 
@@ -61,6 +64,6 @@ stream(SKFStreamReq, StreamState) ->
     SKFStreamResp :: hpr_skf_stream_res:res()
 ) -> ok.
 stream_resp(SKFStreamResp) ->
-    ct:pal("stream_resp ~p  @ ~p", [SKFStreamResp, erlang:whereis(?MODULE)]),
+    lager:notice("stream_resp ~p  @ ~p", [SKFStreamResp, erlang:whereis(?MODULE)]),
     ?MODULE ! {stream_resp, SKFStreamResp},
     ok.

@@ -47,7 +47,7 @@ init_per_testcase(TestCase, Config) ->
         message,
         "\n",
         metadata,
-        "\n#########################\n"
+        "\n\n"
     ],
     ok = application:set_env(lager, log_root, BaseDir),
     case os:getenv("CT_LAGER", "NONE") of
@@ -82,18 +82,8 @@ init_per_testcase(TestCase, Config) ->
     end,
     _ = application:ensure_all_started(lager),
 
-    %% Startup a config service test server
+    %% Startup a config service test server (look at ct.config)
     _ = application:ensure_all_started(grpcbox),
-    {ok, ServerPid} = grpcbox:start_server(#{
-        grpc_opts => #{
-            service_protos => [config_pb],
-            services => #{
-                'helium.config.route' => hpr_test_config_service_route,
-                'helium.config.session_key_filter' => hpr_test_config_service_skf
-            }
-        },
-        listen_opts => #{port => ?CONFIG_SERVICE_PORT, ip => {0, 0, 0, 0}}
-    }),
 
     %% Setup route worker
     FilePath = filename:join([BaseDir, "route_worker.backup"]),
@@ -111,17 +101,13 @@ init_per_testcase(TestCase, Config) ->
     ),
 
     application:ensure_all_started(?APP),
-    [{config_service_pid, ServerPid}, {router_worker_file_backup_path, FilePath} | Config].
+    [{router_worker_file_backup_path, FilePath} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     application:stop(?APP),
     application:stop(throttle),
     application:stop(lager),
-    ServerPid = proplists:get_value(config_service_pid, Config),
-    case erlang:is_process_alive(ServerPid) of
-        true -> ok = gen_server:stop(ServerPid);
-        false -> ok
-    end,
+    application:stop(grpcbox),
     Config.
 
 -spec join_packet_up(

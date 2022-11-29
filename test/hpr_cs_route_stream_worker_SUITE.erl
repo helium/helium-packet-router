@@ -52,7 +52,7 @@ end_per_testcase(TestCase, Config) ->
 
 create_route_test(Config) ->
     %% Let it startup
-    timer:sleep(100),
+    timer:sleep(500),
 
     %% Create route and send them from server
     RouteMap = #{
@@ -107,7 +107,7 @@ create_route_test(Config) ->
 
 update_route_test(Config) ->
     %% Let it startup
-    timer:sleep(100),
+    timer:sleep(500),
 
     %% Create route and send them from server
     Route1Map = #{
@@ -200,7 +200,7 @@ update_route_test(Config) ->
 
 delete_route_test(Config) ->
     %% Let it startup
-    timer:sleep(100),
+    timer:sleep(500),
 
     %% Create route and send them from server
     Route1Map = #{

@@ -24,12 +24,12 @@
 init(_RPC, StreamState) ->
     Self = self(),
     true = erlang:register(?MODULE, self()),
-    ct:pal("init ~p @ ~p", [?MODULE, Self]),
+    lager:notice("init ~p @ ~p", [?MODULE, Self]),
     StreamState.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({stream_resp, RouteStreamResp}, StreamState) ->
-    ct:pal("got RouteStreamResp ~p", [RouteStreamResp]),
+    lager:notice("got RouteStreamResp ~p", [RouteStreamResp]),
     grpcbox_stream:send(false, RouteStreamResp, StreamState);
 handle_info(_Msg, StreamState) ->
     StreamState.
@@ -59,6 +59,6 @@ stream(RouteStreamReq, StreamState) ->
 
 -spec stream_resp(RouteStreamResp :: hpr_route_stream_res:res()) -> ok.
 stream_resp(RouteStreamResp) ->
-    ct:pal("stream_resp ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
+    lager:notice("stream_resp ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
     ?MODULE ! {stream_resp, RouteStreamResp},
     ok.
