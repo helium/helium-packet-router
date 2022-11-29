@@ -2,10 +2,20 @@
 
 set -euo pipefail
 
-VERSION=$(git describe)
+cd $GITHUB_WORKSPACE
 
-# make rel to ensure grpc generation
-make rel
+git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+if [ -z "$GITHUB_REF" ]; then
+    VERSION=$(git describe)
+else
+    VERSION=$(echo "$GITHUB_REF" | sed 's|refs/tags/||')
+fi
+
+export CARGO_BUILD_RUSTFLAGS="-C target-feature=-crt-static"
+./rebar3 get-deps
+make grpc
+./rebar3 release -n "hpr" -v "${VERSION}"
 
 if [ ! -d /opt/hpr/etc ]; then
     mkdir -p /opt/hpr/etc
