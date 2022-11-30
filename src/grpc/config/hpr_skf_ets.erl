@@ -1,5 +1,7 @@
 -module(hpr_skf_ets).
 
+-include("../autogen/server/config_pb.hrl").
+
 -export([
     init/0,
     insert/1,
@@ -11,16 +13,21 @@
 
 -spec init() -> ok.
 init() ->
-    ?ETS = ets:new(?ETS, [public, named_table, set, {read_concurrency, true}]),
+    ?ETS = ets:new(?ETS, [
+        public,
+        named_table,
+        set,
+        {read_concurrency, true},
+        {keypos, #config_session_key_filter_v1_pb.devaddr}
+    ]),
     ok.
 
 -spec insert(SKF :: hpr_skf:skf()) -> ok.
 insert(SKF) ->
-    DevAddr = hpr_skf:devaddr(SKF),
-    true = ets:insert(?ETS, {DevAddr, SKF}),
+    true = ets:insert(?ETS, SKF),
     lager:info(
         [
-            {devaddr, hpr_utils:int_to_hex(DevAddr)},
+            {devaddr, hpr_utils:int_to_hex(hpr_skf:devaddr(SKF))},
             {keys_cnt, hpr_skf:session_keys(SKF)}
         ],
         "inserting SKF"
@@ -41,7 +48,7 @@ delete(SKF) ->
 lookup_devaddr(DevAddr) ->
     case ets:lookup(?ETS, DevAddr) of
         [] -> {error, not_found};
-        [{DevAddr, SKF}] -> {ok, SKF}
+        [SKF] -> {ok, SKF}
     end.
 
 %% ------------------------------------------------------------------
@@ -76,7 +83,7 @@ test_insert() ->
     ?assertEqual(ok, ?MODULE:insert(SKF)),
     DevAddr = hpr_skf:devaddr(SKF),
     ?assertEqual(
-        [{DevAddr, SKF}], ets:lookup(?ETS, DevAddr)
+        [SKF], ets:lookup(?ETS, DevAddr)
     ),
     ok.
 
@@ -85,7 +92,7 @@ test_delete() ->
     ?assertEqual(ok, ?MODULE:insert(SKF)),
     DevAddr = hpr_skf:devaddr(SKF),
     ?assertEqual(
-        [{DevAddr, SKF}], ets:lookup(?ETS, DevAddr)
+        [SKF], ets:lookup(?ETS, DevAddr)
     ),
     ?assertEqual(ok, ?MODULE:delete(SKF)),
     ?assertEqual(
