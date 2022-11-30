@@ -1,8 +1,6 @@
--module(hpr_test_config_service).
+-module(hpr_test_config_service_route).
 
 -behaviour(helium_config_route_bhvr).
-
--include("../src/grpc/autogen/server/config_pb.hrl").
 
 -export([
     init/2,
@@ -19,19 +17,19 @@
 ]).
 
 -export([
-    route_stream_resp/1
+    stream_resp/1
 ]).
 
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
     Self = self(),
     true = erlang:register(?MODULE, self()),
-    ct:pal("init ~p @ ~p", [?MODULE, Self]),
+    lager:notice("init ~p @ ~p", [?MODULE, Self]),
     StreamState.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info({route_stream_resp, RouteStreamResp}, StreamState) ->
-    ct:pal("got RouteStreamResp ~p", [RouteStreamResp]),
+handle_info({stream_resp, RouteStreamResp}, StreamState) ->
+    lager:notice("got RouteStreamResp ~p", [RouteStreamResp]),
     grpcbox_stream:send(false, RouteStreamResp, StreamState);
 handle_info(_Msg, StreamState) ->
     StreamState.
@@ -59,8 +57,8 @@ stream(RouteStreamReq, StreamState) ->
             {ok, StreamState}
     end.
 
--spec route_stream_resp(RouteStreamResp :: #config_route_stream_res_v1_pb{}) -> ok.
-route_stream_resp(RouteStreamResp) ->
-    ct:pal("route_stream_resp ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
-    ?MODULE ! {route_stream_resp, RouteStreamResp},
+-spec stream_resp(RouteStreamResp :: hpr_route_stream_res:res()) -> ok.
+stream_resp(RouteStreamResp) ->
+    lager:notice("stream_resp ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
+    ?MODULE ! {stream_resp, RouteStreamResp},
     ok.

@@ -1,4 +1,4 @@
--module(hpr_config_worker_SUITE).
+-module(hpr_cs_route_stream_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/grpc/autogen/server/config_pb.hrl").
@@ -12,11 +12,8 @@
 -export([
     create_route_test/1,
     update_route_test/1,
-    delete_route_test/1,
-    backoff_test/1
+    delete_route_test/1
 ]).
-
--define(PORT, 8085).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -32,36 +29,14 @@ all() ->
     [
         create_route_test,
         update_route_test,
-        delete_route_test,
-        backoff_test
+        delete_route_test
     ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    %% Startup a config service test server
-    _ = application:ensure_all_started(grpcbox),
-    {ok, ServerPid} = grpcbox:start_server(#{
-        grpc_opts => #{
-            service_protos => [config_pb],
-            services => #{'helium.config.route' => hpr_test_config_service}
-        },
-        listen_opts => #{port => ?PORT, ip => {0, 0, 0, 0}}
-    }),
-
-    %% Setup config worker
-    BaseDir = erlang:atom_to_list(TestCase) ++ "_data",
-    FilePath = filename:join(BaseDir, "config_worker.backup"),
-    application:set_env(hpr, config_worker, #{
-        host => "localhost",
-        port => ?PORT,
-        file_backup_path => FilePath
-    }),
-
-    test_utils:init_per_testcase(TestCase, [
-        {server_pid, ServerPid}, {file_backup_path, FilePath} | Config
-    ]).
+    test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
@@ -69,12 +44,6 @@ init_per_testcase(TestCase, Config) ->
 end_per_testcase(TestCase, Config) ->
     meck:unload(),
     test_utils:end_per_testcase(TestCase, Config),
-    ServerPid = proplists:get_value(server_pid, Config),
-    case erlang:is_process_alive(ServerPid) of
-        true -> ok = gen_server:stop(ServerPid);
-        false -> ok
-    end,
-    application:set_env(hpr, config_worker, #{}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -83,7 +52,7 @@ end_per_testcase(TestCase, Config) ->
 
 create_route_test(Config) ->
     %% Let it startup
-    timer:sleep(100),
+    timer:sleep(500),
 
     %% Create route and send them from server
     RouteMap = #{
@@ -103,7 +72,7 @@ create_route_test(Config) ->
         nonce => 1
     },
     Route = hpr_route:new(RouteMap),
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => RouteMap
         })
@@ -112,12 +81,12 @@ create_route_test(Config) ->
     %% Let time to process new routes
     ok = test_utils:wait_until(
         fun() ->
-            1 =:= ets:info(hpr_config_routes, size)
+            1 =:= ets:info(hpr_route_ets_routes, size)
         end
     ),
 
     %% Check backup file
-    FilePath = proplists:get_value(file_backup_path, Config),
+    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
     case file:read_file(FilePath) of
         {ok, Binary} ->
             Map = erlang:binary_to_term(Binary),
@@ -128,17 +97,17 @@ create_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route)], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual([], hpr_config:lookup_devaddr(16#00000020)),
-    ?assertEqual([], hpr_config:lookup_eui(3, 3)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_eui(1, 100)),
+    ?assertEqual([], hpr_route_ets:lookup_devaddr(16#00000020)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(3, 3)),
     ok.
 
 update_route_test(Config) ->
     %% Let it startup
-    timer:sleep(100),
+    timer:sleep(500),
 
     %% Create route and send them from server
     Route1Map = #{
@@ -158,14 +127,14 @@ update_route_test(Config) ->
         nonce => 1
     },
     Route1 = hpr_route:new(Route1Map),
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => Route1Map
         })
     ),
 
     %% Let time to process new routes
-    FilePath = proplists:get_value(file_backup_path, Config),
+    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
     ok = test_utils:wait_until(
         fun() ->
             case file:read_file(FilePath) of
@@ -180,10 +149,10 @@ update_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 100)),
 
     %% Update our Route
     Route2Map = Route1Map#{
@@ -195,7 +164,7 @@ update_route_test(Config) ->
         nonce => 2
     },
     Route2 = hpr_route:new(Route2Map),
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => update, route => Route2Map
         })
@@ -215,23 +184,23 @@ update_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#0000000B)
+        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#0000000B)
     ),
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_devaddr(16#0000000C)
+        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#0000000C)
     ),
-    ?assertEqual([], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route2)], hpr_config:lookup_eui(2, 2)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(1, 100)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_eui(2, 2)),
 
     ok.
 
 delete_route_test(Config) ->
     %% Let it startup
-    timer:sleep(100),
+    timer:sleep(500),
 
     %% Create route and send them from server
     Route1Map = #{
@@ -251,14 +220,14 @@ delete_route_test(Config) ->
         nonce => 1
     },
     Route1 = hpr_route:new(Route1Map),
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => create, route => Route1Map
         })
     ),
 
     %% Let time to process new routes
-    FilePath = proplists:get_value(file_backup_path, Config),
+    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
     ok = test_utils:wait_until(
         fun() ->
             case file:read_file(FilePath) of
@@ -273,14 +242,14 @@ delete_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_devaddr(16#00000005)
+        [hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([hpr_config:remove_euis_dev_ranges(Route1)], hpr_config:lookup_eui(1, 100)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 100)),
 
     %% Delete our Route
 
-    ok = hpr_test_config_service:route_stream_resp(
+    ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:from_map(#{
             action => delete, route => Route1Map
         })
@@ -300,38 +269,13 @@ delete_route_test(Config) ->
 
     %% Check that we can query route via config
     ?assertEqual(
-        [], hpr_config:lookup_devaddr(16#00000005)
+        [], hpr_route_ets:lookup_devaddr(16#00000005)
     ),
-    ?assertEqual([], hpr_config:lookup_eui(1, 12)),
-    ?assertEqual([], hpr_config:lookup_eui(1, 100)),
-    ?assertEqual(0, ets:info(hpr_config_routes_by_devaddr, size)),
-    ?assertEqual(0, ets:info(hpr_config_routes_by_eui, size)),
-    ?assertEqual(0, ets:info(hpr_config_routes, size)),
-
-    ok.
-
-backoff_test(Config) ->
-    %% Let it startup
-    timer:sleep(100),
-
-    ServerPid = proplists:get_value(server_pid, Config),
-
-    meck:new(backoff, [passthrough]),
-
-    gen_server:stop(ServerPid),
-
-    ?assertEqual(1, meck:num_calls(backoff, fail, 1)),
-
-    %% We sleep 3s the BACKOFF_MIN is 1s so we should get another 2 tries
-    timer:sleep(3000),
-
-    ok = test_utils:wait_until(
-        fun() ->
-            3 == meck:num_calls(backoff, fail, 1)
-        end
-    ),
-
-    meck:unload(backoff),
+    ?assertEqual([], hpr_route_ets:lookup_eui(1, 12)),
+    ?assertEqual([], hpr_route_ets:lookup_eui(1, 100)),
+    ?assertEqual(0, ets:info(hpr_route_ets_routes_by_devaddr, size)),
+    ?assertEqual(0, ets:info(hpr_route_ets_routes_by_eui, size)),
+    ?assertEqual(0, ets:info(hpr_route_ets_routes, size)),
 
     ok.
 

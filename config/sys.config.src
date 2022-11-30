@@ -9,10 +9,12 @@
             report_interval => 300_000,
             report_max_size => 50_000_000
         }},
-        {config_worker, #{
+        {config_service, #{
             host => "${HPR_CONFIG_WORKER_HOST}",
             port => "${HPR_CONFIG_WORKER_PORT}",
-            file_backup_path => "/var/data/config_worker.backup"
+            route => #{
+                file_backup_path => "/var/data/route_worker.backup"
+            }
         }},
         {http_roaming_downlink_port, 8090}
     ]},

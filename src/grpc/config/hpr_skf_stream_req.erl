@@ -1,4 +1,4 @@
--module(hpr_route_stream_req).
+-module(hpr_skf_stream_req).
 
 -include("../autogen/server/config_pb.hrl").
 
@@ -12,41 +12,46 @@
     to_map/1
 ]).
 
--type req() :: #config_route_stream_req_v1_pb{}.
+-type req() :: #config_session_key_filter_stream_req_v1_pb{}.
 
 -export_type([req/0]).
 
 -spec new(Signer :: libp2p_crypto:pubkey_bin()) -> req().
 new(Signer) ->
-    #config_route_stream_req_v1_pb{
+    #config_session_key_filter_stream_req_v1_pb{
         timestamp = erlang:system_time(millisecond),
         signer = Signer
     }.
 
 -spec timestamp(RouteStreamReq :: req()) -> non_neg_integer().
 timestamp(RouteStreamReq) ->
-    RouteStreamReq#config_route_stream_req_v1_pb.timestamp.
+    RouteStreamReq#config_session_key_filter_stream_req_v1_pb.timestamp.
 
 -spec signer(RouteStreamReq :: req()) -> libp2p_crypto:pubkey_bin().
 signer(RouteStreamReq) ->
-    RouteStreamReq#config_route_stream_req_v1_pb.signer.
+    RouteStreamReq#config_session_key_filter_stream_req_v1_pb.signer.
 
 -spec signature(RouteStreamReq :: req()) -> binary().
 signature(RouteStreamReq) ->
-    RouteStreamReq#config_route_stream_req_v1_pb.signature.
+    RouteStreamReq#config_session_key_filter_stream_req_v1_pb.signature.
 
--spec sign(RouteStreamReq :: req(), SigFun :: fun()) -> req().
+-spec sign(RouteStreamReq :: req(), SigFun :: fun()) ->
+    req().
 sign(RouteStreamReq, SigFun) ->
-    EncodedRouteStreamReq = config_pb:encode_msg(RouteStreamReq, config_route_stream_req_v1_pb),
-    RouteStreamReq#config_route_stream_req_v1_pb{signature = SigFun(EncodedRouteStreamReq)}.
+    EncodedRouteStreamReq = config_pb:encode_msg(
+        RouteStreamReq, config_session_key_filter_stream_req_v1_pb
+    ),
+    RouteStreamReq#config_session_key_filter_stream_req_v1_pb{
+        signature = SigFun(EncodedRouteStreamReq)
+    }.
 
 -spec verify(RouteStreamReq :: req()) -> boolean().
 verify(RouteStreamReq) ->
     EncodedRouteStreamReq = config_pb:encode_msg(
-        RouteStreamReq#config_route_stream_req_v1_pb{
+        RouteStreamReq#config_session_key_filter_stream_req_v1_pb{
             signature = <<>>
         },
-        config_route_stream_req_v1_pb
+        config_session_key_filter_stream_req_v1_pb
     ),
     libp2p_crypto:verify(
         EncodedRouteStreamReq,
@@ -57,8 +62,8 @@ verify(RouteStreamReq) ->
 -spec to_map(RouteStreamReq :: req()) -> map().
 to_map(RouteStreamReq) ->
     client_config_pb:decode_msg(
-        config_pb:encode_msg(RouteStreamReq, config_route_stream_req_v1_pb),
-        route_stream_req_v1_pb
+        config_pb:encode_msg(RouteStreamReq, config_session_key_filter_stream_req_v1_pb),
+        session_key_filter_stream_req_v1_pb
     ).
 
 %% ------------------------------------------------------------------

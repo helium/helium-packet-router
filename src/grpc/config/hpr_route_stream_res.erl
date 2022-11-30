@@ -8,20 +8,20 @@
     from_map/1
 ]).
 
--type route_stream_res() :: #config_route_stream_res_v1_pb{}.
+-type res() :: #config_route_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
 
--export_type([route_stream_res/0, action/0]).
+-export_type([res/0, action/0]).
 
--spec action(RouteStreamRes :: route_stream_res()) -> action().
+-spec action(RouteStreamRes :: res()) -> action().
 action(RouteStreamRes) ->
     RouteStreamRes#config_route_stream_res_v1_pb.action.
 
--spec route(RouteStreamRes :: route_stream_res()) -> hpr_route:route().
+-spec route(RouteStreamRes :: res()) -> hpr_route:route().
 route(RouteStreamRes) ->
     RouteStreamRes#config_route_stream_res_v1_pb.route.
 
--spec from_map(Map :: map()) -> route_stream_res().
+-spec from_map(Map :: map()) -> res().
 from_map(Map) ->
     config_pb:decode_msg(
         client_config_pb:encode_msg(Map, route_stream_res_v1_pb),
