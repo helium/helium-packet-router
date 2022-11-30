@@ -70,18 +70,18 @@ delete(Route) ->
     ]),
     ok.
 
--spec lookup_devaddr(Devaddr :: non_neg_integer()) -> list(hpr_route:route()).
-lookup_devaddr(Devaddr) ->
-    case lora_subnet:parse_netid(Devaddr, big) of
+-spec lookup_devaddr(DevAddr :: non_neg_integer()) -> list(hpr_route:route()).
+lookup_devaddr(DevAddr) ->
+    case lora_subnet:parse_netid(DevAddr, big) of
         {error, invalid_netid_type} ->
-            lager:debug("invalid devaddr ~p", [Devaddr]),
+            lager:debug("invalid devaddr ~p", [DevAddr]),
             [];
         {ok, NetID} ->
             MS = [
                 {
                     {{NetID, '$2', '$3'}, '$4'},
                     [
-                        {'andalso', {'=<', '$2', Devaddr}, {'=<', Devaddr, '$3'}}
+                        {'andalso', {'=<', '$2', DevAddr}, {'=<', DevAddr, '$3'}}
                     ],
                     ['$4']
                 }
@@ -183,15 +183,15 @@ test_insert() ->
     }),
     ok = insert(Route),
 
-    ExpectedDevaddrRows0 = lists:sort(route_to_devaddr_rows(Route)),
+    ExpectedDevAddrRows0 = lists:sort(route_to_devaddr_rows(Route)),
     ExpectedEUIRows0 = lists:sort(route_to_eui_rows(Route)),
 
-    GotDevaddrRows0 = lists:sort(ets:tab2list(?DEVADDRS_ETS)),
+    GotDevAddrRows0 = lists:sort(ets:tab2list(?DEVADDRS_ETS)),
     GotEUIRows0 = lists:sort(ets:tab2list(?EUIS_ETS)),
 
     ?assertEqual(
-        ExpectedDevaddrRows0,
-        [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevaddrRows0]
+        ExpectedDevAddrRows0,
+        [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevAddrRows0]
     ),
     ?assertEqual(ExpectedEUIRows0, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotEUIRows0]),
 
@@ -221,15 +221,15 @@ test_insert() ->
 
     ok = insert(UpdatedRoute),
 
-    ExpectedDevaddrRows1 = lists:sort(route_to_devaddr_rows(UpdatedRoute)),
+    ExpectedDevAddrRows1 = lists:sort(route_to_devaddr_rows(UpdatedRoute)),
     ExpectedEUIRows1 = lists:sort(route_to_eui_rows(UpdatedRoute)),
 
-    GotDevaddrRows1 = lists:sort(ets:tab2list(?DEVADDRS_ETS)),
+    GotDevAddrRows1 = lists:sort(ets:tab2list(?DEVADDRS_ETS)),
     GotEUIRows1 = lists:sort(ets:tab2list(?EUIS_ETS)),
 
     ?assertEqual(
-        ExpectedDevaddrRows1,
-        [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevaddrRows1]
+        ExpectedDevAddrRows1,
+        [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevAddrRows1]
     ),
     ?assertEqual(ExpectedEUIRows1, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotEUIRows1]),
     ?assertEqual([{ID, UpdatedRoute}], ets:lookup(?ROUTE_ETS, ID)),
@@ -239,13 +239,13 @@ test_delete() ->
     Route = new_route(),
     ok = insert(Route),
 
-    ExpectedDevaddrRows = lists:sort(route_to_devaddr_rows(Route)),
+    ExpectedDevAddrRows = lists:sort(route_to_devaddr_rows(Route)),
     ExpectedEUIRows = lists:sort(route_to_eui_rows(Route)),
 
-    GotDevaddrRows = lists:sort(ets:tab2list(?DEVADDRS_ETS)),
+    GotDevAddrRows = lists:sort(ets:tab2list(?DEVADDRS_ETS)),
     GotEUIRows = lists:sort(ets:tab2list(?EUIS_ETS)),
 
-    ?assertEqual(ExpectedDevaddrRows, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevaddrRows]),
+    ?assertEqual(ExpectedDevAddrRows, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotDevAddrRows]),
     ?assertEqual(ExpectedEUIRows, [{K, remove_euis_dev_ranges(R)} || {K, R} <- GotEUIRows]),
 
     ID = hpr_route:id(Route),

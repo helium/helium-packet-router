@@ -1059,7 +1059,7 @@ http_overlapping_devaddr_test(_Config) ->
         end_addr => 16#45000044
     },
 
-    %% Overlapping Devaddrs, but going to different endpoints
+    %% Overlapping DevAddrs, but going to different endpoints
     uplink_test_route(#{
         id => <<"route1">>,
         net_id => ?NET_ID_COMCAST,

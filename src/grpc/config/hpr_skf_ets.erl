@@ -17,13 +17,14 @@ init() ->
 -spec insert(SKF :: hpr_skf:skf()) -> ok.
 insert(SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
-    Keys = hpr_skf:session_keys(SKF),
-    true = ets:insert(?ETS, {DevAddr, Keys}),
-    Fields = [
-        {devaddr, hpr_utils:int_to_hex(DevAddr)},
-        {keys_cnt, erlang:length(Keys)}
-    ],
-    lager:info(Fields, "inserting SKF"),
+    true = ets:insert(?ETS, {DevAddr, SKF}),
+    lager:info(
+        [
+            {devaddr, hpr_utils:int_to_hex(DevAddr)},
+            {keys_cnt, hpr_skf:session_keys(SKF)}
+        ],
+        "inserting SKF"
+    ),
     ok.
 
 -spec delete(SKF :: hpr_skf:skf()) -> ok.
@@ -36,21 +37,78 @@ delete(SKF) ->
     lager:info(Fields, "deleted"),
     ok.
 
--spec lookup_devaddr(Devaddr :: non_neg_integer()) -> {error, not_found} | {ok, list(binary())}.
-lookup_devaddr(Devaddr) ->
-    case ets:lookup(?ETS, Devaddr) of
+-spec lookup_devaddr(DevAddr :: non_neg_integer()) -> {error, not_found} | {ok, hpr_skf:skf()}.
+lookup_devaddr(DevAddr) ->
+    case ets:lookup(?ETS, DevAddr) of
         [] -> {error, not_found};
-        [{Devaddr, Keys}] -> {ok, Keys}
+        [{DevAddr, SKF}] -> {ok, SKF}
     end.
-
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
 
 %% ------------------------------------------------------------------
 %% EUnit tests
 %% ------------------------------------------------------------------
 
 -ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+all_test_() ->
+    {setup, fun setup/0,
+        {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
+            ?_test(test_insert()),
+            ?_test(test_delete()),
+            ?_test(test_lookup_devaddr())
+        ]}}.
+
+setup() ->
+    ok.
+
+foreach_setup() ->
+    ?MODULE:init(),
+    ok.
+
+foreach_cleanup(ok) ->
+    true = ets:delete(?ETS),
+    ok.
+
+test_insert() ->
+    SKF = new_skf(),
+    ?assertEqual(ok, ?MODULE:insert(SKF)),
+    DevAddr = hpr_skf:devaddr(SKF),
+    ?assertEqual(
+        [{DevAddr, SKF}], ets:lookup(?ETS, DevAddr)
+    ),
+    ok.
+
+test_delete() ->
+    SKF = new_skf(),
+    ?assertEqual(ok, ?MODULE:insert(SKF)),
+    DevAddr = hpr_skf:devaddr(SKF),
+    ?assertEqual(
+        [{DevAddr, SKF}], ets:lookup(?ETS, DevAddr)
+    ),
+    ?assertEqual(ok, ?MODULE:delete(SKF)),
+    ?assertEqual(
+        [], ets:lookup(?ETS, DevAddr)
+    ),
+    ok.
+
+test_lookup_devaddr() ->
+    SKF = new_skf(),
+    ?assertEqual(ok, ?MODULE:insert(SKF)),
+    DevAddr = hpr_skf:devaddr(SKF),
+    ?assertEqual(
+        {ok, SKF}, ?MODULE:lookup_devaddr(DevAddr)
+    ),
+    ok.
+
+new_skf() ->
+    DevAddr = 16#00000000,
+    SessionKeys = [crypto:strong_rand_bytes(16)],
+    SKFMap = #{
+        devaddr => DevAddr,
+        session_keys => SessionKeys
+    },
+    hpr_skf:from_map(SKFMap).
 
 -endif.

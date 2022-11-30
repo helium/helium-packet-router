@@ -71,7 +71,7 @@ create_skf_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({ok, SessionKeys}, hpr_skf_ets:lookup_devaddr(DevAddr)),
+    ?assertEqual({ok, hpr_skf:from_map(SKFMap)}, hpr_skf_ets:lookup_devaddr(DevAddr)),
     ok.
 
 update_skf_test(_Config) ->
@@ -95,7 +95,7 @@ update_skf_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({ok, SessionKeys1}, hpr_skf_ets:lookup_devaddr(DevAddr1)),
+    ?assertEqual({ok, hpr_skf:from_map(SKFMap1)}, hpr_skf_ets:lookup_devaddr(DevAddr1)),
 
     %% Update our SKF
     SessionKeys2 = [crypto:strong_rand_bytes(16)],
@@ -111,7 +111,7 @@ update_skf_test(_Config) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            {ok, SessionKeys2} =:= hpr_skf_ets:lookup_devaddr(DevAddr1)
+            {ok, hpr_skf:from_map(SKFMap2)} =:= hpr_skf_ets:lookup_devaddr(DevAddr1)
         end
     ),
     ok.
@@ -137,7 +137,7 @@ delete_skf_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({ok, SessionKeys}, hpr_skf_ets:lookup_devaddr(DevAddr)),
+    ?assertEqual({ok, hpr_skf:from_map(SKFMap)}, hpr_skf_ets:lookup_devaddr(DevAddr)),
 
     ok = hpr_test_config_service_skf:stream_resp(
         hpr_skf_stream_res:from_map(#{

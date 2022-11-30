@@ -168,13 +168,13 @@ mic_check(Packet) ->
             case hpr_skf_ets:lookup_devaddr(DevAddr) of
                 {error, not_found} ->
                     true;
-                {ok, Keys} ->
+                {ok, SFK} ->
                     Payload = hpr_packet_up:payload(Packet),
                     lists:any(
                         fun(Key) ->
                             hpr_lorawan:key_matches_mic(Key, Payload)
                         end,
-                        Keys
+                        hpr_skf:session_keys(SFK)
                     )
             end
     end.
