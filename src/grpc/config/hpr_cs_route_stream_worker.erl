@@ -30,7 +30,7 @@
 -define(BACKOFF_MAX, timer:minutes(5)).
 
 -record(state, {
-    stream :: grpc_client:stream() | undefined,
+    stream :: grpcbox_client:stream() | undefined,
     file_backup_path :: path(),
     conn_backoff :: backoff:backoff()
 }).
@@ -39,8 +39,6 @@
 
 -define(SERVER, ?MODULE).
 -define(INIT_STREAM, init_stream).
--define(RCV_CFG_UPDATE, receive_config_update).
--define(RCV_TIMEOUT, timer:seconds(5)).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -76,63 +74,42 @@ handle_cast(Msg, State) ->
 
 handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    case hpr_cs_conn_worker:get_connection() of
-        undefined ->
-            {Delay, Backoff1} = backoff:fail(Backoff0),
-            lager:error("failed to get connection sleeping ~wms", [Delay]),
-            _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
-            {noreply, State#state{conn_backoff = Backoff1}};
-        Connection ->
-            {_, Backoff1} = backoff:succeed(Backoff0),
-            #{http_connection := Pid} = Connection,
-            _Ref = erlang:monitor(process, Pid, [{tag, {'DOWN', ?MODULE}}]),
-            lager:info("connected"),
-            {ok, Stream} = grpc_client:new_stream(
-                Connection, 'helium.config.route', stream, client_config_pb
-            ),
-            %% Sending Route Stream Request
-            {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
-            PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-            RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
-            SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
-            ok = grpc_client:send_last(Stream, hpr_route_stream_req:to_map(SignedRouteStreamReq)),
+    {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
+    SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
+    SignedRouteStreamReqMap = hpr_route_stream_req:to_map(SignedRouteStreamReq),
+    StreamOptions = #{channel => config_channel},
+
+    case helium_config_route_client:stream(SignedRouteStreamReqMap, StreamOptions) of
+        {ok, Stream} ->
             lager:info("stream initialized"),
-            self() ! ?RCV_CFG_UPDATE,
-            {noreply, State#state{stream = Stream, conn_backoff = Backoff1}}
-    end;
-handle_info(
-    ?RCV_CFG_UPDATE,
-    #state{
-        stream = Stream, file_backup_path = Path, conn_backoff = Backoff0
-    } = State
-) ->
-    case grpc_client:rcv(Stream, ?RCV_TIMEOUT) of
-        {headers, _Headers} ->
-            self() ! ?RCV_CFG_UPDATE,
-            {noreply, State};
-        {data, RouteStreamRes} ->
-            lager:info("got router update"),
-            ok = process_route_stream_res(hpr_route_stream_res:from_map(RouteStreamRes), Path),
-            self() ! ?RCV_CFG_UPDATE,
-            {noreply, State};
-        eof ->
-            lager:warning("got eof"),
-            self() ! ?INIT_STREAM,
-            {noreply, State#state{stream = undefined}};
-        {error, timeout} ->
-            lager:debug("rcv timeout"),
             {_, Backoff1} = backoff:succeed(Backoff0),
-            self() ! ?RCV_CFG_UPDATE,
-            {noreply, State#state{conn_backoff = Backoff1}};
-        {error, E} ->
-            lager:error("failed to rcv ~p", [E]),
-            self() ! ?INIT_STREAM,
-            {noreply, State#state{stream = undefined}}
+            {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
+        {error, _E} ->
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            lager:error("failed to get stream sleeping ~wms", [Delay]),
+            _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
+            {noreply, State#state{conn_backoff = Backoff1}}
     end;
-handle_info({{'DOWN', ?MODULE}, _Mon, process, _Pid, _ExitReason}, State) ->
-    lager:info("connection ~p went down ~p", [_Pid, _ExitReason]),
+%% GRPC stream callbacks
+handle_info({data, _StreamID, RouteStreamRes}, #state{file_backup_path = Path} = State) ->
+    lager:debug("route update"),
+    ok = process_route_stream_res(hpr_route_stream_res:from_map(RouteStreamRes), Path),
+    {noreply, State};
+handle_info(
+    {'DOWN', Ref, process, Pid, _Reason},
+    #state{stream = #{stream_pid := Pid, monitor_ref := Ref}} = State
+) ->
+    lager:warning("stream closed"),
     self() ! ?INIT_STREAM,
     {noreply, State#state{stream = undefined}};
+handle_info({headers, _StreamID, _Headers}, State) ->
+    %% noop on headers
+    {noreply, State};
+handle_info({trailers, _StreamID, _Trailers}, State) ->
+    %% noop on trailers
+    {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.

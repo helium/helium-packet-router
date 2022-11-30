@@ -67,6 +67,7 @@ init([]) ->
 
     ok = hpr_routing:init(),
     ok = hpr_max_copies:init(),
+    ok = hpr_protocol_router:init(),
 
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
@@ -92,12 +93,7 @@ init([]) ->
         ?SUP(hpr_gwmp_sup, []),
 
         ?SUP(hpr_http_roaming_sup, []),
-        ?ELLI_WORKER(hpr_http_roaming_downlink_handler, [ElliConfigRoamingDownlink]),
-
-        ?WORKER(hpr_router_connection_manager, []),
-        ?WORKER(hpr_router_stream_manager, [
-            'helium.packet_router.packet', route, client_packet_router_pb
-        ])
+        ?ELLI_WORKER(hpr_http_roaming_downlink_handler, [ElliConfigRoamingDownlink])
     ],
     {ok, {
         #{

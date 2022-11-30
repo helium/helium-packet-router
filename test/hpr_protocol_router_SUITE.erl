@@ -104,7 +104,7 @@ connection_refused_test(_Config) ->
     Route = test_route(),
 
     ?assertEqual(
-        {error, econnrefused},
+        {error, {shutdown, econnrefused}},
         hpr_protocol_router:send(PacketUp, Route)
     ),
 
@@ -212,14 +212,15 @@ server_crash_test(_Config) ->
     after timer:seconds(2) -> ok
     end,
 
-    ?assert(erlang:is_pid(erlang:whereis(hpr_router_connection_manager))),
-    ?assert(erlang:is_process_alive(erlang:whereis(hpr_router_connection_manager))),
-
-    ok = test_utils:wait_until(
-        fun() ->
-            {state, Conns} = sys:get_state(hpr_router_connection_manager),
-            0 =:= maps:size(Conns)
-        end
+    %% Make sure the stream is gone, and we can't get another.
+    ?assertEqual(0, erlang:length(hpr_protocol_router:all_streams())),
+    ?assertEqual(
+        {error, {shutdown, econnrefused}},
+        hpr_protocol_router:get_stream(
+            hpr_test_gateway:pubkey_bin(GatewayPid),
+            hpr_route:lns(Route),
+            hpr_route:server(Route)
+        )
     ),
     ok.
 
