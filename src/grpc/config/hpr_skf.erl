@@ -8,10 +8,6 @@
     from_map/1
 ]).
 
--ifdef(TEST).
-
--endif.
-
 -type skf() :: #config_session_key_filter_v1_pb{}.
 
 -export_type([skf/0]).
