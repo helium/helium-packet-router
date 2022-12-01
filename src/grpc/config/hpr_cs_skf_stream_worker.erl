@@ -1,3 +1,12 @@
+%%%-------------------------------------------------------------------
+%% @doc
+%% === Config Service Session Key Filter Worker ===
+%%
+%% Same as `hpr_cs_route_stream_worker' but for Session Key Filters.
+%% Go see the other module for some notes about failure modes.
+%%
+%% @end
+%%%-------------------------------------------------------------------
 -module(hpr_cs_skf_stream_worker).
 
 -behaviour(gen_server).
@@ -80,6 +89,11 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
             {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
+        {error, undefined_channel} ->
+            lager:notice(
+                "`config_channel` is not defined, or not started. Not attempting to reconnect."
+            ),
+            {noreply, State};
         {error, _E} ->
             {Delay, Backoff1} = backoff:fail(Backoff0),
             lager:error("failed to get stream sleeping ~wms", [Delay]),
@@ -91,19 +105,33 @@ handle_info({data, _StreamID, SKFStreamRes}, State) ->
     lager:debug("sfk update"),
     ok = process_res(hpr_skf_stream_res:from_map(SKFStreamRes)),
     {noreply, State};
-handle_info(
-    {'DOWN', Ref, process, Pid, _Reason},
-    #state{stream = #{stream_pid := Pid, monitor_ref := Ref}} = State
-) ->
-    lager:warning("stream closed"),
-    self() ! ?INIT_STREAM,
-    {noreply, State#state{stream = undefined}};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
     {noreply, State};
-handle_info({trailers, _StreamID, _Trailers}, State) ->
-    %% noop on trailers
-    {noreply, State};
+handle_info({trailers, _StreamID, Trailers}, State) ->
+    %% IF a stream is closed by the server side, Trailers will be
+    %% received before the EOS. Removing the stream from state will
+    %% mean none of the other clauses match, and reconnecting will not
+    %% be attempted.
+    %% ref: https://grpc.github.io/grpc/core/md_doc_statuscodes.html
+    case Trailers of
+        {<<"12">>, _, _} ->
+            lager:notice(
+                "helium.config.route/stream not implemented. "
+                "Make sure you're pointing at the right server."
+            ),
+            {noreply, State#state{stream = undefined}};
+        _ ->
+            {noreply, State}
+    end;
+handle_info(
+    {eos, StreamID},
+    #state{stream = #{stream_id := StreamID}, conn_backoff = Backoff0} = State
+) ->
+    {Delay, Backoff1} = backoff:fail(Backoff0),
+    lager:info("stream went down sleeping ~wms", [Delay]),
+    _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
+    {noreply, State#state{stream = undefined, conn_backoff = Backoff1}};
 handle_info(_Msg, State) ->
     lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.
