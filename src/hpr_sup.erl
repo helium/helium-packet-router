@@ -68,19 +68,21 @@ init([]) ->
     ok = hpr_routing:init(),
     ok = hpr_max_copies:init(),
     ok = hpr_protocol_router:init(),
+    ok = hpr_route_ets:init(),
+    ok = hpr_skf_ets:init(),
+
+    HttpRoamingDownlink = application:get_env(?APP, http_roaming_downlink_port, 8090),
+    PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
+    ConfigServiceConfig = application:get_env(?APP, config_service, #{}),
 
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
         {port, 3000}
     ],
-
-    HttpRoamingDownlink = application:get_env(?APP, http_roaming_downlink_port, 8090),
     ElliConfigRoamingDownlink = [
         {callback, hpr_http_roaming_downlink_handler},
         {port, HttpRoamingDownlink}
     ],
-
-    PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
 
     ChildSpecs = [
         ?WORKER(hpr_metrics, [#{}]),
@@ -88,7 +90,8 @@ init([]) ->
 
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
 
-        ?SUP(hpr_cs_sup, []),
+        ?WORKER(hpr_cs_route_stream_worker, [maps:get(route, ConfigServiceConfig, #{})]),
+        ?WORKER(hpr_cs_skf_stream_worker, [#{}]),
 
         ?SUP(hpr_gwmp_sup, []),
 
