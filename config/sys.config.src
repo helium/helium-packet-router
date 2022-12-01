@@ -10,6 +10,8 @@
             report_max_size => 50_000_000
         }},
         {config_service, #{
+            host => "${HPR_CONFIG_WORKER_HOST}",
+            port => "${HPR_CONFIG_WORKER_PORT}",
             route => #{
                 file_backup_path => "/var/data/route_worker.backup"
             }
@@ -17,7 +19,6 @@
         {http_roaming_downlink_port, 8090}
     ]},
     {grpcbox, [
-        {client, #{channels => [{config_channel, [{http, "${HPR_CONFIG_WORKER_HOST}", ${HPR_CONFIG_WORKER_PORT}, []}], #{}}]},
         {listen_opts, #{port => 8080, ip => {0, 0, 0, 0}}},
         {servers, [
             #{

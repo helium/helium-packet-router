@@ -75,6 +75,10 @@ init([]) ->
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
     ConfigServiceConfig = application:get_env(?APP, config_service, #{}),
 
+    %% Starting config service client channel here because of the way we get
+    %% .env vars into the app.
+    _ = maybe_start_config_channel(ConfigServiceConfig),
+
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
         {port, 3000}
@@ -106,3 +110,15 @@ init([]) ->
         },
         ChildSpecs
     }}.
+
+maybe_start_config_channel(Config) ->
+    case Config of
+        #{port := []} ->
+            lager:notice("no port provided for config channel");
+        #{port := Port} when erlang:is_list(Port) ->
+            maybe_start_config_channel(Config#{port => erlang:list_to_integer(Port)});
+        #{host := Host, port := Port} ->
+            _ = grpcbox_client:connect(config_channel, [{http, Host, Port, []}], #{});
+        _ ->
+            lager:notice("no host and port to start config_channel")
+    end.
