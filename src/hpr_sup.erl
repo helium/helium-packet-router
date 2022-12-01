@@ -114,11 +114,11 @@ init([]) ->
 maybe_start_config_channel(Config) ->
     case Config of
         #{port := []} ->
-            lager:notice("no port provided for config channel");
+            lager:error("no port provided for config channel");
         #{port := Port} when erlang:is_list(Port) ->
             maybe_start_config_channel(Config#{port => erlang:list_to_integer(Port)});
         #{host := Host, port := Port} ->
             _ = grpcbox_client:connect(config_channel, [{http, Host, Port, []}], #{});
         _ ->
-            lager:notice("no host and port to start config_channel")
+            lager:error("no host and port to start config_channel")
     end.

@@ -132,7 +132,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
             {_, Backoff1} = backoff:succeed(Backoff0),
             {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
         {error, undefined_channel} ->
-            lager:notice(
+            lager:error(
                 "`config_channel` is not defined, or not started. Not attempting to reconnect."
             ),
             {noreply, State};
@@ -158,7 +158,7 @@ handle_info({trailers, _StreamID, Trailers}, State) ->
     %% ref: https://grpc.github.io/grpc/core/md_doc_statuscodes.html
     case Trailers of
         {<<"12">>, _, _} ->
-            lager:notice(
+            lager:error(
                 "helium.config.route/stream not implemented. "
                 "Make sure you're pointing at the right server."
             ),
