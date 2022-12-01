@@ -117,7 +117,7 @@ handle_info({trailers, _StreamID, Trailers}, State) ->
     case Trailers of
         {<<"12">>, _, _} ->
             lager:notice(
-                "helium.config.route/stream not implemented. "
+                "helium.config.session_key_filter/stream not implemented. "
                 "Make sure you're pointing at the right server."
             ),
             {noreply, State#state{stream = undefined}};
