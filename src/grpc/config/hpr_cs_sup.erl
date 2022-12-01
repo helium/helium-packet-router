@@ -28,7 +28,6 @@ init([]) ->
 
     ConfigServiceConfig = application:get_env(?APP, config_service, #{}),
     ChildSpecs = [
-        ?WORKER(hpr_cs_conn_worker, [ConfigServiceConfig]),
         ?WORKER(hpr_cs_route_stream_worker, [maps:get(route, ConfigServiceConfig, #{})]),
         ?WORKER(hpr_cs_skf_stream_worker, [#{}])
     ],
