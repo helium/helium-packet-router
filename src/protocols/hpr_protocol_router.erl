@@ -77,7 +77,7 @@ get_stream(Gateway, LNS, Server) ->
                             channel => LNS,
                             callback_module => {
                                 hpr_packet_router_downlink_handler,
-                                #{gateway => Gateway, lns => LNS}
+                                hpr_packet_router_downlink_handler:new_state(Gateway, LNS)
                             }
                         })
                     of
