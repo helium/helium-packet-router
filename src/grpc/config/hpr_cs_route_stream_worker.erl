@@ -170,6 +170,9 @@ handle_info(
     {eos, StreamID},
     #state{stream = #{stream_id := StreamID}, conn_backoff = Backoff0} = State
 ) ->
+    %% When streams or channels go down, they first send an `eos' message, then
+    %% send a `DOWN' message. We're choosing not to handle the `DOWN' message,
+    %% it behaves as a copy of the `eos' message.
     {Delay, Backoff1} = backoff:fail(Backoff0),
     lager:info("stream went down sleeping ~wms", [Delay]),
     _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
