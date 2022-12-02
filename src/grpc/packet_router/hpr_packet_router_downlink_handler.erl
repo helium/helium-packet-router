@@ -12,6 +12,7 @@
 
 -record(state, {
     gateway :: libp2p_crypto:pubkey_bin(),
+    lns :: binary(),
     stream_id :: stream_id()
 }).
 
@@ -19,8 +20,8 @@
 -type callback_data() :: #state{}.
 
 -spec init(pid(), stream_id(), term()) -> {ok, callback_data()}.
-init(_ConnectionPid, StreamId, #{gateway := Gateway}) ->
-    {ok, #state{gateway = Gateway, stream_id = StreamId}}.
+init(_ConnectionPid, StreamId, #{gateway := Gateway, lns := LNS}) ->
+    {ok, #state{gateway = Gateway, stream_id = StreamId, lns = LNS}}.
 
 -spec handle_message(map(), callback_data()) -> {ok, callback_data()}.
 handle_message(EnvDownMap, #state{gateway = Gateway} = CBData) ->
@@ -39,11 +40,11 @@ handle_trailers(_Status, _Message, _Metadata, CBData) ->
     {ok, CBData}.
 
 -spec handle_eos(callback_data()) -> {ok, callback_data()}.
-handle_eos(#state{gateway = Gateway} = CBData) ->
+handle_eos(#state{gateway = Gateway, lns = LNS} = CBData) ->
     GatewayName = hpr_utils:gateway_name(Gateway),
-    RemoveCount = hpr_protocol_router:remove_stream(Gateway),
+    true = hpr_protocol_router:remove_stream(Gateway, LNS),
     lager:info(
-        [{removed_count, RemoveCount}, {gateway, GatewayName}],
+        [{gateway, GatewayName}, {lns, erlang:binary_to_list(LNS)}],
         "stream going down"
     ),
     {ok, CBData}.

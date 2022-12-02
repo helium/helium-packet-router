@@ -13,7 +13,7 @@
 %% ------------------------------------------------------------------
 -export([
     get_stream/3,
-    remove_stream/1
+    remove_stream/2
 ]).
 
 -ifdef(TEST).
@@ -76,7 +76,8 @@ get_stream(Gateway, LNS, Server) ->
                         helium_packet_router_packet_client:route(#{
                             channel => LNS,
                             callback_module => {
-                                hpr_packet_router_downlink_handler, #{gateway => Gateway}
+                                hpr_packet_router_downlink_handler,
+                                #{gateway => Gateway, lns => LNS}
                             }
                         })
                     of
@@ -89,11 +90,9 @@ get_stream(Gateway, LNS, Server) ->
             end
     end.
 
--spec remove_stream(libp2p_crypto:pubkey_bin()) -> non_neg_integer().
-remove_stream(Gateway) ->
-    %% Match = ets:fun2ms(fun({{GW, _}, _}) when GW == Gateway -> true end),
-    Match = [{{{'$1', '_'}, '_'}, [{'==', '$1', {const, Gateway}}], [true]}],
-    ets:select_delete(?STREAM_ETS, Match).
+-spec remove_stream(libp2p_crypto:pubkey_bin(), binary()) -> true.
+remove_stream(Gateway, LNS) ->
+    ets:delete(?STREAM_ETS, {Gateway, LNS}).
 
 %% ------------------------------------------------------------------
 %% Tests Functions
