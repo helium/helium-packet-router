@@ -11,7 +11,7 @@
 %%
 %% If a channel goes down, all the stream will receive a `eos'
 %% message, and a `DOWN' message. The channel will clean up the
-%% remaining stram pids.
+%% remaining stream pids.
 %%
 %% == Known Failures ==
 %%
@@ -33,7 +33,7 @@
 %% channel, `config_channel'. Channels do not make connections to
 %% servers. If this message is received it means the channel was never
 %% created, either through configuration, or explicitly with
-%% `grpcbox_clietn:connect/3'.
+%% `grpcbox_client:connect/3'.
 %%
 %% = econnrefused =
 %%
