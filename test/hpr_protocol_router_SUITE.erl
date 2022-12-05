@@ -125,14 +125,12 @@ downlink_test(_Config) ->
 
     %% Queue up a downlink from the testing server
     EnvDown = hpr_envelope_down:new(
-        hpr_packet_down:to_record(#{
-            payload => base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
-            rx1 => #{
-                timestamp => erlang:system_time(millisecond) band 16#FFFF_FFFF,
-                frequency => 904_100_000,
-                datarate => 'SF11BW125'
-            }
-        })
+        hpr_packet_down:new_downlink(
+            base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
+            erlang:system_time(millisecond) band 16#FFFF_FFFF,
+            904_100_000,
+            'SF11BW125'
+        )
     ),
     application:set_env(
         hpr,

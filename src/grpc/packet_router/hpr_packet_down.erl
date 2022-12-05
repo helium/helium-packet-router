@@ -3,38 +3,25 @@
 -include("../autogen/packet_router_pb.hrl").
 
 -export([
-    new/1,
     rx1_frequency/1,
     rx2_frequency/1,
     window/1,
-    to_record/1,
-    to_record/2,
     payload/1,
     rx1_timestamp/1,
     rx1_datarate/1,
     rx2_datarate/1,
     window/3,
+    new_downlink/4,
     new_downlink/5
 ]).
 
--type packet_map() :: client_packet_router_pb:packet_router_packet_down_v1_pb().
 -type packet() :: packet_router_pb:packet_router_packet_down_v1_pb().
 -type downlink_packet() :: hpr_packet_down:packet().
 
 -export_type([
-    packet_map/0,
     packet/0,
     downlink_packet/0
 ]).
-
--spec new(packet_map() | map()) -> packet().
-new(PacketMap) when erlang:is_map(PacketMap) ->
-    Template = #packet_router_packet_down_v1_pb{},
-    #packet_router_packet_down_v1_pb{
-        payload = maps:get(payload, PacketMap, Template#packet_router_packet_down_v1_pb.payload),
-        rx1 = window(maps:get(rx1, PacketMap, Template#packet_router_packet_down_v1_pb.rx1)),
-        rx2 = window(maps:get(rx2, PacketMap, Template#packet_router_packet_down_v1_pb.rx1))
-    }.
 
 -spec rx1_frequency(PacketDown :: packet()) ->
     Frequency :: non_neg_integer() | undefined.
@@ -62,27 +49,10 @@ rx1_datarate(PacketDown) ->
 rx2_datarate(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.datarate.
 
--spec to_record(packet_map() | map()) -> packet().
-to_record(PacketMap) ->
-    Template = #packet_router_packet_down_v1_pb{},
-    #packet_router_packet_down_v1_pb{
-        payload = maps:get(payload, PacketMap, Template#packet_router_packet_down_v1_pb.payload),
-        rx1 = window(maps:get(rx1, PacketMap, Template#packet_router_packet_down_v1_pb.rx1)),
-        rx2 = window(maps:get(rx2, PacketMap, Template#packet_router_packet_down_v1_pb.rx1))
-    }.
-
--spec to_record(PacketMap :: packet_map() | map(), Rx2 :: #window_v1_pb{} | undefined) -> packet().
-to_record(PacketMap, Rx2) ->
-    Template = #packet_router_packet_down_v1_pb{},
-    #packet_router_packet_down_v1_pb{
-        payload = maps:get(payload, PacketMap, Template#packet_router_packet_down_v1_pb.payload),
-        rx1 = window(maps:get(rx1, PacketMap, Template#packet_router_packet_down_v1_pb.rx1)),
-        rx2 = Rx2
-    }.
-
 -spec window
     (undefined) -> undefined;
-    (packet_router_pb:window_v1_pb()) -> packet_router_pb:window_v1_pb().
+    (packet_router_pb:window_v1_pb()) -> packet_router_pb:window_v1_pb();
+    (map()) -> packet_router_pb:window_v1_pb().
 window(undefined) ->
     undefined;
 window(#window_v1_pb{} = Window) ->
@@ -110,19 +80,22 @@ window(TS, FrequencyHz, DataRate) ->
     Payload :: binary(),
     Timestamp :: non_neg_integer(),
     Frequency :: atom() | number(),
+    DataRate :: atom() | integer()
+) -> downlink_packet().
+new_downlink(Payload, Timestamp, FrequencyHz, DataRate) ->
+    new_downlink(Payload, Timestamp, FrequencyHz, DataRate, undefined).
+
+-spec new_downlink(
+    Payload :: binary(),
+    Timestamp :: non_neg_integer(),
+    Frequency :: atom() | number(),
     DataRate :: atom() | integer(),
     Rx2 :: packet_router_pb:window_v1_pb() | undefined
 ) -> downlink_packet().
 new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
     #packet_router_packet_down_v1_pb{
         payload = Payload,
-        rx1 = #window_v1_pb{
-            timestamp = Timestamp,
-            %% Protobuf encoding requires that the frequency is an integer, rather than a
-            %% float in exponential notation
-            frequency = round(FrequencyHz),
-            datarate = DataRate
-        },
+        rx1 = window(Timestamp, FrequencyHz, DataRate),
         rx2 = window(Rx2)
     }.
 
@@ -218,7 +191,7 @@ fake_window() ->
         frequency => ?FAKE_FREQUENCY,
         datarate => ?FAKE_DATARATE
     }),
-    ?assertEqual(ok, client_packet_router_pb:verify_msg(Window, window_v1_pb)),
+    ?assertEqual(ok, packet_router_pb:verify_msg(Window, window_v1_pb)),
     Window.
 
 fake_downlink() ->
