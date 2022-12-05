@@ -8,8 +8,7 @@
     signer/1,
     signature/1,
     sign/2,
-    verify/1,
-    to_map/1
+    verify/1
 ]).
 
 -type req() :: #config_session_key_filter_stream_req_v1_pb{}.
@@ -59,13 +58,6 @@ verify(RouteStreamReq) ->
         libp2p_crypto:bin_to_pubkey(?MODULE:signer(RouteStreamReq))
     ).
 
--spec to_map(RouteStreamReq :: req()) -> map().
-to_map(RouteStreamReq) ->
-    client_config_pb:decode_msg(
-        config_pb:encode_msg(RouteStreamReq, config_session_key_filter_stream_req_v1_pb),
-        session_key_filter_stream_req_v1_pb
-    ).
-
 %% ------------------------------------------------------------------
 %% EUNIT Tests
 %% ------------------------------------------------------------------
@@ -104,14 +96,6 @@ sign_verify_test() ->
     SignedRouteStreamReq = ?MODULE:sign(RouteStreamReq, SigFun),
 
     ?assert(?MODULE:verify(SignedRouteStreamReq)),
-    ok.
-
-to_map_test() ->
-    Req = ?MODULE:new(<<"Signer">>),
-    Map = ?MODULE:to_map(Req),
-    ?assertEqual(?MODULE:timestamp(Req), maps:get(timestamp, Map)),
-    ?assertEqual(?MODULE:signer(Req), maps:get(signer, Map)),
-    ?assertEqual(?MODULE:signature(Req), maps:get(signature, Map)),
     ok.
 
 -endif.

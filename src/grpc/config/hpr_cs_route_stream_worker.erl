@@ -123,10 +123,9 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
     SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
-    SignedRouteStreamReqMap = hpr_route_stream_req:to_map(SignedRouteStreamReq),
     StreamOptions = #{channel => config_channel},
 
-    case helium_config_route_client:stream(SignedRouteStreamReqMap, StreamOptions) of
+    case helium_config_route_client:stream(SignedRouteStreamReq, StreamOptions) of
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
@@ -145,7 +144,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
 %% GRPC stream callbacks
 handle_info({data, _StreamID, RouteStreamRes}, #state{file_backup_path = Path} = State) ->
     lager:debug("route update"),
-    ok = process_route_stream_res(hpr_route_stream_res:from_map(RouteStreamRes), Path),
+    ok = process_route_stream_res(RouteStreamRes, Path),
     {noreply, State};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers

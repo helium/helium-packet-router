@@ -3,6 +3,7 @@
 -include("../autogen/server/packet_router_pb.hrl").
 
 -export([
+    new/1,
     rx1_frequency/1,
     rx2_frequency/1,
     window/1,
@@ -25,6 +26,15 @@
     packet/0,
     downlink_packet/0
 ]).
+
+-spec new(packet_map() | map()) -> packet().
+new(PacketMap) when erlang:is_map(PacketMap) ->
+    Template = #packet_router_packet_down_v1_pb{},
+    #packet_router_packet_down_v1_pb{
+        payload = maps:get(payload, PacketMap, Template#packet_router_packet_down_v1_pb.payload),
+        rx1 = window(maps:get(rx1, PacketMap, Template#packet_router_packet_down_v1_pb.rx1)),
+        rx2 = window(maps:get(rx2, PacketMap, Template#packet_router_packet_down_v1_pb.rx1))
+    }.
 
 -spec rx1_frequency(PacketDown :: packet()) ->
     Frequency :: non_neg_integer() | undefined.
@@ -72,13 +82,12 @@ to_record(PacketMap, Rx2) ->
 
 -spec window
     (undefined) -> undefined;
-    (packet_router_pb:window_v1_pb()) -> packet_router_pb:window_v1_pb();
-    (client_packet_router_pb:window_v1_pb()) -> packet_router_pb:window_v1_pb().
+    (packet_router_pb:window_v1_pb()) -> packet_router_pb:window_v1_pb().
 window(undefined) ->
     undefined;
 window(#window_v1_pb{} = Window) ->
     Window;
-window(WindowMap) ->
+window(WindowMap) when erlang:is_map(WindowMap) ->
     Template = #window_v1_pb{},
     #window_v1_pb{
         timestamp = maps:get(timestamp, WindowMap, Template#window_v1_pb.timestamp),
@@ -89,15 +98,13 @@ window(WindowMap) ->
 -spec window(non_neg_integer(), 'undefined' | non_neg_integer(), atom()) ->
     packet_router_pb:window_v1_pb().
 window(TS, FrequencyHz, DataRate) ->
-    WindowMap = #{
-        timestamp => TS,
-
-        %%        the protobuf encoding requires that the frequency is an integer, rather than a float in exponential notation
-        frequency => round(FrequencyHz),
-
-        datarate => DataRate
-    },
-    hpr_packet_down:window(WindowMap).
+    #window_v1_pb{
+        timestamp = TS,
+        %% Protobuf encoding requires that the frequency is an integer, rather
+        %% than a float in exponential notation
+        frequency = round(FrequencyHz),
+        datarate = DataRate
+    }.
 
 -spec new_downlink(
     Payload :: binary(),
@@ -107,18 +114,17 @@ window(TS, FrequencyHz, DataRate) ->
     Rx2 :: packet_router_pb:window_v1_pb() | undefined
 ) -> downlink_packet().
 new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
-    PacketMap = #{
-        payload => Payload,
-        rx1 => #{
-            timestamp => Timestamp,
-
-            %%        the protobuf encoding requires that the frequency is an integer, rather than a float in exponential notation
-            frequency => round(FrequencyHz),
-
-            datarate => DataRate
-        }
-    },
-    hpr_packet_down:to_record(PacketMap, Rx2).
+    #packet_router_packet_down_v1_pb{
+        payload = Payload,
+        rx1 = #window_v1_pb{
+            timestamp = Timestamp,
+            %% Protobuf encoding requires that the frequency is an integer, rather than a
+            %% float in exponential notation
+            frequency = round(FrequencyHz),
+            datarate = DataRate
+        },
+        rx2 = window(Rx2)
+    }.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
@@ -138,21 +144,6 @@ window_test() ->
     ?assertEqual(#window_v1_pb{}, window(#{})),
     ?assertEqual(ok, packet_router_pb:verify_msg(window(fake_window()), window_v1_pb)),
     ?assertEqual(ok, packet_router_pb:verify_msg(window(#{}), window_v1_pb)).
-
-to_record_test() ->
-    ?assertEqual(#packet_router_packet_down_v1_pb{}, to_record(#{})),
-
-    ?assertEqual(
-        ok, packet_router_pb:verify_msg(to_record(fake_packet()), packet_router_packet_down_v1_pb)
-    ),
-    ?assertEqual(ok, packet_router_pb:verify_msg(to_record(#{}), packet_router_packet_down_v1_pb)).
-
-to_record_2_test() ->
-    ?assertEqual(#packet_router_packet_down_v1_pb{}, to_record(#{}, undefined)),
-
-    ?assertEqual(ok, packet_router_pb:verify_msg(to_record(fake_packet(), window(fake_window())))),
-
-    ?assertEqual(ok, packet_router_pb:verify_msg(to_record(#{}, #window_v1_pb{}))).
 
 rx1_frequency_test() ->
     PacketDown = fake_downlink(),
@@ -222,24 +213,13 @@ encoding_test() ->
 %% ------------------------------------------------------------------
 
 fake_window() ->
-    WindowMap = #{
+    Window = ?MODULE:window(#{
         timestamp => ?FAKE_TIMESTAMP,
         frequency => ?FAKE_FREQUENCY,
         datarate => ?FAKE_DATARATE
-    },
-    ?assertEqual(ok, client_packet_router_pb:verify_msg(WindowMap, window_v1_pb)),
-    WindowMap.
-
-fake_packet() ->
-    PacketMap = #{
-        payload => ?FAKE_PAYLOAD,
-        rx1 => fake_window(),
-        rx2 => fake_window()
-    },
-    ?assertEqual(
-        ok, client_packet_router_pb:verify_msg(PacketMap, packet_router_packet_down_v1_pb)
-    ),
-    PacketMap.
+    }),
+    ?assertEqual(ok, client_packet_router_pb:verify_msg(Window, window_v1_pb)),
+    Window.
 
 fake_downlink() ->
     new_downlink(

@@ -3,15 +3,22 @@
 -include("../autogen/server/config_pb.hrl").
 
 -export([
+    new/1,
     action/1,
-    route/1,
-    from_map/1
+    route/1
 ]).
 
 -type res() :: #config_route_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
 
 -export_type([res/0, action/0]).
+
+-spec new(map()) -> res().
+new(Map) ->
+    #config_route_stream_res_v1_pb{
+        action = maps:get(action, Map),
+        route = maps:get(route, Map)
+    }.
 
 -spec action(RouteStreamRes :: res()) -> action().
 action(RouteStreamRes) ->
@@ -20,13 +27,6 @@ action(RouteStreamRes) ->
 -spec route(RouteStreamRes :: res()) -> hpr_route:route().
 route(RouteStreamRes) ->
     RouteStreamRes#config_route_stream_res_v1_pb.route.
-
--spec from_map(Map :: map()) -> res().
-from_map(Map) ->
-    config_pb:decode_msg(
-        client_config_pb:encode_msg(Map, route_stream_res_v1_pb),
-        config_route_stream_res_v1_pb
-    ).
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -72,8 +72,8 @@ route_test() ->
     ),
     ok.
 
-from_map_test() ->
-    RouteMap = #{
+new_test() ->
+    RouteMap = hpr_route:new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 0,
         devaddr_ranges => [
@@ -89,13 +89,13 @@ from_map_test() ->
         },
         max_copies => 1,
         nonce => 1
-    },
+    }),
     ?assertEqual(
         #config_route_stream_res_v1_pb{
             action = create,
-            route = hpr_route:new(RouteMap)
+            route = RouteMap
         },
-        ?MODULE:from_map(#{
+        ?MODULE:new(#{
             action => create,
             route => RouteMap
         })

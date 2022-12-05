@@ -40,12 +40,50 @@
 
 -export_type([route/0, server/0, protocol/0]).
 
--spec new(RouteMap :: client_config_pb:route_v1_pb()) -> route().
+-spec new(RouteMap :: map()) -> route().
 new(RouteMap) ->
-    config_pb:decode_msg(
-        client_config_pb:encode_msg(RouteMap, route_v1_pb),
-        config_route_v1_pb
-    ).
+    #config_route_v1_pb{
+        id = maps:get(id, RouteMap),
+        net_id = maps:get(net_id, RouteMap),
+        devaddr_ranges = [
+            #config_devaddr_range_v1_pb{start_addr = S, end_addr = E}
+         || #{start_addr := S, end_addr := E} <- maps:get(devaddr_ranges, RouteMap)
+        ],
+        euis = [
+            #config_eui_v1_pb{dev_eui = D, app_eui = A}
+         || #{dev_eui := D, app_eui := A} <- maps:get(euis, RouteMap)
+        ],
+        oui = maps:get(oui, RouteMap),
+        server = mk_server(maps:get(server, RouteMap)),
+        max_copies = maps:get(max_copies, RouteMap),
+        nonce = maps:get(nonce, RouteMap)
+    }.
+
+mk_server(ServerMap) ->
+    #config_server_v1_pb{
+        host = maps:get(host, ServerMap),
+        port = maps:get(port, ServerMap),
+        protocol = mk_protocol(maps:get(protocol, ServerMap))
+    }.
+
+mk_protocol({packet_router, _PacketRouterMap}) ->
+    {packet_router, #config_protocol_packet_router_v1_pb{}};
+mk_protocol({gwmp, GwmpMap}) ->
+    Mapping = [
+        #config_protocol_gwmp_mapping_v1_pb{region = Region, port = Port}
+     || #{region := Region, port := Port} <- maps:get(mapping, GwmpMap)
+    ],
+    {gwmp, #config_protocol_gwmp_v1_pb{mapping = Mapping}};
+mk_protocol({http_roaming, HttpMap}) ->
+    {http_roaming, #config_protocol_http_roaming_v1_pb{
+        flow_type = maps:get(flow_type, HttpMap, #config_protocol_http_roaming_v1_pb.flow_type),
+        dedupe_timeout = maps:get(
+            dedupe_timeout, HttpMap, #config_protocol_http_roaming_v1_pb.dedupe_timeout
+        ),
+        path = maps:get(path, HttpMap, #config_protocol_http_roaming_v1_pb.path)
+    }};
+mk_protocol(undefined) ->
+    undefined.
 
 -spec id(Route :: route()) -> binary().
 id(Route) ->
@@ -357,10 +395,10 @@ region_lns_test() ->
                         #{region => 'EU868', port => 82},
                         #{region => 'AS923_1', port => 83}
                     ]
-                }},
-            max_copies => 1,
-            nonce => 1
-        }
+                }}
+        },
+        max_copies => 1,
+        nonce => 1
     }),
     ?assertEqual({"lsn.lora.com", 81}, ?MODULE:gwmp_region_lns('US915', Route)),
     ?assertEqual({"lsn.lora.com", 82}, ?MODULE:gwmp_region_lns('EU868', Route)),

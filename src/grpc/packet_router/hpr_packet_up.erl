@@ -18,7 +18,6 @@
     verify/1,
     encode/1,
     decode/1,
-    to_map/1,
     type/1
 ]).
 
@@ -36,7 +35,7 @@
 -define(CONFIRMED_UP, 2#100).
 
 -type packet() :: #packet_router_packet_up_v1_pb{}.
--type packet_map() :: client_packet_router_pb:packet_router_packet_up_v1_pb().
+-type packet_map() :: #packet_router_packet_up_v1_pb{}.
 -type packet_type() ::
     {join_req, {non_neg_integer(), non_neg_integer()}}
     | {uplink, non_neg_integer()}
@@ -117,21 +116,6 @@ encode(#packet_router_packet_up_v1_pb{} = Packet) ->
 -spec decode(BinaryPacket :: binary()) -> packet().
 decode(BinaryPacket) ->
     packet_router_pb:decode_msg(BinaryPacket, packet_router_packet_up_v1_pb).
-
--spec to_map(packet()) -> packet_map().
-to_map(PacketRecord) ->
-    #{
-        payload => PacketRecord#packet_router_packet_up_v1_pb.payload,
-        timestamp => PacketRecord#packet_router_packet_up_v1_pb.timestamp,
-        rssi => PacketRecord#packet_router_packet_up_v1_pb.rssi,
-        frequency => PacketRecord#packet_router_packet_up_v1_pb.frequency,
-        datarate => PacketRecord#packet_router_packet_up_v1_pb.datarate,
-        snr => PacketRecord#packet_router_packet_up_v1_pb.snr,
-        region => PacketRecord#packet_router_packet_up_v1_pb.region,
-        hold_time => PacketRecord#packet_router_packet_up_v1_pb.hold_time,
-        gateway => PacketRecord#packet_router_packet_up_v1_pb.gateway,
-        signature => PacketRecord#packet_router_packet_up_v1_pb.signature
-    }.
 
 -spec type(Packet :: packet()) -> packet_type().
 type(Packet) ->
@@ -267,22 +251,6 @@ encode_decode_test() ->
     PacketUp = ?MODULE:new(#{frequency => 904_000_000}),
     ?assertEqual(PacketUp, decode(encode(PacketUp))),
     ok.
-
-to_map_test() ->
-    HprPacketUp = test_utils:join_packet_up(#{}),
-    HprPacketUpMap = to_map(HprPacketUp),
-    ?assertEqual(
-        ok,
-        client_packet_router_pb:verify_msg(HprPacketUpMap, packet_router_packet_up_v1_pb),
-        "to_map/1 produces a valid packet map"
-    ),
-    ?assertEqual(
-        HprPacketUpMap,
-        client_packet_router_pb:decode_msg(
-            packet_router_pb:encode_msg(HprPacketUp), packet_router_packet_up_v1_pb
-        ),
-        "to_map/1 is equivalent to encoding a packet record and decoding it to a map"
-    ).
 
 type_test() ->
     ?assertEqual(

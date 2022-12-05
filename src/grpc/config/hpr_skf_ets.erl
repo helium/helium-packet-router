@@ -116,6 +116,6 @@ new_skf() ->
         devaddr => DevAddr,
         session_keys => SessionKeys
     },
-    hpr_skf:from_map(SKFMap).
+    hpr_skf:new(SKFMap).
 
 -endif.

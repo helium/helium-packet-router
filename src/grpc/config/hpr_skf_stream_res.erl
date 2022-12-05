@@ -3,15 +3,22 @@
 -include("../autogen/server/config_pb.hrl").
 
 -export([
+    new/1,
     action/1,
-    filter/1,
-    from_map/1
+    filter/1
 ]).
 
 -type res() :: #config_session_key_filter_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
 
 -export_type([res/0, action/0]).
+
+-spec new(map()) -> res().
+new(Map) ->
+    #config_session_key_filter_stream_res_v1_pb{
+        action = maps:get(action, Map),
+        filter = maps:get(filter, Map)
+    }.
 
 -spec action(SessionKeyFilterRes :: res()) -> action().
 action(SessionKeyFilterRes) ->
@@ -21,13 +28,6 @@ action(SessionKeyFilterRes) ->
     hpr_skf:skf().
 filter(SessionKeyFilterRes) ->
     SessionKeyFilterRes#config_session_key_filter_stream_res_v1_pb.filter.
-
--spec from_map(Map :: map()) -> res().
-from_map(Map) ->
-    config_pb:decode_msg(
-        client_config_pb:encode_msg(Map, session_key_filter_stream_res_v1_pb),
-        config_session_key_filter_stream_res_v1_pb
-    ).
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -47,7 +47,7 @@ action_test() ->
     ok.
 
 filter_test() ->
-    Filter = hpr_skf:from_map(#{devaddr => 16#0000001, session_keys => []}),
+    Filter = hpr_skf:new(#{devaddr => 16#0000001, session_keys => []}),
     ?assertEqual(
         Filter,
         ?MODULE:filter(#config_session_key_filter_stream_res_v1_pb{
@@ -57,17 +57,16 @@ filter_test() ->
     ),
     ok.
 
-from_map_test() ->
-    FilterMap = #{devaddr => 16#0000001, session_keys => []},
-    Filter = hpr_skf:from_map(#{devaddr => 16#0000001, session_keys => []}),
+new_test() ->
+    Filter = hpr_skf:new(#{devaddr => 16#0000001, session_keys => []}),
     ?assertEqual(
         #config_session_key_filter_stream_res_v1_pb{
             action = create,
             filter = Filter
         },
-        ?MODULE:from_map(#{
+        ?MODULE:new(#{
             action => create,
-            filter => FilterMap
+            filter => Filter
         })
     ),
     ok.
