@@ -4,6 +4,7 @@
 
 -export([
     new/1,
+    new/2,
     action/1,
     filter/1
 ]).
@@ -15,9 +16,13 @@
 
 -spec new(map()) -> res().
 new(Map) ->
+    ?MODULE:new(maps:get(action, Map), maps:get(filter, Map)).
+
+-spec new(action(), hpr_skf:skf()) -> res().
+new(Action, Filter) ->
     #config_session_key_filter_stream_res_v1_pb{
-        action = maps:get(action, Map),
-        filter = maps:get(filter, Map)
+        action = Action,
+        filter = Filter
     }.
 
 -spec action(SessionKeyFilterRes :: res()) -> action().

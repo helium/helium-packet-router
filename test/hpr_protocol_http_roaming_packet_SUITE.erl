@@ -1187,6 +1187,8 @@ join_test_route(DevEUI, AppEUI, FlowType, RouteId) ->
 join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
     RouteMap = #{
         id => RouteId,
+        oui => 0,
+        nonce => 0,
         net_id => NetId,
         devaddr_ranges => [],
         euis => [
@@ -1202,7 +1204,7 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
             protocol =>
                 {http_roaming, #{
                     flow_type => FlowType,
-                    path => <<"/uplink">>
+                    path => "/uplink"
                 }}
         }
     },
@@ -1231,6 +1233,8 @@ uplink_test_route(InputMap) ->
 
     RouteMap = #{
         id => RouteId,
+        oui => 1,
+        nonce => 1,
         net_id => NetId,
         devaddr_ranges => DevAddrRanges,
         euis => [],
@@ -1242,7 +1246,7 @@ uplink_test_route(InputMap) ->
                 {http_roaming, #{
                     flow_type => FlowType,
                     dedupe_timeout => DedupeTimeout,
-                    path => <<"/uplink">>
+                    path => "/uplink"
                 }}
         }
     },
@@ -1251,6 +1255,9 @@ uplink_test_route(InputMap) ->
 
 downlink_test_route(FlowType) ->
     RouteMap = #{
+        id => <<"1">>,
+        oui => 1,
+        nonce => 1,
         net_id => ?NET_ID_ACTILITY,
         devaddr_ranges => [],
         euis => [],

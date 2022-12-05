@@ -4,6 +4,7 @@
 
 -export([
     new/1,
+    new/2,
     action/1,
     route/1
 ]).
@@ -15,9 +16,13 @@
 
 -spec new(map()) -> res().
 new(Map) ->
+    new(maps:get(action, Map), maps:get(route, Map)).
+
+-spec new(action(), hpr_route:route()) -> res().
+new(Action, Route) ->
     #config_route_stream_res_v1_pb{
-        action = maps:get(action, Map),
-        route = maps:get(route, Map)
+        action = Action,
+        route = Route
     }.
 
 -spec action(RouteStreamRes :: res()) -> action().

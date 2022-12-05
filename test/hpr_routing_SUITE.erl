@@ -121,17 +121,17 @@ mic_check_test(_Config) ->
     ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
     hpr_skf_ets:insert(
-        hpr_skf:from_map(#{devaddr => DevAddr, session_keys => [crypto:strong_rand_bytes(16)]})
+        hpr_skf:new(#{devaddr => DevAddr, session_keys => [crypto:strong_rand_bytes(16)]})
     ),
     ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
 
     hpr_skf_ets:delete(
-        hpr_skf:from_map(#{devaddr => DevAddr, session_keys => [NwkSessionKey]})
+        hpr_skf:new(#{devaddr => DevAddr, session_keys => [NwkSessionKey]})
     ),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
     hpr_skf_ets:insert(
-        hpr_skf:from_map(#{devaddr => DevAddr, session_keys => [NwkSessionKey]})
+        hpr_skf:new(#{devaddr => DevAddr, session_keys => [NwkSessionKey]})
     ),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 

@@ -120,7 +120,7 @@ handle_cast(
         gateway => PubKeyBin, sig_fun => SigFun, devaddr => DevAddr
     }),
     EnvUp = hpr_envelope_up:new(PacketUp),
-    ok = grpcbox_client:send(Stream, hpr_envelope_up:to_map(EnvUp)),
+    ok = grpcbox_client:send(Stream, EnvUp),
     Pid ! {?MODULE, self(), {?SEND_PACKET, EnvUp}},
     lager:debug("send_packet ~p", [EnvUp]),
     {noreply, State};
@@ -134,15 +134,14 @@ handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = Si
     Reg = hpr_register:new(PubKeyBin),
     SignedReg = hpr_register:sign(Reg, SigFun),
     EnvUp = hpr_envelope_up:new(SignedReg),
-    EnvUpMap = hpr_envelope_up:to_map(EnvUp),
-    ok = grpcbox_client:send(Stream, EnvUpMap),
+    ok = grpcbox_client:send(Stream, EnvUp),
     Pid ! {?MODULE, self(), {?REGISTER, EnvUp}},
     lager:debug("connected and registered"),
     {noreply, State#state{stream = Stream}};
 %% GRPC stream callbacks
 handle_info({data, _StreamID, Data}, #state{forward = Pid} = State) ->
     lager:debug("got data ~p", [Data]),
-    Pid ! {?MODULE, self(), {data, catch hpr_envelope_down:to_record(Data)}},
+    Pid ! {?MODULE, self(), {data, Data}},
     {noreply, State};
 handle_info(
     {'DOWN', Ref, process, Pid, _Reason},
