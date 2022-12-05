@@ -1,7 +1,7 @@
 -module(hpr_cs_skf_stream_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../src/grpc/autogen/server/config_pb.hrl").
+-include("../src/grpc/autogen/config_pb.hrl").
 
 -export([
     all/0,

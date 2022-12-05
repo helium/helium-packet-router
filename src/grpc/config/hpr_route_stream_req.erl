@@ -1,6 +1,6 @@
 -module(hpr_route_stream_req).
 
--include("../autogen/client/config_pb.hrl").
+-include("../autogen/config_pb.hrl").
 
 -export([
     new/1,

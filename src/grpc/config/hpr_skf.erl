@@ -1,6 +1,6 @@
 -module(hpr_skf).
 
--include("../autogen/server/config_pb.hrl").
+-include("../autogen/config_pb.hrl").
 
 -export([
     new/1,
