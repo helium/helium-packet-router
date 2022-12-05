@@ -94,7 +94,7 @@ upload_test(_Config) ->
     N = 100,
     OUI = 1,
     NetID = 2,
-    Route = hpr_route:new(#{oui => OUI, net_id => NetID}),
+    Route = hpr_route:test_new(#{oui => OUI, net_id => NetID}),
     ExpectedPackets = lists:foldl(
         fun(X, Acc) ->
             Packet = test_utils:uplink_packet_up(#{rssi => X}),

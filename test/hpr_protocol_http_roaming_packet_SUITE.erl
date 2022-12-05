@@ -1208,7 +1208,7 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
                 }}
         }
     },
-    Route = hpr_route:new(RouteMap),
+    Route = hpr_route:test_new(RouteMap),
     hpr_route_ets:insert(Route).
 
 uplink_test_route() ->
@@ -1250,7 +1250,7 @@ uplink_test_route(InputMap) ->
                 }}
         }
     },
-    Route = hpr_route:new(RouteMap),
+    Route = hpr_route:test_new(RouteMap),
     hpr_route_ets:insert(Route).
 
 downlink_test_route(FlowType) ->
@@ -1268,7 +1268,7 @@ downlink_test_route(FlowType) ->
             protocol => {http_roaming, #{flow_type => FlowType}}
         }
     },
-    Route = hpr_route:new(RouteMap),
+    Route = hpr_route:test_new(RouteMap),
     hpr_route_ets:insert(Route).
 
 test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->

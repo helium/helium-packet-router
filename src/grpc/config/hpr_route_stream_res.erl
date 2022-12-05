@@ -51,7 +51,7 @@ action_test() ->
     ok.
 
 route_test() ->
-    Route = hpr_route:new(#{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 0,
         devaddr_ranges => [
@@ -78,7 +78,7 @@ route_test() ->
     ok.
 
 new_test() ->
-    RouteMap = hpr_route:new(#{
+    RouteMap = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 0,
         devaddr_ranges => [

@@ -135,7 +135,7 @@ test_send() ->
     EnvMap = hpr_envelope_up:new(HprPacketUp),
     Host = <<"example-lns.com">>,
     Port = 4321,
-    Route = hpr_route:new(#{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 1,
         devaddr_ranges => [],

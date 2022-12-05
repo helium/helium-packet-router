@@ -229,7 +229,7 @@ server_crash_test(_Config) ->
 %% ===================================================================
 
 test_route() ->
-    hpr_route:new(#{
+    hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 0,
         devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],

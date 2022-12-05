@@ -141,7 +141,7 @@ max_copies_test(_Config) ->
     MaxCopies = 2,
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
-    Route = hpr_route:new(#{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => NetID,
         devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
@@ -260,7 +260,7 @@ success_test(_Config) ->
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
-    Route = hpr_route:new(#{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => NetID,
         devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],

@@ -3,7 +3,6 @@
 -include("../autogen/config_pb.hrl").
 
 -export([
-    new/1,
     id/1,
     net_id/1,
     devaddr_ranges/1, devaddr_ranges/2,
@@ -26,64 +25,22 @@
     http_roaming_path/1
 ]).
 
+-ifdef(TEST).
+
+-export([test_new/1]).
+
+-endif.
+
 -type route() :: #config_route_v1_pb{}.
-
 -type server() :: #config_server_v1_pb{}.
-
 -type protocol() ::
     {packet_router, #config_protocol_packet_router_v1_pb{}}
     | {gwmp, #config_protocol_gwmp_v1_pb{}}
     | {http_roaming, #config_protocol_http_roaming_v1_pb{}}
     | undefined.
-
 -type protocol_type() :: packet_router | gwmp | http_roaming | undefined.
 
 -export_type([route/0, server/0, protocol/0]).
-
--spec new(RouteMap :: map()) -> route().
-new(RouteMap) ->
-    #config_route_v1_pb{
-        id = maps:get(id, RouteMap),
-        net_id = maps:get(net_id, RouteMap),
-        devaddr_ranges = [
-            #config_devaddr_range_v1_pb{start_addr = S, end_addr = E}
-         || #{start_addr := S, end_addr := E} <- maps:get(devaddr_ranges, RouteMap)
-        ],
-        euis = [
-            #config_eui_v1_pb{dev_eui = D, app_eui = A}
-         || #{dev_eui := D, app_eui := A} <- maps:get(euis, RouteMap)
-        ],
-        oui = maps:get(oui, RouteMap),
-        server = mk_server(maps:get(server, RouteMap)),
-        max_copies = maps:get(max_copies, RouteMap),
-        nonce = maps:get(nonce, RouteMap)
-    }.
-
-mk_server(ServerMap) ->
-    #config_server_v1_pb{
-        host = maps:get(host, ServerMap),
-        port = maps:get(port, ServerMap),
-        protocol = mk_protocol(maps:get(protocol, ServerMap))
-    }.
-
-mk_protocol({packet_router, _PacketRouterMap}) ->
-    {packet_router, #config_protocol_packet_router_v1_pb{}};
-mk_protocol({gwmp, GwmpMap}) ->
-    Mapping = [
-        #config_protocol_gwmp_mapping_v1_pb{region = Region, port = Port}
-     || #{region := Region, port := Port} <- maps:get(mapping, GwmpMap)
-    ],
-    {gwmp, #config_protocol_gwmp_v1_pb{mapping = Mapping}};
-mk_protocol({http_roaming, HttpMap}) ->
-    {http_roaming, #config_protocol_http_roaming_v1_pb{
-        flow_type = maps:get(flow_type, HttpMap, #config_protocol_http_roaming_v1_pb.flow_type),
-        dedupe_timeout = maps:get(
-            dedupe_timeout, HttpMap, #config_protocol_http_roaming_v1_pb.dedupe_timeout
-        ),
-        path = maps:get(path, HttpMap, #config_protocol_http_roaming_v1_pb.path)
-    }};
-mk_protocol(undefined) ->
-    undefined.
 
 -spec id(Route :: route()) -> binary().
 id(Route) ->
@@ -210,7 +167,57 @@ protocol_type(Server) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-new_test() ->
+-spec test_new(RouteMap :: map()) -> route().
+test_new(RouteMap) ->
+    #config_route_v1_pb{
+        id = maps:get(id, RouteMap),
+        net_id = maps:get(net_id, RouteMap),
+        devaddr_ranges = [
+            #config_devaddr_range_v1_pb{start_addr = S, end_addr = E}
+         || #{start_addr := S, end_addr := E} <- maps:get(devaddr_ranges, RouteMap)
+        ],
+        euis = [
+            #config_eui_v1_pb{dev_eui = D, app_eui = A}
+         || #{dev_eui := D, app_eui := A} <- maps:get(euis, RouteMap)
+        ],
+        oui = maps:get(oui, RouteMap),
+        server = mk_server(maps:get(server, RouteMap)),
+        max_copies = maps:get(max_copies, RouteMap),
+        nonce = maps:get(nonce, RouteMap)
+    }.
+
+-spec mk_server(map()) -> #config_server_v1_pb{}.
+mk_server(ServerMap) ->
+    #config_server_v1_pb{
+        host = maps:get(host, ServerMap),
+        port = maps:get(port, ServerMap),
+        protocol = mk_protocol(maps:get(protocol, ServerMap))
+    }.
+
+-spec mk_protocol({protocol_type(), map()}) -> protocol().
+mk_protocol({packet_router, _PacketRouterMap}) ->
+    {packet_router, #config_protocol_packet_router_v1_pb{}};
+mk_protocol({gwmp, GwmpMap}) ->
+    Mapping = [
+        #config_protocol_gwmp_mapping_v1_pb{region = Region, port = Port}
+     || #{region := Region, port := Port} <- maps:get(mapping, GwmpMap)
+    ],
+    {gwmp, #config_protocol_gwmp_v1_pb{mapping = Mapping}};
+mk_protocol({http_roaming, HttpMap}) ->
+    Template = #config_protocol_http_roaming_v1_pb{},
+    {http_roaming, #config_protocol_http_roaming_v1_pb{
+        flow_type = maps:get(
+            flow_type, HttpMap, Template#config_protocol_http_roaming_v1_pb.flow_type
+        ),
+        dedupe_timeout = maps:get(
+            dedupe_timeout, HttpMap, Template#config_protocol_http_roaming_v1_pb.dedupe_timeout
+        ),
+        path = maps:get(path, HttpMap, Template#config_protocol_http_roaming_v1_pb.path)
+    }};
+mk_protocol(undefined) ->
+    undefined.
+
+test_new_test() ->
     Route = #config_route_v1_pb{
         id = <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id = 1,
@@ -233,7 +240,7 @@ new_test() ->
     },
     ?assertEqual(
         Route,
-        ?MODULE:new(#{
+        ?MODULE:test_new(#{
             id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
             net_id => 1,
             devaddr_ranges => [
@@ -253,131 +260,37 @@ new_test() ->
     ok.
 
 id_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(<<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>, ?MODULE:id(Route)),
     ok.
 
 net_id_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(1, ?MODULE:net_id(Route)),
     ok.
 
 devaddr_ranges_1_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual([{1, 10}, {11, 20}], ?MODULE:devaddr_ranges(Route)),
     ok.
 
 devaddr_ranges_2_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual([], ?MODULE:devaddr_ranges(?MODULE:devaddr_ranges(Route, []))),
     ok.
 
 euis_1_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
-    ?assertEqual(
-        [{1, 1}, {2, 0}], ?MODULE:euis(Route)
-    ),
+    Route = test_route(),
+    ?assertEqual([{1, 1}, {2, 0}], ?MODULE:euis(Route)),
     ok.
 
 euis_2_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
-    ?assertEqual(
-        [], ?MODULE:euis(?MODULE:euis(Route, []))
-    ),
+    Route = test_route(),
+    ?assertEqual([], ?MODULE:euis(?MODULE:euis(Route, []))),
     ok.
 
 region_lns_test() ->
-    Route = ?MODULE:new(#{
+    Route = ?MODULE:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 1,
         devaddr_ranges => [
@@ -407,42 +320,12 @@ region_lns_test() ->
     ok.
 
 oui_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(10, ?MODULE:oui(Route)),
     ok.
 
 server_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(
         #config_server_v1_pb{
             host = <<"lsn.lora.com">>,
@@ -454,107 +337,37 @@ server_test() ->
     ok.
 
 max_copies_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(1, ?MODULE:max_copies(Route)),
     ok.
 
 nonce_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(1, ?MODULE:nonce(Route)),
     ok.
 
 lns_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(<<"lsn.lora.com:80">>, ?MODULE:lns(Route)),
     ok.
 
 host_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(<<"lsn.lora.com">>, ?MODULE:host(?MODULE:server(Route))),
     ok.
 
 port_test() ->
-    Route = ?MODULE:new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
-        net_id => 1,
-        devaddr_ranges => [
-            #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
-        oui => 10,
-        server => #{
-            host => <<"lsn.lora.com">>,
-            port => 80,
-            protocol => {gwmp, #{mapping => []}}
-        },
-        max_copies => 1,
-        nonce => 1
-    }),
+    Route = test_route(),
     ?assertEqual(80, ?MODULE:port(?MODULE:server(Route))),
     ok.
 
 protocol_test() ->
-    Route = ?MODULE:new(#{
+    Route = test_route(),
+    ?assertEqual({gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}, ?MODULE:protocol(?MODULE:server(Route))),
+    ok.
+
+test_route() ->
+    ?MODULE:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 1,
         devaddr_ranges => [
@@ -569,10 +382,6 @@ protocol_test() ->
         },
         max_copies => 1,
         nonce => 1
-    }),
-    ?assertEqual(
-        {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}, ?MODULE:protocol(?MODULE:server(Route))
-    ),
-    ok.
+    }).
 
 -endif.

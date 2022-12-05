@@ -55,7 +55,7 @@ create_route_test(Config) ->
     timer:sleep(500),
 
     %% Create route and send them from server
-    Route = hpr_route:new(#{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-001">>,
         net_id => 0,
         devaddr_ranges => [
@@ -124,7 +124,7 @@ update_route_test(Config) ->
         max_copies => 1,
         nonce => 1
     },
-    Route1 = hpr_route:new(Route1Map),
+    Route1 = hpr_route:test_new(Route1Map),
     ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:new(create, Route1)
     ),
@@ -159,7 +159,7 @@ update_route_test(Config) ->
         euis => [#{app_eui => 2, dev_eui => 2}],
         nonce => 2
     },
-    Route2 = hpr_route:new(Route2Map),
+    Route2 = hpr_route:test_new(Route2Map),
     ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:new(update, Route2)
     ),
@@ -213,7 +213,7 @@ delete_route_test(Config) ->
         max_copies => 1,
         nonce => 1
     },
-    Route1 = hpr_route:new(Route1Map),
+    Route1 = hpr_route:test_new(Route1Map),
     ok = hpr_test_config_service_route:stream_resp(
         hpr_route_stream_res:new(create, Route1)
     ),
