@@ -47,7 +47,7 @@ docker-run:
 	docker run --rm -it --init --name=helium_packet_router quay.io/team-helium/hpr:local
 
 grpc:
-	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_gen.config" $(REBAR) grpc gen
 
 $(grpc_services_directory): config/grpc_gen.config
 	@echo "grpc service directory $(directory) does not exist, generating services"
