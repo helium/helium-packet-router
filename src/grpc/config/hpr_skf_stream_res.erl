@@ -3,27 +3,20 @@
 -include("../autogen/config_pb.hrl").
 
 -export([
-    new/1,
-    new/2,
     action/1,
     filter/1
 ]).
+
+-ifdef(TEST).
+
+-export([test_new/1]).
+
+-endif.
 
 -type res() :: #config_session_key_filter_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
 
 -export_type([res/0, action/0]).
-
--spec new(map()) -> res().
-new(Map) ->
-    ?MODULE:new(maps:get(action, Map), maps:get(filter, Map)).
-
--spec new(action(), hpr_skf:skf()) -> res().
-new(Action, Filter) ->
-    #config_session_key_filter_stream_res_v1_pb{
-        action = Action,
-        filter = Filter
-    }.
 
 -spec action(SessionKeyFilterRes :: res()) -> action().
 action(SessionKeyFilterRes) ->
@@ -33,6 +26,20 @@ action(SessionKeyFilterRes) ->
     hpr_skf:skf().
 filter(SessionKeyFilterRes) ->
     SessionKeyFilterRes#config_session_key_filter_stream_res_v1_pb.filter.
+
+%% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec test_new(map()) -> res().
+test_new(Map) ->
+    #config_session_key_filter_stream_res_v1_pb{
+        action = maps:get(action, Map),
+        filter = maps:get(filter, Map)
+    }.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -52,7 +59,7 @@ action_test() ->
     ok.
 
 filter_test() ->
-    Filter = hpr_skf:new(#{devaddr => 16#0000001, session_keys => []}),
+    Filter = hpr_skf:test_new(#{devaddr => 16#0000001, session_keys => []}),
     ?assertEqual(
         Filter,
         ?MODULE:filter(#config_session_key_filter_stream_res_v1_pb{
@@ -63,13 +70,13 @@ filter_test() ->
     ok.
 
 new_test() ->
-    Filter = hpr_skf:new(#{devaddr => 16#0000001, session_keys => []}),
+    Filter = hpr_skf:test_new(#{devaddr => 16#0000001, session_keys => []}),
     ?assertEqual(
         #config_session_key_filter_stream_res_v1_pb{
             action = create,
             filter = Filter
         },
-        ?MODULE:new(#{
+        ?MODULE:test_new(#{
             action => create,
             filter => Filter
         })

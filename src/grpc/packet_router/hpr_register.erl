@@ -3,7 +3,6 @@
 -include("../autogen/packet_router_pb.hrl").
 
 -export([
-    new/1,
     timestamp/1,
     gateway/1,
     signature/1,
@@ -13,6 +12,7 @@
 -ifdef(TEST).
 
 -export([
+    test_new/1,
     sign/2
 ]).
 
@@ -21,12 +21,6 @@
 -type register() :: #packet_router_register_v1_pb{}.
 
 -export_type([register/0]).
-
-new(Gateway) ->
-    #packet_router_register_v1_pb{
-        timestamp = erlang:system_time(millisecond),
-        gateway = Gateway
-    }.
 
 -spec timestamp(Reg :: register()) -> non_neg_integer().
 timestamp(Reg) ->
@@ -61,6 +55,13 @@ verify(Reg) ->
 %% ------------------------------------------------------------------
 -ifdef(TEST).
 
+-spec test_new(Gateway :: binary()) -> register().
+test_new(Gateway) ->
+    #packet_router_register_v1_pb{
+        timestamp = erlang:system_time(millisecond),
+        gateway = Gateway
+    }.
+
 -spec sign(Reg :: register(), SigFun :: fun()) -> register().
 sign(Reg, SigFun) ->
     RegEncoded = packet_router_pb:encode_msg(Reg#packet_router_register_v1_pb{
@@ -80,23 +81,23 @@ sign(Reg, SigFun) ->
 -include_lib("eunit/include/eunit.hrl").
 
 new_test() ->
-    Reg = ?MODULE:new(<<"gateway">>),
+    Reg = ?MODULE:test_new(<<"gateway">>),
     ?assertEqual(<<"gateway">>, Reg#packet_router_register_v1_pb.gateway),
     ?assert(erlang:is_integer(Reg#packet_router_register_v1_pb.timestamp)),
     ok.
 
 timestamp_test() ->
-    Reg = ?MODULE:new(<<"gateway">>),
+    Reg = ?MODULE:test_new(<<"gateway">>),
     ?assert(erlang:is_integer(?MODULE:timestamp(Reg))),
     ok.
 
 gateway_test() ->
-    Reg = ?MODULE:new(<<"gateway">>),
+    Reg = ?MODULE:test_new(<<"gateway">>),
     ?assertEqual(<<"gateway">>, ?MODULE:gateway(Reg)),
     ok.
 
 signature_test() ->
-    Reg = ?MODULE:new(<<"gateway">>),
+    Reg = ?MODULE:test_new(<<"gateway">>),
     ?assertEqual(<<>>, ?MODULE:signature(Reg)),
     ok.
 
@@ -104,7 +105,7 @@ verify_test() ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-    Reg = ?MODULE:new(Gateway),
+    Reg = ?MODULE:test_new(Gateway),
     RegSigned = ?MODULE:sign(Reg, SigFun),
     ?assert(verify(RegSigned)),
     ok.

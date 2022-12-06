@@ -73,7 +73,7 @@ create_route_test(Config) ->
     }),
 
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:new(create, Route)
+        hpr_route_stream_res:test_new(#{action => create, route => Route})
     ),
 
     %% Let time to process new routes
@@ -126,7 +126,7 @@ update_route_test(Config) ->
     },
     Route1 = hpr_route:test_new(Route1Map),
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:new(create, Route1)
+        hpr_route_stream_res:test_new(#{action => create, route => Route1})
     ),
 
     %% Let time to process new routes
@@ -161,7 +161,7 @@ update_route_test(Config) ->
     },
     Route2 = hpr_route:test_new(Route2Map),
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:new(update, Route2)
+        hpr_route_stream_res:test_new(#{action => update, route => Route2})
     ),
 
     ok = test_utils:wait_until(
@@ -215,7 +215,7 @@ delete_route_test(Config) ->
     },
     Route1 = hpr_route:test_new(Route1Map),
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:new(create, Route1)
+        hpr_route_stream_res:test_new(#{action => create, route => Route1})
     ),
 
     %% Let time to process new routes
@@ -242,7 +242,7 @@ delete_route_test(Config) ->
     %% Delete our Route
 
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:new(delete, Route1)
+        hpr_route_stream_res:test_new(#{action => delete, route => Route1})
     ),
 
     ok = test_utils:wait_until(

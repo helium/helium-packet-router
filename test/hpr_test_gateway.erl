@@ -131,7 +131,7 @@ handle_cast(_Msg, State) ->
 handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = SigFun} = State) ->
     lager:debug("connecting"),
     {ok, Stream} = helium_packet_router_packet_client:route(),
-    Reg = hpr_register:new(PubKeyBin),
+    Reg = hpr_register:test_new(PubKeyBin),
     SignedReg = hpr_register:sign(Reg, SigFun),
     EnvUp = hpr_envelope_up:new(SignedReg),
     ok = grpcbox_client:send(Stream, EnvUp),

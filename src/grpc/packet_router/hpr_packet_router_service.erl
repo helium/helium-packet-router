@@ -108,7 +108,7 @@ route_register_test() ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-    Reg = hpr_register:new(Gateway),
+    Reg = hpr_register:test_new(Gateway),
     RegSigned = hpr_register:sign(Reg, SigFun),
 
     ?assertEqual({stop, stream_state}, ?MODULE:route(hpr_envelope_up:new(Reg), stream_state)),

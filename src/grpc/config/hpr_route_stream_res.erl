@@ -3,27 +3,20 @@
 -include("../autogen/config_pb.hrl").
 
 -export([
-    new/1,
-    new/2,
     action/1,
     route/1
 ]).
+
+-ifdef(TEST).
+
+-export([test_new/1]).
+
+-endif.
 
 -type res() :: #config_route_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
 
 -export_type([res/0, action/0]).
-
--spec new(map()) -> res().
-new(Map) ->
-    new(maps:get(action, Map), maps:get(route, Map)).
-
--spec new(action(), hpr_route:route()) -> res().
-new(Action, Route) ->
-    #config_route_stream_res_v1_pb{
-        action = Action,
-        route = Route
-    }.
 
 -spec action(RouteStreamRes :: res()) -> action().
 action(RouteStreamRes) ->
@@ -32,6 +25,20 @@ action(RouteStreamRes) ->
 -spec route(RouteStreamRes :: res()) -> hpr_route:route().
 route(RouteStreamRes) ->
     RouteStreamRes#config_route_stream_res_v1_pb.route.
+
+%% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec test_new(map()) -> res().
+test_new(Map) ->
+    #config_route_stream_res_v1_pb{
+        action = maps:get(action, Map),
+        route = maps:get(route, Map)
+    }.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -78,7 +85,7 @@ route_test() ->
     ok.
 
 new_test() ->
-    RouteMap = hpr_route:test_new(#{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 0,
         devaddr_ranges => [
@@ -98,12 +105,9 @@ new_test() ->
     ?assertEqual(
         #config_route_stream_res_v1_pb{
             action = create,
-            route = RouteMap
+            route = Route
         },
-        ?MODULE:new(#{
-            action => create,
-            route => RouteMap
-        })
+        ?MODULE:test_new(#{action => create, route => Route})
     ),
     ok.
 
