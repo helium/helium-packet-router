@@ -132,7 +132,7 @@ per_testcase_cleanup(ok) ->
 test_send() ->
     PubKeyBin = <<"PubKeyBin">>,
     HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
-    EnvMap = hpr_envelope_up:new(HprPacketUp),
+    EnvUp = hpr_envelope_up:new(HprPacketUp),
     Host = <<"example-lns.com">>,
     Port = 4321,
     Route = hpr_route:test_new(#{
@@ -151,7 +151,7 @@ test_send() ->
     }),
 
     true = ets:insert(?STREAM_ETS, {{PubKeyBin, hpr_route:lns(Route)}, fake_stream}),
-    meck:expect(grpcbox_client, send, [fake_stream, EnvMap], ok),
+    meck:expect(grpcbox_client, send, [fake_stream, EnvUp], ok),
 
     ResponseValue = send(HprPacketUp, Route),
 
