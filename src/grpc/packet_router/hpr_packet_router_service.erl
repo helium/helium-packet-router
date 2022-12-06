@@ -90,7 +90,7 @@ init_test() ->
 
 route_packet_test() ->
     meck:new(hpr_routing, [passthrough]),
-    PacketUp = hpr_packet_up:new(#{}),
+    PacketUp = hpr_packet_up:test_new(#{}),
     EnvUp = hpr_envelope_up:new(PacketUp),
     meck:expect(hpr_routing, handle_packet, [PacketUp], ok),
 

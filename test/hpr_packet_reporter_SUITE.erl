@@ -94,23 +94,21 @@ upload_test(_Config) ->
     N = 100,
     OUI = 1,
     NetID = 2,
-    Route = hpr_route:test_new(#{oui => OUI, net_id => NetID}),
+    Route = hpr_route:test_new(#{
+        id => <<"test-route">>,
+        oui => OUI,
+        net_id => NetID,
+        devaddr_ranges => [],
+        euis => [],
+        max_copies => 1,
+        nonce => 1,
+        server => #{host => <<"example.com">>, port => 8080, protocol => undefined}
+    }),
     ExpectedPackets = lists:foldl(
         fun(X, Acc) ->
             Packet = test_utils:uplink_packet_up(#{rssi => X}),
             hpr_packet_reporter:report_packet(Packet, Route),
-            PacketReport = hpr_packet_report:to_record(#{
-                gateway_timestamp_ms => hpr_packet_up:timestamp(Packet),
-                oui => OUI,
-                net_id => NetID,
-                rssi => hpr_packet_up:rssi(Packet),
-                frequency => hpr_packet_up:frequency(Packet),
-                datarate => hpr_packet_up:datarate(Packet),
-                snr => hpr_packet_up:snr(Packet),
-                region => hpr_packet_up:region(Packet),
-                gateway => hpr_packet_up:gateway(Packet),
-                payload_hash => hpr_packet_up:phash(Packet)
-            }),
+            PacketReport = hpr_packet_report:new(Packet, Route),
             [PacketReport | Acc]
         end,
         [],

@@ -161,16 +161,15 @@ protocol_type(Server) ->
     end.
 
 %% ------------------------------------------------------------------
-%% EUNIT Tests
+%% Tests Functions
 %% ------------------------------------------------------------------
 -ifdef(TEST).
-
--include_lib("eunit/include/eunit.hrl").
 
 -spec test_new(RouteMap :: map()) -> route().
 test_new(RouteMap) ->
     #config_route_v1_pb{
         id = maps:get(id, RouteMap),
+        oui = maps:get(oui, RouteMap),
         net_id = maps:get(net_id, RouteMap),
         devaddr_ranges = [
             #config_devaddr_range_v1_pb{start_addr = S, end_addr = E}
@@ -180,10 +179,9 @@ test_new(RouteMap) ->
             #config_eui_v1_pb{dev_eui = D, app_eui = A}
          || #{dev_eui := D, app_eui := A} <- maps:get(euis, RouteMap)
         ],
-        oui = maps:get(oui, RouteMap),
-        server = mk_server(maps:get(server, RouteMap)),
         max_copies = maps:get(max_copies, RouteMap),
-        nonce = maps:get(nonce, RouteMap)
+        nonce = maps:get(nonce, RouteMap),
+        server = mk_server(maps:get(server, RouteMap))
     }.
 
 -spec mk_server(map()) -> #config_server_v1_pb{}.
@@ -216,6 +214,14 @@ mk_protocol({http_roaming, HttpMap}) ->
     }};
 mk_protocol(undefined) ->
     undefined.
+
+-endif.
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
 
 test_new_test() ->
     Route = #config_route_v1_pb{
@@ -363,7 +369,9 @@ port_test() ->
 
 protocol_test() ->
     Route = test_route(),
-    ?assertEqual({gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}, ?MODULE:protocol(?MODULE:server(Route))),
+    ?assertEqual(
+        {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}, ?MODULE:protocol(?MODULE:server(Route))
+    ),
     ok.
 
 test_route() ->

@@ -30,12 +30,12 @@ data(Env) ->
 -include_lib("eunit/include/eunit.hrl").
 
 new_test() ->
-    Packet = hpr_packet_up:new(#{}),
+    Packet = hpr_packet_up:test_new(#{}),
     ?assertEqual(#envelope_up_v1_pb{data = {packet, Packet}}, ?MODULE:new(Packet)),
     ok.
 
 data_test() ->
-    Packet = hpr_packet_up:new(#{}),
+    Packet = hpr_packet_up:test_new(#{}),
     EnvUp = ?MODULE:new(Packet),
     ?assertEqual({packet, Packet}, ?MODULE:data(EnvUp)),
     ok.

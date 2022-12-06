@@ -122,20 +122,7 @@ terminate(_Reason, #state{current_packets = Packets}) ->
 
 -spec encode_packet(Packet :: hpr_packet_up:packet(), PacketRoute :: hpr_route:route()) -> binary().
 encode_packet(Packet, PacketRoute) ->
-    EncodedPacket = hpr_packet_report:encode(
-        hpr_packet_report:to_record(#{
-            gateway_timestamp_ms => hpr_packet_up:timestamp(Packet),
-            oui => hpr_route:oui(PacketRoute),
-            net_id => hpr_route:net_id(PacketRoute),
-            rssi => hpr_packet_up:rssi(Packet),
-            frequency => hpr_packet_up:frequency(Packet),
-            datarate => hpr_packet_up:datarate(Packet),
-            snr => hpr_packet_up:snr(Packet),
-            region => hpr_packet_up:region(Packet),
-            gateway => hpr_packet_up:gateway(Packet),
-            payload_hash => hpr_packet_up:phash(Packet)
-        })
-    ),
+    EncodedPacket = hpr_packet_report:encode(hpr_packet_report:new(Packet, PacketRoute)),
     PacketSize = erlang:size(EncodedPacket),
     <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>.
 

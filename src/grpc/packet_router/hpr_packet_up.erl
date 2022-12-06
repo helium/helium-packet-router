@@ -24,7 +24,7 @@
 -ifdef(TEST).
 
 -export([
-    new/1,
+    test_new/1,
     sign/2
 ]).
 
@@ -153,8 +153,8 @@ type(Packet) ->
 %% ------------------------------------------------------------------
 -ifdef(TEST).
 
--spec new(Opts :: map()) -> packet().
-new(Opts) ->
+-spec test_new(Opts :: map()) -> packet().
+test_new(Opts) ->
     #packet_router_packet_up_v1_pb{
         payload = maps:get(payload, Opts, <<"payload">>),
         timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond)),
@@ -187,53 +187,53 @@ sign(Packet, SigFun) ->
 -include_lib("eunit/include/eunit.hrl").
 
 payload_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual(<<"payload">>, payload(PacketUp)),
     ok.
 
 timestamp_test() ->
     Now = erlang:system_time(millisecond),
-    PacketUp = ?MODULE:new(#{timestamp => Now}),
+    PacketUp = ?MODULE:test_new(#{timestamp => Now}),
     ?assertEqual(Now, timestamp(PacketUp)),
     ok.
 
 rssi_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual(-40, rssi(PacketUp)),
     ok.
 
 frequency_mhz_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual(904.30, frequency_mhz(PacketUp)),
     ok.
 
 datarate_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual('SF7BW125', datarate(PacketUp)),
     ok.
 
 snr_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual(7.0, snr(PacketUp)),
     ok.
 
 region_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual('US915', region(PacketUp)),
     ok.
 
 hold_time_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual(0, hold_time(PacketUp)),
     ok.
 
 gateway_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual(<<"gateway">>, gateway(PacketUp)),
     ok.
 
 signature_test() ->
-    PacketUp = ?MODULE:new(#{}),
+    PacketUp = ?MODULE:test_new(#{}),
     ?assertEqual(<<"signature">>, signature(PacketUp)),
     ok.
 
@@ -241,14 +241,14 @@ verify_test() ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-    PacketUp = ?MODULE:new(#{gateway => Gateway}),
+    PacketUp = ?MODULE:test_new(#{gateway => Gateway}),
     SignedPacketUp = ?MODULE:sign(PacketUp, SigFun),
 
     ?assert(verify(SignedPacketUp)),
     ok.
 
 encode_decode_test() ->
-    PacketUp = ?MODULE:new(#{frequency => 904_000_000}),
+    PacketUp = ?MODULE:test_new(#{frequency => 904_000_000}),
     ?assertEqual(PacketUp, decode(encode(PacketUp))),
     ok.
 
@@ -256,7 +256,7 @@ type_test() ->
     ?assertEqual(
         {join_req, {1, 1}},
         ?MODULE:type(
-            ?MODULE:new(#{
+            ?MODULE:test_new(#{
                 payload =>
                     <<
                         (?JOIN_REQUEST):3,
@@ -274,7 +274,7 @@ type_test() ->
     ?assertEqual(
         {uplink, 1},
         ?MODULE:type(
-            ?MODULE:new(#{
+            ?MODULE:test_new(#{
                 payload =>
                     <<UnconfirmedUp:3, 0:3, 1:2, 16#00000001:32/integer-unsigned-little, 0:1, 0:1,
                         0:1, 0:1, 1:4, 2:16/little-unsigned-integer,
@@ -285,9 +285,9 @@ type_test() ->
     ),
     ?assertEqual(
         {undefined, 7},
-        ?MODULE:type(?MODULE:new(#{payload => <<2#111:3, (crypto:strong_rand_bytes(20))/binary>>}))
+        ?MODULE:type(?MODULE:test_new(#{payload => <<2#111:3, (crypto:strong_rand_bytes(20))/binary>>}))
     ),
-    ?assertEqual({undefined, 0}, ?MODULE:type(?MODULE:new(#{payload => <<>>}))),
+    ?assertEqual({undefined, 0}, ?MODULE:type(?MODULE:test_new(#{payload => <<>>}))),
     ok.
 
 -endif.
