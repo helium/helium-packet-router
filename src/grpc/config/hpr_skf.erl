@@ -1,12 +1,17 @@
 -module(hpr_skf).
 
--include("../autogen/server/config_pb.hrl").
+-include("../autogen/config_pb.hrl").
 
 -export([
     devaddr/1,
-    session_keys/1,
-    from_map/1
+    session_keys/1
 ]).
+
+-ifdef(TEST).
+
+-export([test_new/1]).
+
+-endif.
 
 -type skf() :: #config_session_key_filter_v1_pb{}.
 
@@ -20,12 +25,19 @@ devaddr(SessionKeyFilter) ->
 session_keys(SessionKeyFilter) ->
     SessionKeyFilter#config_session_key_filter_v1_pb.session_keys.
 
--spec from_map(SessionKeyFilterMap :: client_config_pb:route_v1_pb()) -> skf().
-from_map(SessionKeyFilterMap) ->
-    config_pb:decode_msg(
-        client_config_pb:encode_msg(SessionKeyFilterMap, session_key_filter_v1_pb),
-        config_session_key_filter_v1_pb
-    ).
+%% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec test_new(SessionKeyFilterMap :: map()) -> skf().
+test_new(SessionKeyFilterMap) when erlang:is_map(SessionKeyFilterMap) ->
+    #config_session_key_filter_v1_pb{
+        devaddr = maps:get(devaddr, SessionKeyFilterMap),
+        session_keys = maps:get(session_keys, SessionKeyFilterMap)
+    }.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests

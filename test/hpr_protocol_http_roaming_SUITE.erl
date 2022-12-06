@@ -9,7 +9,7 @@
 -module(hpr_protocol_http_roaming_SUITE).
 -author("jonathanruttenberg").
 
--include("../src/grpc/autogen/server/packet_router_pb.hrl").
+-include("../src/grpc/autogen/packet_router_pb.hrl").
 
 -export([
     all/0,

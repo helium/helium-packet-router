@@ -81,10 +81,9 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     SKFStreamReq = hpr_skf_stream_req:new(PubKeyBin),
     SignedSKFStreamReq = hpr_skf_stream_req:sign(SKFStreamReq, SigFun),
-    SignedSKFStreamReqMap = hpr_skf_stream_req:to_map(SignedSKFStreamReq),
     StreamOptions = #{channel => config_channel},
 
-    case helium_config_session_key_filter_client:stream(SignedSKFStreamReqMap, StreamOptions) of
+    case helium_config_session_key_filter_client:stream(SignedSKFStreamReq, StreamOptions) of
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
@@ -103,7 +102,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
 %% GRPC stream callbacks
 handle_info({data, _StreamID, SKFStreamRes}, State) ->
     lager:debug("sfk update"),
-    ok = process_res(hpr_skf_stream_res:from_map(SKFStreamRes)),
+    ok = process_res(SKFStreamRes),
     {noreply, State};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers

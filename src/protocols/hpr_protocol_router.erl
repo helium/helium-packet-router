@@ -41,9 +41,8 @@ send(PacketUp, Route) ->
     Server = hpr_route:server(Route),
     case get_stream(Gateway, LNS, Server) of
         {ok, RouterStream} ->
-            Env = hpr_envelope_up:new(PacketUp),
-            EnvMap = hpr_envelope_up:to_map(Env),
-            ok = grpcbox_client:send(RouterStream, EnvMap);
+            EnvUp = hpr_envelope_up:new(PacketUp),
+            ok = grpcbox_client:send(RouterStream, EnvUp);
         {error, _} = Err ->
             Err
     end.
@@ -133,10 +132,10 @@ per_testcase_cleanup(ok) ->
 test_send() ->
     PubKeyBin = <<"PubKeyBin">>,
     HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
-    EnvMap = hpr_envelope_up:to_map(hpr_envelope_up:new(HprPacketUp)),
+    EnvUp = hpr_envelope_up:new(HprPacketUp),
     Host = <<"example-lns.com">>,
     Port = 4321,
-    Route = hpr_route:new(#{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 1,
         devaddr_ranges => [],
@@ -152,7 +151,7 @@ test_send() ->
     }),
 
     true = ets:insert(?STREAM_ETS, {{PubKeyBin, hpr_route:lns(Route)}, fake_stream}),
-    meck:expect(grpcbox_client, send, [fake_stream, EnvMap], ok),
+    meck:expect(grpcbox_client, send, [fake_stream, EnvUp], ok),
 
     ResponseValue = send(HprPacketUp, Route),
 

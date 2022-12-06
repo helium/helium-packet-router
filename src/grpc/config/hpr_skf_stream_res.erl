@@ -1,12 +1,17 @@
 -module(hpr_skf_stream_res).
 
--include("../autogen/server/config_pb.hrl").
+-include("../autogen/config_pb.hrl").
 
 -export([
     action/1,
-    filter/1,
-    from_map/1
+    filter/1
 ]).
+
+-ifdef(TEST).
+
+-export([test_new/1]).
+
+-endif.
 
 -type res() :: #config_session_key_filter_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
@@ -22,12 +27,19 @@ action(SessionKeyFilterRes) ->
 filter(SessionKeyFilterRes) ->
     SessionKeyFilterRes#config_session_key_filter_stream_res_v1_pb.filter.
 
--spec from_map(Map :: map()) -> res().
-from_map(Map) ->
-    config_pb:decode_msg(
-        client_config_pb:encode_msg(Map, session_key_filter_stream_res_v1_pb),
-        config_session_key_filter_stream_res_v1_pb
-    ).
+%% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec test_new(map()) -> res().
+test_new(Map) ->
+    #config_session_key_filter_stream_res_v1_pb{
+        action = maps:get(action, Map),
+        filter = maps:get(filter, Map)
+    }.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -47,7 +59,7 @@ action_test() ->
     ok.
 
 filter_test() ->
-    Filter = hpr_skf:from_map(#{devaddr => 16#0000001, session_keys => []}),
+    Filter = hpr_skf:test_new(#{devaddr => 16#0000001, session_keys => []}),
     ?assertEqual(
         Filter,
         ?MODULE:filter(#config_session_key_filter_stream_res_v1_pb{
@@ -57,17 +69,16 @@ filter_test() ->
     ),
     ok.
 
-from_map_test() ->
-    FilterMap = #{devaddr => 16#0000001, session_keys => []},
-    Filter = hpr_skf:from_map(#{devaddr => 16#0000001, session_keys => []}),
+new_test() ->
+    Filter = hpr_skf:test_new(#{devaddr => 16#0000001, session_keys => []}),
     ?assertEqual(
         #config_session_key_filter_stream_res_v1_pb{
             action = create,
             filter = Filter
         },
-        ?MODULE:from_map(#{
+        ?MODULE:test_new(#{
             action => create,
-            filter => FilterMap
+            filter => Filter
         })
     ),
     ok.

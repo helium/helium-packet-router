@@ -90,7 +90,7 @@ init_test() ->
 
 route_packet_test() ->
     meck:new(hpr_routing, [passthrough]),
-    PacketUp = hpr_packet_up:new(#{}),
+    PacketUp = hpr_packet_up:test_new(#{}),
     EnvUp = hpr_envelope_up:new(PacketUp),
     meck:expect(hpr_routing, handle_packet, [PacketUp], ok),
 
@@ -108,7 +108,7 @@ route_register_test() ->
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-    Reg = hpr_register:new(Gateway),
+    Reg = hpr_register:test_new(Gateway),
     RegSigned = hpr_register:sign(Reg, SigFun),
 
     ?assertEqual({stop, stream_state}, ?MODULE:route(hpr_envelope_up:new(Reg), stream_state)),

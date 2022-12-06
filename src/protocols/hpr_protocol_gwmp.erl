@@ -43,16 +43,12 @@ txpk_to_packet_down(TxPkBin) ->
             false -> maps:get(<<"tmst">>, Map);
             true -> 0
         end,
-    hpr_packet_down:to_record(#{
-        payload => JSONData0,
-        rx1 => #{
-            timestamp => Timestamp,
-            frequency => erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
-            datarate => erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
-        },
-        %% No rx2 windows for udp
-        rx2 => undefined
-    }).
+    hpr_packet_down:new_downlink(
+        JSONData0,
+        Timestamp,
+        erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
+        erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
+    ).
 
 -spec packet_up_to_push_data(
     PacketUp :: hpr_packet_up:packet(),

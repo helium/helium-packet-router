@@ -1,12 +1,17 @@
 -module(hpr_route_stream_res).
 
--include("../autogen/server/config_pb.hrl").
+-include("../autogen/config_pb.hrl").
 
 -export([
     action/1,
-    route/1,
-    from_map/1
+    route/1
 ]).
+
+-ifdef(TEST).
+
+-export([test_new/1]).
+
+-endif.
 
 -type res() :: #config_route_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
@@ -21,12 +26,19 @@ action(RouteStreamRes) ->
 route(RouteStreamRes) ->
     RouteStreamRes#config_route_stream_res_v1_pb.route.
 
--spec from_map(Map :: map()) -> res().
-from_map(Map) ->
-    config_pb:decode_msg(
-        client_config_pb:encode_msg(Map, route_stream_res_v1_pb),
-        config_route_stream_res_v1_pb
-    ).
+%% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec test_new(map()) -> res().
+test_new(Map) ->
+    #config_route_stream_res_v1_pb{
+        action = maps:get(action, Map),
+        route = maps:get(route, Map)
+    }.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -46,7 +58,7 @@ action_test() ->
     ok.
 
 route_test() ->
-    Route = hpr_route:new(#{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 0,
         devaddr_ranges => [
@@ -72,8 +84,8 @@ route_test() ->
     ),
     ok.
 
-from_map_test() ->
-    RouteMap = #{
+new_test() ->
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 0,
         devaddr_ranges => [
@@ -89,16 +101,13 @@ from_map_test() ->
         },
         max_copies => 1,
         nonce => 1
-    },
+    }),
     ?assertEqual(
         #config_route_stream_res_v1_pb{
             action = create,
-            route = hpr_route:new(RouteMap)
+            route = Route
         },
-        ?MODULE:from_map(#{
-            action => create,
-            route => RouteMap
-        })
+        ?MODULE:test_new(#{action => create, route => Route})
     ),
     ok.
 

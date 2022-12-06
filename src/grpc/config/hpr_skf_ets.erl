@@ -1,6 +1,6 @@
 -module(hpr_skf_ets).
 
--include("../autogen/server/config_pb.hrl").
+-include("../autogen/config_pb.hrl").
 
 -export([
     init/0,
@@ -116,6 +116,6 @@ new_skf() ->
         devaddr => DevAddr,
         session_keys => SessionKeys
     },
-    hpr_skf:from_map(SKFMap).
+    hpr_skf:test_new(SKFMap).
 
 -endif.

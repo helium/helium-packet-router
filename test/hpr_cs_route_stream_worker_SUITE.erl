@@ -1,7 +1,7 @@
 -module(hpr_cs_route_stream_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../src/grpc/autogen/server/config_pb.hrl").
+-include("../src/grpc/autogen/config_pb.hrl").
 
 -export([
     all/0,
@@ -55,7 +55,7 @@ create_route_test(Config) ->
     timer:sleep(500),
 
     %% Create route and send them from server
-    RouteMap = #{
+    Route = hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-001">>,
         net_id => 0,
         devaddr_ranges => [
@@ -70,12 +70,10 @@ create_route_test(Config) ->
         },
         max_copies => 1,
         nonce => 1
-    },
-    Route = hpr_route:new(RouteMap),
+    }),
+
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:from_map(#{
-            action => create, route => RouteMap
-        })
+        hpr_route_stream_res:test_new(#{action => create, route => Route})
     ),
 
     %% Let time to process new routes
@@ -126,11 +124,9 @@ update_route_test(Config) ->
         max_copies => 1,
         nonce => 1
     },
-    Route1 = hpr_route:new(Route1Map),
+    Route1 = hpr_route:test_new(Route1Map),
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:from_map(#{
-            action => create, route => Route1Map
-        })
+        hpr_route_stream_res:test_new(#{action => create, route => Route1})
     ),
 
     %% Let time to process new routes
@@ -163,11 +159,9 @@ update_route_test(Config) ->
         euis => [#{app_eui => 2, dev_eui => 2}],
         nonce => 2
     },
-    Route2 = hpr_route:new(Route2Map),
+    Route2 = hpr_route:test_new(Route2Map),
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:from_map(#{
-            action => update, route => Route2Map
-        })
+        hpr_route_stream_res:test_new(#{action => update, route => Route2})
     ),
 
     ok = test_utils:wait_until(
@@ -219,11 +213,9 @@ delete_route_test(Config) ->
         max_copies => 1,
         nonce => 1
     },
-    Route1 = hpr_route:new(Route1Map),
+    Route1 = hpr_route:test_new(Route1Map),
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:from_map(#{
-            action => create, route => Route1Map
-        })
+        hpr_route_stream_res:test_new(#{action => create, route => Route1})
     ),
 
     %% Let time to process new routes
@@ -250,9 +242,7 @@ delete_route_test(Config) ->
     %% Delete our Route
 
     ok = hpr_test_config_service_route:stream_resp(
-        hpr_route_stream_res:from_map(#{
-            action => delete, route => Route1Map
-        })
+        hpr_route_stream_res:test_new(#{action => delete, route => Route1})
     ),
 
     ok = test_utils:wait_until(

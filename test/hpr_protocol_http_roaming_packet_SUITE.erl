@@ -1187,6 +1187,8 @@ join_test_route(DevEUI, AppEUI, FlowType, RouteId) ->
 join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
     RouteMap = #{
         id => RouteId,
+        oui => 0,
+        nonce => 0,
         net_id => NetId,
         devaddr_ranges => [],
         euis => [
@@ -1202,11 +1204,11 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
             protocol =>
                 {http_roaming, #{
                     flow_type => FlowType,
-                    path => <<"/uplink">>
+                    path => "/uplink"
                 }}
         }
     },
-    Route = hpr_route:new(RouteMap),
+    Route = hpr_route:test_new(RouteMap),
     hpr_route_ets:insert(Route).
 
 uplink_test_route() ->
@@ -1231,6 +1233,8 @@ uplink_test_route(InputMap) ->
 
     RouteMap = #{
         id => RouteId,
+        oui => 1,
+        nonce => 1,
         net_id => NetId,
         devaddr_ranges => DevAddrRanges,
         euis => [],
@@ -1242,15 +1246,18 @@ uplink_test_route(InputMap) ->
                 {http_roaming, #{
                     flow_type => FlowType,
                     dedupe_timeout => DedupeTimeout,
-                    path => <<"/uplink">>
+                    path => "/uplink"
                 }}
         }
     },
-    Route = hpr_route:new(RouteMap),
+    Route = hpr_route:test_new(RouteMap),
     hpr_route_ets:insert(Route).
 
 downlink_test_route(FlowType) ->
     RouteMap = #{
+        id => <<"1">>,
+        oui => 1,
+        nonce => 1,
         net_id => ?NET_ID_ACTILITY,
         devaddr_ranges => [],
         euis => [],
@@ -1261,7 +1268,7 @@ downlink_test_route(FlowType) ->
             protocol => {http_roaming, #{flow_type => FlowType}}
         }
     },
-    Route = hpr_route:new(RouteMap),
+    Route = hpr_route:test_new(RouteMap),
     hpr_route_ets:insert(Route).
 
 test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->

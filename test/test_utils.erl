@@ -127,7 +127,7 @@ join_packet_up(Opts0) ->
     MIC = crypto:macN(cmac, aes_128_cbc, AppKey, JoinPayload0, 4),
     JoinPayload1 = <<JoinPayload0/binary, MIC:4/binary>>,
     Opts1 = maps:put(payload, maps:get(payload, Opts0, JoinPayload1), Opts0),
-    PacketUp = hpr_packet_up:new(Opts1),
+    PacketUp = hpr_packet_up:test_new(Opts1),
     SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
     hpr_packet_up:sign(PacketUp, SigFun).
 
@@ -170,7 +170,7 @@ uplink_packet_up(Opts0) ->
 
     Payload = <<Payload0/binary, MIC:4/binary>>,
     Opts1 = maps:put(payload, maps:get(payload, Opts0, Payload), Opts0),
-    PacketUp = hpr_packet_up:new(Opts1),
+    PacketUp = hpr_packet_up:test_new(Opts1),
     SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
     hpr_packet_up:sign(PacketUp, SigFun).
 

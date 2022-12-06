@@ -28,10 +28,9 @@ new_state(Gateway, LNS) ->
 init(_ConnectionPid, StreamId, State) ->
     {ok, State#state{stream_id = StreamId}}.
 
--spec handle_message(map(), state()) -> {ok, state()}.
-handle_message(EnvDownMap, #state{gateway = Gateway} = CBData) ->
+-spec handle_message(hpr_envelop_down:envelope(), state()) -> {ok, state()}.
+handle_message(EnvDown, #state{gateway = Gateway} = CBData) ->
     lager:debug("sending router downlink"),
-    EnvDown = hpr_envelope_down:to_record(EnvDownMap),
     {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
     ok = hpr_packet_router_service:send_packet_down(Gateway, PacketDown),
     {ok, CBData}.

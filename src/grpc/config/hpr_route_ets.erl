@@ -164,7 +164,7 @@ foreach_cleanup(ok) ->
     ok.
 
 test_insert() ->
-    Route = hpr_route:new(#{
+    Route = hpr_route:test_new(#{
         id => <<"11ea6dfd-3dce-4106-8980-d34007ab689b">>,
         net_id => 0,
         devaddr_ranges => [
@@ -198,7 +198,7 @@ test_insert() ->
     ID = hpr_route:id(Route),
     ?assertEqual([{ID, Route}], ets:lookup(?ROUTE_ETS, ID)),
 
-    UpdatedRoute = hpr_route:new(#{
+    UpdatedRoute = hpr_route:test_new(#{
         id => <<"11ea6dfd-3dce-4106-8980-d34007ab689b">>,
         net_id => 0,
         devaddr_ranges => [
@@ -269,7 +269,7 @@ test_devaddr_lookup() ->
     ok.
 
 test_eui_lookup() ->
-    Route1 = hpr_route:new(#{
+    Route1 = hpr_route:test_new(#{
         id => <<"11ea6dfd-3dce-4106-8980-d34007ab689b">>,
         net_id => 0,
         devaddr_ranges => [
@@ -287,7 +287,7 @@ test_eui_lookup() ->
         nonce => 1
     }),
 
-    Route2 = hpr_route:new(#{
+    Route2 = hpr_route:test_new(#{
         id => <<"be427c6d-d3b7-4146-ae14-1fc662034f6d">>,
         net_id => 0,
         devaddr_ranges => [
@@ -334,7 +334,7 @@ test_route_to_eui_rows() ->
     ?assertEqual([{{1, 2}, CleanedRoute}, {{3, 4}, CleanedRoute}], route_to_eui_rows(Route)).
 
 new_route() ->
-    hpr_route:new(#{
+    hpr_route:test_new(#{
         id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
         net_id => 0,
         devaddr_ranges => [

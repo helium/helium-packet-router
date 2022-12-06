@@ -1,7 +1,7 @@
 -module(hpr_cs_skf_stream_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../src/grpc/autogen/server/config_pb.hrl").
+-include("../src/grpc/autogen/config_pb.hrl").
 
 -export([
     all/0,
@@ -56,14 +56,12 @@ create_skf_test(_Config) ->
 
     DevAddr = 16#00000000,
     SessionKeys = [crypto:strong_rand_bytes(16)],
-    SKFMap = #{
+    SessionKeyFilter = hpr_skf:test_new(#{
         devaddr => DevAddr,
         session_keys => SessionKeys
-    },
+    }),
     ok = hpr_test_config_service_skf:stream_resp(
-        hpr_skf_stream_res:from_map(#{
-            action => create, filter => SKFMap
-        })
+        hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter})
     ),
 
     ok = test_utils:wait_until(
@@ -71,7 +69,7 @@ create_skf_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({ok, hpr_skf:from_map(SKFMap)}, hpr_skf_ets:lookup_devaddr(DevAddr)),
+    ?assertEqual({ok, SessionKeyFilter}, hpr_skf_ets:lookup_devaddr(DevAddr)),
     ok.
 
 update_skf_test(_Config) ->
@@ -80,14 +78,12 @@ update_skf_test(_Config) ->
 
     DevAddr1 = 16#00000000,
     SessionKeys1 = [crypto:strong_rand_bytes(16)],
-    SKFMap1 = #{
+    SessionKeyFilter1 = hpr_skf:test_new(#{
         devaddr => DevAddr1,
         session_keys => SessionKeys1
-    },
+    }),
     ok = hpr_test_config_service_skf:stream_resp(
-        hpr_skf_stream_res:from_map(#{
-            action => create, filter => SKFMap1
-        })
+        hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter1})
     ),
 
     ok = test_utils:wait_until(
@@ -95,23 +91,21 @@ update_skf_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({ok, hpr_skf:from_map(SKFMap1)}, hpr_skf_ets:lookup_devaddr(DevAddr1)),
+    ?assertEqual({ok, SessionKeyFilter1}, hpr_skf_ets:lookup_devaddr(DevAddr1)),
 
     %% Update our SKF
     SessionKeys2 = [crypto:strong_rand_bytes(16)],
-    SKFMap2 = SKFMap1#{
+    SessionKeyFilter2 = hpr_skf:test_new(#{
         devaddr => DevAddr1,
         session_keys => SessionKeys2
-    },
+    }),
     ok = hpr_test_config_service_skf:stream_resp(
-        hpr_skf_stream_res:from_map(#{
-            action => update, filter => SKFMap2
-        })
+        hpr_skf_stream_res:test_new(#{action => update, filter => SessionKeyFilter2})
     ),
 
     ok = test_utils:wait_until(
         fun() ->
-            {ok, hpr_skf:from_map(SKFMap2)} =:= hpr_skf_ets:lookup_devaddr(DevAddr1)
+            {ok, SessionKeyFilter2} =:= hpr_skf_ets:lookup_devaddr(DevAddr1)
         end
     ),
     ok.
@@ -122,14 +116,12 @@ delete_skf_test(_Config) ->
 
     DevAddr = 16#00000000,
     SessionKeys = [crypto:strong_rand_bytes(16)],
-    SKFMap = #{
+    SessionKeyFilter = hpr_skf:test_new(#{
         devaddr => DevAddr,
         session_keys => SessionKeys
-    },
+    }),
     ok = hpr_test_config_service_skf:stream_resp(
-        hpr_skf_stream_res:from_map(#{
-            action => create, filter => SKFMap
-        })
+        hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter})
     ),
 
     ok = test_utils:wait_until(
@@ -137,12 +129,10 @@ delete_skf_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({ok, hpr_skf:from_map(SKFMap)}, hpr_skf_ets:lookup_devaddr(DevAddr)),
+    ?assertEqual({ok, SessionKeyFilter}, hpr_skf_ets:lookup_devaddr(DevAddr)),
 
     ok = hpr_test_config_service_skf:stream_resp(
-        hpr_skf_stream_res:from_map(#{
-            action => delete, filter => SKFMap
-        })
+        hpr_skf_stream_res:test_new(#{action => delete, filter => SessionKeyFilter})
     ),
 
     ok = test_utils:wait_until(
