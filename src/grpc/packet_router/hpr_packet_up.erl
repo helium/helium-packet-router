@@ -285,7 +285,9 @@ type_test() ->
     ),
     ?assertEqual(
         {undefined, 7},
-        ?MODULE:type(?MODULE:test_new(#{payload => <<2#111:3, (crypto:strong_rand_bytes(20))/binary>>}))
+        ?MODULE:type(
+            ?MODULE:test_new(#{payload => <<2#111:3, (crypto:strong_rand_bytes(20))/binary>>})
+        )
     ),
     ?assertEqual({undefined, 0}, ?MODULE:type(?MODULE:test_new(#{payload => <<>>}))),
     ok.
