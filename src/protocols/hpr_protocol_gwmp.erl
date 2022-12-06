@@ -59,9 +59,8 @@ packet_up_to_push_data(Up, GatewayTime) ->
     Token = semtech_udp:token(),
     PubKeyBin = hpr_packet_up:gateway(Up),
     MAC = hpr_utils:pubkeybin_to_mac(PubKeyBin),
-
-    %% TODO: Add back potential geo stuff
-    %% CP breaks if {lati, long} are not parseable number
+    B58 = erlang:list_to_binary(libp2p_crypto:bin_to_b58(PubKeyBin)),
+    Name = erlang:list_to_binary(hpr_utils:gateway_name(PubKeyBin)),
 
     Data = semtech_udp:push_data(
         Token,
@@ -77,19 +76,24 @@ packet_up_to_push_data(Up, GatewayTime) ->
             codr => <<"4/5">>,
             stat => 1,
             chan => 0,
-
             datr => erlang:atom_to_binary(hpr_packet_up:datarate(Up)),
             rssi => hpr_packet_up:rssi(Up),
             lsnr => hpr_packet_up:snr(Up),
             size => erlang:byte_size(hpr_packet_up:payload(Up)),
-            data => base64:encode(hpr_packet_up:payload(Up))
+            data => base64:encode(hpr_packet_up:payload(Up)),
+            meta => #{
+                gateway_id => B58,
+                gateway_name => Name
+            }
         },
         #{
             regi => hpr_packet_up:region(Up),
+            %% TODO: Add back potential geo stuff
+            %% CP breaks if {lati, long} are not parseable number
             %% inde => Index,
             %% lati => Lat,
             %% long => Long,
-            pubk => libp2p_crypto:bin_to_b58(PubKeyBin)
+            pubk => B58
         }
     ),
     {Token, Data}.

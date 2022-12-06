@@ -29,6 +29,7 @@ route(EnvUp, StreamState) ->
             {ok, StreamState};
         {register, Reg} ->
             PubKeyBin = hpr_register:gateway(Reg),
+            lager:md([{gateway, hpr_utils:gateway_name(PubKeyBin)}]),
             case hpr_register:verify(Reg) of
                 false ->
                     lager:info("failed to verify"),
@@ -72,7 +73,6 @@ locate(PubKeyBin) ->
 
 -spec register(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
 register(PubKeyBin) ->
-    lager:md([{gateway, hpr_utils:gateway_name(PubKeyBin)}]),
     lager:info("register"),
     true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
     ok.
