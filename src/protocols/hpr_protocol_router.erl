@@ -1,6 +1,35 @@
 -module(hpr_protocol_router).
 
--export([send/2]).
+%% ------------------------------------------------------------------
+%% Routing Function Exports
+%% ------------------------------------------------------------------
+-export([
+    init/0,
+    send/2
+]).
+
+%% ------------------------------------------------------------------
+%% Protocol Function Exports
+%% ------------------------------------------------------------------
+-export([
+    get_stream/3,
+    remove_stream/2
+]).
+
+-ifdef(TEST).
+-export([all_streams/0]).
+-endif.
+
+-define(STREAM_ETS, hpr_protocol_router_ets).
+
+%% ------------------------------------------------------------------
+%% API Function Definitions
+%% ------------------------------------------------------------------
+
+-spec init() -> ok.
+init() ->
+    ?STREAM_ETS = ets:new(?STREAM_ETS, [public, named_table, set, {read_concurrency, true}]),
+    ok.
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
@@ -9,14 +38,72 @@
 send(PacketUp, Route) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
     LNS = hpr_route:lns(Route),
-    case hpr_router_stream_manager:get_stream(Gateway, LNS) of
+    Server = hpr_route:server(Route),
+    case get_stream(Gateway, LNS, Server) of
         {ok, RouterStream} ->
             Env = hpr_envelope_up:new(PacketUp),
             EnvMap = hpr_envelope_up:to_map(Env),
-            ok = grpc_client:send(RouterStream, EnvMap);
+            ok = grpcbox_client:send(RouterStream, EnvMap);
         {error, _} = Err ->
             Err
     end.
+
+%% ------------------------------------------------------------------
+%% Protocol Function Definitions
+%% ------------------------------------------------------------------
+
+-spec get_stream(
+    Gateway :: libp2p_crypto:pubkey_bin(),
+    LNS :: binary(),
+    Server :: hpr_route:server()
+) -> {ok, grpcbox_client:stream()} | {error, any()}.
+get_stream(Gateway, LNS, Server) ->
+    case ets:lookup(?STREAM_ETS, {Gateway, LNS}) of
+        [{_, Stream}] ->
+            {ok, Stream};
+        [] ->
+            case grpcbox_channel:pick(LNS, stream) of
+                {error, _} ->
+                    %% No connection
+                    Host = erlang:binary_to_list(hpr_route:host(Server)),
+                    Port = hpr_route:port(Server),
+                    {ok, _Conn} = grpcbox_client:connect(LNS, [{http, Host, Port, []}], #{
+                        sync_start => true
+                    }),
+                    get_stream(Gateway, LNS, Server);
+                {ok, {_Conn, _Interceptor}} ->
+                    case
+                        helium_packet_router_packet_client:route(#{
+                            channel => LNS,
+                            callback_module => {
+                                hpr_packet_router_downlink_handler,
+                                hpr_packet_router_downlink_handler:new_state(Gateway, LNS)
+                            }
+                        })
+                    of
+                        {error, _} = Error ->
+                            Error;
+                        {ok, Stream} ->
+                            true = ets:insert(?STREAM_ETS, {{Gateway, LNS}, Stream}),
+                            get_stream(Gateway, LNS, Server)
+                    end
+            end
+    end.
+
+-spec remove_stream(libp2p_crypto:pubkey_bin(), binary()) -> true.
+remove_stream(Gateway, LNS) ->
+    ets:delete(?STREAM_ETS, {Gateway, LNS}).
+
+%% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec all_streams() -> [{{libp2p_crypto:pubkey_bin(), binary()}, map()}].
+all_streams() ->
+    ets:tab2list(?STREAM_ETS).
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
@@ -34,20 +121,19 @@ basic_test_() ->
     ].
 
 per_testcase_setup() ->
-    meck:new(hpr_router_stream_manager),
-    meck:new(grpc_client),
+    ?MODULE:init(),
+    meck:new(grpcbox_client),
     ok.
 
 per_testcase_cleanup(ok) ->
-    meck:unload(hpr_router_stream_manager),
-    meck:unload(grpc_client).
+    true = ets:delete(?STREAM_ETS),
+    meck:unload(grpcbox_client).
 
 % send/3: happy path
 test_send() ->
     PubKeyBin = <<"PubKeyBin">>,
     HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
     EnvMap = hpr_envelope_up:to_map(hpr_envelope_up:new(HprPacketUp)),
-    Stream = self(),
     Host = <<"example-lns.com">>,
     Port = 4321,
     Route = hpr_route:new(#{
@@ -65,18 +151,12 @@ test_send() ->
         nonce => 1
     }),
 
-    meck:expect(
-        hpr_router_stream_manager,
-        get_stream,
-        [PubKeyBin, <<Host/binary, ":", (integer_to_binary(Port))/binary>>],
-        {ok, Stream}
-    ),
-    meck:expect(grpc_client, send, [Stream, EnvMap], ok),
+    true = ets:insert(?STREAM_ETS, {{PubKeyBin, hpr_route:lns(Route)}, fake_stream}),
+    meck:expect(grpcbox_client, send, [fake_stream, EnvMap], ok),
 
     ResponseValue = send(HprPacketUp, Route),
 
     ?assertEqual(ok, ResponseValue),
-    ?assertEqual(1, meck:num_calls(hpr_router_stream_manager, get_stream, 2)),
-    ?assertEqual(1, meck:num_calls(grpc_client, send, 2)).
+    ?assertEqual(1, meck:num_calls(grpcbox_client, send, 2)).
 
 -endif.

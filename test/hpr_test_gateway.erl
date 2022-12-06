@@ -37,8 +37,7 @@
     route :: hpr_route:route(),
     pubkey_bin :: libp2p_crypto:pubkey_bin(),
     sig_fun :: libp2p_crypto:sig_fun(),
-    connection :: grpc_client:connection(),
-    stream :: grpc_client:client_stream()
+    stream :: grpcbox_client:stream()
 }).
 
 -type state() :: #state{}.
@@ -121,7 +120,7 @@ handle_cast(
         gateway => PubKeyBin, sig_fun => SigFun, devaddr => DevAddr
     }),
     EnvUp = hpr_envelope_up:new(PacketUp),
-    ok = grpc_client:send(Stream, hpr_envelope_up:to_map(EnvUp)),
+    ok = grpcbox_client:send(Stream, hpr_envelope_up:to_map(EnvUp)),
     Pid ! {?MODULE, self(), {?SEND_PACKET, EnvUp}},
     lager:debug("send_packet ~p", [EnvUp]),
     {noreply, State};
@@ -131,51 +130,36 @@ handle_cast(_Msg, State) ->
 
 handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = SigFun} = State) ->
     lager:debug("connecting"),
-    {ok, Connection} = grpc_client:connect(tcp, "127.0.0.1", 8080),
-    {ok, Stream} = grpc_client:new_stream(
-        Connection,
-        'helium.packet_router.packet',
-        route,
-        client_packet_router_pb
-    ),
+    {ok, Stream} = helium_packet_router_packet_client:route(),
     Reg = hpr_register:new(PubKeyBin),
     SignedReg = hpr_register:sign(Reg, SigFun),
     EnvUp = hpr_envelope_up:new(SignedReg),
-    ok = grpc_client:send(Stream, hpr_envelope_up:to_map(EnvUp)),
+    EnvUpMap = hpr_envelope_up:to_map(EnvUp),
+    ok = grpcbox_client:send(Stream, EnvUpMap),
     Pid ! {?MODULE, self(), {?REGISTER, EnvUp}},
-    self() ! ?RCV_LOOP,
     lager:debug("connected and registered"),
-    {noreply, State#state{connection = Connection, stream = Stream}};
-handle_info(?RCV_LOOP, #state{forward = Pid, connection = Connection, stream = Stream} = State) ->
-    case grpc_client:rcv(Stream, ?RCV_TIMEOUT) of
-        {headers, _Headers} ->
-            lager:debug("got headers"),
-            self() ! ?RCV_LOOP,
-            {noreply, State};
-        {data, Data} ->
-            lager:debug("got data ~p", [Data]),
-            self() ! ?RCV_LOOP,
-            Pid ! {?MODULE, self(), {data, catch hpr_envelope_down:to_record(Data)}},
-            {noreply, State};
-        eof ->
-            lager:debug("got eof"),
-            catch grpc_client:stop_connection(Connection),
-            self() ! ?CONNECT,
-            {noreply, State};
-        {error, timeout} ->
-            self() ! ?RCV_LOOP,
-            {noreply, State};
-        {error, E} ->
-            lager:debug("failed to rcv ~p", [E]),
-            {stop, {error, E}}
-    end;
+    {noreply, State#state{stream = Stream}};
+%% GRPC stream callbacks
+handle_info({data, _StreamID, Data}, #state{forward = Pid} = State) ->
+    lager:debug("got data ~p", [Data]),
+    Pid ! {?MODULE, self(), {data, catch hpr_envelope_down:to_record(Data)}},
+    {noreply, State};
+handle_info(
+    {'DOWN', Ref, process, Pid, _Reason},
+    #state{stream = #{stream_pid := Pid, monitor_ref := Ref}} = State
+) ->
+    lager:debug("test gateway stream went down"),
+    {noreply, State#state{stream = undefined}};
+handle_info({headers, _StreamID, _Headers}, State) ->
+    {noreply, State};
+handle_info({trailers, _StreamID, _Trailers}, State) ->
+    {noreply, State};
 handle_info(_Msg, State) ->
     lager:debug("unknown info ~p", [_Msg]),
     {noreply, State}.
 
-terminate(_Reason, #state{connection = Connection}) ->
+terminate(_Reason, #state{}) ->
     lager:debug("terminate ~p", [_Reason]),
-    catch grpc_client:stop_connection(Connection),
     ok.
 
 %% ------------------------------------------------------------------

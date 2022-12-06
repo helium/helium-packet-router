@@ -1,3 +1,48 @@
+%%%-------------------------------------------------------------------
+%% @doc
+%% === Config Service Stream Worker ===
+%%
+%% Makes a GRPC stream to the config service to receive route updates
+%% and forward them dealt with.
+%%
+%% A "channel" is created `grpcbox' when the app is started. This
+%% channel does not make an actual connection. That happens when a
+%% stream is created and a message is sent.
+%%
+%% If a channel goes down, all the stream will receive a `eos'
+%% message, and a `DOWN' message. The channel will clean up the
+%% remaining stream pids.
+%%
+%% == Known Failures ==
+%%
+%%   - unimplemented
+%%   - undefined channel
+%%   - econnrefused
+%%
+%% = UNIMPLEMENTED Trailers =
+%%
+%% If we connect to a valid grpc server, but it does not implement the
+%% messages we expect, the stream will be "successfully" created, then
+%% immediately torn down. The failure will be relayed in `trailers'.
+%% In this care, we log the unimplimented message, but do not attempt
+%% to reconnect.
+%%
+%% = Undefined Channel =
+%%
+%% All workers that talk to the Config Service use the same client
+%% channel, `config_channel'. Channels do not make connections to
+%% servers. If this message is received it means the channel was never
+%% created, either through configuration, or explicitly with
+%% `grpcbox_client:connect/3'.
+%%
+%% = econnrefused =
+%%
+%% The `config_channel' has been improperly configured to point at a
+%% non-grpc server. Or, the grpc server is down. We fail the backoff
+%% and try again later.
+%%
+%% @end
+%%%-------------------------------------------------------------------
 -module(hpr_cs_route_stream_worker).
 
 -behaviour(gen_server).
@@ -30,7 +75,7 @@
 -define(BACKOFF_MAX, timer:minutes(5)).
 
 -record(state, {
-    stream :: grpc_client:stream() | undefined,
+    stream :: grpcbox_client:stream() | undefined,
     file_backup_path :: path(),
     conn_backoff :: backoff:backoff()
 }).
@@ -39,8 +84,6 @@
 
 -define(SERVER, ?MODULE).
 -define(INIT_STREAM, init_stream).
--define(RCV_CFG_UPDATE, receive_config_update).
--define(RCV_TIMEOUT, timer:seconds(5)).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -76,63 +119,64 @@ handle_cast(Msg, State) ->
 
 handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    case hpr_cs_conn_worker:get_connection() of
-        undefined ->
-            {Delay, Backoff1} = backoff:fail(Backoff0),
-            lager:error("failed to get connection sleeping ~wms", [Delay]),
-            _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
-            {noreply, State#state{conn_backoff = Backoff1}};
-        Connection ->
-            {_, Backoff1} = backoff:succeed(Backoff0),
-            #{http_connection := Pid} = Connection,
-            _Ref = erlang:monitor(process, Pid, [{tag, {'DOWN', ?MODULE}}]),
-            lager:info("connected"),
-            {ok, Stream} = grpc_client:new_stream(
-                Connection, 'helium.config.route', stream, client_config_pb
-            ),
-            %% Sending Route Stream Request
-            {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
-            PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-            RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
-            SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
-            ok = grpc_client:send_last(Stream, hpr_route_stream_req:to_map(SignedRouteStreamReq)),
+    {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
+    SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
+    SignedRouteStreamReqMap = hpr_route_stream_req:to_map(SignedRouteStreamReq),
+    StreamOptions = #{channel => config_channel},
+
+    case helium_config_route_client:stream(SignedRouteStreamReqMap, StreamOptions) of
+        {ok, Stream} ->
             lager:info("stream initialized"),
-            self() ! ?RCV_CFG_UPDATE,
-            {noreply, State#state{stream = Stream, conn_backoff = Backoff1}}
+            {_, Backoff1} = backoff:succeed(Backoff0),
+            {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
+        {error, undefined_channel} ->
+            lager:error(
+                "`config_channel` is not defined, or not started. Not attempting to reconnect."
+            ),
+            {noreply, State};
+        {error, _E} ->
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            lager:error("failed to get stream sleeping ~wms : ~p", [Delay, _E]),
+            _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
+            {noreply, State#state{conn_backoff = Backoff1}}
+    end;
+%% GRPC stream callbacks
+handle_info({data, _StreamID, RouteStreamRes}, #state{file_backup_path = Path} = State) ->
+    lager:debug("route update"),
+    ok = process_route_stream_res(hpr_route_stream_res:from_map(RouteStreamRes), Path),
+    {noreply, State};
+handle_info({headers, _StreamID, _Headers}, State) ->
+    %% noop on headers
+    {noreply, State};
+handle_info({trailers, _StreamID, Trailers}, State) ->
+    %% IF a stream is closed by the server side, Trailers will be
+    %% received before the EOS. Removing the stream from state will
+    %% mean none of the other clauses match, and reconnecting will not
+    %% be attempted.
+    %% ref: https://grpc.github.io/grpc/core/md_doc_statuscodes.html
+    case Trailers of
+        {<<"12">>, _, _} ->
+            lager:error(
+                "helium.config.route/stream not implemented. "
+                "Make sure you're pointing at the right server."
+            ),
+            {noreply, State#state{stream = undefined}};
+        _ ->
+            {noreply, State}
     end;
 handle_info(
-    ?RCV_CFG_UPDATE,
-    #state{
-        stream = Stream, file_backup_path = Path, conn_backoff = Backoff0
-    } = State
+    {eos, StreamID},
+    #state{stream = #{stream_id := StreamID}, conn_backoff = Backoff0} = State
 ) ->
-    case grpc_client:rcv(Stream, ?RCV_TIMEOUT) of
-        {headers, _Headers} ->
-            self() ! ?RCV_CFG_UPDATE,
-            {noreply, State};
-        {data, RouteStreamRes} ->
-            lager:info("got router update"),
-            ok = process_route_stream_res(hpr_route_stream_res:from_map(RouteStreamRes), Path),
-            self() ! ?RCV_CFG_UPDATE,
-            {noreply, State};
-        eof ->
-            lager:warning("got eof"),
-            self() ! ?INIT_STREAM,
-            {noreply, State#state{stream = undefined}};
-        {error, timeout} ->
-            lager:debug("rcv timeout"),
-            {_, Backoff1} = backoff:succeed(Backoff0),
-            self() ! ?RCV_CFG_UPDATE,
-            {noreply, State#state{conn_backoff = Backoff1}};
-        {error, E} ->
-            lager:error("failed to rcv ~p", [E]),
-            self() ! ?INIT_STREAM,
-            {noreply, State#state{stream = undefined}}
-    end;
-handle_info({{'DOWN', ?MODULE}, _Mon, process, _Pid, _ExitReason}, State) ->
-    lager:info("connection ~p went down ~p", [_Pid, _ExitReason]),
-    self() ! ?INIT_STREAM,
-    {noreply, State#state{stream = undefined}};
+    %% When streams or channels go down, they first send an `eos' message, then
+    %% send a `DOWN' message. We're choosing not to handle the `DOWN' message,
+    %% it behaves as a copy of the `eos' message.
+    {Delay, Backoff1} = backoff:fail(Backoff0),
+    lager:info("stream went down sleeping ~wms", [Delay]),
+    _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
+    {noreply, State#state{stream = undefined, conn_backoff = Backoff1}};
 handle_info(_Msg, State) ->
     lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.
