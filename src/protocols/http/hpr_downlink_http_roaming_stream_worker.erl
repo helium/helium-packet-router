@@ -176,17 +176,29 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                         sync ->
                             {200, jsx:encode(PayloadResponse)};
                         async ->
-                            spawn(fun() ->
-                                Res = hackney:post(Endpoint, jsx:encode(PayloadResponse), [
-                                    with_body
-                                ]),
-                                lager:debug(
-                                    [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                                    "async downlink response ~s, Endpoint: ~s",
-                                    [
-                                        Res, Endpoint
-                                    ]
-                                )
+                            _ = erlang:spawn(fun() ->
+                                case
+                                    hackney:post(Endpoint, [], jsx:encode(PayloadResponse), [
+                                        with_body
+                                    ])
+                                of
+                                    {ok, Code, _, _} ->
+                                        lager:debug(
+                                            [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                                            "async downlink response ~w, Endpoint: ~s",
+                                            [
+                                                Code, Endpoint
+                                            ]
+                                        );
+                                    {error, Reason} ->
+                                        lager:debug(
+                                            [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                                            "async downlink response ~s, Endpoint: ~s",
+                                            [
+                                                Reason, Endpoint
+                                            ]
+                                        )
+                                end
                             end),
                             {200, <<"downlink sent: 2">>}
                     end

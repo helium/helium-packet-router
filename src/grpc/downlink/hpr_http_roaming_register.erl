@@ -11,11 +11,11 @@
     verify/1
 ]).
 
--type req() :: #http_roaming_register_v1_pb{}.
+-type http_roaming_register() :: #http_roaming_register_v1_pb{}.
 
--export_type([req/0]).
+-export_type([http_roaming_register/0]).
 
--spec new(Region :: atom(), Signer :: libp2p_crypto:pubkey_bin()) -> req().
+-spec new(Region :: atom(), Signer :: libp2p_crypto:pubkey_bin()) -> http_roaming_register().
 new(Region, Signer) ->
     #http_roaming_register_v1_pb{
         region = Region,
@@ -23,40 +23,40 @@ new(Region, Signer) ->
         signer = Signer
     }.
 
--spec timestamp(RouteStreamReq :: req()) -> non_neg_integer().
-timestamp(RouteStreamReq) ->
-    RouteStreamReq#http_roaming_register_v1_pb.timestamp.
+-spec timestamp(HttpRoamingReg :: http_roaming_register()) -> non_neg_integer().
+timestamp(HttpRoamingReg) ->
+    HttpRoamingReg#http_roaming_register_v1_pb.timestamp.
 
--spec signer(RouteStreamReq :: req()) -> libp2p_crypto:pubkey_bin().
-signer(RouteStreamReq) ->
-    RouteStreamReq#http_roaming_register_v1_pb.signer.
+-spec signer(HttpRoamingReg :: http_roaming_register()) -> libp2p_crypto:pubkey_bin().
+signer(HttpRoamingReg) ->
+    HttpRoamingReg#http_roaming_register_v1_pb.signer.
 
--spec signature(RouteStreamReq :: req()) -> binary().
-signature(RouteStreamReq) ->
-    RouteStreamReq#http_roaming_register_v1_pb.signature.
+-spec signature(HttpRoamingReg :: http_roaming_register()) -> binary().
+signature(HttpRoamingReg) ->
+    HttpRoamingReg#http_roaming_register_v1_pb.signature.
 
--spec sign(RouteStreamReq :: req(), SigFun :: fun()) ->
-    req().
-sign(RouteStreamReq, SigFun) ->
-    EncodedRouteStreamReq = config_pb:encode_msg(
-        RouteStreamReq, http_roaming_register_v1_pb
+-spec sign(HttpRoamingReg :: http_roaming_register(), SigFun :: fun()) ->
+    http_roaming_register().
+sign(HttpRoamingReg, SigFun) ->
+    EncodedHttpRoamingReg = downlink_pb:encode_msg(
+        HttpRoamingReg, http_roaming_register_v1_pb
     ),
-    RouteStreamReq#http_roaming_register_v1_pb{
-        signature = SigFun(EncodedRouteStreamReq)
+    HttpRoamingReg#http_roaming_register_v1_pb{
+        signature = SigFun(EncodedHttpRoamingReg)
     }.
 
--spec verify(RouteStreamReq :: req()) -> boolean().
-verify(RouteStreamReq) ->
-    EncodedRouteStreamReq = config_pb:encode_msg(
-        RouteStreamReq#http_roaming_register_v1_pb{
+-spec verify(HttpRoamingReg :: http_roaming_register()) -> boolean().
+verify(HttpRoamingReg) ->
+    EncodedHttpRoamingReg = downlink_pb:encode_msg(
+        HttpRoamingReg#http_roaming_register_v1_pb{
             signature = <<>>
         },
         http_roaming_register_v1_pb
     ),
     libp2p_crypto:verify(
-        EncodedRouteStreamReq,
-        ?MODULE:signature(RouteStreamReq),
-        libp2p_crypto:bin_to_pubkey(?MODULE:signer(RouteStreamReq))
+        EncodedHttpRoamingReg,
+        ?MODULE:signature(HttpRoamingReg),
+        libp2p_crypto:bin_to_pubkey(?MODULE:signer(HttpRoamingReg))
     ).
 
 %% ------------------------------------------------------------------
@@ -100,11 +100,11 @@ sign_verify_test() ->
     #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Signer = libp2p_crypto:pubkey_to_bin(PubKey),
-    RouteStreamReq = ?MODULE:new('EU868', Signer),
+    HttpRoamingReg = ?MODULE:new('EU868', Signer),
 
-    SignedRouteStreamReq = ?MODULE:sign(RouteStreamReq, SigFun),
+    SignedHttpRoamingReg = ?MODULE:sign(HttpRoamingReg, SigFun),
 
-    ?assert(?MODULE:verify(SignedRouteStreamReq)),
+    ?assert(?MODULE:verify(SignedHttpRoamingReg)),
     ok.
 
 -endif.
