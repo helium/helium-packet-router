@@ -675,8 +675,12 @@ verify_push_data(PacketUp, PushDataBinary) ->
                     <<"time">> => fun erlang:is_binary/1,
                     <<"tmst">> => hpr_packet_up:timestamp(PacketUp) band 16#FFFF_FFFF,
                     <<"meta">> => #{
-                        <<"gateway_id">> => erlang:list_to_binary(libp2p_crypto:bin_to_b58(PubKeyBin)),
-                        <<"gateway_name">> => erlang:list_to_binary(hpr_utils:gateway_name(PubKeyBin))
+                        <<"gateway_id">> => erlang:list_to_binary(
+                            libp2p_crypto:bin_to_b58(PubKeyBin)
+                        ),
+                        <<"gateway_name">> => erlang:list_to_binary(
+                            hpr_utils:gateway_name(PubKeyBin)
+                        )
                     }
                 }
             ],
