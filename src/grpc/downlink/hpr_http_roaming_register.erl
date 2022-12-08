@@ -4,6 +4,7 @@
 
 -export([
     new/2,
+    region/1,
     timestamp/1,
     signer/1,
     signature/1,
@@ -22,6 +23,10 @@ new(Region, Signer) ->
         timestamp = erlang:system_time(millisecond),
         signer = Signer
     }.
+
+-spec region(HttpRoamingReg :: http_roaming_register()) -> atom().
+region(HttpRoamingReg) ->
+    HttpRoamingReg#http_roaming_register_v1_pb.region.
 
 -spec timestamp(HttpRoamingReg :: http_roaming_register()) -> non_neg_integer().
 timestamp(HttpRoamingReg) ->
