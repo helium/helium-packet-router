@@ -2,7 +2,7 @@
 %% @doc
 %% @end
 %%%-------------------------------------------------------------------
--module(hpr_downlink_http_roaming_stream_worker).
+-module(hpr_http_roaming_downlink_stream_worker).
 
 -behaviour(gen_server).
 

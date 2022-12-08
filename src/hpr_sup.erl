@@ -97,7 +97,7 @@ init([]) ->
         ?SUP(hpr_gwmp_sup, []),
 
         ?SUP(hpr_http_roaming_sup, []),
-        ?WORKER(hpr_downlink_http_roaming_stream_worker, [#{}])
+        ?WORKER(hpr_http_roaming_downlink_stream_worker, [#{}])
     ],
     {ok, {
         #{
