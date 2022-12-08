@@ -63,7 +63,7 @@ end_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 
 class_c_downlink_test(_Config) ->
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
     hpr_packet_router_service:register(PubKeyBin),
@@ -100,7 +100,7 @@ class_c_downlink_test(_Config) ->
 
 chirpstack_join_accept_test(_Config) ->
     TransactionID = 473719436,
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     hpr_packet_router_service:register(PubKeyBin),
 
@@ -147,7 +147,7 @@ chirpstack_join_accept_test(_Config) ->
     ok.
 
 rx1_timestamp_test(_Config) ->
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     ok = hpr_packet_router_service:register(PubKeyBin),
 
@@ -202,7 +202,7 @@ rx1_timestamp_test(_Config) ->
     ok.
 
 rx1_downlink_test(_Config) ->
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     ok = hpr_packet_router_service:register(PubKeyBin),
 
@@ -261,7 +261,7 @@ rx1_downlink_test(_Config) ->
     ok.
 
 rx2_downlink_test(_Config) ->
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     ok = hpr_packet_router_service:register(PubKeyBin),
 

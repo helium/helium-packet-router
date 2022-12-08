@@ -53,7 +53,7 @@ elli_started_test(_Config) ->
     ok.
 
 packet_up_histogram_test(_Config) ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 

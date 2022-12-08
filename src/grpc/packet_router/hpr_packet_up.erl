@@ -238,7 +238,7 @@ signature_test() ->
     ok.
 
 verify_test() ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
     PacketUp = ?MODULE:test_new(#{gateway => Gateway}),

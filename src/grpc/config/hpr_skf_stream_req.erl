@@ -88,7 +88,7 @@ signature_test() ->
     ok.
 
 sign_verify_test() ->
-    #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Signer = libp2p_crypto:pubkey_to_bin(PubKey),
     RouteStreamReq = ?MODULE:new(Signer),
