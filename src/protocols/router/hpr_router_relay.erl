@@ -43,10 +43,9 @@ start(PubKeyBin, RouterStream) ->
 
 -spec init(list()) -> {ok, #state{}, {continue, relay}}.
 init([PubKeyBin, RouterStream]) ->
-    {ok, GatewayStream} = hpr_packet_router_service:locate(PubKeyBin),
     {ok, MonitorPid} =
         hpr_router_relay_monitor:start(
-            self(), GatewayStream, RouterStream
+            self(), RouterStream
         ),
     lager:md([
         {gateway, hpr_utils:gateway_name(PubKeyBin)},

@@ -6,7 +6,7 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start/3
+    start/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -21,10 +21,7 @@
 
 -type process_name() :: relay | gateway_stream | router_stream.
 -type relay() :: pid().
--type process_type() ::
-    relay()
-    | hpr_router_stream_manager:gateway_stream()
-    | grpc_client:client_stream().
+-type process_type() :: relay() | grpc_client:client_stream().
 -type monitor_exit(Reason) ::
     normal
     | shutdown
@@ -33,7 +30,6 @@
 
 -record(state, {
     relay :: relay(),
-    gateway_stream :: hpr_router_stream_manager:gateway_stream(),
     router_stream :: grpc_client:client_stream()
 }).
 
@@ -41,42 +37,23 @@
 %% API Function Definitions
 %% ------------------------------------------------------------------
 
--spec start(
-    relay(),
-    hpr_router_stream_manager:gateway_stream(),
-    grpc_client:client_stream()
-) -> {ok, pid()}.
+-spec start(relay(), grpc_client:client_stream()) -> {ok, pid()}.
 %% @doc Start this service.
-start(RelayPid, GatewayStream, RouterStream) ->
-    gen_server:start(?MODULE, [RelayPid, GatewayStream, RouterStream], []).
+start(RelayPid, RouterStream) ->
+    gen_server:start(?MODULE, [RelayPid, RouterStream], []).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
 -spec init(list()) -> {ok, #state{}}.
-init([Relay, GatewayStream, RouterStream]) ->
-    % monitor Relay, GatewayStream and RouterStream to cleanup the communication
-    % stack if one of the processes exits.
-    % - If RouterStream exits:
-    %       - stop relay
-    %       - leave the GatewayStream intact. The GatewayStream is
-    %         multiplexed to many RouterStreams.
-    % - If GatewayStream exits:
-    %       - stop relay
-    %       - clean up the RouterStream because it no longer has a stream to
-    %         reply to.
-    % - If Relay exits:
-    %       - clean up the RouterStream because it no longer has a way to
-    %         communciate with the GatewayStream.
-    monitor_process(gateway_stream, GatewayStream),
+init([Relay, RouterStream]) ->
     monitor_process(router_stream, RouterStream),
     monitor_process(relay, Relay),
     {
         ok,
         #state{
             relay = Relay,
-            gateway_stream = GatewayStream,
             router_stream = RouterStream
         }
     }.
@@ -102,12 +79,6 @@ handle_info(
 ) ->
     stop_relay(State#state.relay),
     {stop, process_exit_status(router_stream, RouterStream, Reason), State};
-handle_info(
-    {{'DOWN', gateway_stream}, _, process, GatewayStream, Reason}, State
-) ->
-    grpc_client:stop_stream(State#state.router_stream),
-    stop_relay(State#state.relay),
-    {stop, process_exit_status(gateway_stream, GatewayStream, Reason), State};
 handle_info({{'DOWN', relay}, _, process, RouterStream, Reason}, State) ->
     grpc_client:stop_stream(State#state.router_stream),
     {stop, process_exit_status(router_stream, RouterStream, Reason), State}.
@@ -151,7 +122,6 @@ stop_relay(Relay) ->
 all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         ?_test(test_relay_exit()),
-        ?_test(test_gateway_exit()),
         ?_test(test_router_exit())
     ]}.
 
@@ -164,49 +134,28 @@ foreach_cleanup(ok) ->
 test_relay_exit() ->
     meck:new(grpc_client),
     Relay = fake_process(),
-    GatewayStream = fake_process(),
     RouterStream = fake_process(),
     meck:expect(grpc_client, stop_stream, fun(Pid) -> kill_process(Pid) end),
 
-    {ok, Monitor} = start(Relay, GatewayStream, RouterStream),
+    {ok, Monitor} = start(Relay, RouterStream),
 
     kill_process(Relay),
     timer:sleep(10),
 
     ?assertNot(erlang:is_process_alive(Relay)),
-    ?assert(erlang:is_process_alive(GatewayStream)),
-    ?assertNot(erlang:is_process_alive(RouterStream)),
-    ?assertNot(erlang:is_process_alive(Monitor)).
-
-test_gateway_exit() ->
-    meck:new(grpc_client),
-    Relay = fake_process(),
-    GatewayStream = fake_process(),
-    RouterStream = fake_process(),
-    meck:expect(grpc_client, stop_stream, fun(Pid) -> kill_process(Pid) end),
-
-    {ok, Monitor} = start(Relay, GatewayStream, RouterStream),
-
-    kill_process(GatewayStream),
-    timer:sleep(10),
-
-    ?assertNot(erlang:is_process_alive(Relay)),
-    ?assertNot(erlang:is_process_alive(GatewayStream)),
     ?assertNot(erlang:is_process_alive(RouterStream)),
     ?assertNot(erlang:is_process_alive(Monitor)).
 
 test_router_exit() ->
     Relay = fake_process(),
-    GatewayStream = fake_process(),
     RouterStream = fake_process(),
 
-    {ok, Monitor} = start(Relay, GatewayStream, RouterStream),
+    {ok, Monitor} = start(Relay, RouterStream),
 
     kill_process(RouterStream),
     timer:sleep(10),
 
     ?assertNot(erlang:is_process_alive(Relay)),
-    ?assert(erlang:is_process_alive(GatewayStream)),
     ?assertNot(erlang:is_process_alive(RouterStream)),
     ?assertNot(erlang:is_process_alive(Monitor)).
 
