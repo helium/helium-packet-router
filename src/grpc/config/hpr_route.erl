@@ -42,7 +42,7 @@
 
 -export_type([route/0, server/0, protocol/0]).
 
--spec id(Route :: route()) -> binary().
+-spec id(Route :: route()) -> string().
 id(Route) ->
     Route#config_route_v1_pb.id.
 
@@ -93,7 +93,7 @@ nonce(Route) ->
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->
     Server = ?MODULE:server(Route),
-    Host = ?MODULE:host(Server),
+    Host = erlang:list_to_binary(?MODULE:host(Server)),
     Port = ?MODULE:port(Server),
     case Server#config_server_v1_pb.protocol of
         {http_roaming, _RoamingProtocol} ->
@@ -115,9 +115,9 @@ gwmp_region_lns(Region, Route) ->
             false -> ?MODULE:port(Server);
             #config_protocol_gwmp_mapping_v1_pb{port = P} -> P
         end,
-    {erlang:binary_to_list(Host), Port}.
+    {Host, Port}.
 
--spec host(Server :: server()) -> binary().
+-spec host(Server :: server()) -> string().
 host(Server) ->
     Server#config_server_v1_pb.host.
 
@@ -225,7 +225,7 @@ mk_protocol(undefined) ->
 
 test_new_test() ->
     Route = #config_route_v1_pb{
-        id = <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
+        id = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
         net_id = 1,
         devaddr_ranges = [
             #config_devaddr_range_v1_pb{start_addr = 1, end_addr = 10},
@@ -237,7 +237,7 @@ test_new_test() ->
         ],
         oui = 10,
         server = #config_server_v1_pb{
-            host = <<"lsn.lora.com">>,
+            host = "lsn.lora.com",
             port = 80,
             protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
         },
@@ -247,7 +247,7 @@ test_new_test() ->
     ?assertEqual(
         Route,
         ?MODULE:test_new(#{
-            id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
+            id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
             net_id => 1,
             devaddr_ranges => [
                 #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
@@ -255,7 +255,7 @@ test_new_test() ->
             euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
             oui => 10,
             server => #{
-                host => <<"lsn.lora.com">>,
+                host => "lsn.lora.com",
                 port => 80,
                 protocol => {gwmp, #{mapping => []}}
             },
@@ -267,7 +267,7 @@ test_new_test() ->
 
 id_test() ->
     Route = test_route(),
-    ?assertEqual(<<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>, ?MODULE:id(Route)),
+    ?assertEqual("7d502f32-4d58-4746-965e-8c7dfdcfc624", ?MODULE:id(Route)),
     ok.
 
 net_id_test() ->
@@ -297,7 +297,7 @@ euis_2_test() ->
 
 region_lns_test() ->
     Route = ?MODULE:test_new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
+        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
         net_id => 1,
         devaddr_ranges => [
             #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
@@ -305,7 +305,7 @@ region_lns_test() ->
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
         oui => 10,
         server => #{
-            host => <<"lsn.lora.com">>,
+            host => "lsn.lora.com",
             port => 80,
             protocol =>
                 {gwmp, #{
@@ -334,7 +334,7 @@ server_test() ->
     Route = test_route(),
     ?assertEqual(
         #config_server_v1_pb{
-            host = <<"lsn.lora.com">>,
+            host = "lsn.lora.com",
             port = 80,
             protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
         },
@@ -359,7 +359,7 @@ lns_test() ->
 
 host_test() ->
     Route = test_route(),
-    ?assertEqual(<<"lsn.lora.com">>, ?MODULE:host(?MODULE:server(Route))),
+    ?assertEqual("lsn.lora.com", ?MODULE:host(?MODULE:server(Route))),
     ok.
 
 port_test() ->
@@ -376,7 +376,7 @@ protocol_test() ->
 
 test_route() ->
     ?MODULE:test_new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
+        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
         net_id => 1,
         devaddr_ranges => [
             #{start_addr => 1, end_addr => 10}, #{start_addr => 11, end_addr => 20}
@@ -384,7 +384,7 @@ test_route() ->
         euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 2, dev_eui => 0}],
         oui => 10,
         server => #{
-            host => <<"lsn.lora.com">>,
+            host => "lsn.lora.com",
             port => 80,
             protocol => {gwmp, #{mapping => []}}
         },

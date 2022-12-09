@@ -195,12 +195,12 @@ new_test() ->
         gateway => <<"gateway">>
     }),
     TestRoute = hpr_route:test_new(#{
-        id => 1,
+        id => "1",
         oui => 1,
         net_id => 0,
         devaddr_ranges => [],
         euis => [],
-        server => #{host => <<"example.com">>, port => 8080, protocol => undefined},
+        server => #{host => "example.com", port => 8080, protocol => undefined},
         max_copies => 1,
         nonce => 1
     }),

@@ -228,13 +228,13 @@ server_crash_test(_Config) ->
 
 test_route() ->
     hpr_route:test_new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
+        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
         net_id => 0,
         devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
         euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
         oui => 4020,
         server => #{
-            host => <<"127.0.0.1">>,
+            host => "127.0.0.1",
             port => 8082,
             protocol => {packet_router, #{}}
         },
