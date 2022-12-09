@@ -58,7 +58,7 @@ init([]) ->
             {error, enoent} ->
                 KeyMap =
                     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(
-                        ecc_compact
+                        ed25519
                     ),
                 ok = libp2p_crypto:save_keys(KeyMap, KeyFileName),
                 {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)}

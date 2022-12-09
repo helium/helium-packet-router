@@ -322,7 +322,7 @@ multi_lns_downlink_test(_Config) ->
 multi_gw_single_lns_test(_Config) ->
     %% Ensure gws start up uniquely
     PacketUp1 = fake_join_up_packet(),
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{gateway = PubKeyBin},
 
@@ -491,12 +491,12 @@ region_port_redirect_test(_Config) ->
     {ok, USSocket} = gen_udp:open(USPort, [binary, {active, true}]),
     {ok, EUSocket} = gen_udp:open(EUPort, [binary, {active, true}]),
 
-    #{public := EUPubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := EUPubKey} = libp2p_crypto:generate_keys(ed25519),
     EUPubKeyBin = libp2p_crypto:pubkey_to_bin(EUPubKey),
 
     %% This gateway will have no mapping, and should result in sending to the
     %% fallback port.
-    #{public := CNPubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := CNPubKey} = libp2p_crypto:generate_keys(ed25519),
     CNPubKeyBin = libp2p_crypto:pubkey_to_bin(CNPubKey),
 
     %% NOTE: Hotspot needs to be changed because 1 hotspot can't send from 2 regions.
@@ -675,8 +675,12 @@ verify_push_data(PacketUp, PushDataBinary) ->
                     <<"time">> => fun erlang:is_binary/1,
                     <<"tmst">> => hpr_packet_up:timestamp(PacketUp) band 16#FFFF_FFFF,
                     <<"meta">> => #{
-                        <<"gateway_id">> => erlang:list_to_binary(libp2p_crypto:bin_to_b58(PubKeyBin)),
-                        <<"gateway_name">> => erlang:list_to_binary(hpr_utils:gateway_name(PubKeyBin))
+                        <<"gateway_id">> => erlang:list_to_binary(
+                            libp2p_crypto:bin_to_b58(PubKeyBin)
+                        ),
+                        <<"gateway_name">> => erlang:list_to_binary(
+                            hpr_utils:gateway_name(PubKeyBin)
+                        )
                     }
                 }
             ],

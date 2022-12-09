@@ -56,7 +56,7 @@ end_per_testcase(TestCase, Config) ->
 gateway_limit_exceeded_test(_Config) ->
     %% Limit is DEFAULT_GATEWAY_THROTTLE = 25 per second
     Limit = 25,
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
     JoinPacketUpValid = test_utils:join_packet_up(#{
@@ -78,7 +78,7 @@ gateway_limit_exceeded_test(_Config) ->
     ok.
 
 invalid_packet_type_test(_Config) ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
     JoinPacketUpInvalid = test_utils:join_packet_up(#{
@@ -90,7 +90,7 @@ invalid_packet_type_test(_Config) ->
     ok.
 
 bad_signature_test(_Config) ->
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     JoinPacketBadSig = test_utils:join_packet_up(#{
@@ -100,7 +100,7 @@ bad_signature_test(_Config) ->
     ok.
 
 mic_check_test(_Config) ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
@@ -163,7 +163,7 @@ max_copies_test(_Config) ->
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
 
-    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
     Gateway1 = libp2p_crypto:pubkey_to_bin(PubKey1),
 
@@ -176,7 +176,7 @@ max_copies_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ed25519),
     SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
     Gateway2 = libp2p_crypto:pubkey_to_bin(PubKey2),
 
@@ -189,7 +189,7 @@ max_copies_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    #{secret := PrivKey3, public := PubKey3} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey3, public := PubKey3} = libp2p_crypto:generate_keys(ed25519),
     SigFun3 = libp2p_crypto:mk_sig_fun(PrivKey3),
     Gateway3 = libp2p_crypto:pubkey_to_bin(PubKey3),
 
@@ -251,7 +251,7 @@ max_copies_test(_Config) ->
 
 success_test(_Config) ->
     Self = self(),
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 

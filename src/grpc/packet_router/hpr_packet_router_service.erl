@@ -105,7 +105,7 @@ route_register_test() ->
     application:ensure_all_started(gproc),
 
     Self = self(),
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
     Reg = hpr_register:test_new(Gateway),
@@ -141,7 +141,7 @@ handle_info_test() ->
 send_packet_down_test() ->
     application:ensure_all_started(gproc),
 
-    #{public := PubKey0} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey0} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin0 = libp2p_crypto:pubkey_to_bin(PubKey0),
     PacketDown = hpr_packet_down:new_downlink(
         <<"data">>,
@@ -162,7 +162,7 @@ send_packet_down_test() ->
         ?assertEqual(PacketDown, timeout)
     end,
 
-    #{public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
     Pid = erlang:spawn(
         fun() ->

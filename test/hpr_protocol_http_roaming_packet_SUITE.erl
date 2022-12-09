@@ -102,7 +102,7 @@ end_per_testcase(TestCase, Config) ->
 
 http_sync_uplink_join_test(_Config) ->
     %% One Gateway is going to be sending all the packets.
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
@@ -243,7 +243,7 @@ http_sync_uplink_join_test(_Config) ->
 http_sync_downlink_test(_Config) ->
     ok = start_forwarder_listener(),
 
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
     DownlinkPayload = <<"downlink_payload">>,
@@ -318,7 +318,7 @@ http_async_uplink_join_test(_Config) ->
     ok = start_roamer_listener(#{callback_args => #{flow_type => async}}),
 
     %% 1. Get a gateway to send from
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
@@ -441,7 +441,7 @@ http_async_downlink_test(_Config) ->
     ok = start_roamer_listener(#{callback_args => #{flow_type => async}}),
 
     %% 1. Get a gateway to send from
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
     %% 2. insert response handler
@@ -531,7 +531,7 @@ http_async_downlink_test(_Config) ->
 http_uplink_packet_no_roaming_agreement_test(_Config) ->
     %% When receiving a response that there is no roaming agreement for a NetID,
     %% we should stop purchasing for that NetID.
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
@@ -631,7 +631,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
 
 http_uplink_packet_test(_Config) ->
     %% One Gateway is going to be sending all the packets.
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
@@ -713,7 +713,7 @@ http_class_c_downlink_test(_Config) ->
     ok = start_forwarder_listener(),
     ok = start_roamer_listener(#{callback_args => #{flow_type => async}}),
 
-    #{public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
     %% 1. insert handler and config
@@ -812,11 +812,11 @@ http_class_c_downlink_test(_Config) ->
     ok.
 
 http_multiple_gateways_test(_Config) ->
-    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
     PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
 
-    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ed25519),
     SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
     PubKeyBin2 = libp2p_crypto:pubkey_to_bin(PubKey2),
 
@@ -917,7 +917,7 @@ http_multiple_joins_same_dest_test(_Config) ->
     DevEUI1 = 1,
     AppEUI1 = 16#200000001,
 
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
@@ -948,11 +948,11 @@ http_multiple_joins_same_dest_test(_Config) ->
     ok.
 
 http_multiple_gateways_single_shot_test(_Config) ->
-    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
     PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
 
-    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ed25519),
     SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
     PubKeyBin2 = libp2p_crypto:pubkey_to_bin(PubKey2),
 
@@ -1037,7 +1037,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
     ok.
 
 http_overlapping_devaddr_test(_Config) ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
 
@@ -1096,11 +1096,11 @@ http_uplink_packet_late_test(_Config) ->
 
     ok = start_uplink_listener(),
 
-    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
     SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
     PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
 
-    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ecc_compact),
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ed25519),
     SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
     PubKeyBin2 = libp2p_crypto:pubkey_to_bin(PubKey2),
 
