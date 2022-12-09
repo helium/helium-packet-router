@@ -87,7 +87,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
             {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
         {error, undefined_channel} ->
             lager:error(
-                "`config_channel` is not defined, or not started. Not attempting to reconnect."
+                "`downlink_channel` is not defined, or not started. Not attempting to reconnect."
             ),
             {noreply, State};
         {error, _E} ->
@@ -113,7 +113,7 @@ handle_info({trailers, _StreamID, Trailers}, State) ->
     case Trailers of
         {<<"12">>, _, _} ->
             lager:error(
-                "helium.config.session_key_filter/stream not implemented. "
+                "helium.downlink.http_roaming/stream not implemented. "
                 "Make sure you're pointing at the right server."
             ),
             {noreply, State#state{stream = undefined}};

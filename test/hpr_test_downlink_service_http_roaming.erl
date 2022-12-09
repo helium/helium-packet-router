@@ -37,7 +37,7 @@ stream(Req, StreamState) ->
             {ok, StreamState}
     end.
 
--spec downlink(Resp :: hpr_route_stream_res:res()) -> ok.
+-spec downlink(Resp :: downlink_pb:http_roaming_downlink_v1_pb()) -> ok.
 downlink(Resp) ->
     lager:notice("downlink ~p  @ ~p", [Resp, erlang:whereis(?MODULE)]),
     ?MODULE ! {downlink, Resp},
