@@ -433,7 +433,7 @@ pull_ack_hostname_test(_Config) ->
         {ok, {hostent, TestURL, [], inet, 4, [{127, 0, 0, 1}]}}
     ),
 
-    Route = test_route(erlang:list_to_binary(TestURL), 1777),
+    Route = test_route(TestURL, 1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
     hpr_protocol_gwmp:send(PacketUp, Route),
@@ -479,7 +479,7 @@ region_port_redirect_test(_Config) ->
     EUPort = 1779,
 
     Route = test_route(
-        <<"127.0.0.1">>,
+        "127.0.0.1",
         FallbackPort,
         [
             #{region => 'US915', port => USPort},
@@ -538,14 +538,14 @@ region_port_redirect_test(_Config) ->
 %% ===================================================================
 
 test_route(Port) ->
-    test_route(<<"127.0.0.1">>, Port).
+    test_route("127.0.0.1", Port).
 
 test_route(Host, Port) ->
     test_route(Host, Port, []).
 
 test_route(Host, Port, RegionMapping) ->
     hpr_route:test_new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
+        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
         net_id => 0,
         devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
         euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],

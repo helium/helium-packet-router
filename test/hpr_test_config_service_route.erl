@@ -13,6 +13,7 @@
     create/2,
     update/2,
     delete/2,
+    euis/2,
     stream/2
 ]).
 
@@ -34,19 +35,22 @@ handle_info({stream_resp, RouteStreamResp}, StreamState) ->
 handle_info(_Msg, StreamState) ->
     StreamState.
 
-list(_Ctx, _RouteListReq) ->
+list(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-get(_Ctx, _RouteListReq) ->
+get(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-create(_Ctx, _RouteListReq) ->
+create(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-update(_Ctx, _RouteListReq) ->
+update(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-delete(_Ctx, _RouteListReq) ->
+delete(_Ctx, _Msg) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+
+euis(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
 stream(RouteStreamReq, StreamState) ->

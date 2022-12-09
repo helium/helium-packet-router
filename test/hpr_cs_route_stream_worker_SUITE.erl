@@ -56,7 +56,7 @@ create_route_test(Config) ->
 
     %% Create route and send them from server
     Route = hpr_route:test_new(#{
-        id => <<"7d502f32-4d58-4746-965e-001">>,
+        id => "7d502f32-4d58-4746-965e-001",
         net_id => 0,
         devaddr_ranges => [
             #{start_addr => 16#00000001, end_addr => 16#0000000A}
@@ -64,7 +64,7 @@ create_route_test(Config) ->
         euis => [#{app_eui => 1, dev_eui => 0}],
         oui => 1,
         server => #{
-            host => <<"localhost">>,
+            host => "localhost",
             port => 8080,
             protocol => {packet_router, #{}}
         },
@@ -109,7 +109,7 @@ update_route_test(Config) ->
 
     %% Create route and send them from server
     Route1Map = #{
-        id => <<"7d502f32-4d58-4746-965e-001">>,
+        id => "7d502f32-4d58-4746-965e-001",
         net_id => 0,
         devaddr_ranges => [
             #{start_addr => 16#00000001, end_addr => 16#0000000A}
@@ -117,7 +117,7 @@ update_route_test(Config) ->
         euis => [#{app_eui => 1, dev_eui => 0}],
         oui => 1,
         server => #{
-            host => <<"localhost">>,
+            host => "localhost",
             port => 8080,
             protocol => {packet_router, #{}}
         },
@@ -198,7 +198,7 @@ delete_route_test(Config) ->
 
     %% Create route and send them from server
     Route1Map = #{
-        id => <<"7d502f32-4d58-4746-965e-001">>,
+        id => "7d502f32-4d58-4746-965e-001",
         net_id => 0,
         devaddr_ranges => [
             #{start_addr => 16#00000001, end_addr => 16#0000000A}
@@ -206,7 +206,7 @@ delete_route_test(Config) ->
         euis => [#{app_eui => 1, dev_eui => 0}],
         oui => 1,
         server => #{
-            host => <<"localhost">>,
+            host => "localhost",
             port => 8080,
             protocol => {packet_router, #{}}
         },

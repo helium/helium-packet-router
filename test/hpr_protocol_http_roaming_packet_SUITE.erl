@@ -1199,7 +1199,7 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
         ],
         max_copies => 2,
         server => #{
-            host => <<"127.0.0.1">>,
+            host => "127.0.0.1",
             port => 3002,
             protocol =>
                 {http_roaming, #{
@@ -1212,10 +1212,10 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
     hpr_route_ets:insert(Route).
 
 uplink_test_route() ->
-    uplink_test_route(#{id => <<"route1">>}).
+    uplink_test_route(#{id => "route1"}).
 
 uplink_test_route(InputMap) ->
-    RouteId = maps:get(id, InputMap, <<"route1">>),
+    RouteId = maps:get(id, InputMap, "route1"),
     NetId = maps:get(net_id, InputMap, ?NET_ID_ACTILITY),
     DevAddrRanges = maps:get(
         devaddr_ranges,
@@ -1240,7 +1240,7 @@ uplink_test_route(InputMap) ->
         euis => [],
         max_copies => 2,
         server => #{
-            host => <<"127.0.0.1">>,
+            host => "127.0.0.1",
             port => Port,
             protocol =>
                 {http_roaming, #{
@@ -1255,7 +1255,7 @@ uplink_test_route(InputMap) ->
 
 downlink_test_route(FlowType) ->
     RouteMap = #{
-        id => <<"1">>,
+        id => "1",
         oui => 1,
         nonce => 1,
         net_id => ?NET_ID_ACTILITY,
@@ -1263,7 +1263,7 @@ downlink_test_route(FlowType) ->
         euis => [],
         max_copies => 1,
         server => #{
-            host => <<"127.0.0.1">>,
+            host => "127.0.0.1",
             port => 3002,
             protocol => {http_roaming, #{flow_type => FlowType}}
         }

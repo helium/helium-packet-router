@@ -64,7 +64,7 @@ get_stream(Gateway, LNS, Server) ->
             case grpcbox_channel:pick(LNS, stream) of
                 {error, _} ->
                     %% No connection
-                    Host = erlang:binary_to_list(hpr_route:host(Server)),
+                    Host = hpr_route:host(Server),
                     Port = hpr_route:port(Server),
                     {ok, _Conn} = grpcbox_client:connect(LNS, [{http, Host, Port, []}], #{
                         sync_start => true
@@ -133,10 +133,10 @@ test_send() ->
     PubKeyBin = <<"PubKeyBin">>,
     HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
     EnvUp = hpr_envelope_up:new(HprPacketUp),
-    Host = <<"example-lns.com">>,
+    Host = "example-lns.com",
     Port = 4321,
     Route = hpr_route:test_new(#{
-        id => <<"7d502f32-4d58-4746-965e-8c7dfdcfc624">>,
+        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
         net_id => 1,
         devaddr_ranges => [],
         euis => [],

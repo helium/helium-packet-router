@@ -2,6 +2,7 @@
 %% @doc
 %% To run this SUITE:
 %% - `docker-compose -f docker-compose-ct.yaml up`
+%% - Set HPR_PACKET_REPORTER_LOCAL_HOST=localhost
 %% @end
 %%--------------------------------------------------------------------
 -module(hpr_packet_reporter_SUITE).
@@ -95,14 +96,14 @@ upload_test(_Config) ->
     OUI = 1,
     NetID = 2,
     Route = hpr_route:test_new(#{
-        id => <<"test-route">>,
+        id => "test-route",
         oui => OUI,
         net_id => NetID,
         devaddr_ranges => [],
         euis => [],
         max_copies => 1,
         nonce => 1,
-        server => #{host => <<"example.com">>, port => 8080, protocol => undefined}
+        server => #{host => "example.com", port => 8080, protocol => undefined}
     }),
     ExpectedPackets = lists:foldl(
         fun(X, Acc) ->

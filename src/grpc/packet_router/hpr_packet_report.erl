@@ -14,6 +14,7 @@
     region/1,
     gateway/1,
     payload_hash/1,
+    payload_size/1,
     encode/1,
     decode/1
 ]).
@@ -42,7 +43,8 @@ new(Packet, Route) ->
         snr = hpr_packet_up:snr(Packet),
         region = hpr_packet_up:region(Packet),
         gateway = hpr_packet_up:gateway(Packet),
-        payload_hash = hpr_packet_up:phash(Packet)
+        payload_hash = hpr_packet_up:phash(Packet),
+        payload_size = erlang:byte_size(hpr_packet_up:payload(Packet))
     }.
 
 -spec gateway_timestamp_ms(PacketReport :: packet_report()) -> non_neg_integer() | undefined.
@@ -85,6 +87,10 @@ gateway(PacketReport) ->
 payload_hash(PacketReport) ->
     PacketReport#packet_router_packet_report_v1_pb.payload_hash.
 
+-spec payload_size(PacketReport :: packet_report()) -> non_neg_integer() | undefined.
+payload_size(PacketReport) ->
+    PacketReport#packet_router_packet_report_v1_pb.payload_size.
+
 -spec encode(PacketReport :: packet_report()) -> binary().
 encode(#packet_router_packet_report_v1_pb{} = PacketReport) ->
     packet_router_pb:encode_msg(PacketReport).
@@ -100,6 +106,7 @@ decode(BinaryReport) ->
 
 -spec test_new(Opts :: map()) -> packet_report().
 test_new(Opts) ->
+    PacketUp = hpr_packet_up:test_new(#{}),
     #packet_router_packet_report_v1_pb{
         gateway_timestamp_ms = maps:get(
             gateway_timestamp_ms, Opts, erlang:system_time(millisecond)
@@ -112,7 +119,8 @@ test_new(Opts) ->
         datarate = maps:get(datarate, Opts, 'SF7BW125'),
         region = maps:get(region, Opts, 'US915'),
         gateway = maps:get(gateway, Opts, <<"gateway">>),
-        payload_hash = hpr_packet_up:phash(hpr_packet_up:test_new(#{}))
+        payload_hash = hpr_packet_up:phash(PacketUp),
+        payload_size = erlang:byte_size(hpr_packet_up:payload(PacketUp))
     }.
 
 -endif.
@@ -187,12 +195,12 @@ new_test() ->
         gateway => <<"gateway">>
     }),
     TestRoute = hpr_route:test_new(#{
-        id => 1,
+        id => "1",
         oui => 1,
         net_id => 0,
         devaddr_ranges => [],
         euis => [],
-        server => #{host => <<"example.com">>, port => 8080, protocol => undefined},
+        server => #{host => "example.com", port => 8080, protocol => undefined},
         max_copies => 1,
         nonce => 1
     }),
