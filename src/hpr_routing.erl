@@ -101,28 +101,21 @@ maybe_deliver_packet(_Packet, []) ->
 maybe_deliver_packet(Packet, [Route | Routes]) ->
     Server = hpr_route:server(Route),
     Protocol = hpr_route:protocol(Server),
-    lager:debug(
-        [
-            {oui, hpr_route:oui(Route)},
-            {protocol, Protocol},
-            {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))}
-        ],
-        "delivering packet to ~s",
-        [hpr_route:lns(Route)]
-    ),
+    RouteMD = hpr_route:md(Route),
     Key = crypto:hash(sha256, <<
         (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
     >>),
     case hpr_max_copies:update_counter(Key, hpr_route:max_copies(Route)) of
         {error, Reason} ->
-            lager:debug("not sending ~p, Route: ~p", [Reason, Route]);
+            lager:debug(RouteMD, "not sending ~p", [Reason]);
         ok ->
+            lager:debug(RouteMD, "delivering packet"),
             case deliver_packet(Protocol, Packet, Route) of
                 ok ->
                     ok = hpr_packet_reporter:report_packet(Packet, Route),
                     ok;
                 {error, Reason} ->
-                    lager:warning([{protocol, Protocol}], "error ~p", [Reason])
+                    lager:warning(RouteMD, "error ~p", [Reason])
             end
     end,
     maybe_deliver_packet(Packet, Routes).

@@ -12,7 +12,8 @@
     max_copies/1,
     nonce/1,
     lns/1,
-    gwmp_region_lns/2
+    gwmp_region_lns/2,
+    md/1
 ]).
 
 -export([
@@ -159,6 +160,17 @@ protocol_type(Server) ->
         {Type, _} -> Type;
         undefined -> undefined
     end.
+
+-spec md(Route :: route()) -> list({atom(), string() | atom() | non_neg_integer()}).
+md(Route) ->
+    Server = ?MODULE:server(Route),
+    [
+        {route_id, ?MODULE:id(Route)},
+        {oui, ?MODULE:oui(Route)},
+        {protocol_type, ?MODULE:protocol_type(Server)},
+        {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))},
+        {lns, erlang:binary_to_list(hpr_route:lns(Route))}
+    ].
 
 %% ------------------------------------------------------------------
 %% Tests Functions
