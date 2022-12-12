@@ -13,15 +13,16 @@
     nonce/1,
     lns/1,
     gwmp_region_lns/2,
-    md/1
+    md/1,
+    new_packet_router/2
 ]).
 
 -export([
     host/1,
     port/1,
     protocol/1,
-    http_roaming_flow_type/1,
     protocol_type/1,
+    http_roaming_flow_type/1,
     http_roaming_dedupe_timeout/1,
     http_roaming_path/1
 ]).
@@ -118,6 +119,36 @@ gwmp_region_lns(Region, Route) ->
         end,
     {Host, Port}.
 
+-spec md(Route :: route()) -> list({atom(), string() | atom() | non_neg_integer()}).
+md(Route) ->
+    Server = ?MODULE:server(Route),
+    [
+        {route_id, ?MODULE:id(Route)},
+        {oui, ?MODULE:oui(Route)},
+        {protocol_type, ?MODULE:protocol_type(Server)},
+        {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))},
+        {lns, erlang:binary_to_list(hpr_route:lns(Route))}
+    ].
+
+-spec new_packet_router(Host :: string(), Port :: non_neg_integer() | string()) -> route().
+new_packet_router(Host, Port) when is_list(Port) ->
+    new_packet_router(Host, erlang:list_to_integer(Port));
+new_packet_router(Host, Port) ->
+    #iot_config_route_v1_pb{
+        id = Host ++ "_id",
+        oui = 0,
+        net_id = 0,
+        devaddr_ranges = [],
+        euis = [],
+        max_copies = 999,
+        nonce = 1,
+        server = #iot_config_server_v1_pb{
+            host = Host,
+            port = Port,
+            protocol = {packet_router, #iot_config_protocol_packet_router_v1_pb{}}
+        }
+    }.
+
 -spec host(Server :: server()) -> string().
 host(Server) ->
     Server#iot_config_server_v1_pb.host.
@@ -129,6 +160,13 @@ port(Server) ->
 -spec protocol(Server :: server()) -> protocol().
 protocol(Server) ->
     Server#iot_config_server_v1_pb.protocol.
+
+-spec protocol_type(Server :: server()) -> protocol_type().
+protocol_type(Server) ->
+    case Server#iot_config_server_v1_pb.protocol of
+        {Type, _} -> Type;
+        undefined -> undefined
+    end.
 
 -spec http_roaming_flow_type(Route :: route()) -> sync | async.
 http_roaming_flow_type(Route) ->
@@ -153,24 +191,6 @@ http_roaming_path(Route) ->
         _ ->
             <<>>
     end.
-
--spec protocol_type(Server :: server()) -> protocol_type().
-protocol_type(Server) ->
-    case Server#iot_config_server_v1_pb.protocol of
-        {Type, _} -> Type;
-        undefined -> undefined
-    end.
-
--spec md(Route :: route()) -> list({atom(), string() | atom() | non_neg_integer()}).
-md(Route) ->
-    Server = ?MODULE:server(Route),
-    [
-        {route_id, ?MODULE:id(Route)},
-        {oui, ?MODULE:oui(Route)},
-        {protocol_type, ?MODULE:protocol_type(Server)},
-        {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))},
-        {lns, erlang:binary_to_list(hpr_route:lns(Route))}
-    ].
 
 %% ------------------------------------------------------------------
 %% Tests Functions

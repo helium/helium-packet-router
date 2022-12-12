@@ -115,7 +115,14 @@ handle_cast(
     #state{forward = Pid, route = Route, pubkey_bin = PubKeyBin, sig_fun = SigFun, stream = Stream} =
         State
 ) ->
-    [{DevAddr, _} | _] = hpr_route:devaddr_ranges(Route),
+    DevAddr =
+        case maps:get(devaddr, Args, undefined) of
+            undefined ->
+                [{DevAddr0, _} | _] = hpr_route:devaddr_ranges(Route),
+                DevAddr0;
+            DevAddr0 ->
+                DevAddr0
+        end,
     PacketUp = test_utils:uplink_packet_up(Args#{
         gateway => PubKeyBin, sig_fun => SigFun, devaddr => DevAddr
     }),

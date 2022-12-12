@@ -1,5 +1,8 @@
 -module(hpr_routing_SUITE).
 
+-include_lib("eunit/include/eunit.hrl").
+-include("hpr.hrl").
+
 -export([
     all/0,
     init_per_testcase/2,
@@ -11,11 +14,10 @@
     invalid_packet_type_test/1,
     bad_signature_test/1,
     mic_check_test/1,
+    max_copies_test/1,
     success_test/1,
-    max_copies_test/1
+    no_routes_test/1
 ]).
-
--include_lib("eunit/include/eunit.hrl").
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -33,8 +35,9 @@ all() ->
         invalid_packet_type_test,
         bad_signature_test,
         mic_check_test,
+        max_copies_test,
         success_test,
-        max_copies_test
+        no_routes_test
     ].
 
 %%--------------------------------------------------------------------
@@ -312,6 +315,95 @@ success_test(_Config) ->
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
+    ok.
+
+no_routes_test(_Config) ->
+    Port1 = 8180,
+    Port2 = 8280,
+    application:set_env(
+        ?APP,
+        no_routes,
+        [{"localhost", Port1}, {"127.0.0.1", erlang:integer_to_list(Port2)}],
+        [{persistent, true}]
+    ),
+    %% Startup no route servers
+    {ok, ServerPid1} = grpcbox:start_server(#{
+        grpc_opts => #{
+            service_protos => [packet_router_pb],
+            services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
+        },
+        listen_opts => #{port => Port1, ip => {0, 0, 0, 0}}
+    }),
+    {ok, ServerPid2} = grpcbox:start_server(#{
+        grpc_opts => #{
+            service_protos => [packet_router_pb],
+            services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
+        },
+        listen_opts => #{port => Port2, ip => {0, 0, 0, 0}}
+    }),
+
+    %% Interceptor
+    Self = self(),
+    application:set_env(
+        hpr,
+        packet_service_route_fun,
+        fun(Env, StreamState) ->
+            {packet, Packet} = hpr_envelope_up:data(Env),
+            Self ! {packet_up, Packet},
+            StreamState
+        end
+    ),
+
+    Route = hpr_route:test_new(#{
+        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+        net_id => 0,
+        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
+        euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
+        oui => 4020,
+        server => #{
+            host => "127.0.0.1",
+            port => 8082,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 2,
+        nonce => 1
+    }),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+
+    %% Send packet and route directly through interface
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{devaddr => 16#FFFFFFFF}),
+
+    PacketUp =
+        case hpr_test_gateway:receive_send_packet(GatewayPid) of
+            {ok, EnvUp} ->
+                {packet, PUp} = hpr_envelope_up:data(EnvUp),
+                PUp;
+            {error, timeout} ->
+                ct:fail(receive_send_packet)
+        end,
+
+    ok =
+        receive
+            {packet_up, RvcPacketUp0} -> ?assertEqual(RvcPacketUp0, PacketUp)
+        after timer:seconds(2) -> ct:fail(no_msg_rcvd)
+        end,
+
+    ok =
+        receive
+            {packet_up, RvcPacketUp1} -> ?assertEqual(RvcPacketUp1, PacketUp)
+        after timer:seconds(2) -> ct:fail(no_msg_rcvd)
+        end,
+
+    ok = gen_server:stop(GatewayPid),
+    ok = gen_server:stop(ServerPid1),
+    ok = gen_server:stop(ServerPid2),
+
+    application:set_env(
+        ?APP,
+        no_routes,
+        [],
+        [{persistent, true}]
+    ),
     ok.
 
 %% ===================================================================
