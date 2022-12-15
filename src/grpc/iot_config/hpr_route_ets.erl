@@ -57,7 +57,7 @@ delete(Route) ->
     ID = hpr_route:id(Route),
     MS = [
         {
-            {'_', {config_route_v1_pb, ID, '_', '_', '_', '_', '_', '_', '_'}},
+            {'_', {iot_config_route_v1_pb, ID, '_', '_', '_', '_', '_', '_', '_'}},
             [],
             [true]
         }

@@ -1,6 +1,6 @@
 -module(hpr_route_stream_res).
 
--include("../autogen/config_pb.hrl").
+-include("../autogen/iot_config_pb.hrl").
 
 -export([
     action/1,
@@ -13,18 +13,18 @@
 
 -endif.
 
--type res() :: #config_route_stream_res_v1_pb{}.
+-type res() :: #iot_config_route_stream_res_v1_pb{}.
 -type action() :: create | update | delete.
 
 -export_type([res/0, action/0]).
 
 -spec action(RouteStreamRes :: res()) -> action().
 action(RouteStreamRes) ->
-    RouteStreamRes#config_route_stream_res_v1_pb.action.
+    RouteStreamRes#iot_config_route_stream_res_v1_pb.action.
 
 -spec route(RouteStreamRes :: res()) -> hpr_route:route().
 route(RouteStreamRes) ->
-    RouteStreamRes#config_route_stream_res_v1_pb.route.
+    RouteStreamRes#iot_config_route_stream_res_v1_pb.route.
 
 %% ------------------------------------------------------------------
 %% Tests Functions
@@ -33,7 +33,7 @@ route(RouteStreamRes) ->
 
 -spec test_new(map()) -> res().
 test_new(Map) ->
-    #config_route_stream_res_v1_pb{
+    #iot_config_route_stream_res_v1_pb{
         action = maps:get(action, Map),
         route = maps:get(route, Map)
     }.
@@ -50,7 +50,7 @@ test_new(Map) ->
 action_test() ->
     ?assertEqual(
         create,
-        ?MODULE:action(#config_route_stream_res_v1_pb{
+        ?MODULE:action(#iot_config_route_stream_res_v1_pb{
             action = create,
             route = undefined
         })
@@ -77,7 +77,7 @@ route_test() ->
     }),
     ?assertEqual(
         Route,
-        ?MODULE:route(#config_route_stream_res_v1_pb{
+        ?MODULE:route(#iot_config_route_stream_res_v1_pb{
             action = create,
             route = Route
         })
@@ -103,7 +103,7 @@ new_test() ->
         nonce => 1
     }),
     ?assertEqual(
-        #config_route_stream_res_v1_pb{
+        #iot_config_route_stream_res_v1_pb{
             action = create,
             route = Route
         },

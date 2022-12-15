@@ -30,20 +30,20 @@
 %% = Undefined Channel =
 %%
 %% All workers that talk to the Config Service use the same client
-%% channel, `config_channel'. Channels do not make connections to
+%% channel, `iot_config_channel'. Channels do not make connections to
 %% servers. If this message is received it means the channel was never
 %% created, either through configuration, or explicitly with
 %% `grpcbox_client:connect/3'.
 %%
 %% = econnrefused =
 %%
-%% The `config_channel' has been improperly configured to point at a
+%% The `iot_config_channel' has been improperly configured to point at a
 %% non-grpc server. Or, the grpc server is down. We fail the backoff
 %% and try again later.
 %%
 %% @end
 %%%-------------------------------------------------------------------
--module(hpr_cs_route_stream_worker).
+-module(hpr_route_stream_worker).
 
 -behaviour(gen_server).
 
@@ -123,16 +123,16 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
     SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
-    StreamOptions = #{channel => config_channel},
+    StreamOptions = #{channel => iot_config_channel},
 
-    case helium_config_route_client:stream(SignedRouteStreamReq, StreamOptions) of
+    case helium_iot_config_route_client:stream(SignedRouteStreamReq, StreamOptions) of
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
             {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
         {error, undefined_channel} ->
             lager:error(
-                "`config_channel` is not defined, or not started. Not attempting to reconnect."
+                "`iot_config_channel` is not defined, or not started. Not attempting to reconnect."
             ),
             {noreply, State};
         {error, _E} ->

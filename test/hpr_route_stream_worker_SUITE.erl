@@ -1,7 +1,7 @@
--module(hpr_cs_route_stream_worker_SUITE).
+-module(hpr_route_stream_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../src/grpc/autogen/config_pb.hrl").
+-include("../src/grpc/autogen/iot_config_pb.hrl").
 
 -export([
     all/0,
@@ -72,7 +72,7 @@ create_route_test(Config) ->
         nonce => 1
     }),
 
-    ok = hpr_test_config_service_route:stream_resp(
+    ok = hpr_test_iot_config_service_route:stream_resp(
         hpr_route_stream_res:test_new(#{action => create, route => Route})
     ),
 
@@ -125,7 +125,7 @@ update_route_test(Config) ->
         nonce => 1
     },
     Route1 = hpr_route:test_new(Route1Map),
-    ok = hpr_test_config_service_route:stream_resp(
+    ok = hpr_test_iot_config_service_route:stream_resp(
         hpr_route_stream_res:test_new(#{action => create, route => Route1})
     ),
 
@@ -160,7 +160,7 @@ update_route_test(Config) ->
         nonce => 2
     },
     Route2 = hpr_route:test_new(Route2Map),
-    ok = hpr_test_config_service_route:stream_resp(
+    ok = hpr_test_iot_config_service_route:stream_resp(
         hpr_route_stream_res:test_new(#{action => update, route => Route2})
     ),
 
@@ -214,7 +214,7 @@ delete_route_test(Config) ->
         nonce => 1
     },
     Route1 = hpr_route:test_new(Route1Map),
-    ok = hpr_test_config_service_route:stream_resp(
+    ok = hpr_test_iot_config_service_route:stream_resp(
         hpr_route_stream_res:test_new(#{action => create, route => Route1})
     ),
 
@@ -241,7 +241,7 @@ delete_route_test(Config) ->
 
     %% Delete our Route
 
-    ok = hpr_test_config_service_route:stream_resp(
+    ok = hpr_test_iot_config_service_route:stream_resp(
         hpr_route_stream_res:test_new(#{action => delete, route => Route1})
     ),
 

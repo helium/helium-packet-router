@@ -73,11 +73,11 @@ init([]) ->
 
     HttpRoamingDownlink = application:get_env(?APP, http_roaming_downlink_port, 8090),
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
-    ConfigServiceConfig = application:get_env(?APP, config_service, #{}),
+    ConfigServiceConfig = application:get_env(?APP, iot_config_service, #{}),
 
     %% Starting config service client channel here because of the way we get
     %% .env vars into the app.
-    _ = maybe_start_config_channel(ConfigServiceConfig),
+    _ = maybe_start_iot_config_channel(ConfigServiceConfig),
 
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
@@ -94,8 +94,8 @@ init([]) ->
 
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
 
-        ?WORKER(hpr_cs_route_stream_worker, [maps:get(route, ConfigServiceConfig, #{})]),
-        ?WORKER(hpr_cs_skf_stream_worker, [#{}]),
+        ?WORKER(hpr_route_stream_worker, [maps:get(route, ConfigServiceConfig, #{})]),
+        ?WORKER(hpr_skf_stream_worker, [#{}]),
 
         ?SUP(hpr_gwmp_sup, []),
 
@@ -111,14 +111,14 @@ init([]) ->
         ChildSpecs
     }}.
 
-maybe_start_config_channel(Config) ->
+maybe_start_iot_config_channel(Config) ->
     case Config of
         #{port := []} ->
             lager:error("no port provided for config channel");
         #{port := Port} when erlang:is_list(Port) ->
-            maybe_start_config_channel(Config#{port => erlang:list_to_integer(Port)});
+            maybe_start_iot_config_channel(Config#{port => erlang:list_to_integer(Port)});
         #{host := Host, port := Port} ->
-            _ = grpcbox_client:connect(config_channel, [{http, Host, Port, []}], #{});
+            _ = grpcbox_client:connect(iot_config_channel, [{http, Host, Port, []}], #{});
         _ ->
-            lager:error("no host and port to start config_channel")
+            lager:error("no host and port to start iot_config_channel")
     end.

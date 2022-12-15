@@ -1,6 +1,6 @@
 -module(hpr_route).
 
--include("../autogen/config_pb.hrl").
+-include("../autogen/iot_config_pb.hrl").
 
 -export([
     id/1,
@@ -32,12 +32,12 @@
 
 -endif.
 
--type route() :: #config_route_v1_pb{}.
--type server() :: #config_server_v1_pb{}.
+-type route() :: #iot_config_route_v1_pb{}.
+-type server() :: #iot_config_server_v1_pb{}.
 -type protocol() ::
-    {packet_router, #config_protocol_packet_router_v1_pb{}}
-    | {gwmp, #config_protocol_gwmp_v1_pb{}}
-    | {http_roaming, #config_protocol_http_roaming_v1_pb{}}
+    {packet_router, #iot_config_protocol_packet_router_v1_pb{}}
+    | {gwmp, #iot_config_protocol_gwmp_v1_pb{}}
+    | {http_roaming, #iot_config_protocol_http_roaming_v1_pb{}}
     | undefined.
 -type protocol_type() :: packet_router | gwmp | http_roaming | undefined.
 
@@ -45,58 +45,58 @@
 
 -spec id(Route :: route()) -> string().
 id(Route) ->
-    Route#config_route_v1_pb.id.
+    Route#iot_config_route_v1_pb.id.
 
 -spec net_id(Route :: route()) -> non_neg_integer().
 net_id(Route) ->
-    Route#config_route_v1_pb.net_id.
+    Route#iot_config_route_v1_pb.net_id.
 
 -spec devaddr_ranges(Route :: route()) -> [{non_neg_integer(), non_neg_integer()}].
 devaddr_ranges(Route) ->
     [
         {Start, End}
-     || #config_devaddr_range_v1_pb{start_addr = Start, end_addr = End} <-
-            Route#config_route_v1_pb.devaddr_ranges
+     || #iot_config_devaddr_range_v1_pb{start_addr = Start, end_addr = End} <-
+            Route#iot_config_route_v1_pb.devaddr_ranges
     ].
 
--spec devaddr_ranges(Route :: route(), DevRanges :: [#config_devaddr_range_v1_pb{}]) -> route().
+-spec devaddr_ranges(Route :: route(), DevRanges :: [#iot_config_devaddr_range_v1_pb{}]) -> route().
 devaddr_ranges(Route, DevRanges) ->
-    Route#config_route_v1_pb{devaddr_ranges = DevRanges}.
+    Route#iot_config_route_v1_pb{devaddr_ranges = DevRanges}.
 
 -spec euis(Route :: route()) -> [{non_neg_integer(), non_neg_integer()}].
 euis(Route) ->
     [
         {AppEUI, DevEUI}
-     || #config_eui_v1_pb{app_eui = AppEUI, dev_eui = DevEUI} <-
-            Route#config_route_v1_pb.euis
+     || #iot_config_eui_v1_pb{app_eui = AppEUI, dev_eui = DevEUI} <-
+            Route#iot_config_route_v1_pb.euis
     ].
 
--spec euis(Route :: route(), EUIs :: [#config_eui_v1_pb{}]) -> route().
+-spec euis(Route :: route(), EUIs :: [#iot_config_eui_v1_pb{}]) -> route().
 euis(Route, EUIs) ->
-    Route#config_route_v1_pb{euis = EUIs}.
+    Route#iot_config_route_v1_pb{euis = EUIs}.
 
 -spec server(Route :: route()) -> server().
 server(Route) ->
-    Route#config_route_v1_pb.server.
+    Route#iot_config_route_v1_pb.server.
 
 -spec oui(Route :: route()) -> non_neg_integer().
 oui(Route) ->
-    Route#config_route_v1_pb.oui.
+    Route#iot_config_route_v1_pb.oui.
 
 -spec max_copies(Route :: route()) -> non_neg_integer().
 max_copies(Route) ->
-    Route#config_route_v1_pb.max_copies.
+    Route#iot_config_route_v1_pb.max_copies.
 
 -spec nonce(Route :: route()) -> non_neg_integer().
 nonce(Route) ->
-    Route#config_route_v1_pb.nonce.
+    Route#iot_config_route_v1_pb.nonce.
 
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->
     Server = ?MODULE:server(Route),
     Host = erlang:list_to_binary(?MODULE:host(Server)),
     Port = ?MODULE:port(Server),
-    case Server#config_server_v1_pb.protocol of
+    case Server#iot_config_server_v1_pb.protocol of
         {http_roaming, _RoamingProtocol} ->
             Path = http_roaming_path(Route),
             <<Host/binary, $:, (erlang:integer_to_binary(Port))/binary, Path/binary>>;
@@ -108,47 +108,47 @@ lns(Route) ->
     {Address :: string(), Port :: inet:port_number()}.
 gwmp_region_lns(Region, Route) ->
     Server = ?MODULE:server(Route),
-    {gwmp, #config_protocol_gwmp_v1_pb{mapping = Mapping}} = ?MODULE:protocol(Server),
+    {gwmp, #iot_config_protocol_gwmp_v1_pb{mapping = Mapping}} = ?MODULE:protocol(Server),
 
     Host = ?MODULE:host(Server),
     Port =
         case lists:keyfind(Region, 2, Mapping) of
             false -> ?MODULE:port(Server);
-            #config_protocol_gwmp_mapping_v1_pb{port = P} -> P
+            #iot_config_protocol_gwmp_mapping_v1_pb{port = P} -> P
         end,
     {Host, Port}.
 
 -spec host(Server :: server()) -> string().
 host(Server) ->
-    Server#config_server_v1_pb.host.
+    Server#iot_config_server_v1_pb.host.
 
 -spec port(Server :: server()) -> non_neg_integer().
 port(Server) ->
-    Server#config_server_v1_pb.port.
+    Server#iot_config_server_v1_pb.port.
 
 -spec protocol(Server :: server()) -> protocol().
 protocol(Server) ->
-    Server#config_server_v1_pb.protocol.
+    Server#iot_config_server_v1_pb.protocol.
 
 -spec http_roaming_flow_type(Route :: route()) -> sync | async.
 http_roaming_flow_type(Route) ->
-    Server = Route#config_route_v1_pb.server,
-    {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
-    HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.flow_type.
+    Server = Route#iot_config_route_v1_pb.server,
+    {http_roaming, HttpRoamingProtocol} = Server#iot_config_server_v1_pb.protocol,
+    HttpRoamingProtocol#iot_config_protocol_http_roaming_v1_pb.flow_type.
 
 -spec http_roaming_dedupe_timeout(Route :: route()) -> non_neg_integer() | undefined.
 http_roaming_dedupe_timeout(Route) ->
-    Server = Route#config_route_v1_pb.server,
-    {http_roaming, HttpRoamingProtocol} = Server#config_server_v1_pb.protocol,
-    HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.dedupe_timeout.
+    Server = Route#iot_config_route_v1_pb.server,
+    {http_roaming, HttpRoamingProtocol} = Server#iot_config_server_v1_pb.protocol,
+    HttpRoamingProtocol#iot_config_protocol_http_roaming_v1_pb.dedupe_timeout.
 
 -spec http_roaming_path(Route :: route()) -> binary().
 http_roaming_path(Route) ->
-    Server = Route#config_route_v1_pb.server,
-    case Server#config_server_v1_pb.protocol of
+    Server = Route#iot_config_route_v1_pb.server,
+    case Server#iot_config_server_v1_pb.protocol of
         {http_roaming, HttpRoamingProtocol} ->
             erlang:list_to_binary(
-                HttpRoamingProtocol#config_protocol_http_roaming_v1_pb.path
+                HttpRoamingProtocol#iot_config_protocol_http_roaming_v1_pb.path
             );
         _ ->
             <<>>
@@ -156,7 +156,7 @@ http_roaming_path(Route) ->
 
 -spec protocol_type(Server :: server()) -> protocol_type().
 protocol_type(Server) ->
-    case Server#config_server_v1_pb.protocol of
+    case Server#iot_config_server_v1_pb.protocol of
         {Type, _} -> Type;
         undefined -> undefined
     end.
@@ -179,16 +179,16 @@ md(Route) ->
 
 -spec test_new(RouteMap :: map()) -> route().
 test_new(RouteMap) ->
-    #config_route_v1_pb{
+    #iot_config_route_v1_pb{
         id = maps:get(id, RouteMap),
         oui = maps:get(oui, RouteMap),
         net_id = maps:get(net_id, RouteMap),
         devaddr_ranges = [
-            #config_devaddr_range_v1_pb{start_addr = S, end_addr = E}
+            #iot_config_devaddr_range_v1_pb{start_addr = S, end_addr = E}
          || #{start_addr := S, end_addr := E} <- maps:get(devaddr_ranges, RouteMap)
         ],
         euis = [
-            #config_eui_v1_pb{dev_eui = D, app_eui = A}
+            #iot_config_eui_v1_pb{dev_eui = D, app_eui = A}
          || #{dev_eui := D, app_eui := A} <- maps:get(euis, RouteMap)
         ],
         max_copies = maps:get(max_copies, RouteMap),
@@ -196,9 +196,9 @@ test_new(RouteMap) ->
         server = mk_server(maps:get(server, RouteMap))
     }.
 
--spec mk_server(map()) -> #config_server_v1_pb{}.
+-spec mk_server(map()) -> #iot_config_server_v1_pb{}.
 mk_server(ServerMap) ->
-    #config_server_v1_pb{
+    #iot_config_server_v1_pb{
         host = maps:get(host, ServerMap),
         port = maps:get(port, ServerMap),
         protocol = mk_protocol(maps:get(protocol, ServerMap))
@@ -206,23 +206,23 @@ mk_server(ServerMap) ->
 
 -spec mk_protocol({protocol_type(), map()}) -> protocol().
 mk_protocol({packet_router, _PacketRouterMap}) ->
-    {packet_router, #config_protocol_packet_router_v1_pb{}};
+    {packet_router, #iot_config_protocol_packet_router_v1_pb{}};
 mk_protocol({gwmp, GwmpMap}) ->
     Mapping = [
-        #config_protocol_gwmp_mapping_v1_pb{region = Region, port = Port}
+        #iot_config_protocol_gwmp_mapping_v1_pb{region = Region, port = Port}
      || #{region := Region, port := Port} <- maps:get(mapping, GwmpMap)
     ],
-    {gwmp, #config_protocol_gwmp_v1_pb{mapping = Mapping}};
+    {gwmp, #iot_config_protocol_gwmp_v1_pb{mapping = Mapping}};
 mk_protocol({http_roaming, HttpMap}) ->
-    Template = #config_protocol_http_roaming_v1_pb{},
-    {http_roaming, #config_protocol_http_roaming_v1_pb{
+    Template = #iot_config_protocol_http_roaming_v1_pb{},
+    {http_roaming, #iot_config_protocol_http_roaming_v1_pb{
         flow_type = maps:get(
-            flow_type, HttpMap, Template#config_protocol_http_roaming_v1_pb.flow_type
+            flow_type, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.flow_type
         ),
         dedupe_timeout = maps:get(
-            dedupe_timeout, HttpMap, Template#config_protocol_http_roaming_v1_pb.dedupe_timeout
+            dedupe_timeout, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.dedupe_timeout
         ),
-        path = maps:get(path, HttpMap, Template#config_protocol_http_roaming_v1_pb.path)
+        path = maps:get(path, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.path)
     }};
 mk_protocol(undefined) ->
     undefined.
@@ -236,22 +236,22 @@ mk_protocol(undefined) ->
 -include_lib("eunit/include/eunit.hrl").
 
 test_new_test() ->
-    Route = #config_route_v1_pb{
+    Route = #iot_config_route_v1_pb{
         id = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
         net_id = 1,
         devaddr_ranges = [
-            #config_devaddr_range_v1_pb{start_addr = 1, end_addr = 10},
-            #config_devaddr_range_v1_pb{start_addr = 11, end_addr = 20}
+            #iot_config_devaddr_range_v1_pb{start_addr = 1, end_addr = 10},
+            #iot_config_devaddr_range_v1_pb{start_addr = 11, end_addr = 20}
         ],
         euis = [
-            #config_eui_v1_pb{app_eui = 1, dev_eui = 1},
-            #config_eui_v1_pb{app_eui = 2, dev_eui = 0}
+            #iot_config_eui_v1_pb{app_eui = 1, dev_eui = 1},
+            #iot_config_eui_v1_pb{app_eui = 2, dev_eui = 0}
         ],
         oui = 10,
-        server = #config_server_v1_pb{
+        server = #iot_config_server_v1_pb{
             host = "lsn.lora.com",
             port = 80,
-            protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
+            protocol = {gwmp, #iot_config_protocol_gwmp_v1_pb{mapping = []}}
         },
         max_copies = 1,
         nonce = 1
@@ -345,10 +345,10 @@ oui_test() ->
 server_test() ->
     Route = test_route(),
     ?assertEqual(
-        #config_server_v1_pb{
+        #iot_config_server_v1_pb{
             host = "lsn.lora.com",
             port = 80,
-            protocol = {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}
+            protocol = {gwmp, #iot_config_protocol_gwmp_v1_pb{mapping = []}}
         },
         ?MODULE:server(Route)
     ),
@@ -382,7 +382,8 @@ port_test() ->
 protocol_test() ->
     Route = test_route(),
     ?assertEqual(
-        {gwmp, #config_protocol_gwmp_v1_pb{mapping = []}}, ?MODULE:protocol(?MODULE:server(Route))
+        {gwmp, #iot_config_protocol_gwmp_v1_pb{mapping = []}},
+        ?MODULE:protocol(?MODULE:server(Route))
     ),
     ok.
 
