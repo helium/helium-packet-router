@@ -14,6 +14,7 @@
     update/2,
     delete/2,
     euis/2,
+    devaddrs/2,
     stream/2
 ]).
 
@@ -51,6 +52,9 @@ delete(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
 euis(_Ctx, _Msg) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+
+devaddrs(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
 stream(RouteStreamReq, StreamState) ->
