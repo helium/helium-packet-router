@@ -89,7 +89,7 @@ init_per_testcase(TestCase, Config) ->
     FilePath = filename:join([BaseDir, "route_worker.backup"]),
     application:set_env(
         hpr,
-        config_service,
+        iot_config_service,
         #{
             host => "localhost",
             port => ?CONFIG_SERVICE_PORT,
@@ -101,6 +101,26 @@ init_per_testcase(TestCase, Config) ->
     ),
 
     application:ensure_all_started(?APP),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            {state, Stream, _File, _Backoff} = sys:get_state(hpr_route_stream_worker),
+            Stream =/= undefined andalso
+                erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_route))
+        end,
+        20,
+        500
+    ),
+    ok = test_utils:wait_until(
+        fun() ->
+            {state, Stream, _Backoff} = sys:get_state(hpr_skf_stream_worker),
+            Stream =/= undefined andalso
+                erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_skf))
+        end,
+        20,
+        500
+    ),
+
     [{router_worker_file_backup_path, FilePath} | Config].
 
 end_per_testcase(_TestCase, Config) ->

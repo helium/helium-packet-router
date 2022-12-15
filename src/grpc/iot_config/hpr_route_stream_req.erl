@@ -1,6 +1,6 @@
 -module(hpr_route_stream_req).
 
--include("../autogen/config_pb.hrl").
+-include("../autogen/iot_config_pb.hrl").
 
 -export([
     new/1,
@@ -11,41 +11,43 @@
     verify/1
 ]).
 
--type req() :: #config_route_stream_req_v1_pb{}.
+-type req() :: #iot_config_route_stream_req_v1_pb{}.
 
 -export_type([req/0]).
 
 -spec new(Signer :: libp2p_crypto:pubkey_bin()) -> req().
 new(Signer) ->
-    #config_route_stream_req_v1_pb{
+    #iot_config_route_stream_req_v1_pb{
         timestamp = erlang:system_time(millisecond),
         signer = Signer
     }.
 
 -spec timestamp(RouteStreamReq :: req()) -> non_neg_integer().
 timestamp(RouteStreamReq) ->
-    RouteStreamReq#config_route_stream_req_v1_pb.timestamp.
+    RouteStreamReq#iot_config_route_stream_req_v1_pb.timestamp.
 
 -spec signer(RouteStreamReq :: req()) -> libp2p_crypto:pubkey_bin().
 signer(RouteStreamReq) ->
-    RouteStreamReq#config_route_stream_req_v1_pb.signer.
+    RouteStreamReq#iot_config_route_stream_req_v1_pb.signer.
 
 -spec signature(RouteStreamReq :: req()) -> binary().
 signature(RouteStreamReq) ->
-    RouteStreamReq#config_route_stream_req_v1_pb.signature.
+    RouteStreamReq#iot_config_route_stream_req_v1_pb.signature.
 
 -spec sign(RouteStreamReq :: req(), SigFun :: fun()) -> req().
 sign(RouteStreamReq, SigFun) ->
-    EncodedRouteStreamReq = config_pb:encode_msg(RouteStreamReq, config_route_stream_req_v1_pb),
-    RouteStreamReq#config_route_stream_req_v1_pb{signature = SigFun(EncodedRouteStreamReq)}.
+    EncodedRouteStreamReq = iot_config_pb:encode_msg(
+        RouteStreamReq, iot_config_route_stream_req_v1_pb
+    ),
+    RouteStreamReq#iot_config_route_stream_req_v1_pb{signature = SigFun(EncodedRouteStreamReq)}.
 
 -spec verify(RouteStreamReq :: req()) -> boolean().
 verify(RouteStreamReq) ->
-    EncodedRouteStreamReq = config_pb:encode_msg(
-        RouteStreamReq#config_route_stream_req_v1_pb{
+    EncodedRouteStreamReq = iot_config_pb:encode_msg(
+        RouteStreamReq#iot_config_route_stream_req_v1_pb{
             signature = <<>>
         },
-        config_route_stream_req_v1_pb
+        iot_config_route_stream_req_v1_pb
     ),
     libp2p_crypto:verify(
         EncodedRouteStreamReq,

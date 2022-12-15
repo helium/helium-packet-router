@@ -1,7 +1,7 @@
--module(hpr_cs_skf_stream_worker_SUITE).
+-module(hpr_skf_stream_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../src/grpc/autogen/config_pb.hrl").
+-include("../src/grpc/autogen/iot_config_pb.hrl").
 
 -export([
     all/0,
@@ -60,7 +60,7 @@ create_skf_test(_Config) ->
         devaddr => DevAddr,
         session_keys => SessionKeys
     }),
-    ok = hpr_test_config_service_skf:stream_resp(
+    ok = hpr_test_iot_config_service_skf:stream_resp(
         hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter})
     ),
 
@@ -82,7 +82,7 @@ update_skf_test(_Config) ->
         devaddr => DevAddr1,
         session_keys => SessionKeys1
     }),
-    ok = hpr_test_config_service_skf:stream_resp(
+    ok = hpr_test_iot_config_service_skf:stream_resp(
         hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter1})
     ),
 
@@ -99,7 +99,7 @@ update_skf_test(_Config) ->
         devaddr => DevAddr1,
         session_keys => SessionKeys2
     }),
-    ok = hpr_test_config_service_skf:stream_resp(
+    ok = hpr_test_iot_config_service_skf:stream_resp(
         hpr_skf_stream_res:test_new(#{action => update, filter => SessionKeyFilter2})
     ),
 
@@ -120,7 +120,7 @@ delete_skf_test(_Config) ->
         devaddr => DevAddr,
         session_keys => SessionKeys
     }),
-    ok = hpr_test_config_service_skf:stream_resp(
+    ok = hpr_test_iot_config_service_skf:stream_resp(
         hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter})
     ),
 
@@ -131,7 +131,7 @@ delete_skf_test(_Config) ->
     ),
     ?assertEqual({ok, SessionKeyFilter}, hpr_skf_ets:lookup_devaddr(DevAddr)),
 
-    ok = hpr_test_config_service_skf:stream_resp(
+    ok = hpr_test_iot_config_service_skf:stream_resp(
         hpr_skf_stream_res:test_new(#{action => delete, filter => SessionKeyFilter})
     ),
 

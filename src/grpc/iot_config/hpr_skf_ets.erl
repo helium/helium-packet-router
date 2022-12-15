@@ -1,6 +1,6 @@
 -module(hpr_skf_ets).
 
--include("../autogen/config_pb.hrl").
+-include("../autogen/iot_config_pb.hrl").
 
 -export([
     init/0,
@@ -18,7 +18,7 @@ init() ->
         named_table,
         set,
         {read_concurrency, true},
-        {keypos, #config_session_key_filter_v1_pb.devaddr}
+        {keypos, #iot_config_session_key_filter_v1_pb.devaddr}
     ]),
     ok.
 
