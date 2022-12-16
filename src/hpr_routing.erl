@@ -107,8 +107,16 @@ maybe_deliver_no_routes(Packet) ->
         [] ->
             lager:debug("no routes not set");
         HostsAndPorts ->
-            Routes = [hpr_route:new_packet_router(Host, Port) || {Host, Port} <- HostsAndPorts],
-            maybe_deliver_packet(Packet, Routes)
+            %% NOTE: Fallback routes will always be packet_router protocol.
+            %% Don't go through reporting logic when sending to roaming.
+            %% State channels are still in use over there.
+            lists:foreach(
+                fun({Host, Port}) ->
+                    Route = hpr_route:new_packet_router(Host, Port),
+                    hpr_protocol_router:send(Packet, Route)
+                end,
+                HostsAndPorts
+            )
     end.
 
 -spec maybe_deliver_packet(

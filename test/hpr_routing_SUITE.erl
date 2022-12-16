@@ -318,6 +318,10 @@ success_test(_Config) ->
     ok.
 
 no_routes_test(_Config) ->
+
+    ok = meck:new(hpr_packet_reporter, [passthrough]),
+    ok = meck:expect(hpr_packet_reporter, report_packet, 2, ok),
+
     Port1 = 8180,
     Port2 = 8280,
     application:set_env(
@@ -397,6 +401,10 @@ no_routes_test(_Config) ->
     ok = gen_server:stop(GatewayPid),
     ok = gen_server:stop(ServerPid1),
     ok = gen_server:stop(ServerPid2),
+
+    %% Ensure packets sent to no_routes do not get reported.
+    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 2)),
+    meck:unload(hpr_packet_reporter),
 
     application:set_env(
         ?APP,
