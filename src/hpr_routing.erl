@@ -1,5 +1,7 @@
 -module(hpr_routing).
 
+-include("hpr.hrl").
+
 -export([
     init/0,
     handle_packet/1
@@ -36,11 +38,18 @@ handle_packet(Packet) ->
             hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
             Error;
         ok ->
-            Routes = find_routes(PacketType),
-            lager:debug("maybe deliver packet to ~w routes", [erlang:length(Routes)]),
-            ok = maybe_deliver_packet(Packet, Routes),
-            hpr_metrics:observe_packet_up(PacketType, ok, erlang:length(Routes), Start),
-            ok
+            case find_routes(PacketType) of
+                [] ->
+                    lager:debug("no routes found"),
+                    ok = maybe_deliver_no_routes(Packet),
+                    hpr_metrics:observe_packet_up(PacketType, ok, 0, Start),
+                    ok;
+                Routes ->
+                    lager:debug("maybe deliver packet to ~w routes", [erlang:length(Routes)]),
+                    ok = maybe_deliver_packet(Packet, Routes),
+                    hpr_metrics:observe_packet_up(PacketType, ok, erlang:length(Routes), Start),
+                    ok
+            end
     end.
 
 %% ------------------------------------------------------------------
@@ -91,6 +100,24 @@ find_routes({join_req, {AppEUI, DevEUI}}) ->
     hpr_route_ets:lookup_eui(AppEUI, DevEUI);
 find_routes({uplink, DevAddr}) ->
     hpr_route_ets:lookup_devaddr(DevAddr).
+
+-spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
+maybe_deliver_no_routes(Packet) ->
+    case application:get_env(?APP, no_routes, []) of
+        [] ->
+            lager:debug("no routes not set");
+        HostsAndPorts ->
+            %% NOTE: Fallback routes will always be packet_router protocol.
+            %% Don't go through reporting logic when sending to roaming.
+            %% State channels are still in use over there.
+            lists:foreach(
+                fun({Host, Port}) ->
+                    Route = hpr_route:new_packet_router(Host, Port),
+                    hpr_protocol_router:send(Packet, Route)
+                end,
+                HostsAndPorts
+            )
+    end.
 
 -spec maybe_deliver_packet(
     Packet :: hpr_packet_up:packet(),

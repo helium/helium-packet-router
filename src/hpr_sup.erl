@@ -46,7 +46,7 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    KeyFileName = application:get_env(hpr, key, "/var/data/hpr.key"),
+    KeyFileName = application:get_env(?APP, key, "/var/data/hpr.key"),
 
     lager:info("KeyFileName ~s", [KeyFileName]),
 
