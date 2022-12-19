@@ -24,7 +24,8 @@
     protocol_type/1,
     http_roaming_flow_type/1,
     http_roaming_dedupe_timeout/1,
-    http_roaming_path/1
+    http_roaming_path/1,
+    http_auth_header/1
 ]).
 
 -ifdef(TEST).
@@ -192,6 +193,15 @@ http_roaming_path(Route) ->
             <<>>
     end.
 
+-spec http_auth_header(Route :: route()) -> null | string().
+http_auth_header(Route) ->
+    Server = ?MODULE:server(Route),
+    {http_roaming, HttpRoamingProtocol} = ?MODULE:protocol(Server),
+    case HttpRoamingProtocol#iot_config_protocol_http_roaming_v1_pb.auth_header of
+        [] -> null;
+        V -> V
+    end.
+
 %% ------------------------------------------------------------------
 %% Tests Functions
 %% ------------------------------------------------------------------
@@ -242,7 +252,10 @@ mk_protocol({http_roaming, HttpMap}) ->
         dedupe_timeout = maps:get(
             dedupe_timeout, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.dedupe_timeout
         ),
-        path = maps:get(path, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.path)
+        path = maps:get(path, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.path),
+        auth_header = maps:get(
+            auth_header, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.auth_header
+        )
     }};
 mk_protocol(undefined) ->
     undefined.
