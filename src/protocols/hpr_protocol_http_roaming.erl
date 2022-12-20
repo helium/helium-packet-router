@@ -21,8 +21,7 @@ send(PacketUp, Route) ->
     WorkerKey = worker_key_from(PacketUp, Route),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
-
-    %%    start worker
+    %% start worker
     case
         hpr_http_roaming_sup:maybe_start_worker(
             WorkerKey,
@@ -46,11 +45,11 @@ send(PacketUp, Route) ->
 -spec worker_key_from(hpr_packet_up:packet(), hpr_route:route()) ->
     hpr_http_roaming_sup:worker_key().
 worker_key_from(PacketUp, Route) ->
-    %%    get phash
+    %% get phash
     Phash = hpr_packet_up:phash(PacketUp),
     NetId = hpr_route:net_id(Route),
 
-    %%    get protocol
+    %% get protocol
     Protocol = protocol_from(Route),
     {Phash, Protocol, NetId}.
 

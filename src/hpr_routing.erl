@@ -45,9 +45,10 @@ handle_packet(Packet) ->
                     hpr_metrics:observe_packet_up(PacketType, ok, 0, Start),
                     ok;
                 Routes ->
-                    lager:debug("maybe deliver packet to ~w routes", [erlang:length(Routes)]),
+                    N = erlang:length(Routes),
+                    lager:debug([{routes, N}], "maybe deliver packet to ~w routes", [N]),
                     ok = maybe_deliver_packet(Packet, Routes),
-                    hpr_metrics:observe_packet_up(PacketType, ok, erlang:length(Routes), Start),
+                    hpr_metrics:observe_packet_up(PacketType, ok, N, Start),
                     ok
             end
     end.
@@ -89,6 +90,7 @@ md(PacketUp) ->
                 {stream, StreamPid},
                 {gateway, GatewayName},
                 {devaddr, hpr_utils:int_to_hex(DevAddr)},
+                %% TODO: Add net id (warningd they might not have one)
                 {devaddr_int, DevAddr},
                 {packet_type, uplink},
                 {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
@@ -136,9 +138,10 @@ maybe_deliver_packet(Packet, [Route | Routes]) ->
         {error, Reason} ->
             lager:debug(RouteMD, "not sending ~p", [Reason]);
         ok ->
-            lager:debug(RouteMD, "delivering packet"),
             case deliver_packet(Protocol, Packet, Route) of
                 ok ->
+                    %% Leave me at info, used by stats
+                    lager:info(RouteMD, "delivered"),
                     ok = hpr_packet_reporter:report_packet(Packet, Route),
                     ok;
                 {error, Reason} ->
