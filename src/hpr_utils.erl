@@ -7,8 +7,12 @@
     bin_to_hex/1,
     hex_to_bin/1,
     pubkeybin_to_mac/1,
-    net_id_display/1
+    net_id_display/1,
+    trace/2,
+    stop_trace/1
 ]).
+
+-type trace() :: gateway | devaddr | app_eui | dev_eui.
 
 -spec gateway_name(PubKeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
 gateway_name(PubKeyBin) when is_binary(PubKeyBin) ->
@@ -47,3 +51,95 @@ pubkeybin_to_mac(PubKeyBin) ->
 -spec net_id_display(non_neg_integer()) -> string().
 net_id_display(Num) ->
     string:right(erlang:integer_to_list(Num, 16), 6, $0).
+
+-spec trace(Type :: trace(), Data :: string()) -> string().
+trace(Type, Data) ->
+    FileName = "traces/" ++ Data ++ ".log",
+    {ok, _} = lager:trace_file(FileName, [{Type, Data}], debug),
+    _ = erlang:spawn(fun() ->
+        Timeout = application:get_env(hpr, trace_timeout, 240),
+        lager:debug([{Type, Data}], "will stop trace in ~pmin", [Timeout]),
+        timer:sleep(timer:minutes(Timeout)),
+        ?MODULE:stop_trace(Data)
+    end),
+    FileName.
+
+-spec stop_trace(Data :: string()) -> ok.
+stop_trace(Data) ->
+    DeviceTraces = get_device_traces(Data),
+    lists:foreach(
+        fun({F, M, L}) ->
+            ok = lager:stop_trace(F, M, L)
+        end,
+        DeviceTraces
+    ),
+    ok.
+
+-spec get_device_traces(Data :: string()) ->
+    list({{lager_file_backend, string()}, list(), atom()}).
+get_device_traces(Data) ->
+    Sinks = lists:sort(lager:list_all_sinks()),
+    Traces = lists:foldl(
+        fun(S, Acc) ->
+            {_Level, Traces} = lager_config:get({S, loglevel}),
+            Acc ++ lists:map(fun(T) -> {S, T} end, Traces)
+        end,
+        [],
+        Sinks
+    ),
+    lists:filtermap(
+        fun(Trace) ->
+            {_Sink, {{_All, Meta}, Level, Backend}} = Trace,
+            case Backend of
+                {lager_file_backend, File} ->
+                    case
+                        binary:match(binary:list_to_bin(File), binary:list_to_bin(Data)) =/= nomatch
+                    of
+                        false ->
+                            false;
+                        true ->
+                            LevelName =
+                                case Level of
+                                    {mask, Mask} ->
+                                        case lager_util:mask_to_levels(Mask) of
+                                            [] -> none;
+                                            Levels -> hd(Levels)
+                                        end;
+                                    Num ->
+                                        lager_util:num_to_level(Num)
+                                end,
+                            {true, {Backend, Meta, LevelName}}
+                    end;
+                _ ->
+                    false
+            end
+        end,
+        Traces
+    ).
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+trace_test() ->
+    application:ensure_all_started(lager),
+    application:set_env(lager, log_root, "log"),
+
+    Gateway = "happy-yellow-bird",
+    _ = trace(gateway, Gateway),
+    ?assert([] =/= get_device_traces(Gateway)),
+
+    [{{Backend, _}, MD, Lvl}] = get_device_traces(Gateway),
+    ?assertEqual(lager_file_backend, Backend),
+    ?assertEqual([{gateway, '=', Gateway}], MD),
+    ?assertEqual(debug, Lvl),
+
+    ok = stop_trace(Gateway),
+    ?assertEqual([], get_device_traces(Gateway)),
+
+    application:stop(lager),
+    ok.
+
+-endif.
