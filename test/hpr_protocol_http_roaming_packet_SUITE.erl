@@ -29,7 +29,8 @@
     http_multiple_joins_same_dest_test/1,
     http_multiple_gateways_single_shot_test/1,
     http_overlapping_devaddr_test/1,
-    http_uplink_packet_late_test/1
+    http_uplink_packet_late_test/1,
+    http_auth_header_test/1
 ]).
 
 %% Elli callback functions
@@ -81,7 +82,8 @@ all() ->
         http_multiple_gateways_test,
         http_multiple_joins_same_dest_test,
         http_multiple_gateways_single_shot_test,
-        http_overlapping_devaddr_test
+        http_overlapping_devaddr_test,
+        http_auth_header_test
     ].
 
 %%--------------------------------------------------------------------
@@ -261,7 +263,7 @@ http_sync_downlink_test(_Config) ->
     ),
     RXDelay = 1,
 
-    DownlinkBody = test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin),
+    DownlinkBody = downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin),
 
     %% NOTE: We need to insert the transaction and handler here because we're
     %% only simulating downlinks. In a normal flow, these details would be
@@ -466,7 +468,7 @@ http_async_downlink_test(_Config) ->
     ),
     RXDelay = 1,
 
-    DownlinkBody = test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin),
+    DownlinkBody = downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin),
 
     _ = hackney:post(
         <<"http://127.0.0.1:3003/downlink">>,
@@ -1181,6 +1183,74 @@ http_uplink_packet_late_test(_Config) ->
 
     ok.
 
+http_auth_header_test(_Config) ->
+    %% One Gateway is going to be sending all the packets.
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    ok = start_uplink_listener(),
+
+    DevEUIBin = <<"00BBCCDDEEFF0011">>,
+    DevEUI = erlang:binary_to_integer(DevEUIBin, 16),
+    AppEUI = erlang:binary_to_integer(<<"1122334455667788">>, 16),
+
+    ok = hpr_packet_router_service:register(PubKeyBin),
+
+    SendPacketFun = fun() ->
+        GatewayTime = erlang:system_time(millisecond),
+        PacketUp = test_utils:join_packet_up(#{
+            gateway => PubKeyBin,
+            dev_eui => DevEUI,
+            app_eui => AppEUI,
+            sig_fun => SigFun,
+            timestamp => GatewayTime
+        }),
+
+        ok = hpr_routing:handle_packet(PacketUp),
+        {ok, PacketUp, GatewayTime}
+    end,
+
+    %% ===================================================================
+    %% Expect an Auth header in the request
+
+    uplink_test_route(#{
+        euis => [#{dev_eui => DevEUI, app_eui => AppEUI}],
+        flow_type => sync,
+        auth_header => "Basic: testing"
+    }),
+
+    %% 1. Send a join uplink
+    _ = SendPacketFun(),
+
+    %% 2. Expect a PRStartReq to the lns
+    {ok, _, Request1, _} = http_rcv(),
+    Headers1 = elli_request:headers(Request1),
+    ?assertEqual(<<"Basic: testing">>, proplists:get_value(<<"Authorization">>, Headers1)),
+
+    %% ===================================================================
+    %% Expect no auth header in the request
+
+    uplink_test_route(#{
+        euis => [#{dev_eui => DevEUI, app_eui => AppEUI}],
+        flow_type => sync
+        %% auth_header => "Basic: testing"
+    }),
+
+    %% 1. Send a join uplink
+    _ = SendPacketFun(),
+
+    %% 2. Expect a PRStartReq to the lns
+    {ok, _, Request2, _} = http_rcv(),
+    Headers2 = elli_request:headers(Request2),
+    ?assertEqual(undefined, proplists:get_value(<<"Authorization">>, Headers2)),
+
+    ok.
+
+%% ------------------------------------------------------------------
+%% Fixture Helpers
+%% ------------------------------------------------------------------
+
 join_test_route(DevEUI, AppEUI, FlowType, RouteId) ->
     join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY, RouteId).
 
@@ -1230,6 +1300,7 @@ uplink_test_route(InputMap) ->
     FlowType = maps:get(flow_type, InputMap, sync),
     DedupeTimeout = maps:get(dedupe_timeout, InputMap, 250),
     Port = maps:get(port, InputMap, 3002),
+    AuthHeader = maps:get(auth_header, InputMap, null),
 
     RouteMap = #{
         id => RouteId,
@@ -1237,7 +1308,7 @@ uplink_test_route(InputMap) ->
         nonce => 1,
         net_id => NetId,
         devaddr_ranges => DevAddrRanges,
-        euis => [],
+        euis => maps:get(euis, InputMap, []),
         max_copies => 2,
         server => #{
             host => "127.0.0.1",
@@ -1246,7 +1317,8 @@ uplink_test_route(InputMap) ->
                 {http_roaming, #{
                     flow_type => FlowType,
                     dedupe_timeout => DedupeTimeout,
-                    path => "/uplink"
+                    path => "/uplink",
+                    auth_header => AuthHeader
                 }}
         }
     },
@@ -1271,7 +1343,7 @@ downlink_test_route(FlowType) ->
     Route = hpr_route:test_new(RouteMap),
     hpr_route_ets:insert(Route).
 
-test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
+downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
     DownlinkBody = #{
         'ProtocolVersion' => <<"1.1">>,
         'SenderID' => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
@@ -1293,8 +1365,9 @@ test_downlink_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
         }
     },
     DownlinkBody.
+
 %% ------------------------------------------------------------------
-%% Internal Function Definitions
+%% Elli Handler
 %% ------------------------------------------------------------------
 
 handle(Req, Args) ->
@@ -1475,6 +1548,10 @@ make_response_body(#{
         %% Step 6: stateless fNS operation
         'Lifetime' => 0
     }.
+
+%% ------------------------------------------------------------------
+%% Helpers
+%% ------------------------------------------------------------------
 
 start_uplink_listener() ->
     start_uplink_listener(#{callback_args => #{}}).

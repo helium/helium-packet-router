@@ -62,10 +62,11 @@ protocol_from(Route) ->
             undefined -> 250;
             DT -> DT
         end,
+    AuthHeader = hpr_route:http_auth_header(Route),
 
     #http_protocol{
         flow_type = FlowType,
         endpoint = hpr_route:lns(Route),
         dedupe_timeout = DedupeTimeout,
-        auth_header = null
+        auth_header = AuthHeader
     }.
