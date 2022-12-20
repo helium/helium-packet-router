@@ -39,6 +39,7 @@
     handle_event/3
 ]).
 
+-include("../src/grpc/autogen/downlink_pb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %% NetIDs
@@ -272,32 +273,33 @@ http_sync_downlink_test(_Config) ->
 
     downlink_test_route(sync),
 
-    {ok, 200, _Headers, Resp} = hackney:post(
+    {ok, 200, _Headers, _Resp} = hackney:post(
         <<"http://127.0.0.1:3003/downlink">>,
         [{<<"Host">>, <<"localhost">>}],
         jsx:encode(DownlinkBody),
         [with_body]
     ),
 
-    case
-        test_utils:match_map(
-            #{
-                <<"ProtocolVersion">> => <<"1.1">>,
-                <<"TransactionID">> => TransactionID,
-                <<"SenderID">> => <<"0xC00053">>,
-                <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
-                <<"MessageType">> => <<"XmitDataAns">>,
-                <<"Result">> => #{
-                    <<"ResultCode">> => <<"Success">>
-                },
-                <<"DLFreq1">> => DownlinkFreq
-            },
-            jsx:decode(Resp)
-        )
-    of
-        true -> ok;
-        {false, Reason} -> ct:fail({http_response, Reason})
-    end,
+    %% TODO: sync mode is to-be-removed
+    %% case
+    %%     test_utils:match_map(
+    %%         #{
+    %%             <<"ProtocolVersion">> => <<"1.1">>,
+    %%             <<"TransactionID">> => TransactionID,
+    %%             <<"SenderID">> => <<"0xC00053">>,
+    %%             <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
+    %%             <<"MessageType">> => <<"XmitDataAns">>,
+    %%             <<"Result">> => #{
+    %%                 <<"ResultCode">> => <<"Success">>
+    %%             },
+    %%             <<"DLFreq1">> => DownlinkFreq
+    %%         },
+    %%         jsx:decode(Resp)
+    %%     )
+    %% of
+    %%     true -> ok;
+    %%     {false, Reason} -> ct:fail({http_response, Reason})
+    %% end,
 
     ok = gateway_expect_downlink(fun(PacketDown) ->
         ?assertEqual(DownlinkPayload, hpr_packet_down:payload(PacketDown)),
@@ -1397,6 +1399,8 @@ handle(Req, Args) ->
 %% need to know about the tests.
 %% ------------------------------------------------------------------
 handle('POST', [<<"downlink">>], Req, Args) ->
+    %% NOTE: This function is acting as the downlink handler that is being
+    %% written in rust to broadcast messages.
     Forward = maps:get(forward, Args),
     Body = elli_request:body(Req),
     #{
@@ -1407,17 +1411,20 @@ handle('POST', [<<"downlink">>], Req, Args) ->
     case FlowType of
         async ->
             Forward ! {http_downlink_data, Body},
-            Res = hpr_http_roaming_downlink_handler:handle(Req, Args),
-            ct:pal("Downlink handler resp: ~p", [Res]),
+
+            Downlink = #http_roaming_downlink_v1_pb{data = Body},
+            ok = hpr_test_downlink_service_http_roaming:downlink(Downlink),
+
             Forward ! {http_downlink_data_response, 200},
             {200, [], <<>>};
         sync ->
             ct:pal("sync handling downlink:~n~p", [Decoded]),
-            Response = hpr_http_roaming_downlink_handler:handle(Req, Args),
 
-            %% Response = {200, [], jsx:encode(ResponseBody)},
-            Forward ! {http_msg, Body, Req, Response},
-            Response
+            Downlink = #http_roaming_downlink_v1_pb{data = Body},
+            ok = hpr_test_downlink_service_http_roaming:downlink(Downlink),
+
+            Forward ! {http_msg, Body, Req, <<>>},
+            {200, [], <<>>}
     end;
 handle('POST', [<<"uplink">>], Req, Args) ->
     Forward = maps:get(forward, Args),

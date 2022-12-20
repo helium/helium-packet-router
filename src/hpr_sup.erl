@@ -71,21 +71,18 @@ init([]) ->
     ok = hpr_route_ets:init(),
     ok = hpr_skf_ets:init(),
 
-    HttpRoamingDownlink = application:get_env(?APP, http_roaming_downlink_port, 8090),
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
     ConfigServiceConfig = application:get_env(?APP, iot_config_service, #{}),
+    DownlinkServiceConfig = application:get_env(?APP, downlink_service, #{}),
 
     %% Starting config service client channel here because of the way we get
     %% .env vars into the app.
-    _ = maybe_start_iot_config_channel(ConfigServiceConfig),
+    _ = maybe_start_channel(ConfigServiceConfig, ?IOT_CONFIG_CHANNEL),
+    _ = maybe_start_channel(DownlinkServiceConfig, ?DOWNLINK_CHANNEL),
 
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
         {port, 3000}
-    ],
-    ElliConfigRoamingDownlink = [
-        {callback, hpr_http_roaming_downlink_handler},
-        {port, HttpRoamingDownlink}
     ],
 
     ChildSpecs = [
@@ -100,7 +97,7 @@ init([]) ->
         ?SUP(hpr_gwmp_sup, []),
 
         ?SUP(hpr_http_roaming_sup, []),
-        ?ELLI_WORKER(hpr_http_roaming_downlink_handler, [ElliConfigRoamingDownlink])
+        ?WORKER(hpr_http_roaming_downlink_stream_worker, [#{}])
     ],
     {ok, {
         #{
@@ -111,14 +108,15 @@ init([]) ->
         ChildSpecs
     }}.
 
-maybe_start_iot_config_channel(Config) ->
+maybe_start_channel(Config, ChannelName) ->
     case Config of
         #{port := []} ->
-            lager:error("no port provided for config channel");
+            lager:error("no port provided for ~s", [ChannelName]);
         #{port := Port} when erlang:is_list(Port) ->
-            maybe_start_iot_config_channel(Config#{port => erlang:list_to_integer(Port)});
+            maybe_start_channel(Config#{port => erlang:list_to_integer(Port)}, ChannelName);
         #{host := Host, port := Port} ->
-            _ = grpcbox_client:connect(iot_config_channel, [{http, Host, Port, []}], #{});
+            _ = grpcbox_client:connect(ChannelName, [{http, Host, Port, []}], #{}),
+            lager:info("~s started at ~s:~w", [ChannelName, Host, Port]);
         _ ->
-            lager:error("no host and port to start iot_config_channel")
+            lager:error("no host and port to start ~s", [ChannelName])
     end.

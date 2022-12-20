@@ -123,7 +123,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
     SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
-    StreamOptions = #{channel => iot_config_channel},
+    StreamOptions = #{channel => ?IOT_CONFIG_CHANNEL},
 
     case helium_iot_config_route_client:stream(SignedRouteStreamReq, StreamOptions) of
         {ok, Stream} ->

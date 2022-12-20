@@ -1,17 +1,13 @@
 %%%-------------------------------------------------------------------
 %% @doc
-%% === Config Service Session Key Filter Worker ===
-%%
-%% Same as `hpr_route_stream_worker' but for Session Key Filters.
-%% Go see the other module for some notes about failure modes.
-%%
 %% @end
 %%%-------------------------------------------------------------------
--module(hpr_skf_stream_worker).
+-module(hpr_http_roaming_downlink_stream_worker).
 
 -behaviour(gen_server).
 
 -include("hpr.hrl").
+-include("../../grpc/autogen/downlink_pb.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
@@ -62,7 +58,7 @@ start_link(Args) ->
 
 init(_Args) ->
     Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
-    lager:info("starting session key filter worker"),
+    lager:info("starting downlink worker"),
     self() ! ?INIT_STREAM,
     {ok, #state{
         stream = undefined,
@@ -79,18 +75,19 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
     {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    SKFStreamReq = hpr_skf_stream_req:new(PubKeyBin),
-    SignedSKFStreamReq = hpr_skf_stream_req:sign(SKFStreamReq, SigFun),
-    StreamOptions = #{channel => ?IOT_CONFIG_CHANNEL},
+    %% TODO: Region hardcoded from now until it is used on server side
+    Req = hpr_http_roaming_register:new('US915', PubKeyBin),
+    SignedReq = hpr_http_roaming_register:sign(Req, SigFun),
+    StreamOptions = #{channel => ?DOWNLINK_CHANNEL},
 
-    case helium_iot_config_session_key_filter_client:stream(SignedSKFStreamReq, StreamOptions) of
+    case helium_downlink_http_roaming_client:stream(SignedReq, StreamOptions) of
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
             {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
         {error, undefined_channel} ->
             lager:error(
-                "`iot_config_channel` is not defined, or not started. Not attempting to reconnect."
+                "`downlink_channel` is not defined, or not started. Not attempting to reconnect."
             ),
             {noreply, State};
         {error, _E} ->
@@ -100,9 +97,9 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
             {noreply, State#state{conn_backoff = Backoff1}}
     end;
 %% GRPC stream callbacks
-handle_info({data, _StreamID, SKFStreamRes}, State) ->
-    lager:debug("sfk update"),
-    ok = process_res(SKFStreamRes),
+handle_info({data, _StreamID, Downlink}, State) ->
+    lager:debug("got downlink"),
+    _ = erlang:spawn(fun() -> process_downlink(Downlink) end),
     {noreply, State};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
@@ -116,7 +113,7 @@ handle_info({trailers, _StreamID, Trailers}, State) ->
     case Trailers of
         {<<"12">>, _, _} ->
             lager:error(
-                "helium.config.session_key_filter/stream not implemented. "
+                "helium.downlink.http_roaming/stream not implemented. "
                 "Make sure you're pointing at the right server."
             ),
             {noreply, State#state{stream = undefined}};
@@ -143,14 +140,67 @@ terminate(_Reason, _State) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec process_res(
-    SKFStreamRes :: hpr_skf_stream_res:res()
-) -> ok.
-process_res(SKFStreamRes) ->
-    SKF = hpr_skf_stream_res:filter(SKFStreamRes),
-    case hpr_skf_stream_res:action(SKFStreamRes) of
-        delete ->
-            hpr_skf_ets:delete(SKF);
-        _ ->
-            hpr_skf_ets:insert(SKF)
+-spec process_downlink(
+    Downlink :: #http_roaming_downlink_v1_pb{}
+) -> {integer(), binary()}.
+process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
+    Decoded = jsx:decode(Data),
+    case hpr_http_roaming:handle_message(Decoded) of
+        ok ->
+            {200, <<"OK">>};
+        {error, _} = Err ->
+            lager:error("dowlink handle message error ~p", [Err]),
+            {500, <<"An error occurred">>};
+        {join_accept, {PubKeyBin, PacketDown}} ->
+            lager:debug(
+                [{gateway, hpr_utils:gateway_name(PubKeyBin)}], "sending downlink [gateway: ~p]", [
+                    hpr_utils:gateway_name(PubKeyBin)
+                ]
+            ),
+            case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
+                ok ->
+                    {200, <<"downlink sent: 1">>};
+                {error, not_found} ->
+                    {404, <<"Not Found">>}
+            end;
+        {downlink, PayloadResponse, {PubKeyBin, PacketDown}, {Endpoint, FlowType}} ->
+            lager:debug(
+                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                "sending downlink"
+            ),
+            case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
+                {error, not_found} ->
+                    {404, <<"Not Found">>};
+                ok ->
+                    case FlowType of
+                        sync ->
+                            {200, jsx:encode(PayloadResponse)};
+                        async ->
+                            _ = erlang:spawn(fun() ->
+                                case
+                                    hackney:post(Endpoint, [], jsx:encode(PayloadResponse), [
+                                        with_body
+                                    ])
+                                of
+                                    {ok, Code, _, _} ->
+                                        lager:debug(
+                                            [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                                            "async downlink response ~w, Endpoint: ~s",
+                                            [
+                                                Code, Endpoint
+                                            ]
+                                        );
+                                    {error, Reason} ->
+                                        lager:debug(
+                                            [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                                            "async downlink response ~s, Endpoint: ~s",
+                                            [
+                                                Reason, Endpoint
+                                            ]
+                                        )
+                                end
+                            end),
+                            {200, <<"downlink sent: 2">>}
+                    end
+            end
     end.
