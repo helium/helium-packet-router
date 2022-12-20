@@ -98,6 +98,7 @@ handle_cast(
     {handle_packet, PacketUp, GatewayTime},
     #state{send_data_timer = 0, shutdown_timer_ref = ShutdownTimerRef0} = State
 ) ->
+    ok = hpr_packet_up:md(PacketUp),
     {ok, StateWithPacket} = do_handle_packet(
         PacketUp, GatewayTime, State
     ),
@@ -112,17 +113,19 @@ handle_cast(
         send_data_timer_ref = TimerRef0
     } = State0
 ) ->
+    ok = hpr_packet_up:md(PacketUp),
     {ok, State1} = do_handle_packet(PacketUp, GatewayTime, State0),
     {ok, TimerRef1} = maybe_schedule_send_data(Timeout, TimerRef0),
     {noreply, State1#state{send_data_timer_ref = TimerRef1}};
 handle_cast(
-    {handle_packet, _PacketUp, _PacketTime},
+    {handle_packet, PacketUp, _PacketTime},
     #state{
         should_shutdown = true,
         shutdown_timer_ref = ShutdownTimerRef0,
         send_data_timer = DataTimeout
     } = State0
 ) ->
+    ok = hpr_packet_up:md(PacketUp),
     lager:debug("packet delivery after data sent [send_data_timer: ~w]", [DataTimeout]),
     {ok, ShutdownTimerRef1} = maybe_schedule_shutdown(ShutdownTimerRef0),
     {noreply, State0#state{shutdown_timer_ref = ShutdownTimerRef1}};
@@ -228,8 +231,10 @@ send_data(
                                     _ = hpr_packet_router_service:send_packet_down(
                                         PubKeyBin, PacketDown
                                     ),
+                                    lager:debug("got join_accept"),
                                     ok;
                                 ok ->
+                                    lager:debug("sent"),
                                     ok
                             end
                     catch

@@ -23,7 +23,7 @@ init() ->
 -spec handle_packet(Packet :: hpr_packet_up:packet()) -> hpr_routing_response().
 handle_packet(Packet) ->
     Start = erlang:system_time(millisecond),
-    ok = md(Packet),
+    ok = hpr_packet_up:md(Packet),
     lager:debug("received packet"),
     Checks = [
         {fun throttle_check/1, gateway_limit_exceeded},
@@ -56,47 +56,6 @@ handle_packet(Packet) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
--spec md(PacketUp :: hpr_packet_up:packet()) -> ok.
-md(PacketUp) ->
-    Gateway = hpr_packet_up:gateway(PacketUp),
-    GatewayName = hpr_utils:gateway_name(Gateway),
-    StreamPid =
-        case hpr_packet_router_service:locate(Gateway) of
-            {ok, Pid} -> Pid;
-            {error, _} -> undefined
-        end,
-    case hpr_packet_up:type(PacketUp) of
-        {undefined, FType} ->
-            lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
-                {packet_type, FType},
-                {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
-            ]);
-        {join_req, {AppEUI, DevEUI}} ->
-            lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
-                {app_eui, hpr_utils:int_to_hex(AppEUI)},
-                {dev_eui, hpr_utils:int_to_hex(DevEUI)},
-                {app_eui_int, AppEUI},
-                {dev_eui_int, DevEUI},
-                {packet_type, join_req},
-                {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
-            ]);
-        {uplink, DevAddr} ->
-            lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
-                {devaddr, hpr_utils:int_to_hex(DevAddr)},
-                %% TODO: Add net id (warningd they might not have one)
-                {devaddr_int, DevAddr},
-                {packet_type, uplink},
-                {phash, hpr_utils:bin_to_hex(hpr_packet_up:phash(PacketUp))}
-            ])
-    end.
-
 -spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
 find_routes({join_req, {AppEUI, DevEUI}}) ->
     hpr_route_ets:lookup_eui(AppEUI, DevEUI);

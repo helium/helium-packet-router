@@ -721,5 +721,4 @@ rx2_downlink_test() ->
     ?assertMatch({A, B} when A == B, {923_300_000, FrequencyFromDownlinkPacket}),
     ok.
 
-
 -endif.
