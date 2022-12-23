@@ -2,7 +2,8 @@
 
 -define(CLI_MODULES, [
     hpr_cli_config,
-    hpr_cli_info
+    hpr_cli_info,
+    hpr_cli_trace
 ]).
 
 -export([register_cli/0]).

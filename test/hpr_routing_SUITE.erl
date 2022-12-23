@@ -318,7 +318,6 @@ success_test(_Config) ->
     ok.
 
 no_routes_test(_Config) ->
-
     ok = meck:new(hpr_packet_reporter, [passthrough]),
     ok = meck:expect(hpr_packet_reporter, report_packet, 2, ok),
 

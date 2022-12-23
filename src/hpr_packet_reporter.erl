@@ -87,7 +87,6 @@ handle_cast(
     {report_packet, EncodedPacket},
     #state{report_max_size = MaxSize, current_packets = Packets, current_size = Size} = State
 ) when Size < MaxSize ->
-    lager:debug("got packet"),
     {noreply, State#state{
         current_packets = [EncodedPacket | Packets],
         current_size = erlang:size(EncodedPacket) + Size
@@ -96,7 +95,7 @@ handle_cast(
     {report_packet, EncodedPacket},
     #state{report_max_size = MaxSize, current_packets = Packets, current_size = Size} = State
 ) when Size >= MaxSize ->
-    lager:debug("got packet, size too big"),
+    lager:info("got packet, size too big"),
     {noreply,
         upload(State#state{
             current_packets = [EncodedPacket | Packets],
@@ -106,7 +105,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(?UPLOAD, #state{report_interval = Interval} = State) ->
-    lager:debug("upload time"),
+    lager:info("upload time"),
     ok = schedule_upload(Interval),
     {noreply, upload(State)};
 handle_info(_Info, State) ->
