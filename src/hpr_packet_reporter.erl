@@ -133,6 +133,7 @@ setup_aws(#{
     local_port := LocalPort,
     local_host := LocalHost
 }) ->
+    Credentials = aws_credentials:get_credentials(),
     aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
 setup_aws(#{
     aws_key := AccessKey,
