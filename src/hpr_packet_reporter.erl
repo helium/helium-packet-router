@@ -21,6 +21,15 @@
     terminate/2
 ]).
 
+-ifdef(TEST).
+
+-export([
+    get_bucket/1,
+    get_client/1
+]).
+
+-endif.
+
 -define(SERVER, ?MODULE).
 -define(UPLOAD, upload).
 
@@ -58,6 +67,22 @@ start_link(Args) ->
 report_packet(Packet, PacketRoute) ->
     EncodedPacket = encode_packet(Packet, PacketRoute),
     gen_server:cast(?SERVER, {report_packet, EncodedPacket}).
+
+%% ------------------------------------------------------------------
+%%% Test Function Definitions
+%% ------------------------------------------------------------------
+
+-ifdef(TEST).
+
+-spec get_bucket(state()) -> binary().
+get_bucket(#state{bucket = Bucket}) ->
+    Bucket.
+
+-spec get_client(state()) -> aws_client:aws_client().
+get_client(#state{aws_client_args = Args}) ->
+    setup_aws(Args).
+
+-endif.
 
 %% ------------------------------------------------------------------
 %%% gen_server Function Definitions
