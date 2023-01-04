@@ -124,7 +124,7 @@ upload_test(_Config) ->
         end
     ),
 
-    AWSClient = erlang:element(2, sys:get_state(hpr_packet_reporter)),
+    AWSClient = aws_credentials:get_credentials(),
     Bucket = erlang:element(3, sys:get_state(hpr_packet_reporter)),
 
     %% Check that bucket is still empty
