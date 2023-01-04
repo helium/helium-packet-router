@@ -25,7 +25,7 @@
 -define(UPLOAD, upload).
 
 -record(state, {
-    aws_client :: aws_client:aws_client(),
+    aws_client_args :: map(),
     bucket :: binary(),
     report_max_size :: non_neg_integer(),
     report_interval :: non_neg_integer(),
@@ -71,10 +71,9 @@ init(
     } = Args
 ) ->
     lager:info(maps:to_list(Args), "started"),
-    AWSClient = setup_aws(Args),
     ok = schedule_upload(Interval),
     {ok, #state{
-        aws_client = AWSClient,
+        aws_client_args = Args,
         bucket = Bucket,
         report_max_size = MaxSize,
         report_interval = Interval
@@ -149,12 +148,14 @@ upload(#state{current_packets = []} = State) ->
     State;
 upload(
     #state{
-        aws_client = AWSClient,
+        aws_client_args = AWSClientArgs,
         bucket = Bucket,
         current_packets = Packets,
         current_size = Size
     } = State
 ) ->
+    AWSClient = setup_aws(AWSClientArgs),
+
     Timestamp = erlang:system_time(millisecond),
     FileName = erlang:list_to_binary("packetreport." ++ erlang:integer_to_list(Timestamp) ++ ".gz"),
     Compressed = zlib:gzip(Packets),
