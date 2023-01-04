@@ -23,9 +23,9 @@
     {aws_credentials, [
         {credential_providers, [aws_credentials_env, aws_credentials_ec2]},
         %% uncomment for env usage
-        %% {aws_access_key_id, <<"${HPR_PACKET_REPORTER_AWS_KEY}">>},
-        %% {aws_secret_access_key, <<"${HPR_PACKET_REPORTER_AWS_SECRET}">>},
-        %% {aws_default_region, <<"${HPR_PACKET_REPORTER_AWS_REGION}">>}
+        %% {aws_access_key_id, "${HPR_PACKET_REPORTER_AWS_KEY}"},
+        %% {aws_secret_access_key, "${HPR_PACKET_REPORTER_AWS_SECRET}"},
+        %% {aws_default_region, "${HPR_PACKET_REPORTER_AWS_REGION}"}
     ]},
     {grpcbox, [
         {listen_opts, #{port => 8080, ip => {0, 0, 0, 0}}},
