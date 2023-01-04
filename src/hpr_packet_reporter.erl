@@ -127,19 +127,20 @@ encode_packet(Packet, PacketRoute) ->
 
 -spec setup_aws(packet_reporter_opts()) -> aws_client:aws_client().
 setup_aws(#{
-    aws_key := AccessKey,
-    aws_secret := Secret,
-    aws_region := <<"local">>,
     local_port := LocalPort,
     local_host := LocalHost
 }) ->
-    Credentials = aws_credentials:get_credentials(),
+    #{
+        access_key_id := AccessKey,
+        secret_access_key := Secret
+    } = aws_credentials:get_credentials(),
     aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
-setup_aws(#{
-    aws_key := AccessKey,
-    aws_secret := Secret,
-    aws_region := Region
-}) ->
+setup_aws(_Options) ->
+    #{
+        access_key_id := AccessKey,
+        secret_access_key := Secret,
+        region := Region
+    } = aws_credentials:get_credentials(),
     aws_client:make_client(AccessKey, Secret, Region).
 
 -spec upload(state()) -> state().
