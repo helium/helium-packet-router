@@ -13,6 +13,12 @@
 %% message, and a `DOWN' message. The channel will clean up the
 %% remaining stream pids.
 %%
+%% If a grpc server goes down, it may not have time to send `eos' to all of it's
+%% streams, and we will only get a `DOWN' message.
+%%
+%% Handling both of these, `eos' will result in an unhandled `DOWN' message, and
+%% a `DOWN' message will have no corresponding `eos' message.
+%%
 %% == Known Failures ==
 %%
 %%   - unimplemented
@@ -166,12 +172,21 @@ handle_info({trailers, _StreamID, Trailers}, State) ->
             {noreply, State}
     end;
 handle_info(
+    {'DOWN', _Ref, process, Pid, Reason},
+    #state{stream = #{stream_pid := Pid}, conn_backoff = Backoff0} = State
+) ->
+    %% If a server dies unexpectedly, it may not send an `eos' message to all
+    %% it's stream, and we'll only have a `DOWN' to work with.
+    {Delay, Backoff1} = backoff:fail(Backoff0),
+    lager:info("stream went down from the other side for ~p, sleeping ~wms", [Reason, Delay]),
+    _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
+    {noreply, State#state{stream = undefined, conn_backoff = Backoff1}};
+handle_info(
     {eos, StreamID},
     #state{stream = #{stream_id := StreamID}, conn_backoff = Backoff0} = State
 ) ->
-    %% When streams or channels go down, they first send an `eos' message, then
-    %% send a `DOWN' message. We're choosing not to handle the `DOWN' message,
-    %% it behaves as a copy of the `eos' message.
+    %% When streams or channel go down, they first send an `eos' message, then
+    %% send a `DOWN' message.
     {Delay, Backoff1} = backoff:fail(Backoff0),
     lager:info("stream went down sleeping ~wms", [Delay]),
     _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
