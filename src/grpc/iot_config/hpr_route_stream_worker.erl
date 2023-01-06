@@ -135,6 +135,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
+            ok = hpr_route_ets:delete_all(),
             {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
         {error, undefined_channel} ->
             lager:error(

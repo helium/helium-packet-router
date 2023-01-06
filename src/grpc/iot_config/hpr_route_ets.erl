@@ -4,6 +4,7 @@
     init/0,
     insert/1,
     delete/1,
+    delete_all/0,
     lookup_devaddr/1,
     lookup_eui/2
 ]).
@@ -68,6 +69,13 @@ delete(Route) ->
     lager:info("deleted ~w DevAddr Entries, ~w EUIS Entries for ~s", [
         DevAddrEntries, EUISEntries, ID
     ]),
+    ok.
+
+-spec delete_all() -> ok.
+delete_all() ->
+    ets:delete_all_objects(?DEVADDRS_ETS),
+    ets:delete_all_objects(?EUIS_ETS),
+    ets:delete_all_objects(?ROUTE_ETS),
     ok.
 
 -spec lookup_devaddr(DevAddr :: non_neg_integer()) -> list(hpr_route:route()).
