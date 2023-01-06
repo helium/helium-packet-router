@@ -14,7 +14,8 @@
     lns/1,
     gwmp_region_lns/2,
     md/1,
-    new_packet_router/2
+    new_packet_router/2,
+    is_valid_record/1
 ]).
 
 -export([
@@ -130,6 +131,10 @@ md(Route) ->
         {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))},
         {lns, erlang:binary_to_list(hpr_route:lns(Route))}
     ].
+
+-spec is_valid_record(route()) -> boolean().
+is_valid_record(#iot_config_route_v1_pb{}) -> true;
+is_valid_record(_) -> false.
 
 -spec new_packet_router(Host :: string(), Port :: non_neg_integer() | string()) -> route().
 new_packet_router(Host, Port) when is_list(Port) ->
@@ -418,6 +423,12 @@ protocol_test() ->
         {gwmp, #iot_config_protocol_gwmp_v1_pb{mapping = []}},
         ?MODULE:protocol(?MODULE:server(Route))
     ),
+    ok.
+
+is_valid_record_test() ->
+    Route = test_route(),
+    ?assert(?MODULE:is_valid_record(Route)),
+    ?assertNot(?MODULE:is_valid_record({invalid, route, record})),
     ok.
 
 test_route() ->

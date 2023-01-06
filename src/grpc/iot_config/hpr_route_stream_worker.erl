@@ -270,7 +270,14 @@ open_backup_file(Path) ->
         {ok, Binary} ->
             try erlang:binary_to_term(Binary) of
                 Map when is_map(Map) ->
-                    {ok, Map};
+                    case lists:all(fun hpr_route:is_valid_record/1, maps:values(Map)) of
+                        true ->
+                            {ok, Map};
+                        false ->
+                            lager:error("could not parse route record, fixing"),
+                            ok = file:write_file(Path, erlang:term_to_binary(#{})),
+                            {ok, #{}}
+                    end;
                 _ ->
                     ok = file:write_file(Path, erlang:term_to_binary(#{})),
                     lager:warning("binary_to_term failed, fixing"),
