@@ -2,9 +2,6 @@
     {hpr, [
         {key, "/var/data/hpr.key"},
         {packet_reporter, #{
-            aws_key => <<"${HPR_PACKET_REPORTER_AWS_KEY}">>,
-            aws_secret => <<"${HPR_PACKET_REPORTER_AWS_SECRET}">>,
-            aws_region => <<"${HPR_PACKET_REPORTER_AWS_REGION}">>,
             aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
             report_interval => 300_000,
             report_max_size => 50_000_000
@@ -22,6 +19,13 @@
             host => "${HPR_DOWNLINK_SERVICE_HOST}",
             port => "${HPR_DOWNLINK_SERVICE_PORT}"
         }}
+    ]},
+    {aws_credentials, [
+        {credential_providers, [aws_credentials_env, aws_credentials_ec2]},
+        %% uncomment for env usage
+        %% {aws_access_key_id, "${HPR_PACKET_REPORTER_AWS_KEY}"},
+        %% {aws_secret_access_key, "${HPR_PACKET_REPORTER_AWS_SECRET}"},
+        %% {aws_default_region, "${HPR_PACKET_REPORTER_AWS_REGION}"}
     ]},
     {grpcbox, [
         {listen_opts, #{port => 8080, ip => {0, 0, 0, 0}}},

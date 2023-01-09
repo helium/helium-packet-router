@@ -62,8 +62,9 @@ init_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
     %% Empty bucket for next test
-    AWSClient = erlang:element(2, sys:get_state(hpr_packet_reporter)),
-    Bucket = erlang:element(3, sys:get_state(hpr_packet_reporter)),
+    State = sys:get_state(hpr_packet_reporter),
+    AWSClient = hpr_packet_reporter:get_client(State),
+    Bucket = hpr_packet_reporter:get_bucket(State),
     {ok, #{<<"ListBucketResult">> := #{<<"Contents">> := Contents}}, _} = aws_s3:list_objects(
         AWSClient, Bucket
     ),
@@ -124,8 +125,9 @@ upload_test(_Config) ->
         end
     ),
 
-    AWSClient = erlang:element(2, sys:get_state(hpr_packet_reporter)),
-    Bucket = erlang:element(3, sys:get_state(hpr_packet_reporter)),
+    State = sys:get_state(hpr_packet_reporter),
+    AWSClient = hpr_packet_reporter:get_client(State),
+    Bucket = hpr_packet_reporter:get_bucket(State),
 
     %% Check that bucket is still empty
     {ok, #{<<"ListBucketResult">> := ListBucketResult0}, _} = aws_s3:list_objects(
