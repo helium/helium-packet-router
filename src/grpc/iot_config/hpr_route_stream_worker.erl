@@ -13,6 +13,12 @@
 %% message, and a `DOWN' message. The channel will clean up the
 %% remaining stream pids.
 %%
+%% If a grpc server goes down, it may not have time to send `eos' to all of it's
+%% streams, and we will only get a `DOWN' message.
+%%
+%% Handling both of these, `eos' will result in an unhandled `DOWN' message, and
+%% a `DOWN' message will have no corresponding `eos' message.
+%%
 %% == Known Failures ==
 %%
 %%   - unimplemented
@@ -129,6 +135,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
+            ok = hpr_route_ets:delete_all(),
             {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
         {error, undefined_channel} ->
             lager:error(
@@ -166,12 +173,21 @@ handle_info({trailers, _StreamID, Trailers}, State) ->
             {noreply, State}
     end;
 handle_info(
+    {'DOWN', _Ref, process, Pid, Reason},
+    #state{stream = #{stream_pid := Pid}, conn_backoff = Backoff0} = State
+) ->
+    %% If a server dies unexpectedly, it may not send an `eos' message to all
+    %% it's stream, and we'll only have a `DOWN' to work with.
+    {Delay, Backoff1} = backoff:fail(Backoff0),
+    lager:info("stream went down from the other side for ~p, sleeping ~wms", [Reason, Delay]),
+    _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
+    {noreply, State#state{stream = undefined, conn_backoff = Backoff1}};
+handle_info(
     {eos, StreamID},
     #state{stream = #{stream_id := StreamID}, conn_backoff = Backoff0} = State
 ) ->
-    %% When streams or channels go down, they first send an `eos' message, then
-    %% send a `DOWN' message. We're choosing not to handle the `DOWN' message,
-    %% it behaves as a copy of the `eos' message.
+    %% When streams or channel go down, they first send an `eos' message, then
+    %% send a `DOWN' message.
     {Delay, Backoff1} = backoff:fail(Backoff0),
     lager:info("stream went down sleeping ~wms", [Delay]),
     _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
@@ -254,7 +270,14 @@ open_backup_file(Path) ->
         {ok, Binary} ->
             try erlang:binary_to_term(Binary) of
                 Map when is_map(Map) ->
-                    {ok, Map};
+                    case lists:all(fun hpr_route:is_valid_record/1, maps:values(Map)) of
+                        true ->
+                            {ok, Map};
+                        false ->
+                            lager:error("could not parse route record, fixing"),
+                            ok = file:write_file(Path, erlang:term_to_binary(#{})),
+                            {ok, #{}}
+                    end;
                 _ ->
                     ok = file:write_file(Path, erlang:term_to_binary(#{})),
                     lager:warning("binary_to_term failed, fixing"),

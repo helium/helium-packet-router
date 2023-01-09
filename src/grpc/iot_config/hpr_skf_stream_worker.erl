@@ -124,6 +124,14 @@ handle_info({trailers, _StreamID, Trailers}, State) ->
             {noreply, State}
     end;
 handle_info(
+    {'DOWN', _Ref, process, Pid, Reason},
+    #state{stream = #{stream_pid := Pid}, conn_backoff = Backoff0} = State
+) ->
+    {Delay, Backoff1} = backoff:fail(Backoff0),
+    lager:info("stream went down from the other side for ~p, sleeping ~wms", [Reason, Delay]),
+    _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
+    {noreply, State#state{stream = undefined, conn_backoff = Backoff1}};
+handle_info(
     {eos, StreamID},
     #state{stream = #{stream_id := StreamID}, conn_backoff = Backoff0} = State
 ) ->
