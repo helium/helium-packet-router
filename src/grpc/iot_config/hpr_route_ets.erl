@@ -81,7 +81,10 @@ insert_eui_pair(EUIPair) ->
 
 -spec delete_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
 delete_eui_pair(EUIPair) ->
-    true = ets:delete_object(?EUIS_ETS, EUIPair),
+    true = ets:delete_object(?EUIS_ETS, {
+        {hpr_eui_pair:app_eui(EUIPair), hpr_eui_pair:dev_eui(EUIPair)},
+        EUIPair
+    }),
     ok.
 
 -spec lookup_eui_pair(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
@@ -111,7 +114,10 @@ insert_devaddr_range(DevAddrRange) ->
 
 -spec delete_devaddr_range(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 delete_devaddr_range(DevAddrRange) ->
-    true = ets:delete_object(?DEVADDRS_ETS, DevAddrRange),
+    true = ets:delete_object(?DEVADDRS_ETS, {
+        {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
+        DevAddrRange
+    }),
     ok.
 
 -spec lookup_devaddr_range(DevAddr :: non_neg_integer()) -> [hpr_route:route()].
@@ -120,7 +126,7 @@ lookup_devaddr_range(DevAddr) ->
         {
             {{'$1', '$2'}, '$3'},
             [
-                {'andalso', {'=<', '$1', DevAddr}, {'=<', DevAddr, '$1'}}
+                {'andalso', {'=<', '$1', DevAddr}, {'=<', DevAddr, '$2'}}
             ],
             ['$3']
         }
@@ -129,7 +135,7 @@ lookup_devaddr_range(DevAddr) ->
     lists:usort(
         lists:flatten([
             ?MODULE:lookup_route(hpr_devaddr_range:route_id(DevAddrRange))
-         || {_, DevAddrRange} <- DevAddrRanges
+         || DevAddrRange <- DevAddrRanges
         ])
     ).
 
@@ -247,22 +253,24 @@ test_eui_pair() ->
 
     ?assertEqual(ok, ?MODULE:insert_route(Route1)),
     ?assertEqual(ok, ?MODULE:insert_route(Route2)),
+
     ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair1)),
     ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair2)),
     ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair3)),
-    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair4)),
+
     ?assertEqual([Route1], ?MODULE:lookup_eui_pair(1, 1)),
     ?assertEqual([], ?MODULE:lookup_eui_pair(1, 2)),
-    ?assertEqual([RouteID1], ?MODULE:lookup_eui_pair(2, 1)),
-    ?assertEqual([RouteID1, RouteID2], ?MODULE:lookup_eui_pair(2, 2)),
+    ?assertEqual([Route1], ?MODULE:lookup_eui_pair(2, 1)),
+    ?assertEqual([Route1, Route2], ?MODULE:lookup_eui_pair(2, 2)),
 
     EUIPair4 = hpr_eui_pair:test_new(#{route_id => RouteID1, app_eui => 1, dev_eui => 0}),
-
+    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair4)),
     ?assertEqual([Route1], ?MODULE:lookup_eui_pair(1, 1)),
     ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair1)),
     ?assertEqual([Route1], ?MODULE:lookup_eui_pair(1, 1)),
     ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair4)),
     ?assertEqual([], ?MODULE:lookup_eui_pair(1, 1)),
+
     ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair2)),
     ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair3)),
     ?assertEqual([], ?MODULE:lookup_eui_pair(2, 1)),
@@ -299,7 +307,7 @@ test_devaddr_range() ->
         route_id => RouteID1, start_addr => 16#00000001, end_addr => 16#0000000A
     }),
     DevAddrRange2 = hpr_devaddr_range:test_new(#{
-        route_id => RouteID1, start_addr => 16#00000010, end_addr => 16#0000001A
+        route_id => RouteID2, start_addr => 16#00000010, end_addr => 16#0000001A
     }),
     DevAddrRange3 = hpr_devaddr_range:test_new(#{
         route_id => RouteID2, start_addr => 16#00000001, end_addr => 16#00000003
@@ -316,15 +324,16 @@ test_devaddr_range() ->
     ?assertEqual([Route2], ?MODULE:lookup_devaddr_range(16#0000001A)),
     ?assertEqual([Route1, Route2], ?MODULE:lookup_devaddr_range(16#00000002)),
 
-    ?assertEqual(ok, ?MODULE:delete_devaddr_range(Route2)),
+    ?assertEqual(ok, ?MODULE:delete_devaddr_range(DevAddrRange1)),
+    ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([Route2], ?MODULE:lookup_devaddr_range(16#00000002)),
 
+    ?assertEqual(ok, ?MODULE:delete_devaddr_range(DevAddrRange2)),
     ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000010)),
     ?assertEqual([], ?MODULE:lookup_devaddr_range(16#0000001A)),
-    ?assertEqual([Route1], ?MODULE:lookup_devaddr_range(16#00000002)),
 
-    ?assertEqual(ok, ?MODULE:delete_devaddr_range(Route1)),
+    ?assertEqual(ok, ?MODULE:delete_devaddr_range(DevAddrRange3)),
     ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000002)),
-    ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000005)),
 
     ok.
 
@@ -349,7 +358,7 @@ test_delete_all() ->
     ?assertEqual(ok, ?MODULE:insert_route(Route)),
     ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair)),
     ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange)),
-    ?assertEqual(ok, test_delete_all(Route)),
+    ?assertEqual(ok, ?MODULE:delete_all()),
     ?assertEqual([], ets:tab2list(?DEVADDRS_ETS)),
     ?assertEqual([], ets:tab2list(?EUIS_ETS)),
     ?assertEqual([], ets:tab2list(?ROUTE_ETS)),

@@ -45,7 +45,7 @@ test_new(EUIPairMap) ->
     #iot_config_eui_pair_v1_pb{
         route_id = maps:get(route_id, EUIPairMap),
         app_eui = maps:get(app_eui, EUIPairMap),
-        dev_eui = maps:get(dev_eui, EUIPairMap),
+        dev_eui = maps:get(dev_eui, EUIPairMap)
     }.
 
 -endif.

@@ -32,7 +32,7 @@ end_addr(Route) ->
     Route#iot_config_devaddr_range_v1_pb.end_addr.
 
 -spec is_valid_record(devaddr_range()) -> boolean().
-is_valid_record(#iot_config_eui_pair_v1_pb{}) -> true;
+is_valid_record(#iot_config_devaddr_range_v1_pb{}) -> true;
 is_valid_record(_) -> false.
 
 %% ------------------------------------------------------------------
@@ -45,7 +45,7 @@ test_new(DevAddrRangeMap) ->
     #iot_config_devaddr_range_v1_pb{
         route_id = maps:get(route_id, DevAddrRangeMap),
         start_addr = maps:get(start_addr, DevAddrRangeMap),
-        end_addr = maps:get(end_addr, DevAddrRangeMap),
+        end_addr = maps:get(end_addr, DevAddrRangeMap)
     }.
 
 -endif.

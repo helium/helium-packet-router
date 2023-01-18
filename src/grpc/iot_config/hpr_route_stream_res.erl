@@ -76,7 +76,7 @@ data_test() ->
         {route, Route},
         ?MODULE:data(#iot_config_route_stream_res_v1_pb{
             action = add,
-            route = {route, Route}
+            data = {route, Route}
         })
     ),
     ok.
