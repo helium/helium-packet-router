@@ -110,6 +110,13 @@ init([]) ->
 
 maybe_start_channel(Config, ChannelName) ->
     case Config of
+        #{transport := []} ->
+            lager:error("no transport provided for ~s, defaulting to http", [ChannelName]),
+            maybe_start_channel(Config#{transport => http}, ChannelName);
+        #{transport := Transport} when erlang:is_list(Transport) ->
+            maybe_start_channel(
+                Config#{transport => erlang:list_to_existing_atom(Transport)}, ChannelName
+            );
         #{port := []} ->
             lager:error("no port provided for ~s", [ChannelName]);
         #{port := Port} when erlang:is_list(Port) ->

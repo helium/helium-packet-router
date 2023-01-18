@@ -7,7 +7,7 @@
             report_max_size => 50_000_000
         }},
         {iot_config_service, #{
-            transport => https,
+            transport => "${HPR_IOT_CONFIG_TRANSPORT}",
             host => "${HPR_IOT_CONFIG_HOST}",
             port => "${HPR_IOT_CONFIG_PORT}",
             route => #{
@@ -17,7 +17,7 @@
         {http_roaming_downlink_port, 8090},
         {no_routes, [{"${HPR_PP_HOST_1}", 8080}, {"${HPR_PP_HOST_2}", 8080}]},
         {downlink_service, #{
-            transport => http,
+            transport => "${HPR_DOWNLINK_SERVICE_TRANSPORT}",
             host => "${HPR_DOWNLINK_SERVICE_HOST}",
             port => "${HPR_DOWNLINK_SERVICE_PORT}"
         }}
