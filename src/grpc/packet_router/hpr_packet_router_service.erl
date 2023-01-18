@@ -23,7 +23,7 @@ init(_RPC, StreamState) ->
 -spec route(hpr_envelope_up:envelope(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | {stop, grpcbox_stream:t()}.
 route(EnvUp, StreamState) ->
-    case hpr_envelope_up:data(EnvUp) of
+    try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
             _ = erlang:spawn(hpr_routing, handle_packet, [PacketUp]),
             {ok, StreamState};
@@ -38,6 +38,11 @@ route(EnvUp, StreamState) ->
                     ok = ?MODULE:register(PubKeyBin),
                     {ok, StreamState}
             end
+    catch
+        _E:_R ->
+            lager:warning("reason  ~p", [_R]),
+            lager:warning("bad envelope ~p", [EnvUp]),
+            {stop, StreamState}
     end.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
