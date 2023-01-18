@@ -21,7 +21,9 @@
 %% CLI exports
 -export([
     all_routes/0,
-    oui_routes/1
+    oui_routes/1,
+    eui_pairs_for_route/1,
+    devaddr_ranges_for_route/1
 ]).
 
 -define(DEVADDRS_ETS, hpr_route_ets_devaddr_ranges).
@@ -150,6 +152,16 @@ all_routes() ->
 -spec oui_routes(OUI :: non_neg_integer()) -> list(hpr_route:route()).
 oui_routes(OUI) ->
     [Route || {_ID, Route} <- ets:tab2list(?ROUTE_ETS), OUI == hpr_route:oui(Route)].
+
+-spec eui_pairs_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
+eui_pairs_for_route(RouteID) ->
+    MS = [{{'$1', RouteID}, [], ['$1']}],
+    ets:select(?EUIS_ETS, MS).
+
+-spec devaddr_ranges_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
+devaddr_ranges_for_route(RouteID) ->
+    MS = [{{'$1', RouteID}, [], ['$1']}],
+    ets:select(?DEVADDRS_ETS, MS).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions

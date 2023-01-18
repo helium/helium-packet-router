@@ -56,13 +56,13 @@ config_list(["config", "ls"], [], []) ->
         Server = hpr_route:server(Route),
         [
             {" ID ", hpr_route:id(Route)},
-            {" Nonce ", hpr_route:nonce(Route)},
             {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" OUI ", hpr_route:oui(Route)},
             {" Protocol ", hpr_route:protocol_type(Server)},
             {" Max Copies ", hpr_route:max_copies(Route)},
-            {" Addr Range Cnt ", erlang:length(hpr_route:devaddr_ranges(Route))},
-            {" EUI Cnt ", erlang:length(hpr_route:euis(Route))}
+            {" Addr Range Cnt ",
+                erlang:length(hpr_route_ets:devaddr_ranges_for_route(hpr_route:id(Route)))},
+            {" EUI Cnt ", erlang:length(hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)))}
         ]
     end,
     c_table(lists:map(MkRow, Routes));
@@ -105,15 +105,16 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
         NetID = hpr_route:net_id(Route),
         Server = hpr_route:server(Route),
 
-        DevAddrRanges = lists:map(FormatDevAddr, hpr_route:devaddr_ranges(Route)),
+        DevAddrRanges = lists:map(
+            FormatDevAddr, hpr_route_ets:devaddr_ranges_for_route(hpr_route:id(Route))
+        ),
         DevAddrInfo = [DevAddrHeader | DevAddrRanges],
 
-        EUIs = lists:map(FormatEUI, hpr_route:euis(Route)),
+        EUIs = lists:map(FormatEUI, hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route))),
         EUIInfo = [EUIHeader | EUIs],
 
         Info = [
             io_lib:format("- ID         :: ~s~n", [hpr_route:id(Route)]),
-            io_lib:format("- Nonce      :: ~w~n", [hpr_route:nonce(Route)]),
             io_lib:format("- Net ID     :: ~s (~p)~n", [hpr_utils:net_id_display(NetID), NetID]),
             io_lib:format("- Max Copies :: ~p~n", [hpr_route:max_copies(Route)]),
             io_lib:format("- Server     :: ~s~n", [hpr_route:lns(Route)]),
