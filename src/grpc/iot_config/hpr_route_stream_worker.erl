@@ -271,7 +271,7 @@ maybe_cache_response(Path, remove, {route, Route}) ->
             lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
         {ok, {RoutesMap, EUIPairs, DevAddrRanges}} ->
             RouteID = hpr_route:id(Route),
-            RoutesMap1 = maps:remove(RouteID, Route, RoutesMap),
+            RoutesMap1 = maps:remove(RouteID, RoutesMap),
             EUIPairs1 = lists:dropwhile(
                 fun(EUIPair) -> hpr_eui_pair:route_id(EUIPair) == RouteID end,
                 EUIPairs
