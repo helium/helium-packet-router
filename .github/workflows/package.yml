@@ -8,18 +8,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: erlang:24.3-alpine
+      image: erlang:24.3-slim
 
     steps:
-      - name: deps
-        run: apk add --no-cache --updat autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig bash protoc sed tar wget vim rpm zip ruby
-
-      - uses: actions/checkout@v2
-
       - name: cancel previous runs
         uses: styfle/cancel-workflow-action@0.11.0
         with:
           access_token: ${{ github.token }}
+
+      - name: deps
+        run: apt update && apt install --yes autoconf automake bison gcc libc6-dev binutils libbz2-dev curl libdbus-1-dev flex git libgmp10 libgmp-dev libsodium-dev libtool liblz4-dev libssl1.1 libssl-dev pkgconf bash protobuf-compiler sed tar wget vim zip ruby
+
+      - name: install cmake
+        uses: lukka/get-cmake@latest
 
       - name: fpm install
         run: gem install fpm
@@ -28,6 +29,8 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+
+      - uses: actions/checkout@v2
 
       - name: build and package
         run: |
