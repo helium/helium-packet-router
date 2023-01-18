@@ -114,8 +114,8 @@ insert_devaddr_range(DevAddrRange) ->
 delete_devaddr_range(DevAddrRange) ->
     true = ets:delete_object(?DEVADDRS_ETS, [
         {
-            {hpr_eui_pair:start_addr(DevAddrRange), hpr_eui_pair:end_addr(DevAddrRange)},
-            hpr_eui_pair:route_id(DevAddrRange)
+            {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
+            hpr_devaddr_range:route_id(DevAddrRange)
         }
     ]),
     ok.
