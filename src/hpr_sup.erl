@@ -114,9 +114,13 @@ maybe_start_channel(Config, ChannelName) ->
             lager:error("no port provided for ~s", [ChannelName]);
         #{port := Port} when erlang:is_list(Port) ->
             maybe_start_channel(Config#{port => erlang:list_to_integer(Port)}, ChannelName);
-        #{host := Host, port := Port} ->
+        #{host := Host, port := Port, transport := http} ->
             _ = grpcbox_client:connect(ChannelName, [{http, Host, Port, []}], #{}),
             lager:info("~s started at ~s:~w", [ChannelName, Host, Port]);
+        #{host := Host, port := Port, transport := https} ->
+            _ = application:ensure_all_started(ssl),
+            _ = grpcbox_client:connect(ChannelName, [{https, Host, Port, []}], #{}),
+            lager:info("~s started at ~s:~w", [ChannelName, Host, Port]);
         _ ->
-            lager:error("no host and port to start ~s", [ChannelName])
+            lager:error("no host/port/transport to start ~s", [ChannelName])
     end.

@@ -7,6 +7,7 @@
             report_max_size => 50_000_000
         }},
         {iot_config_service, #{
+            transport => https,
             host => "${HPR_IOT_CONFIG_HOST}",
             port => "${HPR_IOT_CONFIG_PORT}",
             route => #{
@@ -16,12 +17,13 @@
         {http_roaming_downlink_port, 8090},
         {no_routes, [{"${HPR_PP_HOST_1}", 8080}, {"${HPR_PP_HOST_2}", 8080}]},
         {downlink_service, #{
+            transport => http,
             host => "${HPR_DOWNLINK_SERVICE_HOST}",
             port => "${HPR_DOWNLINK_SERVICE_PORT}"
         }}
     ]},
     {aws_credentials, [
-        {credential_providers, [aws_credentials_env, aws_credentials_ec2]},
+        {credential_providers, [aws_credentials_env, aws_credentials_ec2]}
         %% uncomment for env usage
         %% {aws_access_key_id, "${HPR_PACKET_REPORTER_AWS_KEY}"},
         %% {aws_secret_access_key, "${HPR_PACKET_REPORTER_AWS_SECRET}"},
