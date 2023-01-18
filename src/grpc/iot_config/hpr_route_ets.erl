@@ -54,9 +54,10 @@ insert_route(Route) ->
 -spec delete_route(Route :: hpr_route:route()) -> ok.
 delete_route(Route) ->
     RouteID = hpr_route:id(Route),
-    MS = [{{'$1', RouteID}, [], [true]}],
-    DevAddrEntries = ets:select_delete(?DEVADDRS_ETS, MS),
-    EUISEntries = ets:select_delete(?EUIS_ETS, MS),
+    MS1 = [{{'_', {iot_config_devaddr_range_v1_pb, RouteID, '_', '_'}}, [], [true]}],
+    DevAddrEntries = ets:select_delete(?DEVADDRS_ETS, MS1),
+    MS2 = [{{'_', {iot_config_eui_pair_v1_pb, RouteID, '_', '_'}}, [], [true]}],
+    EUISEntries = ets:select_delete(?EUIS_ETS, MS2),
     true = ets:delete(?ROUTE_ETS, RouteID),
     lager:info("deleted ~w DevAddr Entries, ~w EUIS Entries for ~s", [
         DevAddrEntries, EUISEntries, RouteID
@@ -73,30 +74,28 @@ insert_eui_pair(EUIPair) ->
     true = ets:insert(?EUIS_ETS, [
         {
             {hpr_eui_pair:app_eui(EUIPair), hpr_eui_pair:dev_eui(EUIPair)},
-            hpr_eui_pair:route_id(EUIPair)
+            EUIPair
         }
     ]),
     ok.
 
 -spec delete_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
 delete_eui_pair(EUIPair) ->
-    true = ets:delete_object(?EUIS_ETS, [
-        {
-            {hpr_eui_pair:app_eui(EUIPair), hpr_eui_pair:dev_eui(EUIPair)},
-            hpr_eui_pair:route_id(EUIPair)
-        }
-    ]),
+    true = ets:delete_object(?EUIS_ETS, EUIPair),
     ok.
 
 -spec lookup_eui_pair(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
     [hpr_route:route()].
 lookup_eui_pair(AppEUI, 0) ->
     EUIPairs = ets:lookup(?EUIS_ETS, {AppEUI, 0}),
-    lists:flatten([?MODULE:lookup_route(RouteID) || {_, RouteID} <- EUIPairs]);
+    lists:flatten([?MODULE:lookup_route(hpr_eui_pair:route_id(EUIPair)) || {_, EUIPair} <- EUIPairs]);
 lookup_eui_pair(AppEUI, DevEUI) ->
     EUIPairs = ets:lookup(?EUIS_ETS, {AppEUI, DevEUI}),
     lists:usort(
-        lists:flatten([?MODULE:lookup_route(RouteID) || {_, RouteID} <- EUIPairs]) ++
+        lists:flatten([
+            ?MODULE:lookup_route(hpr_eui_pair:route_id(EUIPair))
+         || {_, EUIPair} <- EUIPairs
+        ]) ++
             lookup_eui_pair(AppEUI, 0)
     ).
 
@@ -105,19 +104,14 @@ insert_devaddr_range(DevAddrRange) ->
     true = ets:insert(?DEVADDRS_ETS, [
         {
             {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
-            hpr_devaddr_range:route_id(DevAddrRange)
+            DevAddrRange
         }
     ]),
     ok.
 
 -spec delete_devaddr_range(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 delete_devaddr_range(DevAddrRange) ->
-    true = ets:delete_object(?DEVADDRS_ETS, [
-        {
-            {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
-            hpr_devaddr_range:route_id(DevAddrRange)
-        }
-    ]),
+    true = ets:delete_object(?DEVADDRS_ETS, DevAddrRange),
     ok.
 
 -spec lookup_devaddr_range(DevAddr :: non_neg_integer()) -> [hpr_route:route()].
@@ -132,7 +126,12 @@ lookup_devaddr_range(DevAddr) ->
         }
     ],
     DevAddrRanges = ets:select(?DEVADDRS_ETS, MS),
-    lists:usort(lists:flatten([?MODULE:lookup_route(RouteID) || {_, RouteID} <- DevAddrRanges])).
+    lists:usort(
+        lists:flatten([
+            ?MODULE:lookup_route(hpr_devaddr_range:route_id(DevAddrRange))
+         || {_, DevAddrRange} <- DevAddrRanges
+        ])
+    ).
 
 -spec delete_all() -> ok.
 delete_all() ->
@@ -155,12 +154,12 @@ oui_routes(OUI) ->
 
 -spec eui_pairs_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 eui_pairs_for_route(RouteID) ->
-    MS = [{{'$1', RouteID}, [], ['$1']}],
+    MS = [{{'_', {iot_config_eui_pair_v1_pb, RouteID, '$1', '$2'}}, [], [{'$1', '$2'}]}],
     ets:select(?EUIS_ETS, MS).
 
 -spec devaddr_ranges_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 devaddr_ranges_for_route(RouteID) ->
-    MS = [{{'$1', RouteID}, [], ['$1']}],
+    MS = [{{'_', {iot_config_devaddr_range_v1_pb, RouteID, '$1', '$2'}}, [], [{'$1', '$2'}]}],
     ets:select(?DEVADDRS_ETS, MS).
 
 %% ------------------------------------------------------------------

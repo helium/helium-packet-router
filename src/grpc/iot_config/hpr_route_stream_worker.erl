@@ -324,7 +324,7 @@ maybe_init_from_file(Path) ->
             lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges)
     end.
 
--spec open_backup_file(Path :: string()) -> {ok, map()} | {error, any()}.
+-spec open_backup_file(Path :: string()) -> {ok, {map(), list(), list()}} | {error, any()}.
 open_backup_file(Path) ->
     Default = {#{}, [], []},
     case file:read_file(Path) of
