@@ -58,9 +58,9 @@ handle_packet(Packet) ->
 %% ------------------------------------------------------------------
 -spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
 find_routes({join_req, {AppEUI, DevEUI}}) ->
-    hpr_route_ets:lookup_eui(AppEUI, DevEUI);
+    hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI);
 find_routes({uplink, DevAddr}) ->
-    hpr_route_ets:lookup_devaddr(DevAddr).
+    hpr_route_ets:lookup_devaddr_range(DevAddr).
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
 maybe_deliver_no_routes(Packet) ->
