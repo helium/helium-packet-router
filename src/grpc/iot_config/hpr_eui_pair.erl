@@ -5,7 +5,8 @@
 -export([
     route_id/1,
     app_eui/1,
-    dev_eui/1
+    dev_eui/1,
+    is_valid_record/1
 ]).
 
 -ifdef(TEST).
@@ -29,6 +30,10 @@ app_eui(Route) ->
 -spec dev_eui(Route :: eui_pair()) -> non_neg_integer().
 dev_eui(Route) ->
     Route#iot_config_eui_pair_v1_pb.dev_eui.
+
+-spec is_valid_record(eui_pair()) -> boolean().
+is_valid_record(#iot_config_eui_pair_v1_pb{}) -> true;
+is_valid_record(_) -> false.
 
 %% ------------------------------------------------------------------
 %% Tests Functions
@@ -65,6 +70,12 @@ app_eui_test() ->
 dev_eui_test() ->
     EUIPair = test_eui_pair(),
     ?assertEqual(16#000000002, ?MODULE:dev_eui(EUIPair)),
+    ok.
+
+is_valid_record_test() ->
+    EUIPair = test_eui_pair(),
+    ?assert(?MODULE:is_valid_record(EUIPair)),
+    ?assertNot(?MODULE:is_valid_record({invalid, record})),
     ok.
 
 test_eui_pair() ->

@@ -5,7 +5,8 @@
 -export([
     route_id/1,
     start_addr/1,
-    end_addr/1
+    end_addr/1,
+    is_valid_record/1
 ]).
 
 -ifdef(TEST).
@@ -30,6 +31,10 @@ start_addr(Route) ->
 end_addr(Route) ->
     Route#iot_config_devaddr_range_v1_pb.end_addr.
 
+-spec is_valid_record(devaddr_range()) -> boolean().
+is_valid_record(#iot_config_eui_pair_v1_pb{}) -> true;
+is_valid_record(_) -> false.
+
 %% ------------------------------------------------------------------
 %% Tests Functions
 %% ------------------------------------------------------------------
@@ -53,18 +58,24 @@ test_new(DevAddrRangeMap) ->
 -include_lib("eunit/include/eunit.hrl").
 
 route_id_test() ->
-    EUIPair = test_devaddr_range(),
-    ?assertEqual("7d502f32-4d58-4746-965e-8c7dfdcfc624", ?MODULE:route_id(EUIPair)),
+    DevAddrRange = test_devaddr_range(),
+    ?assertEqual("7d502f32-4d58-4746-965e-8c7dfdcfc624", ?MODULE:route_id(DevAddrRange)),
     ok.
 
 start_addr_test() ->
-    EUIPair = test_devaddr_range(),
-    ?assertEqual(16#000000001, ?MODULE:start_addr(EUIPair)),
+    DevAddrRange = test_devaddr_range(),
+    ?assertEqual(16#000000001, ?MODULE:start_addr(DevAddrRange)),
     ok.
 
 end_addr_test() ->
-    EUIPair = test_devaddr_range(),
-    ?assertEqual(16#000000002, ?MODULE:end_addr(EUIPair)),
+    DevAddrRange = test_devaddr_range(),
+    ?assertEqual(16#000000002, ?MODULE:end_addr(DevAddrRange)),
+    ok.
+
+is_valid_record_test() ->
+    DevAddrRange = test_devaddr_range(),
+    ?assert(?MODULE:is_valid_record(DevAddrRange)),
+    ?assertNot(?MODULE:is_valid_record({invalid, record})),
     ok.
 
 test_devaddr_range() ->
