@@ -91,6 +91,7 @@ init_per_testcase(TestCase, Config) ->
         hpr,
         iot_config_service,
         #{
+            transport => http,
             host => "localhost",
             port => ?CONFIG_SERVICE_PORT,
             route => #{
