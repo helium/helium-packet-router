@@ -8,6 +8,12 @@
     end_addr/1
 ]).
 
+-ifdef(TEST).
+
+-export([test_new/1]).
+
+-endif.
+
 -type devaddr_range() :: #iot_config_devaddr_range_v1_pb{}.
 
 -export_type([devaddr_range/0]).
@@ -23,6 +29,21 @@ start_addr(Route) ->
 -spec end_addr(Route :: devaddr_range()) -> non_neg_integer().
 end_addr(Route) ->
     Route#iot_config_devaddr_range_v1_pb.end_addr.
+
+%% ------------------------------------------------------------------
+%% Tests Functions
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-spec test_new(DevAddrRangeMap :: map()) -> devaddr_range().
+test_new(DevAddrRangeMap) ->
+    #iot_config_devaddr_range_v1_pb{
+        route_id = maps:get(route_id, DevAddrRangeMap),
+        start_addr = maps:get(start_addr, DevAddrRangeMap),
+        end_addr = maps:get(end_addr, DevAddrRangeMap),
+    }.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
