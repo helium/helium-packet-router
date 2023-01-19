@@ -26,9 +26,9 @@
     devaddr_ranges_for_route/1
 ]).
 
--define(DEVADDRS_ETS, hpr_route_ets_devaddr_ranges).
--define(EUIS_ETS, hpr_route_ets_eui_pairs).
 -define(ROUTE_ETS, hpr_route_ets_routes).
+-define(EUIS_ETS, hpr_route_ets_eui_pairs).
+-define(DEVADDRS_ETS, hpr_route_ets_devaddr_ranges).
 
 -spec init() -> ok.
 init() ->

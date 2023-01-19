@@ -339,7 +339,7 @@ open_backup_file(Path) ->
                             lists:all(fun hpr_devaddr_range:is_valid_record/1, DevAddrRanges)
                     of
                         true ->
-                            {ok, RoutesMap, EUIPairs, DevAddrRanges};
+                            {ok, {RoutesMap, EUIPairs, DevAddrRanges}};
                         false ->
                             lager:error("could not parse route record, fixing"),
                             ok = file:write_file(Path, erlang:term_to_binary(Default)),

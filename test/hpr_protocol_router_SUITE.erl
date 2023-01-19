@@ -73,8 +73,10 @@ basic_test(_Config) ->
         end
     ),
 
-    Route = test_route(),
-    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+    {Route, EUIPairs, DevAddrRanges} = test_route(),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(), route => Route, eui_pairs => EUIPairs, devaddr_ranges => DevAddrRanges
+    }),
 
     %% Send packet and route directly through interface
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
@@ -120,8 +122,10 @@ downlink_test(_Config) ->
         listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
     }),
 
-    Route = test_route(),
-    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+    {Route, EUIPairs, DevAddrRanges} = test_route(),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(), route => Route, eui_pairs => EUIPairs, devaddr_ranges => DevAddrRanges
+    }),
 
     %% Queue up a downlink from the testing server
     EnvDown = hpr_envelope_down:new(
@@ -176,8 +180,10 @@ server_crash_test(_Config) ->
         end
     ),
 
-    Route = test_route(),
-    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+    {Route, EUIPairs, DevAddrRanges} = test_route(),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(), route => Route, eui_pairs => EUIPairs, devaddr_ranges => DevAddrRanges
+    }),
 
     %% Send packet and route directly through interface
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
@@ -227,17 +233,26 @@ server_crash_test(_Config) ->
 %% ===================================================================
 
 test_route() ->
-    hpr_route:test_new(#{
-        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
         net_id => 0,
-        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
-        euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
         oui => 4020,
         server => #{
             host => "127.0.0.1",
             port => 8082,
             protocol => {packet_router, #{}}
         },
-        max_copies => 2,
-        nonce => 1
-    }).
+        max_copies => 2
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 802041902051071031, dev_eui => 8942655256770396549
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#00000010
+        })
+    ],
+    {Route, EUIPairs, DevAddrRanges}.
