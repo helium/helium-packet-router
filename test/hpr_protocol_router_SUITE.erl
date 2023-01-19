@@ -103,7 +103,7 @@ basic_test(_Config) ->
 
 connection_refused_test(_Config) ->
     PacketUp = test_utils:uplink_packet_up(#{}),
-    Route = test_route(),
+    {Route, _EUIPairs, _DevAddrRanges} = test_route(),
 
     ?assertEqual(
         {error, {shutdown, econnrefused}},
