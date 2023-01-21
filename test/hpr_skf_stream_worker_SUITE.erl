@@ -61,7 +61,7 @@ create_skf_test(_Config) ->
         session_keys => SessionKeys
     }),
     ok = hpr_test_iot_config_service_skf:stream_resp(
-        hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter})
+        hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter})
     ),
 
     ok = test_utils:wait_until(
@@ -83,7 +83,7 @@ update_skf_test(_Config) ->
         session_keys => SessionKeys1
     }),
     ok = hpr_test_iot_config_service_skf:stream_resp(
-        hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter1})
+        hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter1})
     ),
 
     ok = test_utils:wait_until(
@@ -100,7 +100,7 @@ update_skf_test(_Config) ->
         session_keys => SessionKeys2
     }),
     ok = hpr_test_iot_config_service_skf:stream_resp(
-        hpr_skf_stream_res:test_new(#{action => update, filter => SessionKeyFilter2})
+        hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter2})
     ),
 
     ok = test_utils:wait_until(
@@ -121,7 +121,7 @@ delete_skf_test(_Config) ->
         session_keys => SessionKeys
     }),
     ok = hpr_test_iot_config_service_skf:stream_resp(
-        hpr_skf_stream_res:test_new(#{action => create, filter => SessionKeyFilter})
+        hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter})
     ),
 
     ok = test_utils:wait_until(
@@ -132,7 +132,7 @@ delete_skf_test(_Config) ->
     ?assertEqual({ok, SessionKeyFilter}, hpr_skf_ets:lookup_devaddr(DevAddr)),
 
     ok = hpr_test_iot_config_service_skf:stream_resp(
-        hpr_skf_stream_res:test_new(#{action => delete, filter => SessionKeyFilter})
+        hpr_skf_stream_res:test_new(#{action => remove, filter => SessionKeyFilter})
     ),
 
     ok = test_utils:wait_until(
