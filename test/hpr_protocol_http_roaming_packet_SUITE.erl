@@ -135,8 +135,8 @@ http_sync_uplink_join_test(_Config) ->
 
     lager:debug(
         [
-            {devaddr, ets:tab2list(hpr_route_ets_routes_by_devaddr)},
-            {eui, ets:tab2list(hpr_route_ets_routes_by_eui)}
+            {devaddr, ets:tab2list(hpr_route_ets_devaddr_ranges)},
+            {eui, ets:tab2list(hpr_route_ets_eui_pairs)}
         ],
         "config ets"
     ),
@@ -571,7 +571,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     end,
 
     uplink_test_route(),
-    lager:debug("routes by devaddr: ~p", [ets:tab2list(hpr_route_ets_routes_by_devaddr)]),
+    lager:debug("routes by devaddr: ~p", [ets:tab2list(hpr_route_ets_devaddr_ranges)]),
 
     {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY, 0),
     Payload = hpr_packet_up:payload(PacketUp),
@@ -1253,23 +1253,14 @@ http_auth_header_test(_Config) ->
 %% Fixture Helpers
 %% ------------------------------------------------------------------
 
-join_test_route(DevEUI, AppEUI, FlowType, RouteId) ->
-    join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY, RouteId).
+join_test_route(DevEUI, AppEUI, FlowType, RouteID) ->
+    join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY, RouteID).
 
-join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
-    RouteMap = #{
-        id => RouteId,
-        oui => 0,
-        nonce => 0,
+join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteID) ->
+    Route = hpr_route:test_new(#{
+        id => RouteID,
         net_id => NetId,
-        devaddr_ranges => [],
-        euis => [
-            #{
-                dev_eui => DevEUI,
-                app_eui => AppEUI
-            }
-        ],
-        max_copies => 2,
+        oui => 0,
         server => #{
             host => "127.0.0.1",
             port => 3002,
@@ -1278,17 +1269,47 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteId) ->
                     flow_type => FlowType,
                     path => "/uplink"
                 }}
-        }
-    },
-    Route = hpr_route:test_new(RouteMap),
-    hpr_route_ets:insert(Route).
+        },
+        max_copies => 2
+    }),
+    EUIPair = hpr_eui_pair:test_new(#{
+        route_id => RouteID, app_eui => AppEUI, dev_eui => DevEUI
+    }),
+    ok = hpr_route_ets:insert_route(Route),
+    ok = hpr_route_ets:insert_eui_pair(EUIPair).
 
 uplink_test_route() ->
     uplink_test_route(#{id => "route1"}).
 
 uplink_test_route(InputMap) ->
-    RouteId = maps:get(id, InputMap, "route1"),
-    NetId = maps:get(net_id, InputMap, ?NET_ID_ACTILITY),
+    RouteID = maps:get(id, InputMap, "route1"),
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => maps:get(net_id, InputMap, ?NET_ID_ACTILITY),
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => maps:get(port, InputMap, 3002),
+            protocol =>
+                {http_roaming, #{
+                    flow_type => maps:get(flow_type, InputMap, sync),
+                    dedupe_timeout => maps:get(dedupe_timeout, InputMap, 250),
+                    path => "/uplink",
+                    auth_header => maps:get(auth_header, InputMap, null)
+                }}
+        },
+        max_copies => 2
+    }),
+    ok = hpr_route_ets:insert_route(Route),
+
+    EUIPairs = maps:get(euis, InputMap, []),
+    ok = lists:foreach(
+        fun(Pair) ->
+            hpr_route_ets:insert_eui_pair(hpr_eui_pair:test_new(Pair#{route_id => RouteID}))
+        end,
+        EUIPairs
+    ),
+
     DevAddrRanges = maps:get(
         devaddr_ranges,
         InputMap,
@@ -1299,51 +1320,30 @@ uplink_test_route(InputMap) ->
             }
         ]
     ),
-    FlowType = maps:get(flow_type, InputMap, sync),
-    DedupeTimeout = maps:get(dedupe_timeout, InputMap, 250),
-    Port = maps:get(port, InputMap, 3002),
-    AuthHeader = maps:get(auth_header, InputMap, null),
+    ok = lists:foreach(
+        fun(Range) ->
+            hpr_route_ets:insert_devaddr_range(
+                hpr_devaddr_range:test_new(Range#{route_id => RouteID})
+            )
+        end,
+        DevAddrRanges
+    ),
 
-    RouteMap = #{
-        id => RouteId,
-        oui => 1,
-        nonce => 1,
-        net_id => NetId,
-        devaddr_ranges => DevAddrRanges,
-        euis => maps:get(euis, InputMap, []),
-        max_copies => 2,
-        server => #{
-            host => "127.0.0.1",
-            port => Port,
-            protocol =>
-                {http_roaming, #{
-                    flow_type => FlowType,
-                    dedupe_timeout => DedupeTimeout,
-                    path => "/uplink",
-                    auth_header => AuthHeader
-                }}
-        }
-    },
-    Route = hpr_route:test_new(RouteMap),
-    hpr_route_ets:insert(Route).
+    ok.
 
 downlink_test_route(FlowType) ->
-    RouteMap = #{
+    Route = hpr_route:test_new(#{
         id => "1",
-        oui => 1,
-        nonce => 1,
         net_id => ?NET_ID_ACTILITY,
-        devaddr_ranges => [],
-        euis => [],
-        max_copies => 1,
+        oui => 1,
         server => #{
             host => "127.0.0.1",
             port => 3002,
             protocol => {http_roaming, #{flow_type => FlowType}}
-        }
-    },
-    Route = hpr_route:test_new(RouteMap),
-    hpr_route_ets:insert(Route).
+        },
+        max_copies => 1
+    }),
+    ok = hpr_route_ets:insert_route(Route).
 
 downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
     DownlinkBody = #{
