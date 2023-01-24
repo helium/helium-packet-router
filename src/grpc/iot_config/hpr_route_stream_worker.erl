@@ -153,7 +153,7 @@ handle_info({data, _StreamID, RouteStreamRes}, #state{file_backup_path = Path} =
     Action = hpr_route_stream_res:action(RouteStreamRes),
     Data = hpr_route_stream_res:data(RouteStreamRes),
     {Type, _} = Data,
-    lager:debug("got route stream update ~s ~s ", [Action, Type]),
+    lager:debug([{action, Action}, {type, Type}], "got route stream update"),
     ok = process_route_stream_res(Action, Data),
     ok = maybe_cache_response(Path, Action, Data),
     {noreply, State};
