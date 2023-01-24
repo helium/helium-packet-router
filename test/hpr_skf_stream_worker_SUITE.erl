@@ -11,7 +11,6 @@
 
 -export([
     create_skf_test/1,
-    update_skf_test/1,
     delete_skf_test/1
 ]).
 
@@ -28,7 +27,6 @@
 all() ->
     [
         create_skf_test,
-        update_skf_test,
         delete_skf_test
     ].
 
@@ -55,32 +53,11 @@ create_skf_test(_Config) ->
     timer:sleep(500),
 
     DevAddr = 16#00000000,
-    SessionKeys = [crypto:strong_rand_bytes(16)],
-    SessionKeyFilter = hpr_skf:test_new(#{
-        devaddr => DevAddr,
-        session_keys => SessionKeys
-    }),
-    ok = hpr_test_iot_config_service_skf:stream_resp(
-        hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter})
-    ),
-
-    ok = test_utils:wait_until(
-        fun() ->
-            1 =:= ets:info(hpr_skf_ets, size)
-        end
-    ),
-    ?assertEqual({ok, SessionKeyFilter}, hpr_skf_ets:lookup_devaddr(DevAddr)),
-    ok.
-
-update_skf_test(_Config) ->
-    %% Let it startup
-    timer:sleep(500),
-
-    DevAddr1 = 16#00000000,
-    SessionKeys1 = [crypto:strong_rand_bytes(16)],
+    SessionKey1 = crypto:strong_rand_bytes(16),
     SessionKeyFilter1 = hpr_skf:test_new(#{
-        devaddr => DevAddr1,
-        session_keys => SessionKeys1
+        oui => 1,
+        devaddr => DevAddr,
+        session_key => SessionKey1
     }),
     ok = hpr_test_iot_config_service_skf:stream_resp(
         hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter1})
@@ -91,23 +68,25 @@ update_skf_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({ok, SessionKeyFilter1}, hpr_skf_ets:lookup_devaddr(DevAddr1)),
+    ?assertEqual({ok, [SessionKey1]}, hpr_skf_ets:lookup_devaddr(DevAddr)),
 
-    %% Update our SKF
-    SessionKeys2 = [crypto:strong_rand_bytes(16)],
+    SessionKey2 = crypto:strong_rand_bytes(16),
     SessionKeyFilter2 = hpr_skf:test_new(#{
-        devaddr => DevAddr1,
-        session_keys => SessionKeys2
+        oui => 1,
+        devaddr => DevAddr,
+        session_key => SessionKey2
     }),
     ok = hpr_test_iot_config_service_skf:stream_resp(
         hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter2})
     ),
-
     ok = test_utils:wait_until(
         fun() ->
-            {ok, SessionKeyFilter2} =:= hpr_skf_ets:lookup_devaddr(DevAddr1)
+            2 =:= ets:info(hpr_skf_ets, size)
         end
     ),
+
+    ?assertEqual({ok, [SessionKey1, SessionKey2]}, hpr_skf_ets:lookup_devaddr(DevAddr)),
+
     ok.
 
 delete_skf_test(_Config) ->
@@ -115,13 +94,35 @@ delete_skf_test(_Config) ->
     timer:sleep(500),
 
     DevAddr = 16#00000000,
-    SessionKeys = [crypto:strong_rand_bytes(16)],
-    SessionKeyFilter = hpr_skf:test_new(#{
+    SessionKey1 = crypto:strong_rand_bytes(16),
+    SessionKeyFilter1 = hpr_skf:test_new(#{
+        oui => 1,
         devaddr => DevAddr,
-        session_keys => SessionKeys
+        session_key => SessionKey1
     }),
     ok = hpr_test_iot_config_service_skf:stream_resp(
-        hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter})
+        hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter1})
+    ),
+
+    SessionKey2 = crypto:strong_rand_bytes(16),
+    SessionKeyFilter2 = hpr_skf:test_new(#{
+        oui => 1,
+        devaddr => DevAddr,
+        session_key => SessionKey2
+    }),
+    ok = hpr_test_iot_config_service_skf:stream_resp(
+        hpr_skf_stream_res:test_new(#{action => add, filter => SessionKeyFilter2})
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            2 =:= ets:info(hpr_skf_ets, size)
+        end
+    ),
+    ?assertEqual({ok, [SessionKey1, SessionKey2]}, hpr_skf_ets:lookup_devaddr(DevAddr)),
+
+    ok = hpr_test_iot_config_service_skf:stream_resp(
+        hpr_skf_stream_res:test_new(#{action => remove, filter => SessionKeyFilter1})
     ),
 
     ok = test_utils:wait_until(
@@ -129,10 +130,11 @@ delete_skf_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({ok, SessionKeyFilter}, hpr_skf_ets:lookup_devaddr(DevAddr)),
+
+    ?assertEqual({ok, [SessionKey2]}, hpr_skf_ets:lookup_devaddr(DevAddr)),
 
     ok = hpr_test_iot_config_service_skf:stream_resp(
-        hpr_skf_stream_res:test_new(#{action => remove, filter => SessionKeyFilter})
+        hpr_skf_stream_res:test_new(#{action => remove, filter => SessionKeyFilter2})
     ),
 
     ok = test_utils:wait_until(

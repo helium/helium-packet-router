@@ -123,18 +123,46 @@ mic_check_test(_Config) ->
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
+    BadSessionKey = crypto:strong_rand_bytes(16),
     hpr_skf_ets:insert(
-        hpr_skf:test_new(#{devaddr => DevAddr, session_keys => [crypto:strong_rand_bytes(16)]})
+        hpr_skf:test_new(#{
+            oui => 1, devaddr => DevAddr, session_key => BadSessionKey
+        })
+    ),
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_skf_ets, size)
+        end
     ),
     ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
 
-    hpr_skf_ets:delete(
-        hpr_skf:test_new(#{devaddr => DevAddr, session_keys => [NwkSessionKey]})
+    hpr_skf_ets:insert(
+        hpr_skf:test_new(#{oui => 1, devaddr => DevAddr, session_key => NwkSessionKey})
+    ),
+    ok = test_utils:wait_until(
+        fun() ->
+            2 =:= ets:info(hpr_skf_ets, size)
+        end
     ),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
-    hpr_skf_ets:insert(
-        hpr_skf:test_new(#{devaddr => DevAddr, session_keys => [NwkSessionKey]})
+    hpr_skf_ets:delete(
+        hpr_skf:test_new(#{oui => 1, devaddr => DevAddr, session_key => BadSessionKey})
+    ),
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_skf_ets, size)
+        end
+    ),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+
+    hpr_skf_ets:delete(
+        hpr_skf:test_new(#{oui => 1, devaddr => DevAddr, session_key => NwkSessionKey})
+    ),
+    ok = test_utils:wait_until(
+        fun() ->
+            0 =:= ets:info(hpr_skf_ets, size)
+        end
     ),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 

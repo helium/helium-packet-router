@@ -50,34 +50,34 @@ test_new(Map) ->
 
 action_test() ->
     ?assertEqual(
-        create,
+        add,
         ?MODULE:action(#iot_config_session_key_filter_stream_res_v1_pb{
-            action = create,
+            action = add,
             filter = undefined
         })
     ),
     ok.
 
 filter_test() ->
-    Filter = hpr_skf:test_new(#{devaddr => 16#0000001, session_keys => []}),
+    Filter = hpr_skf:test_new(#{oui => 1, devaddr => 16#0000001, session_key => <<>>}),
     ?assertEqual(
         Filter,
         ?MODULE:filter(#iot_config_session_key_filter_stream_res_v1_pb{
-            action = create,
+            action = add,
             filter = Filter
         })
     ),
     ok.
 
 new_test() ->
-    Filter = hpr_skf:test_new(#{devaddr => 16#0000001, session_keys => []}),
+    Filter = hpr_skf:test_new(#{oui => 1, devaddr => 16#0000001, session_key => <<>>}),
     ?assertEqual(
         #iot_config_session_key_filter_stream_res_v1_pb{
-            action = create,
+            action = add,
             filter = Filter
         },
         ?MODULE:test_new(#{
-            action => create,
+            action => add,
             filter => Filter
         })
     ),

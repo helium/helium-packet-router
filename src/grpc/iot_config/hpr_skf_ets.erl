@@ -16,19 +16,20 @@ init() ->
     ?ETS = ets:new(?ETS, [
         public,
         named_table,
-        set,
-        {read_concurrency, true},
-        {keypos, #iot_config_session_key_filter_v1_pb.devaddr}
+        bag,
+        {read_concurrency, true}
     ]),
     ok.
 
 -spec insert(SKF :: hpr_skf:skf()) -> ok.
 insert(SKF) ->
-    true = ets:insert(?ETS, SKF),
+    DevAddr = hpr_skf:devaddr(SKF),
+    SessionKey = hpr_skf:session_key(SKF),
+    true = ets:insert(?ETS, {DevAddr, SessionKey}),
     lager:info(
         [
-            {devaddr, hpr_utils:int_to_hex(hpr_skf:devaddr(SKF))},
-            {keys_cnt, hpr_skf:session_keys(SKF)}
+            {devaddr, hpr_utils:int_to_hex(DevAddr)},
+            {session_key, SessionKey}
         ],
         "inserting SKF"
     ),
@@ -37,18 +38,23 @@ insert(SKF) ->
 -spec delete(SKF :: hpr_skf:skf()) -> ok.
 delete(SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
-    true = ets:delete(?ETS, DevAddr),
-    Fields = [
-        {devaddr, hpr_utils:int_to_hex(DevAddr)}
-    ],
-    lager:info(Fields, "deleted"),
+    SessionKey = hpr_skf:session_key(SKF),
+    true = ets:delete_object(?ETS, {DevAddr, SessionKey}),
+    lager:info(
+        [
+            {devaddr, hpr_utils:int_to_hex(DevAddr)},
+            {session_key, SessionKey}
+        ],
+        "deleting SKF"
+    ),
     ok.
 
--spec lookup_devaddr(DevAddr :: non_neg_integer()) -> {error, not_found} | {ok, hpr_skf:skf()}.
+-spec lookup_devaddr(DevAddr :: non_neg_integer()) ->
+    {error, not_found} | {ok, [binary()]}.
 lookup_devaddr(DevAddr) ->
     case ets:lookup(?ETS, DevAddr) of
         [] -> {error, not_found};
-        [SKF] -> {ok, SKF}
+        SKFs -> {ok, [SessionKey || {_DevAddr, SessionKey} <- SKFs]}
     end.
 
 %% ------------------------------------------------------------------
@@ -83,38 +89,50 @@ test_insert() ->
     ?assertEqual(ok, ?MODULE:insert(SKF)),
     DevAddr = hpr_skf:devaddr(SKF),
     ?assertEqual(
-        [SKF], ets:lookup(?ETS, DevAddr)
+        [{DevAddr, hpr_skf:session_key(SKF)}], ets:lookup(?ETS, DevAddr)
     ),
     ok.
 
 test_delete() ->
-    SKF = new_skf(),
-    ?assertEqual(ok, ?MODULE:insert(SKF)),
-    DevAddr = hpr_skf:devaddr(SKF),
+    SKF1 = new_skf(),
+    SKF2 = new_skf(),
+    ?assertEqual(ok, ?MODULE:insert(SKF1)),
+    ?assertEqual(ok, ?MODULE:insert(SKF2)),
+    DevAddr = hpr_skf:devaddr(SKF1),
     ?assertEqual(
-        [SKF], ets:lookup(?ETS, DevAddr)
+        [{DevAddr, hpr_skf:session_key(SKF1)}, {DevAddr, hpr_skf:session_key(SKF2)}],
+        ets:lookup(?ETS, DevAddr)
     ),
-    ?assertEqual(ok, ?MODULE:delete(SKF)),
+    ?assertEqual(ok, ?MODULE:delete(SKF1)),
     ?assertEqual(
-        [], ets:lookup(?ETS, DevAddr)
+        [{DevAddr, hpr_skf:session_key(SKF2)}], ets:lookup(?ETS, DevAddr)
     ),
+    ?assertEqual(ok, ?MODULE:delete(SKF2)),
+    ?assertEqual([], ets:lookup(?ETS, DevAddr)),
     ok.
 
 test_lookup_devaddr() ->
-    SKF = new_skf(),
-    ?assertEqual(ok, ?MODULE:insert(SKF)),
-    DevAddr = hpr_skf:devaddr(SKF),
+    SKF1 = new_skf(),
+    ?assertEqual(ok, ?MODULE:insert(SKF1)),
+    DevAddr = hpr_skf:devaddr(SKF1),
     ?assertEqual(
-        {ok, SKF}, ?MODULE:lookup_devaddr(DevAddr)
+        {ok, [hpr_skf:session_key(SKF1)]}, ?MODULE:lookup_devaddr(DevAddr)
+    ),
+    SKF2 = new_skf(),
+    ?assertEqual(ok, ?MODULE:insert(SKF2)),
+    ?assertEqual(
+        {ok, [hpr_skf:session_key(SKF1), hpr_skf:session_key(SKF2)]},
+        ?MODULE:lookup_devaddr(DevAddr)
     ),
     ok.
 
 new_skf() ->
     DevAddr = 16#00000000,
-    SessionKeys = [crypto:strong_rand_bytes(16)],
+    SessionKeys = crypto:strong_rand_bytes(16),
     SKFMap = #{
+        oui => 1,
         devaddr => DevAddr,
-        session_keys => SessionKeys
+        session_key => SessionKeys
     },
     hpr_skf:test_new(SKFMap).
 
