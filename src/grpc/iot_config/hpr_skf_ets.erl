@@ -29,7 +29,7 @@ insert(SKF) ->
     lager:info(
         [
             {devaddr, hpr_utils:int_to_hex(DevAddr)},
-            {session_key, SessionKey}
+            {session_key, hpr_utils:bin_to_hex(SessionKey)}
         ],
         "inserting SKF"
     ),
@@ -43,7 +43,7 @@ delete(SKF) ->
     lager:info(
         [
             {devaddr, hpr_utils:int_to_hex(DevAddr)},
-            {session_key, SessionKey}
+            {session_key, hpr_utils:bin_to_hex(SessionKey)}
         ],
         "deleting SKF"
     ),
