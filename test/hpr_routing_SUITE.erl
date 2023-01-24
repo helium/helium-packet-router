@@ -144,21 +144,34 @@ max_copies_test(_Config) ->
     MaxCopies = 2,
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
     Route = hpr_route:test_new(#{
-        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+        id => RouteID,
         net_id => NetID,
-        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
         oui => 1,
         server => #{
             host => "127.0.0.1",
             port => 80,
             protocol => {packet_router, #{}}
         },
-        max_copies => MaxCopies,
-        nonce => 1
+        max_copies => MaxCopies
     }),
-    ok = hpr_route_ets:insert(Route),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        }),
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 2
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
 
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
@@ -214,14 +227,14 @@ max_copies_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
-                hpr_route_ets:remove_euis_dev_ranges(Route)
+                Route
             ]},
             ok},
     Received2 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp2,
-                hpr_route_ets:remove_euis_dev_ranges(Route)
+                Route
             ]},
             ok},
 
@@ -242,7 +255,7 @@ max_copies_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp4,
-                hpr_route_ets:remove_euis_dev_ranges(Route)
+                Route
             ]},
             ok},
 
@@ -263,21 +276,34 @@ success_test(_Config) ->
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
     Route = hpr_route:test_new(#{
-        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+        id => RouteID,
         net_id => NetID,
-        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#0000000A}],
-        euis => [#{app_eui => 1, dev_eui => 1}, #{app_eui => 1, dev_eui => 2}],
         oui => 1,
         server => #{
             host => "127.0.0.1",
             port => 80,
             protocol => {packet_router, #{}}
         },
-        max_copies => 1,
-        nonce => 1
+        max_copies => 1
     }),
-    ok = hpr_route_ets:insert(Route),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        }),
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 2
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
@@ -288,7 +314,7 @@ success_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
-                hpr_route_ets:remove_euis_dev_ranges(Route)
+                Route
             ]},
             ok},
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
@@ -302,7 +328,7 @@ success_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
-                hpr_route_ets:remove_euis_dev_ranges(Route)
+                Route
             ]},
             ok},
     ?assertEqual(
@@ -357,21 +383,31 @@ no_routes_test(_Config) ->
         end
     ),
 
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
     Route = hpr_route:test_new(#{
-        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+        id => RouteID,
         net_id => 0,
-        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
-        euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
         oui => 4020,
         server => #{
             host => "127.0.0.1",
             port => 8082,
             protocol => {packet_router, #{}}
         },
-        max_copies => 2,
-        nonce => 1
+        max_copies => 2
     }),
-    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 802041902051071031, dev_eui => 8942655256770396549
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#00000010
+        })
+    ],
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(), route => Route, eui_pairs => EUIPairs, devaddr_ranges => DevAddrRanges
+    }),
 
     %% Send packet and route directly through interface
     ok = hpr_test_gateway:send_packet(GatewayPid, #{devaddr => 16#FFFFFFFF}),

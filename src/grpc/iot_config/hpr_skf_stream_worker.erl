@@ -157,7 +157,7 @@ terminate(_Reason, _State) ->
 process_res(SKFStreamRes) ->
     SKF = hpr_skf_stream_res:filter(SKFStreamRes),
     case hpr_skf_stream_res:action(SKFStreamRes) of
-        delete ->
+        remove ->
             hpr_skf_ets:delete(SKF);
         _ ->
             hpr_skf_ets:insert(SKF)

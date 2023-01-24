@@ -13,8 +13,12 @@
     create/2,
     update/2,
     delete/2,
-    euis/2,
-    devaddrs/2,
+    get_euis/2,
+    update_euis/2,
+    delete_euis/2,
+    get_devaddr_ranges/2,
+    update_devaddr_ranges/2,
+    delete_devaddr_ranges/2,
     stream/2
 ]).
 
@@ -51,10 +55,22 @@ update(_Ctx, _Msg) ->
 delete(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-euis(_Ctx, _Msg) ->
+get_euis(_Msg, _Stream) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-devaddrs(_Ctx, _Msg) ->
+update_euis(_Msg, _Stream) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+
+delete_euis(_Ctx, _Msg) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+
+get_devaddr_ranges(_Msg, _Stream) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+
+update_devaddr_ranges(_Msg, _Stream) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+
+delete_devaddr_ranges(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
 stream(RouteStreamReq, StreamState) ->

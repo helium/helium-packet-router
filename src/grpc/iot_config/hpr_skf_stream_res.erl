@@ -14,7 +14,7 @@
 -endif.
 
 -type res() :: #iot_config_session_key_filter_stream_res_v1_pb{}.
--type action() :: create | update | delete.
+-type action() :: add | remove.
 
 -export_type([res/0, action/0]).
 

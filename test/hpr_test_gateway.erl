@@ -35,6 +35,8 @@
 -record(state, {
     forward :: pid(),
     route :: hpr_route:route(),
+    eui_pairs :: [hpr_eui_pair:eui_pair()],
+    devaddr_ranges :: [hpr_devaddr_range:devaddr_range()],
     pubkey_bin :: libp2p_crypto:pubkey_bin(),
     sig_fun :: libp2p_crypto:sig_fun(),
     stream :: grpcbox_client:stream()
@@ -92,14 +94,20 @@ receive_register(GatewayPid) ->
 %%% gen_server Function Definitions
 %% ------------------------------------------------------------------
 -spec init(map()) -> {ok, state()}.
-init(#{forward := Pid, route := Route} = Args) ->
+init(
+    #{forward := Pid, route := Route, eui_pairs := EUIPairs, devaddr_ranges := DevAddrRanges} = Args
+) ->
     #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ed25519),
     lager:info(maps:to_list(Args), "started"),
-    ok = hpr_route_ets:insert(Route),
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
     self() ! ?CONNECT,
     {ok, #state{
         forward = Pid,
         route = Route,
+        eui_pairs = EUIPairs,
+        devaddr_ranges = DevAddrRanges,
         pubkey_bin = libp2p_crypto:pubkey_to_bin(PubKey),
         sig_fun = libp2p_crypto:mk_sig_fun(PrivKey)
     }}.
@@ -112,14 +120,20 @@ handle_call(_Msg, _From, State) ->
 
 handle_cast(
     {?SEND_PACKET, Args},
-    #state{forward = Pid, route = Route, pubkey_bin = PubKeyBin, sig_fun = SigFun, stream = Stream} =
+    #state{
+        forward = Pid,
+        devaddr_ranges = DevAddrRanges,
+        pubkey_bin = PubKeyBin,
+        sig_fun = SigFun,
+        stream = Stream
+    } =
         State
 ) ->
     DevAddr =
         case maps:get(devaddr, Args, undefined) of
             undefined ->
-                [{DevAddr0, _} | _] = hpr_route:devaddr_ranges(Route),
-                DevAddr0;
+                [DevAddrRange | _] = DevAddrRanges,
+                hpr_devaddr_range:start_addr(DevAddrRange);
             DevAddr0 ->
                 DevAddr0
         end,

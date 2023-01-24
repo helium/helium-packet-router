@@ -67,8 +67,10 @@ end_per_testcase(TestCase, Config) ->
 full_test(_Config) ->
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    Route = test_route(1777),
-    {ok, GatewayPid} = hpr_test_gateway:start(#{forward => self(), route => Route}),
+    {Route, EUIPairs, DevAddrRanges} = test_route(1777),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(), route => Route, eui_pairs => EUIPairs, devaddr_ranges => DevAddrRanges
+    }),
 
     %% Send packet and route directly through interface
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
@@ -96,7 +98,7 @@ full_test(_Config) ->
 single_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
-    Route = test_route(1777),
+    {Route, _, _} = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
@@ -114,8 +116,8 @@ single_lns_test(_Config) ->
 multi_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
-    Route1 = test_route(1777),
-    Route2 = test_route(1778),
+    {Route1, _, _} = test_route(1777),
+    {Route2, _, _} = test_route(1778),
 
     {ok, RcvSocket1} = gen_udp:open(1777, [binary, {active, true}]),
     {ok, RcvSocket2} = gen_udp:open(1778, [binary, {active, true}]),
@@ -144,7 +146,7 @@ single_lns_downlink_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
     %% Sending a packet up, to get a packet down.
-    Route1 = test_route(1777),
+    {Route1, _, _} = test_route(1777),
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
@@ -208,7 +210,7 @@ single_lns_class_c_downlink_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
     %% Sending a packet up, to get a packet down.
-    Route1 = test_route(1777),
+    {Route1, _, _} = test_route(1777),
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
@@ -274,8 +276,8 @@ multi_lns_downlink_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
     %% Sending a packet up, to get a packet down.
-    Route1 = test_route(1777),
-    Route2 = test_route(1778),
+    {Route1, _, _} = test_route(1777),
+    {Route2, _, _} = test_route(1778),
 
     {ok, LNSSocket1} = gen_udp:open(1777, [binary, {active, true}]),
     {ok, LNSSocket2} = gen_udp:open(1778, [binary, {active, true}]),
@@ -326,7 +328,7 @@ multi_gw_single_lns_test(_Config) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{gateway = PubKeyBin},
 
-    Route = test_route(1777),
+    {Route, _, _} = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
@@ -349,7 +351,7 @@ pull_data_test(_Config) ->
     PacketUp = fake_join_up_packet(),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
 
-    Route = test_route(1777),
+    {Route, _, _} = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
@@ -366,7 +368,7 @@ pull_ack_test(_Config) ->
     PacketUp = fake_join_up_packet(),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
 
-    Route = test_route(1777),
+    {Route, _, _} = test_route(1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
@@ -433,7 +435,7 @@ pull_ack_hostname_test(_Config) ->
         {ok, {hostent, TestURL, [], inet, 4, [{127, 0, 0, 1}]}}
     ),
 
-    Route = test_route(TestURL, 1777),
+    {Route, _, _} = test_route(TestURL, 1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
     hpr_protocol_gwmp:send(PacketUp, Route),
@@ -478,7 +480,7 @@ region_port_redirect_test(_Config) ->
     USPort = 1778,
     EUPort = 1779,
 
-    Route = test_route(
+    {Route, _, _} = test_route(
         "127.0.0.1",
         FallbackPort,
         [
@@ -544,20 +546,29 @@ test_route(Host, Port) ->
     test_route(Host, Port, []).
 
 test_route(Host, Port, RegionMapping) ->
-    hpr_route:test_new(#{
-        id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
         net_id => 0,
-        devaddr_ranges => [#{start_addr => 16#00000000, end_addr => 16#00000010}],
-        euis => [#{app_eui => 802041902051071031, dev_eui => 8942655256770396549}],
         oui => 42,
         server => #{
             host => Host,
             port => Port,
             protocol => {gwmp, #{mapping => RegionMapping}}
         },
-        max_copies => 1,
-        nonce => 1
-    }).
+        max_copies => 1
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 802041902051071031, dev_eui => 8942655256770396549
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#00000010
+        })
+    ],
+    {Route, EUIPairs, DevAddrRanges}.
 
 expect_pull_data(Socket, Reason) ->
     receive

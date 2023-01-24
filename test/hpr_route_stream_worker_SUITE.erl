@@ -55,25 +55,27 @@ create_route_test(Config) ->
     timer:sleep(500),
 
     %% Create route and send them from server
+    RouteID = "7d502f32-4d58-4746-965e-001",
     Route = hpr_route:test_new(#{
-        id => "7d502f32-4d58-4746-965e-001",
+        id => RouteID,
         net_id => 0,
-        devaddr_ranges => [
-            #{start_addr => 16#00000001, end_addr => 16#0000000A}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 0}],
         oui => 1,
         server => #{
             host => "localhost",
             port => 8080,
             protocol => {packet_router, #{}}
         },
-        max_copies => 1,
-        nonce => 1
+        max_copies => 1
+    }),
+    EUIPair = hpr_eui_pair:test_new(#{
+        route_id => RouteID, app_eui => 1, dev_eui => 0
+    }),
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID, start_addr => 16#00000001, end_addr => 16#0000000A
     }),
 
     ok = hpr_test_iot_config_service_route:stream_resp(
-        hpr_route_stream_res:test_new(#{action => create, route => Route})
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route}})
     ),
 
     %% Let time to process new routes
@@ -83,24 +85,49 @@ create_route_test(Config) ->
         end
     ),
 
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair}})
+    ),
+
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange}})
+    ),
+
+    %% Let time to process new routes
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_route_ets_eui_pairs, size)
+        end
+    ),
+
+    %% Let time to process new routes
+
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_route_ets_devaddr_ranges, size)
+        end
+    ),
+
     %% Check backup file
     FilePath = proplists:get_value(router_worker_file_backup_path, Config),
     case file:read_file(FilePath) of
         {ok, Binary} ->
-            Map = erlang:binary_to_term(Binary),
-            ?assertEqual(Route, maps:get(hpr_route:id(Route), Map));
+            {RouteMap, EUIPairs, DevAddrRanges} = erlang:binary_to_term(Binary),
+            ?assertEqual(Route, maps:get(RouteID, RouteMap)),
+            ?assertEqual(EUIPairs, [EUIPair]),
+            ?assertEqual(DevAddrRanges, [DevAddrRange]);
         {error, Reason} ->
             ct:fail(Reason)
     end,
 
     %% Check that we can query route via config
     ?assertEqual(
-        [hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_devaddr(16#00000005)
+        [Route], hpr_route_ets:lookup_devaddr_range(16#00000005)
     ),
-    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_eui(1, 12)),
-    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route)], hpr_route_ets:lookup_eui(1, 100)),
-    ?assertEqual([], hpr_route_ets:lookup_devaddr(16#00000020)),
-    ?assertEqual([], hpr_route_ets:lookup_eui(3, 3)),
+    ?assertEqual([Route], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([Route], hpr_route_ets:lookup_eui_pair(1, 100)),
+    ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     ok.
 
 update_route_test(Config) ->
@@ -108,68 +135,81 @@ update_route_test(Config) ->
     timer:sleep(500),
 
     %% Create route and send them from server
-    Route1Map = #{
-        id => "7d502f32-4d58-4746-965e-001",
+    Route1ID = "7d502f32-4d58-4746-965e-001",
+    Route1 = hpr_route:test_new(#{
+        id => Route1ID,
         net_id => 0,
-        devaddr_ranges => [
-            #{start_addr => 16#00000001, end_addr => 16#0000000A}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 0}],
         oui => 1,
         server => #{
             host => "localhost",
             port => 8080,
             protocol => {packet_router, #{}}
         },
-        max_copies => 1,
-        nonce => 1
-    },
-    Route1 = hpr_route:test_new(Route1Map),
+        max_copies => 1
+    }),
+    EUIPair1 = hpr_eui_pair:test_new(#{
+        route_id => Route1ID, app_eui => 1, dev_eui => 0
+    }),
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
     ok = hpr_test_iot_config_service_route:stream_resp(
-        hpr_route_stream_res:test_new(#{action => create, route => Route1})
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}})
+    ),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
     ),
 
-    %% Let time to process new routes
-    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange1}})
+    ),
+
+    %% Let time to process new route
     ok = test_utils:wait_until(
         fun() ->
-            case file:read_file(FilePath) of
-                {ok, Binary} ->
-                    Map = erlang:binary_to_term(Binary),
-                    Route1 =:= maps:get(hpr_route:id(Route1), Map, undefined);
-                {error, _Reason} ->
-                    false
-            end
+            1 =:= ets:info(hpr_route_ets_routes, size)
         end
     ),
 
+    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
+    case file:read_file(FilePath) of
+        {ok, Binary} ->
+            {RouteMap, EUIPairs, DevAddrRanges} = erlang:binary_to_term(Binary),
+            ?assertEqual(Route1, maps:get(Route1ID, RouteMap)),
+            ?assertEqual(EUIPairs, [EUIPair1]),
+            ?assertEqual(DevAddrRanges, [DevAddrRange1]);
+        {error, Reason} ->
+            ct:fail(Reason)
+    end,
+
     %% Check that we can query route via config
-    ?assertEqual(
-        [hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_devaddr(16#00000005)
-    ),
-    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 12)),
-    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 100)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
 
     %% Update our Route
-    Route2Map = Route1Map#{
-        devaddr_ranges => [
-            #{start_addr => 16#00000001, end_addr => 16#0000000A},
-            #{start_addr => 16#0000000B, end_addr => 16#0000000C}
-        ],
-        euis => [#{app_eui => 2, dev_eui => 2}],
-        nonce => 2
-    },
-    Route2 = hpr_route:test_new(Route2Map),
+    EUIPair2 = hpr_eui_pair:test_new(#{
+        route_id => Route1ID, app_eui => 2, dev_eui => 2
+    }),
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#0000000B, end_addr => 16#0000000C
+    }),
+
     ok = hpr_test_iot_config_service_route:stream_resp(
-        hpr_route_stream_res:test_new(#{action => update, route => Route2})
+        hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair2}})
+    ),
+
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange2}})
     ),
 
     ok = test_utils:wait_until(
         fun() ->
             case file:read_file(FilePath) of
-                {ok, Binary} ->
-                    Map = erlang:binary_to_term(Binary),
-                    Route2 =:= maps:get(hpr_route:id(Route2), Map, undefined);
+                {ok, Bin} ->
+                    {_RouteMap1, EUIPairs1, DevAddrRanges1} = erlang:binary_to_term(Bin),
+                    EUIPairs1 =:= [EUIPair1, EUIPair2] andalso
+                        DevAddrRanges1 =:= [DevAddrRange1, DevAddrRange2];
                 {error, _Reason} ->
                     false
             end
@@ -177,18 +217,12 @@ update_route_test(Config) ->
     ),
 
     %% Check that we can query route via config
-    ?assertEqual(
-        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#00000005)
-    ),
-    ?assertEqual(
-        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#0000000B)
-    ),
-    ?assertEqual(
-        [hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_devaddr(16#0000000C)
-    ),
-    ?assertEqual([], hpr_route_ets:lookup_eui(1, 12)),
-    ?assertEqual([], hpr_route_ets:lookup_eui(1, 100)),
-    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route2)], hpr_route_ets:lookup_eui(2, 2)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#0000000B)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#0000000C)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(2, 2)),
 
     ok.
 
@@ -197,75 +231,136 @@ delete_route_test(Config) ->
     timer:sleep(500),
 
     %% Create route and send them from server
-    Route1Map = #{
-        id => "7d502f32-4d58-4746-965e-001",
+    Route1ID = "7d502f32-4d58-4746-965e-001",
+    Route1 = hpr_route:test_new(#{
+        id => Route1ID,
         net_id => 0,
-        devaddr_ranges => [
-            #{start_addr => 16#00000001, end_addr => 16#0000000A}
-        ],
-        euis => [#{app_eui => 1, dev_eui => 0}],
         oui => 1,
         server => #{
             host => "localhost",
             port => 8080,
             protocol => {packet_router, #{}}
         },
-        max_copies => 1,
-        nonce => 1
-    },
-    Route1 = hpr_route:test_new(Route1Map),
+        max_copies => 1
+    }),
+    EUIPair1 = hpr_eui_pair:test_new(#{
+        route_id => Route1ID, app_eui => 1, dev_eui => 0
+    }),
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
     ok = hpr_test_iot_config_service_route:stream_resp(
-        hpr_route_stream_res:test_new(#{action => create, route => Route1})
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}})
+    ),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
+    ),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange1}})
     ),
 
     %% Let time to process new routes
-    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
     ok = test_utils:wait_until(
         fun() ->
-            case file:read_file(FilePath) of
-                {ok, Binary} ->
-                    Map = erlang:binary_to_term(Binary),
-                    Route1 =:= maps:get(hpr_route:id(Route1), Map, undefined);
-                {error, _Reason} ->
-                    false
-            end
+            1 =:= ets:info(hpr_route_ets_routes, size)
+        end
+    ),
+    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
+    case file:read_file(FilePath) of
+        {ok, Binary} ->
+            {RouteMap, EUIPairs, DevAddrRanges} = erlang:binary_to_term(Binary),
+            ?assertEqual(Route1, maps:get(Route1ID, RouteMap)),
+            ?assertEqual(EUIPairs, [EUIPair1]),
+            ?assertEqual(DevAddrRanges, [DevAddrRange1]);
+        {error, _Reason} ->
+            ct:fail(_Reason)
+    end,
+
+    %% Check that we can query route via config
+    ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
+
+    %% Delete EUI Pairs / DevAddr Ranges
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => remove, data => {eui_pair, EUIPair1}})
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            0 =:= ets:info(hpr_route_ets_eui_pairs, size)
         end
     ),
 
-    %% Check that we can query route via config
-    ?assertEqual(
-        [hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_devaddr(16#00000005)
-    ),
-    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 12)),
-    ?assertEqual([hpr_route_ets:remove_euis_dev_ranges(Route1)], hpr_route_ets:lookup_eui(1, 100)),
-
-    %% Delete our Route
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
 
     ok = hpr_test_iot_config_service_route:stream_resp(
-        hpr_route_stream_res:test_new(#{action => delete, route => Route1})
+        hpr_route_stream_res:test_new(#{action => remove, data => {devaddr_range, DevAddrRange1}})
     ),
 
     ok = test_utils:wait_until(
         fun() ->
-            case file:read_file(FilePath) of
-                {ok, Binary} ->
-                    Map = erlang:binary_to_term(Binary),
-                    0 =:= maps:size(Map);
-                {error, _Reason} ->
-                    false
-            end
+            0 =:= ets:info(hpr_route_ets_devaddr_ranges, size)
         end
     ),
 
-    %% Check that we can query route via config
-    ?assertEqual(
-        [], hpr_route_ets:lookup_devaddr(16#00000005)
+    ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000006)),
+
+    %% Add back euis and ranges to test full route delete
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
     ),
-    ?assertEqual([], hpr_route_ets:lookup_eui(1, 12)),
-    ?assertEqual([], hpr_route_ets:lookup_eui(1, 100)),
-    ?assertEqual(0, ets:info(hpr_route_ets_routes_by_devaddr, size)),
-    ?assertEqual(0, ets:info(hpr_route_ets_routes_by_eui, size)),
-    ?assertEqual(0, ets:info(hpr_route_ets_routes, size)),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange1}})
+    ),
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_route_ets_eui_pairs, size) andalso
+                1 =:= ets:info(hpr_route_ets_devaddr_ranges, size)
+        end
+    ),
+    ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
+
+    %% Remove route should delete eveything
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => remove, data => {route, Route1}})
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            0 =:= ets:info(hpr_route_ets_routes, size)
+        end
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            0 =:= ets:info(hpr_route_ets_eui_pairs, size)
+        end
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            0 =:= ets:info(hpr_route_ets_devaddr_ranges, size)
+        end
+    ),
+
+    ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
+
+    case file:read_file(FilePath) of
+        {ok, Binary1} ->
+            {RouteMap1, EUIPairs1, DevAddrRanges1} = erlang:binary_to_term(Binary1),
+            ?assertEqual(#{}, RouteMap1),
+            ?assertEqual(EUIPairs1, []),
+            ?assertEqual(DevAddrRanges1, []);
+        {error, _Reason1} ->
+            ct:fail(_Reason1)
+    end,
 
     ok.
 
