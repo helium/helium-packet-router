@@ -125,9 +125,8 @@ handle_cast(Msg, State) ->
 
 handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
+    {_PubKey, SigFun} = persistent_term:get(?HPR_KEY),
+    RouteStreamReq = hpr_route_stream_req:new(),
     SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
     StreamOptions = #{channel => ?IOT_CONFIG_CHANNEL},
 
