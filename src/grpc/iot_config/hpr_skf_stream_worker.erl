@@ -77,9 +77,8 @@ handle_cast(Msg, State) ->
 
 handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    SKFStreamReq = hpr_skf_stream_req:new(PubKeyBin),
+    {_PubKey, SigFun} = persistent_term:get(?HPR_KEY),
+    SKFStreamReq = hpr_skf_stream_req:new(),
     SignedSKFStreamReq = hpr_skf_stream_req:sign(SKFStreamReq, SigFun),
     StreamOptions = #{channel => ?IOT_CONFIG_CHANNEL},
 
