@@ -15,6 +15,7 @@
     bad_signature_test/1,
     mic_check_test/1,
     max_copies_test/1,
+    active_locked_route_test/1,
     success_test/1,
     no_routes_test/1
 ]).
@@ -36,6 +37,7 @@ all() ->
         bad_signature_test,
         mic_check_test,
         max_copies_test,
+        active_locked_route_test,
         success_test,
         no_routes_test
     ].
@@ -288,6 +290,110 @@ max_copies_test(_Config) ->
             ok},
 
     ?assertEqual([Received1, Received2, Received3], meck:history(hpr_protocol_router)),
+
+    ?assert(meck:validate(hpr_protocol_router)),
+    meck:unload(hpr_protocol_router),
+    ok.
+
+active_locked_route_test(_Config) ->
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 999,
+        active => true,
+        locked => false
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route1),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
+    SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
+    Gateway1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+
+    UplinkPacketUp1 = test_utils:uplink_packet_up(#{
+        gateway => Gateway1,
+        sig_fun => SigFun1,
+        devaddr => DevAddr,
+        fcnt => 1,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
+    }),
+
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+
+    Self = self(),
+    Received1 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp1,
+                Route1
+            ]},
+            ok},
+
+    ?assertEqual([Received1], meck:history(hpr_protocol_router)),
+    ok = meck:reset(hpr_protocol_router),
+
+    Route2 = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 999,
+        active => false,
+        locked => false
+    }),
+    ok = hpr_route_ets:insert_route(Route2),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+
+    ?assertEqual([], meck:history(hpr_protocol_router)),
+
+    Route3 = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 999,
+        active => true,
+        locked => true
+    }),
+    ok = hpr_route_ets:insert_route(Route3),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+
+    ?assertEqual([], meck:history(hpr_protocol_router)),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),

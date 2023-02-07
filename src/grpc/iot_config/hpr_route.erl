@@ -7,7 +7,9 @@
     net_id/1,
     oui/1,
     server/1,
-    max_copies/1
+    max_copies/1,
+    active/1,
+    locked/1
 ]).
 
 -export([
@@ -63,6 +65,14 @@ server(Route) ->
 max_copies(Route) ->
     Route#iot_config_route_v1_pb.max_copies.
 
+-spec active(Route :: route()) -> boolean().
+active(Route) ->
+    Route#iot_config_route_v1_pb.active.
+
+-spec locked(Route :: route()) -> boolean().
+locked(Route) ->
+    Route#iot_config_route_v1_pb.locked.
+
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->
     Server = ?MODULE:server(Route),
@@ -98,7 +108,9 @@ md(Route) ->
         {oui, ?MODULE:oui(Route)},
         {protocol_type, ?MODULE:protocol_type(Server)},
         {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))},
-        {lns, erlang:binary_to_list(hpr_route:lns(Route))}
+        {lns, erlang:binary_to_list(hpr_route:lns(Route))},
+        {active, ?MODULE:active(Route)},
+        {locked, ?MODULE:locked(Route)}
     ].
 
 -spec is_valid_record(route()) -> boolean().
@@ -118,7 +130,9 @@ new_packet_router(Host, Port) ->
             port = Port,
             protocol = {packet_router, #iot_config_protocol_packet_router_v1_pb{}}
         },
-        max_copies = 999
+        max_copies = 999,
+        active = true,
+        locked = false
     }.
 
 -spec host(Server :: server()) -> string().
@@ -184,8 +198,10 @@ test_new(RouteMap) ->
         id = maps:get(id, RouteMap),
         net_id = maps:get(net_id, RouteMap),
         oui = maps:get(oui, RouteMap),
+        server = mk_server(maps:get(server, RouteMap)),
         max_copies = maps:get(max_copies, RouteMap),
-        server = mk_server(maps:get(server, RouteMap))
+        active = maps:get(active, RouteMap, true),
+        locked = maps:get(locked, RouteMap, false)
     }.
 
 -spec mk_server(map()) -> #iot_config_server_v1_pb{}.
@@ -240,7 +256,9 @@ test_new_test() ->
             port = 80,
             protocol = {gwmp, #iot_config_protocol_gwmp_v1_pb{mapping = []}}
         },
-        max_copies = 1
+        max_copies = 1,
+        active = true,
+        locked = false
     },
     ?assertEqual(
         Route,
@@ -253,7 +271,9 @@ test_new_test() ->
                 port => 80,
                 protocol => {gwmp, #{mapping => []}}
             },
-            max_copies => 1
+            max_copies => 1,
+            active => true,
+            locked => false
         })
     ),
     ok.
@@ -287,6 +307,16 @@ server_test() ->
 max_copies_test() ->
     Route = test_route(),
     ?assertEqual(1, ?MODULE:max_copies(Route)),
+    ok.
+
+active_test() ->
+    Route = test_route(),
+    ?assertEqual(true, ?MODULE:active(Route)),
+    ok.
+
+locked_test() ->
+    Route = test_route(),
+    ?assertEqual(false, ?MODULE:locked(Route)),
     ok.
 
 region_lns_test() ->
@@ -353,7 +383,9 @@ test_route() ->
             port => 80,
             protocol => {gwmp, #{mapping => []}}
         },
-        max_copies => 1
+        max_copies => 1,
+        active => true,
+        locked => false
     }).
 
 -endif.

@@ -87,27 +87,33 @@ maybe_deliver_no_routes(Packet) ->
 maybe_deliver_packet(_Packet, []) ->
     ok;
 maybe_deliver_packet(Packet, [Route | Routes]) ->
-    Server = hpr_route:server(Route),
-    Protocol = hpr_route:protocol(Server),
     RouteMD = hpr_route:md(Route),
-    Key = crypto:hash(sha256, <<
-        (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
-    >>),
-    case hpr_max_copies:update_counter(Key, hpr_route:max_copies(Route)) of
-        {error, Reason} ->
-            lager:debug(RouteMD, "not sending ~p", [Reason]);
-        ok ->
-            case deliver_packet(Protocol, Packet, Route) of
-                ok ->
-                    %% Leave me at info, used by stats
-                    lager:info(RouteMD, "delivered"),
-                    ok = hpr_packet_reporter:report_packet(Packet, Route),
-                    ok;
+    case hpr_route:active(Route) andalso hpr_route:locked(Route) == false of
+        false ->
+            lager:debug(RouteMD, "not sending, route locked or inactive"),
+            maybe_deliver_packet(Packet, Routes);
+        true ->
+            Server = hpr_route:server(Route),
+            Protocol = hpr_route:protocol(Server),
+            Key = crypto:hash(sha256, <<
+                (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
+            >>),
+            case hpr_max_copies:update_counter(Key, hpr_route:max_copies(Route)) of
                 {error, Reason} ->
-                    lager:warning(RouteMD, "error ~p", [Reason])
-            end
-    end,
-    maybe_deliver_packet(Packet, Routes).
+                    lager:debug(RouteMD, "not sending ~p", [Reason]);
+                ok ->
+                    case deliver_packet(Protocol, Packet, Route) of
+                        ok ->
+                            %% Leave me at info, used by stats
+                            lager:info(RouteMD, "delivered"),
+                            ok = hpr_packet_reporter:report_packet(Packet, Route),
+                            ok;
+                        {error, Reason} ->
+                            lager:warning(RouteMD, "error ~p", [Reason])
+                    end
+            end,
+            maybe_deliver_packet(Packet, Routes)
+    end.
 
 -spec deliver_packet(
     hpr_route:protocol(),
