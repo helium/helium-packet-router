@@ -152,7 +152,7 @@ routing_key_and_value(PacketUp) ->
         case PacketType of
             {join_req, {_AppEUI, DevEUI}} ->
                 {'DevEUI', encode_deveui(DevEUI)};
-            {uplink, DevAddr} ->
+            {uplink, {_Type, DevAddr}} ->
                 {'DevAddr', encode_devaddr(DevAddr)}
         end,
     {RoutingKey, RoutingValue}.
