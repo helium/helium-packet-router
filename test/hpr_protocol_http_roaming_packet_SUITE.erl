@@ -161,7 +161,7 @@ http_sync_uplink_join_test(_Config) ->
             <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
-            <<"SenderID">> => <<"0xC00053">>,
+            <<"SenderID">> => <<"0x000024">>,
             <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
             <<"MessageType">> => <<"PRStartReq">>,
             <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
@@ -208,7 +208,7 @@ http_sync_uplink_join_test(_Config) ->
                 <<"ProtocolVersion">> => <<"1.1">>,
                 <<"TransactionID">> => TransactionID,
                 <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
-                <<"ReceiverID">> => <<"0xC00053">>,
+                <<"ReceiverID">> => <<"0x000024">>,
                 <<"MessageType">> => <<"PRStartAns">>,
                 <<"Result">> => #{
                     <<"ResultCode">> => <<"Success">>
@@ -286,7 +286,7 @@ http_sync_downlink_test(_Config) ->
     %%         #{
     %%             <<"ProtocolVersion">> => <<"1.1">>,
     %%             <<"TransactionID">> => TransactionID,
-    %%             <<"SenderID">> => <<"0xC00053">>,
+    %%             <<"SenderID">> => <<"0x000024">>,
     %%             <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
     %%             <<"MessageType">> => <<"XmitDataAns">>,
     %%             <<"Result">> => #{
@@ -363,7 +363,7 @@ http_async_uplink_join_test(_Config) ->
             <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
-            <<"SenderID">> => <<"0xC00053">>,
+            <<"SenderID">> => <<"0x000024">>,
             <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
             <<"MessageType">> => <<"PRStartReq">>,
             <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
@@ -411,7 +411,7 @@ http_async_uplink_join_test(_Config) ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"TransactionID">> => TransactionID,
         <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
-        <<"ReceiverID">> => <<"0xC00053">>,
+        <<"ReceiverID">> => <<"0x000024">>,
         <<"MessageType">> => <<"PRStartAns">>,
         <<"Result">> => #{
             <<"ResultCode">> => <<"Success">>
@@ -483,7 +483,7 @@ http_async_downlink_test(_Config) ->
     {ok, #{<<"TransactionID">> := TransactionID}} = forwarder_expect_downlink_data(#{
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
-        <<"ReceiverID">> => <<"0xC00053">>,
+        <<"ReceiverID">> => <<"0x000024">>,
         <<"TransactionID">> => TransactionID,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -510,7 +510,7 @@ http_async_downlink_test(_Config) ->
         <<"MessageType">> => <<"XmitDataAns">>,
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
-        <<"SenderID">> => <<"0xC00053">>,
+        <<"SenderID">> => <<"0x000024">>,
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
         <<"TransactionID">> => TransactionID
     }),
@@ -543,7 +543,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
         callback_args => #{
             response => #{
                 <<"SenderID">> => <<"000002">>,
-                <<"ReceiverID">> => <<"C00053">>,
+                <<"ReceiverID">> => <<"000024">>,
                 <<"ProtocolVersion">> => <<"1.1">>,
                 <<"TransactionID">> => 601913476,
                 <<"MessageType">> => <<"PRStartAns">>,
@@ -590,7 +590,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
             <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
-            <<"SenderID">> => <<"0xC00053">>,
+            <<"SenderID">> => <<"0x000024">>,
             <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
             <<"MessageType">> => <<"PRStartReq">>,
             <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(Payload),
@@ -672,7 +672,7 @@ http_uplink_packet_test(_Config) ->
             <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
-            <<"SenderID">> => <<"0xC00053">>,
+            <<"SenderID">> => <<"0x000024">>,
             <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
             <<"MessageType">> => <<"PRStartReq">>,
             <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(Payload),
@@ -743,7 +743,7 @@ http_class_c_downlink_test(_Config) ->
     DownlinkBody = #{
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"MessageType">> => <<"XmitDataReq">>,
-        <<"ReceiverID">> => <<"0xC00053">>,
+        <<"ReceiverID">> => <<"0x000024">>,
         <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
         <<"DLMetaData">> => #{
             <<"ClassMode">> => <<"C">>,
@@ -769,7 +769,7 @@ http_class_c_downlink_test(_Config) ->
     {ok, #{<<"TransactionID">> := TransactionID}} = forwarder_expect_downlink_data(#{
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
-        <<"ReceiverID">> => <<"0xC00053">>,
+        <<"ReceiverID">> => <<"0x000024">>,
         <<"TransactionID">> => TransactionID,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -793,7 +793,7 @@ http_class_c_downlink_test(_Config) ->
         <<"MessageType">> => <<"XmitDataAns">>,
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
-        <<"SenderID">> => <<"0xC00053">>,
+        <<"SenderID">> => <<"0x000024">>,
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
         <<"TransactionID">> => TransactionID
     }),
@@ -868,7 +868,7 @@ http_multiple_gateways_test(_Config) ->
             <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
-            <<"SenderID">> => <<"0xC00053">>,
+            <<"SenderID">> => <<"0x000024">>,
             <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
             <<"MessageType">> => <<"PRStartReq">>,
             <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
@@ -992,7 +992,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
             <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
-            <<"SenderID">> => <<"0xC00053">>,
+            <<"SenderID">> => <<"0x000024">>,
             <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
             <<"MessageType">> => <<"PRStartReq">>,
             <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
@@ -1142,7 +1142,7 @@ http_uplink_packet_late_test(_Config) ->
             <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
-            <<"SenderID">> => <<"0xC00053">>,
+            <<"SenderID">> => <<"0x000024">>,
             <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
             <<"MessageType">> => <<"PRStartReq">>,
             <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(
@@ -1349,7 +1349,7 @@ downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
     DownlinkBody = #{
         'ProtocolVersion' => <<"1.1">>,
         'SenderID' => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
-        'ReceiverID' => <<"0xC00053">>,
+        'ReceiverID' => <<"0x000024">>,
         'TransactionID' => TransactionID,
         'MessageType' => <<"XmitDataReq">>,
         'PHYPayload' => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -1547,7 +1547,7 @@ make_response_body(#{
     #{
         'ProtocolVersion' => ProtocolVersion,
         'SenderID' => ReceiverID,
-        'ReceiverID' => <<"0xC00053">>,
+        'ReceiverID' => <<"0x000024">>,
         'TransactionID' => TransactionID,
         'MessageType' => <<"PRStartAns">>,
         'Result' => #{'ResultCode' => <<"Success">>},

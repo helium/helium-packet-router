@@ -128,7 +128,7 @@ make_uplink_payload(
     },
 
     VersionBase#{
-        'SenderID' => <<"0xC00053">>,
+        'SenderID' => <<"0x000024">>,
         'ReceiverID' => hpr_http_roaming_utils:hexstring(NetID),
         'TransactionID' => TransactionID,
         'MessageType' => <<"PRStartReq">>,
@@ -278,7 +278,7 @@ handle_xmitdata_req(#{
         'ProtocolVersion' => ProtocolVersion,
         'MessageType' => <<"XmitDataAns">>,
         'ReceiverID' => SenderID,
-        'SenderID' => <<"0xC00053">>,
+        'SenderID' => <<"0x000024">>,
         'Result' => #{'ResultCode' => <<"Success">>},
         'TransactionID' => IncomingTransactionID,
         'DLFreq1' => FrequencyMhz1
@@ -323,7 +323,7 @@ handle_xmitdata_req(#{
         'ProtocolVersion' => ProtocolVersion,
         'MessageType' => <<"XmitDataAns">>,
         'ReceiverID' => SenderID,
-        'SenderID' => <<"0xC00053">>,
+        'SenderID' => <<"0x000024">>,
         'Result' => #{'ResultCode' => <<"Success">>},
         'TransactionID' => IncomingTransactionID,
         'DLFreq2' => FrequencyMhz
@@ -526,7 +526,7 @@ chirpstack_join_accept_test() ->
     A = #{
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"MessageType">> => <<"PRStartAns">>,
-        <<"ReceiverID">> => <<"C00053">>,
+        <<"ReceiverID">> => <<"000024">>,
         <<"SenderID">> => <<"600013">>,
         <<"DLMetaData">> => #{
             <<"ClassMode">> => <<"A">>,
