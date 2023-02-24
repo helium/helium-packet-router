@@ -77,7 +77,7 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
     %% ========================================================
     %% - ID :: 48088786-5465-4115-92de-5214a88e9a75
     %% - Nonce :: 1
-    %% - Net ID :: 000024 (124781673)
+    %% - Net ID :: C00053 (124781673)
     %% - Max Copies :: 1337
     %% - Server :: Host:Port
     %% - Protocol :: {gwmp, ...}
