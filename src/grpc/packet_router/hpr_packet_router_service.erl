@@ -22,6 +22,9 @@ init(_RPC, StreamState) ->
 
 -spec route(hpr_envelope_up:envelope(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | {stop, grpcbox_stream:t()}.
+route(eos, StreamState) ->
+    lager:debug("received eos for stream"),
+    {stop, StreamState};
 route(EnvUp, StreamState) ->
     try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
