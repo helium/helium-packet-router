@@ -76,7 +76,7 @@ region_test() ->
 timestamp_test() ->
     Signer = <<"Signer">>,
     Timestamp = erlang:system_time(millisecond),
-    ?assert(Timestamp =< ?MODULE:timestamp(?MODULE:new('EU868')),
+    ?assert(Timestamp =< ?MODULE:timestamp(?MODULE:new('EU868'))),
     ok.
 
 signature_test() ->
