@@ -39,7 +39,7 @@
 -type packet_map() :: #packet_router_packet_up_v1_pb{}.
 -type packet_type() ::
     {join_req, {non_neg_integer(), non_neg_integer()}}
-    | {uplink, non_neg_integer()}
+    | {uplink, {confirmed | unconfirmed, non_neg_integer()}}
     | {undefined, any()}.
 
 -export_type([packet/0, packet_map/0, packet_type/0]).
@@ -141,7 +141,10 @@ type(Packet) ->
                 0 when FOptsLen /= 0 ->
                     {undefined, FType};
                 _ ->
-                    {uplink, DevAddr}
+                    case FType of
+                        ?CONFIRMED_UP -> {uplink, {confirmed, DevAddr}};
+                        ?UNCONFIRMED_UP -> {uplink, {unconfirmed, DevAddr}}
+                    end
             end;
         <<FType:3, _/bitstring>> ->
             {undefined, FType};
@@ -177,14 +180,14 @@ md(PacketUp) ->
                 {packet_type, join_req},
                 {phash, hpr_utils:bin_to_hex(?MODULE:phash(PacketUp))}
             ]);
-        {uplink, DevAddr} ->
+        {uplink, {Type, DevAddr}} ->
             lager:md([
                 {stream, StreamPid},
                 {gateway, GatewayName},
                 {devaddr, hpr_utils:int_to_hex(DevAddr)},
-                %% TODO: Add net id (warningd they might not have one)
+                %% TODO: Add net id (warning they might not have one)
                 {devaddr_int, DevAddr},
-                {packet_type, uplink},
+                {packet_type, Type},
                 {phash, hpr_utils:bin_to_hex(?MODULE:phash(PacketUp))}
             ])
     end.
@@ -313,11 +316,24 @@ type_test() ->
     ),
     UnconfirmedUp = ?UNCONFIRMED_UP,
     ?assertEqual(
-        {uplink, 1},
+        {uplink, {unconfirmed, 1}},
         ?MODULE:type(
             ?MODULE:test_new(#{
                 payload =>
                     <<UnconfirmedUp:3, 0:3, 1:2, 16#00000001:32/integer-unsigned-little, 0:1, 0:1,
+                        0:1, 0:1, 1:4, 2:16/little-unsigned-integer,
+                        (crypto:strong_rand_bytes(1))/binary, 2:8/integer,
+                        (crypto:strong_rand_bytes(20))/binary>>
+            })
+        )
+    ),
+    ConfirmedUp = ?CONFIRMED_UP,
+    ?assertEqual(
+        {uplink, {confirmed, 1}},
+        ?MODULE:type(
+            ?MODULE:test_new(#{
+                payload =>
+                    <<ConfirmedUp:3, 0:3, 1:2, 16#00000001:32/integer-unsigned-little, 0:1, 0:1,
                         0:1, 0:1, 1:4, 2:16/little-unsigned-integer,
                         (crypto:strong_rand_bytes(1))/binary, 2:8/integer,
                         (crypto:strong_rand_bytes(20))/binary>>

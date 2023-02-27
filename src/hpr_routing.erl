@@ -59,7 +59,7 @@ handle_packet(Packet) ->
 -spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
 find_routes({join_req, {AppEUI, DevEUI}}) ->
     hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI);
-find_routes({uplink, DevAddr}) ->
+find_routes({uplink, {_Type, DevAddr}}) ->
     hpr_route_ets:lookup_devaddr_range(DevAddr).
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
@@ -152,7 +152,7 @@ mic_check(Packet) ->
             true;
         {join_req, _} ->
             true;
-        {uplink, DevAddr} ->
+        {uplink, {_Type, DevAddr}} ->
             case hpr_skf_ets:lookup_devaddr(DevAddr) of
                 {error, not_found} ->
                     true;

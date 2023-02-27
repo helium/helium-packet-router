@@ -3,25 +3,23 @@
 -include("../autogen/downlink_pb.hrl").
 
 -export([
-    new/2,
+    new/1,
     region/1,
     timestamp/1,
-    signer/1,
     signature/1,
     sign/2,
-    verify/1
+    verify/2
 ]).
 
 -type http_roaming_register() :: #http_roaming_register_v1_pb{}.
 
 -export_type([http_roaming_register/0]).
 
--spec new(Region :: atom(), Signer :: libp2p_crypto:pubkey_bin()) -> http_roaming_register().
-new(Region, Signer) ->
+-spec new(Region :: atom()) -> http_roaming_register().
+new(Region) ->
     #http_roaming_register_v1_pb{
         region = Region,
-        timestamp = erlang:system_time(millisecond),
-        signer = Signer
+        timestamp = erlang:system_time(millisecond)
     }.
 
 -spec region(HttpRoamingReg :: http_roaming_register()) -> atom().
@@ -31,10 +29,6 @@ region(HttpRoamingReg) ->
 -spec timestamp(HttpRoamingReg :: http_roaming_register()) -> non_neg_integer().
 timestamp(HttpRoamingReg) ->
     HttpRoamingReg#http_roaming_register_v1_pb.timestamp.
-
--spec signer(HttpRoamingReg :: http_roaming_register()) -> libp2p_crypto:pubkey_bin().
-signer(HttpRoamingReg) ->
-    HttpRoamingReg#http_roaming_register_v1_pb.signer.
 
 -spec signature(HttpRoamingReg :: http_roaming_register()) -> binary().
 signature(HttpRoamingReg) ->
@@ -50,8 +44,9 @@ sign(HttpRoamingReg, SigFun) ->
         signature = SigFun(EncodedHttpRoamingReg)
     }.
 
--spec verify(HttpRoamingReg :: http_roaming_register()) -> boolean().
-verify(HttpRoamingReg) ->
+-spec verify(HttpRoamingReg :: http_roaming_register(), PubKeyBin :: libp2p_crypto:pubkey_bin()) ->
+    boolean().
+verify(HttpRoamingReg, PubKeyBin) ->
     EncodedHttpRoamingReg = downlink_pb:encode_msg(
         HttpRoamingReg#http_roaming_register_v1_pb{
             signature = <<>>
@@ -61,7 +56,7 @@ verify(HttpRoamingReg) ->
     libp2p_crypto:verify(
         EncodedHttpRoamingReg,
         ?MODULE:signature(HttpRoamingReg),
-        libp2p_crypto:bin_to_pubkey(?MODULE:signer(HttpRoamingReg))
+        libp2p_crypto:bin_to_pubkey(PubKeyBin)
     ).
 
 %% ------------------------------------------------------------------
@@ -75,41 +70,30 @@ region_test() ->
     Region = 'EU868',
     ?assertEqual(
         Region,
-        ?MODULE:region(?MODULE:new(Region, <<"Signer">>))
+        ?MODULE:region(?MODULE:new(Region))
     ),
     ok.
 
 timestamp_test() ->
-    Signer = <<"Signer">>,
     Timestamp = erlang:system_time(millisecond),
-    ?assert(Timestamp =< ?MODULE:timestamp(?MODULE:new('EU868', Signer))),
-    ok.
-
-signer_test() ->
-    Signer = <<"Signer">>,
-    ?assertEqual(
-        Signer,
-        ?MODULE:signer(?MODULE:new('EU868', Signer))
-    ),
+    ?assert(Timestamp =< ?MODULE:timestamp(?MODULE:new('EU868'))),
     ok.
 
 signature_test() ->
-    Signer = <<"Signer">>,
     ?assertEqual(
         <<>>,
-        ?MODULE:signature(?MODULE:new('EU868', Signer))
+        ?MODULE:signature(?MODULE:new('EU868'))
     ),
     ok.
 
 sign_verify_test() ->
     #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ecc_compact),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    Signer = libp2p_crypto:pubkey_to_bin(PubKey),
-    HttpRoamingReg = ?MODULE:new('EU868', Signer),
+    HttpRoamingReg = ?MODULE:new('EU868'),
 
     SignedHttpRoamingReg = ?MODULE:sign(HttpRoamingReg, SigFun),
 
-    ?assert(?MODULE:verify(SignedHttpRoamingReg)),
+    ?assert(?MODULE:verify(SignedHttpRoamingReg, libp2p_crypto:pubkey_to_bin(PubKey))),
     ok.
 
 -endif.

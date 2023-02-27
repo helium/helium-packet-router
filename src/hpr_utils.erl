@@ -55,7 +55,28 @@ net_id_display(Num) ->
 -spec trace(Type :: trace(), Data :: string()) -> string().
 trace(Type, Data) ->
     FileName = "traces/" ++ Data ++ ".log",
-    {ok, _} = lager:trace_file(FileName, [{Type, Data}], debug),
+    FormatStr = [
+        "[",
+        date,
+        " ",
+        time,
+        "] ",
+        pid,
+        " [",
+        severity,
+        "] [",
+        {module, ""},
+        {function, [":", function], ""},
+        {line, [":", line], ""},
+        "] ",
+        message,
+        "\n",
+        metadata,
+        "\n\n"
+    ],
+    {ok, _} = lager:trace_file(FileName, [{Type, Data}], debug, [
+        {formatter_config, FormatStr}
+    ]),
     _ = erlang:spawn(fun() ->
         Timeout = application:get_env(hpr, trace_timeout, 240),
         lager:debug([{Type, Data}], "will stop trace in ~pmin", [Timeout]),
