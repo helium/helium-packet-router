@@ -73,10 +73,9 @@ handle_cast(Msg, State) ->
 
 handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    {PubKey, SigFun} = persistent_term:get(?HPR_KEY),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    {_PubKey, SigFun} = persistent_term:get(?HPR_KEY),
     %% TODO: Region hardcoded from now until it is used on server side
-    Req = hpr_http_roaming_register:new('US915', PubKeyBin),
+    Req = hpr_http_roaming_register:new('US915'),
     SignedReq = hpr_http_roaming_register:sign(Req, SigFun),
     StreamOptions = #{channel => ?DOWNLINK_CHANNEL},
 

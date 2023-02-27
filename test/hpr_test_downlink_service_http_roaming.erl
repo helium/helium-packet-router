@@ -2,6 +2,8 @@
 
 -behaviour(helium_downlink_http_roaming_bhvr).
 
+-include("hpr.hrl").
+
 -export([
     init/2,
     handle_info/2
@@ -15,12 +17,18 @@
     downlink/1
 ]).
 
+-record(state, {
+    signer :: undefined | libp2p_crypto:pubkey_bin()
+}).
+
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
     Self = self(),
     true = erlang:register(?MODULE, self()),
-    lager:notice("init ~p @ ~p", [?MODULE, Self]),
-    StreamState.
+    {PubKey, _SigFun} = persistent_term:get(?HPR_KEY, {undefined, undefined}),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    lager:notice("init ~p @ ~p with signer ~p", [?MODULE, Self, PubKeyBin]),
+    grpcbox_stream:stream_handler_state(StreamState, #state{signer = PubKeyBin}).
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({downlink, Resp}, StreamState) ->
@@ -30,7 +38,9 @@ handle_info(_Msg, StreamState) ->
     StreamState.
 
 stream(Req, StreamState) ->
-    case hpr_http_roaming_register:verify(Req) of
+    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    Signer = HandlerState#state.signer,
+    case hpr_http_roaming_register:verify(Req, Signer) of
         false ->
             {grpc_error, {7, <<"PERMISSION_DENIED">>}};
         true ->
