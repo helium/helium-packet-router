@@ -183,9 +183,11 @@ single_lns_downlink_test(_Config) ->
             rx1 = #window_v1_pb{
                 timestamp = Timestamp,
                 frequency = Frequency,
-                datarate = Datarate
+                datarate = Datarate,
+                immediate = Immediate
             }
         }} ->
+            ?assertNot(Immediate, "immediate defaults to false for non class-c"),
             ?assert(erlang:is_integer(Timestamp)),
             ?assertEqual(Data, base64:encode(Payload)),
             ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
@@ -247,9 +249,11 @@ single_lns_class_c_downlink_test(_Config) ->
             rx1 = #window_v1_pb{
                 timestamp = Timestamp,
                 frequency = Frequency,
-                datarate = Datarate
+                datarate = Datarate,
+                immediate = Immediate
             }
         }} ->
+            ?assert(Immediate),
             ?assertEqual(0, Timestamp, "0ms means immediate"),
             ?assertEqual(Data, base64:encode(Payload)),
             ?assertEqual(erlang:round(Freq * 1_000_000), Frequency),
