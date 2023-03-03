@@ -158,7 +158,6 @@ all_routes() ->
 oui_routes(OUI) ->
     [Route || {_ID, Route} <- ets:tab2list(?ROUTE_ETS), OUI == hpr_route:oui(Route)].
 
-%% This is broken
 -spec eui_pairs_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 eui_pairs_for_route(RouteID) ->
     MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
