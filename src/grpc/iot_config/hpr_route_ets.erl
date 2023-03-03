@@ -161,12 +161,12 @@ oui_routes(OUI) ->
 %% This is broken
 -spec eui_pairs_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 eui_pairs_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{'$1', '$2'}]}],
+    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?EUIS_ETS, MS).
 
 -spec devaddr_ranges_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 devaddr_ranges_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{'$1', '$2'}]}],
+    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?DEVADDRS_ETS, MS).
 
 %% ------------------------------------------------------------------
