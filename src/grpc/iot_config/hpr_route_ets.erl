@@ -160,12 +160,12 @@ oui_routes(OUI) ->
 
 -spec eui_pairs_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 eui_pairs_for_route(RouteID) ->
-    MS = [{{'_', {iot_config_eui_pair_v1_pb, RouteID, '$1', '$2'}}, [], [{'$1', '$2'}]}],
+    MS = [{{'_', {iot_config_eui_pair_v1_pb, RouteID, '$1', '$2'}}, [], [{{'$1', '$2'}}]}],
     ets:select(?EUIS_ETS, MS).
 
 -spec devaddr_ranges_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 devaddr_ranges_for_route(RouteID) ->
-    MS = [{{'_', {iot_config_devaddr_range_v1_pb, RouteID, '$1', '$2'}}, [], [{'$1', '$2'}]}],
+    MS = [{{'_', {iot_config_devaddr_range_v1_pb, RouteID, '$1', '$2'}}, [], [{{'$1', '$2'}}]}],
     ets:select(?DEVADDRS_ETS, MS).
 
 %% ------------------------------------------------------------------
