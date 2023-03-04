@@ -58,8 +58,14 @@ send(PacketUp, Route) ->
 ) -> {ok, grpcbox_client:stream()} | {error, any()}.
 get_stream(Gateway, LNS, Server) ->
     case ets:lookup(?STREAM_ETS, {Gateway, LNS}) of
-        [{_, Stream}] ->
-            {ok, Stream};
+        [{_, #{channel := ChannelPid, stream_pid := StreamPid} = Stream}] ->
+            case erlang:is_process_alive(ChannelPid) andalso erlang:is_process_alive(StreamPid) of
+                true ->
+                    {ok, Stream};
+                false ->
+                    ets:delete(?STREAM_ETS, {Gateway, LNS}),
+                    get_stream(Gateway, LNS, Server)
+            end;
         [] ->
             case grpcbox_channel:pick(LNS, stream) of
                 {error, _} ->
