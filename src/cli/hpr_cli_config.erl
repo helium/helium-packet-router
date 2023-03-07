@@ -33,9 +33,10 @@ config_usage() ->
         ["config"],
         [
             "\n\n",
-            "config ls        - list\n",
-            "config oui <oui> - info for OUI\n",
-            "    [--display_euis] default: false (EUIs not included)\n"
+            "config ls             - List\n",
+            "config oui <oui>      - Info for OUI\n",
+            "    [--display_euis] default: false (EUIs not included)\n",
+            "config skf <devaddr>  - List all Session Key Filters for Devaddr\n"
         ]
     ].
 
@@ -47,7 +48,8 @@ config_cmd() ->
             [],
             [{display_euis, [{longname, "display_euis"}, {datatype, boolean}]}],
             fun config_oui_list/3
-        ]
+        ],
+        [["config", "skf", '*'], [], [], fun config_skf/3]
     ].
 
 config_list(["config", "ls"], [], []) ->
@@ -150,6 +152,25 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
 config_oui_list(_, _, _) ->
     usage.
 
+config_skf(["config", "skf", DevAddrString], [], []) ->
+    <<DevAddr:32/integer-unsigned-little>> = hpr_utils:hex_to_bin(
+        erlang:list_to_binary(DevAddrString)
+    ),
+    case hpr_skf_ets:lookup_devaddr(DevAddr) of
+        {error, _} ->
+            c_text("No SKF found");
+        {ok, SKFs} ->
+            MkRow = fun(SKF) ->
+                [
+                    {" Session Key ", hpr_utils:bin_to_hex(SKF)},
+                    {" DevAddr ", DevAddrString}
+                ]
+            end,
+            c_table(lists:map(MkRow, SKFs))
+    end;
+config_skf(_, _, _) ->
+    usage.
+
 %%--------------------------------------------------------------------
 %% Helpers
 %%--------------------------------------------------------------------
@@ -159,3 +180,6 @@ c_table(PropLists) -> [clique_status:table(PropLists)].
 
 -spec c_list(list(string())) -> clique_status:status().
 c_list(L) -> [clique_status:list(L)].
+
+-spec c_text(string()) -> clique_status:status().
+c_text(T) -> [clique_status:text([T])].
