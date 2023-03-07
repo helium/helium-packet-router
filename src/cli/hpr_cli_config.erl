@@ -34,42 +34,49 @@ config_usage() ->
         [
             "\n\n",
             "config ls        - list\n",
-            "config oui <oui> - info for OUI\n"
+            "config oui <oui> - info for OUI\n",
+            "    [--display_euis] default: false (EUIs not included)\n"
         ]
     ].
 
 config_cmd() ->
     [
         [["config", "ls"], [], [], fun config_list/3],
-        [["config", "oui", '*'], [], [], fun config_oui_list/3]
+        [
+            ["config", "oui", '*'],
+            [],
+            [{display_euis, [{longname, "display_euis"}, {datatype, boolean}]}],
+            fun config_oui_list/3
+        ]
     ].
 
 config_list(["config", "ls"], [], []) ->
-    Routes = hpr_route_ets:all_routes(),
-
-    %% | Net ID | OUI | Protocol     | Max Copies | Addr Range Cnt | EUI Cnt |
-    %% |--------+-----+--------------+------------+----------------+---------|
-    %% | 000001 |   1 | gwmp         |         15 |              4 |       4 |
-    %% | 000002 |   4 | http_roaming |        999 |              3 |       4 |
-
+    Routes = lists:sort(
+        fun(R1, R2) -> hpr_route:oui(R1) < hpr_route:oui(R2) end, hpr_route_ets:all_routes()
+    ),
+    %% | OUI | Net ID | Protocol     | Max Copies | Addr Range Cnt | EUI Cnt | Route ID                             |
+    %% |-----+--------+--------------+------------+----------------+---------+--------------------------------------|
+    %% |   1 | 000001 | gwmp         |         15 |              4 |       4 | b1eed652-b85c-11ed-8c9d-bfa0a604afc0 |
+    %% |   4 | 000002 | http_roaming |        999 |              3 |       4 | 91236f72-a98a-11ed-aacb-830d346922b8 |
     MkRow = fun(Route) ->
         Server = hpr_route:server(Route),
         [
-            {" ID ", hpr_route:id(Route)},
-            {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" OUI ", hpr_route:oui(Route)},
+            {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" Protocol ", hpr_route:protocol_type(Server)},
             {" Max Copies ", hpr_route:max_copies(Route)},
             {" Addr Range Cnt ",
                 erlang:length(hpr_route_ets:devaddr_ranges_for_route(hpr_route:id(Route)))},
-            {" EUI Cnt ", erlang:length(hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)))}
+            {" EUI Cnt ", erlang:length(hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)))},
+            {" Route ID ", hpr_route:id(Route)}
         ]
     end,
     c_table(lists:map(MkRow, Routes));
 config_list(_, _, _) ->
     usage.
 
-config_oui_list(["config", "oui", OUIString], [], []) ->
+config_oui_list(["config", "oui", OUIString], [], Flags) ->
+    Options = maps:from_list(Flags),
     OUI = erlang:list_to_integer(OUIString),
     Routes = hpr_route_ets:oui_routes(OUI),
 
@@ -84,7 +91,8 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
     %% - DevAddr Ranges
     %% --- Start -> End
     %% --- Start -> End
-    %% - EUI Cnt (AppEUI, DevEUI)
+    %% - EUI Count :: 2
+    %% - EUI Count :: 2  (AppEUI, DevEUI)
     %% --- (010203040506070809, 010203040506070809)
     %% --- (0A0B0C0D0E0F0G0102, 0A0B0C0D0E0F0G0102)
 
@@ -92,7 +100,6 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
     Spacer = io_lib:format("========================================================~n", []),
 
     DevAddrHeader = io_lib:format("- DevAddr Ranges~n", []),
-    EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI)~n", []),
 
     FormatDevAddr = fun({S, E}) ->
         io_lib:format("  - ~s -> ~s~n", [hpr_utils:int_to_hex(S), hpr_utils:int_to_hex(E)])
@@ -110,8 +117,15 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
         ),
         DevAddrInfo = [DevAddrHeader | DevAddrRanges],
 
-        EUIs = lists:map(FormatEUI, hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route))),
-        EUIInfo = [EUIHeader | EUIs],
+        EUIs = hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)),
+        EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [erlang:length(EUIs)]),
+        EUIInfo =
+            case maps:is_key(display_euis, Options) of
+                false ->
+                    [EUIHeader];
+                true ->
+                    [EUIHeader | lists:map(FormatEUI, EUIs)]
+            end,
 
         Info = [
             io_lib:format("- ID         :: ~s~n", [hpr_route:id(Route)]),
