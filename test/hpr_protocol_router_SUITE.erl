@@ -207,8 +207,6 @@ server_crash_test(_Config) ->
     %% We're stopping the test server to make sure we don't try to deliver
     %% multiple times for a connection we cannot make or has gone down.
     %% Also, resetting the mock to make sure route is called once.
-
-    % true = erlang:exit(RouterServerPid, kill),
     ok = grpcbox_services_simple_sup:terminate_child(ListenOpts),
 
     %% Send another packet
