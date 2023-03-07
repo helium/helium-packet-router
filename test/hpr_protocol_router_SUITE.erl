@@ -160,12 +160,13 @@ downlink_test(_Config) ->
 
 server_crash_test(_Config) ->
     %% Startup Router server
-    {ok, RouterServerPid} = grpcbox:start_server(#{
+    ListenOpts = #{port => 8082, ip => {0, 0, 0, 0}},
+    {ok, _RouterServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [packet_router_pb],
             services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
         },
-        listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
+        listen_opts => ListenOpts
     }),
 
     %% Interceptor
@@ -206,7 +207,9 @@ server_crash_test(_Config) ->
     %% We're stopping the test server to make sure we don't try to deliver
     %% multiple times for a connection we cannot make or has gone down.
     %% Also, resetting the mock to make sure route is called once.
-    ok = gen_server:stop(RouterServerPid),
+
+    % true = erlang:exit(RouterServerPid, kill),
+    ok = grpcbox_services_simple_sup:terminate_child(ListenOpts),
 
     %% Send another packet
     ok = hpr_test_gateway:send_packet(GatewayPid, #{fcnt => 2}),
@@ -217,15 +220,17 @@ server_crash_test(_Config) ->
     end,
 
     %% Make sure the stream is gone, and we can't get another.
-    ?assertEqual(0, erlang:length(hpr_protocol_router:all_streams())),
-    ?assertEqual(
-        {error, {shutdown, econnrefused}},
-        hpr_protocol_router:get_stream(
-            hpr_test_gateway:pubkey_bin(GatewayPid),
-            hpr_route:lns(Route),
-            hpr_route:server(Route)
-        )
+    ok = test_utils:wait_until(
+        fun() ->
+            {error, {shutdown, econnrefused}} ==
+                hpr_protocol_router:get_stream(
+                    hpr_test_gateway:pubkey_bin(GatewayPid),
+                    hpr_route:lns(Route),
+                    hpr_route:server(Route)
+                )
+        end
     ),
+    ?assertEqual(0, erlang:length(hpr_protocol_router:all_streams())),
     ok.
 
 %% ===================================================================

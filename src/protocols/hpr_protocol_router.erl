@@ -118,24 +118,11 @@ all_streams() ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-basic_test_() ->
-    [
-        {foreach, fun per_testcase_setup/0, fun per_testcase_cleanup/1, [
-            ?_test(test_send())
-        ]}
-    ].
-
-per_testcase_setup() ->
+% send/3: happy path
+send_test() ->
     ?MODULE:init(),
     meck:new(grpcbox_client),
-    ok.
 
-per_testcase_cleanup(ok) ->
-    true = ets:delete(?STREAM_ETS),
-    meck:unload(grpcbox_client).
-
-% send/3: happy path
-test_send() ->
     PubKeyBin = <<"PubKeyBin">>,
     HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
     EnvUp = hpr_envelope_up:new(HprPacketUp),
@@ -155,13 +142,17 @@ test_send() ->
         max_copies => 1,
         nonce => 1
     }),
+    FakeStream = #{channel => self(), stream_pid => self()},
 
-    true = ets:insert(?STREAM_ETS, {{PubKeyBin, hpr_route:lns(Route)}, fake_stream}),
-    meck:expect(grpcbox_client, send, [fake_stream, EnvUp], ok),
+    true = ets:insert(?STREAM_ETS, {{PubKeyBin, hpr_route:lns(Route)}, FakeStream}),
+    meck:expect(grpcbox_client, send, [FakeStream, EnvUp], ok),
 
     ResponseValue = send(HprPacketUp, Route),
 
     ?assertEqual(ok, ResponseValue),
-    ?assertEqual(1, meck:num_calls(grpcbox_client, send, 2)).
+    ?assertEqual(1, meck:num_calls(grpcbox_client, send, 2)),
+
+    true = ets:delete(?STREAM_ETS),
+    meck:unload(grpcbox_client).
 
 -endif.
