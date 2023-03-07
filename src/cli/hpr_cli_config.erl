@@ -93,7 +93,6 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
     %% - DevAddr Ranges
     %% --- Start -> End
     %% --- Start -> End
-    %% - EUI Count :: 2
     %% - EUI Count :: 2  (AppEUI, DevEUI)
     %% --- (010203040506070809, 010203040506070809)
     %% --- (0A0B0C0D0E0F0G0102, 0A0B0C0D0E0F0G0102)
