@@ -119,6 +119,13 @@ handle_info({trailers, _StreamID, Trailers}, State) ->
                 "Make sure you're pointing at the right server."
             ),
             {noreply, State#state{stream = undefined}};
+        {<<"7">>, _, _} ->
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            lager:error("UNAUTHORIZED, make sure HPR key is in config service db, sleeping ~wms", [
+                Delay
+            ]),
+            _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
+            {noreply, State#state{stream = undefined, conn_backoff = Backoff1}};
         _ ->
             {noreply, State}
     end;
