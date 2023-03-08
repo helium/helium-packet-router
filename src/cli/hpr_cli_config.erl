@@ -33,10 +33,11 @@ config_usage() ->
         ["config"],
         [
             "\n\n",
-            "config ls             - List\n",
-            "config oui <oui>      - Info for OUI\n",
+            "config ls                                   - List\n",
+            "config oui <oui>                            - Info for OUI\n",
             "    [--display_euis] default: false (EUIs not included)\n",
-            "config skf <devaddr>  - List all Session Key Filters for Devaddr\n"
+            "config skf <devaddr>                        - List all Session Key Filters for Devaddr\n",
+            "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
         ]
     ].
 
@@ -49,7 +50,22 @@ config_cmd() ->
             [{display_euis, [{longname, "display_euis"}, {datatype, boolean}]}],
             fun config_oui_list/3
         ],
-        [["config", "skf", '*'], [], [], fun config_skf/3]
+        [["config", "skf", '*'], [], [], fun config_skf/3],
+        [
+            ["config", "eui"],
+            [],
+            [
+                {app_eui, [
+                    {shortname, "a"},
+                    {longname, "app"}
+                ]},
+                {dev_eui, [
+                    {shortname, "d"},
+                    {longname, "dev"}
+                ]}
+            ],
+            fun config_eui/3
+        ]
     ].
 
 config_list(["config", "ls"], [], []) ->
@@ -169,6 +185,43 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
     end;
 config_skf(_, _, _) ->
     usage.
+
+config_eui(["config", "eui"], [], Flags) ->
+    case maps:from_list(Flags) of
+        #{app_eui := AppEUI, dev_eui := DevEUI} -> do_config_eui(AppEUI, DevEUI);
+        _ -> usage
+    end;
+config_eui(_, _, _) ->
+    usage.
+
+do_config_eui(AppEUI, DevEUI) ->
+    AppEUINum = erlang:list_to_integer(AppEUI, 16),
+    DevEUINum = erlang:list_to_integer(DevEUI, 16),
+
+    Found = hpr_route_ets:lookup_eui_pair(AppEUINum, DevEUINum),
+
+    %% ======================================================
+    %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
+    %% - Dev EUI :: D52B4AD7C7D613C5 (15360453244708328389)
+    %% - Routes  :: 1 (OUI, Route ID)
+    %%   -- (60, "7c3071f8-b4ae-11ed-becd-7f254cab7af3")
+    %%
+
+    Spacer = [io_lib:format("========================================================~n", [])],
+    Info = [
+        io_lib:format("- App EUI :: ~p (~p)~n", [AppEUI, AppEUINum]),
+        io_lib:format("- Dev EUI :: ~p (~p)~n", [DevEUI, DevEUINum]),
+        io_lib:format("- Routes  :: ~p (OUI, Route ID)~n", [erlang:length(Found)])
+    ],
+
+    Routes = lists:map(
+        fun(Route) ->
+            io_lib:format("  -- (~p, ~p)~n", [hpr_route:oui(Route), hpr_route:id(Route)])
+        end,
+        Found
+    ),
+
+    c_list(Spacer ++ Info ++ Routes).
 
 %%--------------------------------------------------------------------
 %% Helpers
