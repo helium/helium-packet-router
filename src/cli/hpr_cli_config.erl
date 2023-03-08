@@ -33,43 +33,68 @@ config_usage() ->
         ["config"],
         [
             "\n\n",
-            "config ls        - list\n",
-            "config oui <oui> - info for OUI\n"
+            "config ls                                   - List\n",
+            "config oui <oui>                            - Info for OUI\n",
+            "    [--display_euis] default: false (EUIs not included)\n",
+            "config skf <devaddr>                        - List all Session Key Filters for Devaddr\n",
+            "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
         ]
     ].
 
 config_cmd() ->
     [
         [["config", "ls"], [], [], fun config_list/3],
-        [["config", "oui", '*'], [], [], fun config_oui_list/3]
+        [
+            ["config", "oui", '*'],
+            [],
+            [{display_euis, [{longname, "display_euis"}, {datatype, boolean}]}],
+            fun config_oui_list/3
+        ],
+        [["config", "skf", '*'], [], [], fun config_skf/3],
+        [
+            ["config", "eui"],
+            [],
+            [
+                {app_eui, [
+                    {shortname, "a"},
+                    {longname, "app"}
+                ]},
+                {dev_eui, [
+                    {shortname, "d"},
+                    {longname, "dev"}
+                ]}
+            ],
+            fun config_eui/3
+        ]
     ].
 
 config_list(["config", "ls"], [], []) ->
-    Routes = hpr_route_ets:all_routes(),
-
-    %% | Net ID | OUI | Protocol     | Max Copies | Addr Range Cnt | EUI Cnt |
-    %% |--------+-----+--------------+------------+----------------+---------|
-    %% | 000001 |   1 | gwmp         |         15 |              4 |       4 |
-    %% | 000002 |   4 | http_roaming |        999 |              3 |       4 |
-
+    Routes = lists:sort(
+        fun(R1, R2) -> hpr_route:oui(R1) < hpr_route:oui(R2) end, hpr_route_ets:all_routes()
+    ),
+    %% | OUI | Net ID | Protocol     | Max Copies | Addr Range Cnt | EUI Cnt | Route ID                             |
+    %% |-----+--------+--------------+------------+----------------+---------+--------------------------------------|
+    %% |   1 | 000001 | gwmp         |         15 |              4 |       4 | b1eed652-b85c-11ed-8c9d-bfa0a604afc0 |
+    %% |   4 | 000002 | http_roaming |        999 |              3 |       4 | 91236f72-a98a-11ed-aacb-830d346922b8 |
     MkRow = fun(Route) ->
         Server = hpr_route:server(Route),
         [
-            {" ID ", hpr_route:id(Route)},
-            {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" OUI ", hpr_route:oui(Route)},
+            {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" Protocol ", hpr_route:protocol_type(Server)},
             {" Max Copies ", hpr_route:max_copies(Route)},
             {" Addr Range Cnt ",
                 erlang:length(hpr_route_ets:devaddr_ranges_for_route(hpr_route:id(Route)))},
-            {" EUI Cnt ", erlang:length(hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)))}
+            {" EUI Cnt ", erlang:length(hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)))},
+            {" Route ID ", hpr_route:id(Route)}
         ]
     end,
     c_table(lists:map(MkRow, Routes));
 config_list(_, _, _) ->
     usage.
 
-config_oui_list(["config", "oui", OUIString], [], []) ->
+config_oui_list(["config", "oui", OUIString], [], Flags) ->
+    Options = maps:from_list(Flags),
     OUI = erlang:list_to_integer(OUIString),
     Routes = hpr_route_ets:oui_routes(OUI),
 
@@ -84,7 +109,7 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
     %% - DevAddr Ranges
     %% --- Start -> End
     %% --- Start -> End
-    %% - EUI Cnt (AppEUI, DevEUI)
+    %% - EUI Count :: 2  (AppEUI, DevEUI)
     %% --- (010203040506070809, 010203040506070809)
     %% --- (0A0B0C0D0E0F0G0102, 0A0B0C0D0E0F0G0102)
 
@@ -92,7 +117,6 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
     Spacer = io_lib:format("========================================================~n", []),
 
     DevAddrHeader = io_lib:format("- DevAddr Ranges~n", []),
-    EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI)~n", []),
 
     FormatDevAddr = fun({S, E}) ->
         io_lib:format("  - ~s -> ~s~n", [hpr_utils:int_to_hex(S), hpr_utils:int_to_hex(E)])
@@ -110,8 +134,15 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
         ),
         DevAddrInfo = [DevAddrHeader | DevAddrRanges],
 
-        EUIs = lists:map(FormatEUI, hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route))),
-        EUIInfo = [EUIHeader | EUIs],
+        EUIs = hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)),
+        EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [erlang:length(EUIs)]),
+        EUIInfo =
+            case maps:is_key(display_euis, Options) of
+                false ->
+                    [EUIHeader];
+                true ->
+                    [EUIHeader | lists:map(FormatEUI, EUIs)]
+            end,
 
         Info = [
             io_lib:format("- ID         :: ~s~n", [hpr_route:id(Route)]),
@@ -136,6 +167,62 @@ config_oui_list(["config", "oui", OUIString], [], []) ->
 config_oui_list(_, _, _) ->
     usage.
 
+config_skf(["config", "skf", DevAddrString], [], []) ->
+    <<DevAddr:32/integer-unsigned-little>> = hpr_utils:hex_to_bin(
+        erlang:list_to_binary(DevAddrString)
+    ),
+    case hpr_skf_ets:lookup_devaddr(DevAddr) of
+        {error, _} ->
+            c_text("No SKF found");
+        {ok, SKFs} ->
+            MkRow = fun(SKF) ->
+                [
+                    {" Session Key ", hpr_utils:bin_to_hex(SKF)},
+                    {" DevAddr ", DevAddrString}
+                ]
+            end,
+            c_table(lists:map(MkRow, SKFs))
+    end;
+config_skf(_, _, _) ->
+    usage.
+
+config_eui(["config", "eui"], [], Flags) ->
+    case maps:from_list(Flags) of
+        #{app_eui := AppEUI, dev_eui := DevEUI} -> do_config_eui(AppEUI, DevEUI);
+        _ -> usage
+    end;
+config_eui(_, _, _) ->
+    usage.
+
+do_config_eui(AppEUI, DevEUI) ->
+    AppEUINum = erlang:list_to_integer(AppEUI, 16),
+    DevEUINum = erlang:list_to_integer(DevEUI, 16),
+
+    Found = hpr_route_ets:lookup_eui_pair(AppEUINum, DevEUINum),
+
+    %% ======================================================
+    %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
+    %% - Dev EUI :: D52B4AD7C7D613C5 (15360453244708328389)
+    %% - Routes  :: 1 (OUI, Route ID)
+    %%   -- (60, "7c3071f8-b4ae-11ed-becd-7f254cab7af3")
+    %%
+
+    Spacer = [io_lib:format("========================================================~n", [])],
+    Info = [
+        io_lib:format("- App EUI :: ~p (~p)~n", [AppEUI, AppEUINum]),
+        io_lib:format("- Dev EUI :: ~p (~p)~n", [DevEUI, DevEUINum]),
+        io_lib:format("- Routes  :: ~p (OUI, Route ID)~n", [erlang:length(Found)])
+    ],
+
+    Routes = lists:map(
+        fun(Route) ->
+            io_lib:format("  -- (~p, ~p)~n", [hpr_route:oui(Route), hpr_route:id(Route)])
+        end,
+        Found
+    ),
+
+    c_list(Spacer ++ Info ++ Routes).
+
 %%--------------------------------------------------------------------
 %% Helpers
 %%--------------------------------------------------------------------
@@ -145,3 +232,6 @@ c_table(PropLists) -> [clique_status:table(PropLists)].
 
 -spec c_list(list(string())) -> clique_status:status().
 c_list(L) -> [clique_status:list(L)].
+
+-spec c_text(string()) -> clique_status:status().
+c_text(T) -> [clique_status:text([T])].
