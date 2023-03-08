@@ -106,7 +106,7 @@ handle_info({data, _StreamID, SKFStreamRes}, State) ->
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
     {noreply, State};
-handle_info({trailers, _StreamID, Trailers}, State) ->
+handle_info({trailers, _StreamID, Trailers}, #state{conn_backoff = Backoff0} = State) ->
     %% IF a stream is closed by the server side, Trailers will be
     %% received before the EOS. Removing the stream from state will
     %% mean none of the other clauses match, and reconnecting will not
