@@ -46,10 +46,14 @@ handle_packet(Packet) ->
                     hpr_metrics:observe_packet_up(PacketType, ok, 0, Start),
                     ok;
                 Routes ->
+                    Routed = maybe_deliver_packet(Packet, Routes, 0),
                     N = erlang:length(Routes),
-                    lager:debug([{routes, N}], "maybe deliver packet to ~w routes", [N]),
-                    ok = maybe_deliver_packet(Packet, Routes),
-                    hpr_metrics:observe_packet_up(PacketType, ok, N, Start),
+                    lager:debug(
+                        [{routes, N}, {routed, Routed}],
+                        "~w routes and delivered to ~w routes",
+                        [N, Routed]
+                    ),
+                    hpr_metrics:observe_packet_up(PacketType, ok, Routed, Start),
                     ok
             end
     end.
@@ -83,16 +87,17 @@ maybe_deliver_no_routes(Packet) ->
 
 -spec maybe_deliver_packet(
     Packet :: hpr_packet_up:packet(),
-    Routes :: [hpr_route:route()]
-) -> ok.
-maybe_deliver_packet(_Packet, []) ->
-    ok;
-maybe_deliver_packet(Packet, [Route | Routes]) ->
+    Routes :: [hpr_route:route()],
+    Routed :: non_neg_integer()
+) -> non_neg_integer().
+maybe_deliver_packet(_Packet, [], Routed) ->
+    Routed;
+maybe_deliver_packet(Packet, [Route | Routes], Routed) ->
     RouteMD = hpr_route:md(Route),
     case hpr_route:active(Route) andalso hpr_route:locked(Route) == false of
         false ->
             lager:debug(RouteMD, "not sending, route locked or inactive"),
-            maybe_deliver_packet(Packet, Routes);
+            maybe_deliver_packet(Packet, Routes, Routed);
         true ->
             Server = hpr_route:server(Route),
             Protocol = hpr_route:protocol(Server),
@@ -101,7 +106,8 @@ maybe_deliver_packet(Packet, [Route | Routes]) ->
             >>),
             case hpr_max_copies:update_counter(Key, hpr_route:max_copies(Route)) of
                 {error, Reason} ->
-                    lager:debug(RouteMD, "not sending ~p", [Reason]);
+                    lager:debug(RouteMD, "not sending ~p", [Reason]),
+                    maybe_deliver_packet(Packet, Routes, Routed);
                 ok ->
                     case deliver_packet(Protocol, Packet, Route) of
                         ok ->
@@ -110,12 +116,12 @@ maybe_deliver_packet(Packet, [Route | Routes]) ->
                             ok = hpr_packet_reporter:report_packet(Packet, Route),
                             {Type, _} = hpr_packet_up:type(Packet),
                             ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
-                            ok;
+                            maybe_deliver_packet(Packet, Routes, Routed + 1);
                         {error, Reason} ->
-                            lager:warning(RouteMD, "error ~p", [Reason])
+                            lager:warning(RouteMD, "error ~p", [Reason]),
+                            maybe_deliver_packet(Packet, Routes, Routed)
                     end
-            end,
-            maybe_deliver_packet(Packet, Routes)
+            end
     end.
 
 -spec deliver_packet(
