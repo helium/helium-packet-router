@@ -74,6 +74,7 @@ handle_info(?METRICS_TICK, State) ->
         fun() ->
             ok = record_grpc_connections(),
             ok = record_routes(),
+            ok = record_eui_pairs(),
             ok = record_skfs(),
             ok = record_ets(),
             ok = record_queues()
@@ -134,6 +135,16 @@ record_routes() ->
             _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], 0);
         N ->
             _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], N)
+    end,
+    ok.
+
+-spec record_eui_pairs() -> ok.
+record_eui_pairs() ->
+    case ets:info(hpr_route_ets_eui_pairs, size) of
+        undefined ->
+            _ = prometheus_gauge:set(?METRICS_EUI_PAIRS_GAUGE, [], 0);
+        N ->
+            _ = prometheus_gauge:set(?METRICS_EUI_PAIRS_GAUGE, [], N)
     end,
     ok.
 
