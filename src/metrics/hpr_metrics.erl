@@ -37,7 +37,7 @@ start_link(Args) ->
 
 -spec observe_packet_up(
     PacketType :: hpr_packet_up:type(),
-    Status :: hpr_routing:hpr_routing_response(),
+    RoutingStatus :: hpr_routing:hpr_routing_response(),
     NumberOfRoutes :: non_neg_integer(),
     Start :: non_neg_integer()
 ) -> ok.
@@ -45,7 +45,7 @@ observe_packet_up({Type, _}, RoutingStatus, NumberOfRoutes, Start) ->
     Status =
         case RoutingStatus of
             ok -> ok;
-            {error, _} -> error
+            {error, Reason} -> Reason
         end,
     prometheus_histogram:observe(
         ?METRICS_PACKET_UP_HISTOGRAM,

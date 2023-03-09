@@ -10,7 +10,8 @@
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
--type hpr_routing_response() :: ok | {error, any()}.
+-type hpr_routing_response() ::
+    ok | {error, gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic}.
 
 -export_type([hpr_routing_response/0]).
 
