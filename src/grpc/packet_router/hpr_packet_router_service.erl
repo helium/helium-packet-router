@@ -50,7 +50,7 @@ route(EnvUp, StreamState) ->
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({packet_down, PacketDown}, StreamState) ->
-    lager:debug("received packet_down"),
+    lager:info("received packet_down"),
     EnvDown = hpr_envelope_down:new(PacketDown),
     grpcbox_stream:send(false, EnvDown, StreamState);
 handle_info(_Msg, StreamState) ->
