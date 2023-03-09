@@ -73,6 +73,7 @@ handle_info(?METRICS_TICK, State) ->
     _ = erlang:spawn(
         fun() ->
             ok = record_grpc_connections(),
+            ok = record_routes(),
             ok = record_ets(),
             ok = record_queues()
         end
@@ -124,6 +125,16 @@ declare_metrics() ->
         end,
         ?METRICS
     ).
+
+-spec record_routes() -> ok.
+record_routes() ->
+    case ets:info(hpr_route_ets_routes, size) of
+        undefined ->
+            _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], 0);
+        N ->
+            _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], N)
+    end,
+    ok.
 
 -spec record_grpc_connections() -> ok.
 record_grpc_connections() ->
