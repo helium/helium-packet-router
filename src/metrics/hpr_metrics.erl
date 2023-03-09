@@ -74,6 +74,7 @@ handle_info(?METRICS_TICK, State) ->
         fun() ->
             ok = record_grpc_connections(),
             ok = record_routes(),
+            ok = record_skfs(),
             ok = record_ets(),
             ok = record_queues()
         end
@@ -133,6 +134,16 @@ record_routes() ->
             _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], 0);
         N ->
             _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], N)
+    end,
+    ok.
+
+-spec record_skfs() -> ok.
+record_skfs() ->
+    case ets:info(hpr_skf_ets, size) of
+        undefined ->
+            _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], 0);
+        N ->
+            _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], N)
     end,
     ok.
 
