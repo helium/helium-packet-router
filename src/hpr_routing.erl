@@ -108,6 +108,8 @@ maybe_deliver_packet(Packet, [Route | Routes]) ->
                             %% Leave me at info, used by stats
                             lager:info(RouteMD, "delivered"),
                             ok = hpr_packet_reporter:report_packet(Packet, Route),
+                            {Type, _} = hpr_packet_up:type(Packet),
+                            ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
                             ok;
                         {error, Reason} ->
                             lager:warning(RouteMD, "error ~p", [Reason])

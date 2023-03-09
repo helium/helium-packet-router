@@ -9,7 +9,8 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    observe_packet_up/4
+    observe_packet_up/4,
+    packet_up_per_oui/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -52,6 +53,14 @@ observe_packet_up({Type, _}, RoutingStatus, NumberOfRoutes, Start) ->
         [Type, Status, NumberOfRoutes],
         erlang:system_time(millisecond) - Start
     ).
+
+-spec packet_up_per_oui(
+    Type :: join_req | uplink | undefined,
+    OUI :: non_neg_integer()
+) -> ok.
+packet_up_per_oui(Type, OUI) ->
+    _ = prometheus_counter:inc(?METRICS_PACKET_UP_PER_OUI_COUNTER, [Type, OUI]),
+    ok.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
