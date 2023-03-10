@@ -50,8 +50,9 @@ route(EnvUp, StreamState) ->
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({packet_down, PacketDown}, StreamState) ->
-    lager:info("received packet_down"),
+    lager:debug("received packet_down"),
     EnvDown = hpr_envelope_down:new(PacketDown),
+    _ = hpr_metrics:packet_down(ok),
     grpcbox_stream:send(false, EnvDown, StreamState);
 handle_info(_Msg, StreamState) ->
     StreamState.
@@ -67,6 +68,7 @@ send_packet_down(PubKeyBin, PacketDown) ->
             ok;
         {error, not_found} = Err ->
             lager:warning("failed to send PacketDown to stream: not_found"),
+            _ = hpr_metrics:packet_down(not_found),
             Err
     end.
 
@@ -81,8 +83,8 @@ locate(PubKeyBin) ->
 
 -spec register(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
 register(PubKeyBin) ->
-    lager:info("register"),
     true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
+    lager:info("register"),
     ok.
 
 %% ------------------------------------------------------------------

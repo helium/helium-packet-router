@@ -10,7 +10,8 @@
 -export([
     start_link/1,
     observe_packet_up/4,
-    packet_up_per_oui/2
+    packet_up_per_oui/2,
+    packet_down/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -60,6 +61,13 @@ observe_packet_up({Type, _}, RoutingStatus, NumberOfRoutes, Start) ->
 ) -> ok.
 packet_up_per_oui(Type, OUI) ->
     _ = prometheus_counter:inc(?METRICS_PACKET_UP_PER_OUI_COUNTER, [Type, OUI]),
+    ok.
+
+-spec packet_down(
+    Status :: ok | not_found
+) -> ok.
+packet_down(Status) ->
+    _ = prometheus_counter:inc(?METRICS_PACKET_DOWN_COUNTER, [Status]),
     ok.
 
 %% ------------------------------------------------------------------
