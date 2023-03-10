@@ -804,10 +804,8 @@ http_class_c_downlink_test(_Config) ->
     %% 7. gateway receive downlink
     ok = gateway_expect_downlink(fun(PacketDown) ->
         ?assertEqual(DownlinkPayload, hpr_packet_down:payload(PacketDown)),
-        ?assertEqual(
-            immediate,
-            hpr_packet_down:rx1_timestamp(PacketDown)
-        ),
+        ?assertEqual(0, hpr_packet_down:rx1_timestamp(PacketDown)),
+        ?assert(hpr_packet_down:is_immediate(PacketDown)),
         ?assertEqual(DownlinkFreq, hpr_packet_down:rx1_frequency(PacketDown) / 1000000),
         ?assertEqual(DownlinkDatr, hpr_packet_down:rx1_datarate(PacketDown)),
         ok

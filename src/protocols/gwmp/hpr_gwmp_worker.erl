@@ -232,17 +232,22 @@ txpk_to_packet_down(TxPkBin) ->
     TxPk = semtech_udp:json_data(TxPkBin),
     Map = maps:get(<<"txpk">>, TxPk),
     JSONData0 = base64:decode(maps:get(<<"data">>, Map)),
-    Timestamp =
-        case maps:get(<<"imme">>, Map, false) of
-            false -> maps:get(<<"tmst">>, Map);
-            true -> 0
-        end,
-    hpr_packet_down:new_downlink(
-        JSONData0,
-        Timestamp,
-        erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
-        erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
-    ).
+
+    case maps:get(<<"imme">>, Map, false) of
+        false ->
+            hpr_packet_down:new_downlink(
+                JSONData0,
+                maps:get(<<"tmst">>, Map),
+                erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
+                erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
+            );
+        true ->
+            hpr_packet_down:new_imme_downlink(
+                JSONData0,
+                erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
+                erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
+            )
+    end.
 
 -spec handle_udp(
     Data :: binary(),

@@ -339,22 +339,25 @@ handle_xmitdata_req(#{
                     N when N < 2 -> 1;
                     N -> N
                 end,
-            Timeout =
+
+            DownlinkPacket =
                 case DeviceClass of
                     <<"C">> ->
-                        immediate;
+                        hpr_packet_down:new_imme_downlink(
+                            hpr_http_roaming_utils:hexstring_to_binary(Payload),
+                            FrequencyMhz * 1000000,
+                            DataRate
+                        );
                     <<"A">> ->
-                        hpr_http_roaming_utils:uint32(
-                            PacketTime + (Delay1 * ?RX1_DELAY) + ?RX1_DELAY
+                        Timeout = PacketTime + (Delay1 * ?RX1_DELAY) + ?RX1_DELAY,
+                        hpr_packet_down:new_downlink(
+                            hpr_http_roaming_utils:hexstring_to_binary(Payload),
+                            hpr_http_roaming_utils:uint32(Timeout),
+                            FrequencyMhz * 1000000,
+                            DataRate,
+                            undefined
                         )
                 end,
-            DownlinkPacket = hpr_packet_down:new_downlink(
-                hpr_http_roaming_utils:hexstring_to_binary(Payload),
-                Timeout,
-                FrequencyMhz * 1000000,
-                DataRate,
-                undefined
-            ),
             {downlink, PayloadResponse, {PubKeyBin, DownlinkPacket}, {DestURL, FlowType}}
     end.
 

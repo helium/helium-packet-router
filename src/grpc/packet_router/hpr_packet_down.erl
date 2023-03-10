@@ -10,7 +10,9 @@
     rx1_timestamp/1,
     rx1_datarate/1,
     rx2_datarate/1,
+    is_immediate/1,
     window/3,
+    new_imme_downlink/3,
     new_downlink/4,
     new_downlink/5
 ]).
@@ -49,6 +51,10 @@ rx1_datarate(PacketDown) ->
 rx2_datarate(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.datarate.
 
+-spec is_immediate(PacketDown :: packet()) -> boolean().
+is_immediate(PacketDown) ->
+    PacketDown#packet_router_packet_down_v1_pb.rx1#window_v1_pb.immediate.
+
 -spec window
     (undefined) -> undefined;
     (packet_router_pb:window_v1_pb()) -> packet_router_pb:window_v1_pb();
@@ -62,7 +68,8 @@ window(WindowMap) when erlang:is_map(WindowMap) ->
     #window_v1_pb{
         timestamp = maps:get(timestamp, WindowMap, Template#window_v1_pb.timestamp),
         frequency = maps:get(frequency, WindowMap, Template#window_v1_pb.frequency),
-        datarate = maps:get(datarate, WindowMap, Template#window_v1_pb.datarate)
+        datarate = maps:get(datarate, WindowMap, Template#window_v1_pb.datarate),
+        immediate = maps:get(immediate, WindowMap, Template#window_v1_pb.immediate)
     }.
 
 -spec window(non_neg_integer(), 'undefined' | non_neg_integer(), atom()) ->
@@ -73,7 +80,25 @@ window(TS, FrequencyHz, DataRate) ->
         %% Protobuf encoding requires that the frequency is an integer, rather
         %% than a float in exponential notation
         frequency = round(FrequencyHz),
-        datarate = DataRate
+        datarate = DataRate,
+        immediate = false
+    }.
+
+-spec new_imme_downlink(
+    Payload :: binary(),
+    FrequencyHz :: non_neg_integer(),
+    DataRate :: atom() | number()
+) -> downlink_packet().
+new_imme_downlink(Payload, FrequencyHz, DataRate) ->
+    #packet_router_packet_down_v1_pb{
+        payload = Payload,
+        rx1 = #window_v1_pb{
+            timestamp = 0,
+            frequency = round(FrequencyHz),
+            datarate = DataRate,
+            immediate = true
+        },
+        rx2 = undefined
     }.
 
 -spec new_downlink(
@@ -176,8 +201,8 @@ encoding_test() ->
             {packet_router_packet_down_v1_pb,
                 <<32, 120, 27, 32, 121, 54, 203, 110, 31, 45, 232, 6, 197, 16, 15, 132, 203, 12,
                     255, 166, 46, 81, 160, 71, 139, 27, 16, 13, 91, 244, 192, 244, 69>>,
-                {window_v1_pb, 3188801119, 9.257e8, 'SF10BW500'},
-                {window_v1_pb, 3189801119, 9.233e8, 'SF12BW500'}}
+                {window_v1_pb, 3188801119, 9.257e8, 'SF10BW500', false},
+                {window_v1_pb, 3189801119, 9.233e8, 'SF12BW500', false}}
         )
     ).
 
