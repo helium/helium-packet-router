@@ -26,7 +26,7 @@ insert(SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
     true = ets:insert(?ETS, {DevAddr, SessionKey}),
-    lager:info(
+    lager:debug(
         [
             {devaddr, hpr_utils:int_to_hex(DevAddr)},
             {session_key, hpr_utils:bin_to_hex(SessionKey)}
@@ -40,7 +40,7 @@ delete(SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
     true = ets:delete_object(?ETS, {DevAddr, SessionKey}),
-    lager:info(
+    lager:debug(
         [
             {devaddr, hpr_utils:int_to_hex(DevAddr)},
             {session_key, hpr_utils:bin_to_hex(SessionKey)}

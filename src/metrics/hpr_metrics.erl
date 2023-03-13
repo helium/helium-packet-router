@@ -9,7 +9,9 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    observe_packet_up/4
+    observe_packet_up/4,
+    packet_up_per_oui/2,
+    packet_down/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -37,7 +39,7 @@ start_link(Args) ->
 
 -spec observe_packet_up(
     PacketType :: hpr_packet_up:type(),
-    Status :: hpr_routing:hpr_routing_response(),
+    RoutingStatus :: hpr_routing:hpr_routing_response(),
     NumberOfRoutes :: non_neg_integer(),
     Start :: non_neg_integer()
 ) -> ok.
@@ -45,13 +47,28 @@ observe_packet_up({Type, _}, RoutingStatus, NumberOfRoutes, Start) ->
     Status =
         case RoutingStatus of
             ok -> ok;
-            {error, _} -> error
+            {error, Reason} -> Reason
         end,
     prometheus_histogram:observe(
         ?METRICS_PACKET_UP_HISTOGRAM,
         [Type, Status, NumberOfRoutes],
         erlang:system_time(millisecond) - Start
     ).
+
+-spec packet_up_per_oui(
+    Type :: join_req | uplink | undefined,
+    OUI :: non_neg_integer()
+) -> ok.
+packet_up_per_oui(Type, OUI) ->
+    _ = prometheus_counter:inc(?METRICS_PACKET_UP_PER_OUI_COUNTER, [Type, OUI]),
+    ok.
+
+-spec packet_down(
+    Status :: ok | not_found
+) -> ok.
+packet_down(Status) ->
+    _ = prometheus_counter:inc(?METRICS_PACKET_DOWN_COUNTER, [Status]),
+    ok.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -73,6 +90,9 @@ handle_info(?METRICS_TICK, State) ->
     _ = erlang:spawn(
         fun() ->
             ok = record_grpc_connections(),
+            ok = record_routes(),
+            ok = record_eui_pairs(),
+            ok = record_skfs(),
             ok = record_ets(),
             ok = record_queues()
         end
@@ -124,6 +144,36 @@ declare_metrics() ->
         end,
         ?METRICS
     ).
+
+-spec record_routes() -> ok.
+record_routes() ->
+    case ets:info(hpr_route_ets_routes, size) of
+        undefined ->
+            _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], 0);
+        N ->
+            _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], N)
+    end,
+    ok.
+
+-spec record_eui_pairs() -> ok.
+record_eui_pairs() ->
+    case ets:info(hpr_route_ets_eui_pairs, size) of
+        undefined ->
+            _ = prometheus_gauge:set(?METRICS_EUI_PAIRS_GAUGE, [], 0);
+        N ->
+            _ = prometheus_gauge:set(?METRICS_EUI_PAIRS_GAUGE, [], N)
+    end,
+    ok.
+
+-spec record_skfs() -> ok.
+record_skfs() ->
+    case ets:info(hpr_skf_ets, size) of
+        undefined ->
+            _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], 0);
+        N ->
+            _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], N)
+    end,
+    ok.
 
 -spec record_grpc_connections() -> ok.
 record_grpc_connections() ->

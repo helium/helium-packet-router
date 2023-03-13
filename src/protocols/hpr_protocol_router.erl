@@ -72,10 +72,18 @@ get_stream(Gateway, LNS, Server) ->
                     %% No connection
                     Host = hpr_route:host(Server),
                     Port = hpr_route:port(Server),
-                    {ok, _Conn} = grpcbox_client:connect(LNS, [{http, Host, Port, []}], #{
-                        sync_start => true
-                    }),
-                    get_stream(Gateway, LNS, Server);
+                    case
+                        grpcbox_client:connect(LNS, [{http, Host, Port, []}], #{
+                            sync_start => true
+                        })
+                    of
+                        {ok, _Conn, _} ->
+                            get_stream(Gateway, LNS, Server);
+                        {ok, _Conn} ->
+                            get_stream(Gateway, LNS, Server);
+                        {error, _} = Error ->
+                            Error
+                    end;
                 {ok, {_Conn, _Interceptor}} ->
                     case
                         helium_packet_router_packet_client:route(#{

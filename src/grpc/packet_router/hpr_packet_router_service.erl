@@ -52,6 +52,7 @@ route(EnvUp, StreamState) ->
 handle_info({packet_down, PacketDown}, StreamState) ->
     lager:debug("received packet_down"),
     EnvDown = hpr_envelope_down:new(PacketDown),
+    _ = hpr_metrics:packet_down(ok),
     grpcbox_stream:send(false, EnvDown, StreamState);
 handle_info(_Msg, StreamState) ->
     StreamState.
@@ -67,6 +68,7 @@ send_packet_down(PubKeyBin, PacketDown) ->
             ok;
         {error, not_found} = Err ->
             lager:warning("failed to send PacketDown to stream: not_found"),
+            _ = hpr_metrics:packet_down(not_found),
             Err
     end.
 
@@ -81,8 +83,8 @@ locate(PubKeyBin) ->
 
 -spec register(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
 register(PubKeyBin) ->
-    lager:info("register"),
     true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
+    lager:info("register"),
     ok.
 
 %% ------------------------------------------------------------------
@@ -139,15 +141,22 @@ handle_info_test() ->
     EnvDown = hpr_envelope_down:new(PacketDown),
     meck:expect(grpcbox_stream, send, [false, EnvDown, stream_state], stream_state),
 
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
+
     ?assertEqual(stream_state, ?MODULE:handle_info({packet_down, PacketDown}, stream_state)),
     ?assertEqual(stream_state, ?MODULE:handle_info(msg, stream_state)),
     ?assertEqual(1, meck:num_calls(grpcbox_stream, send, 3)),
 
+    meck:unload(hpr_metrics),
     meck:unload(grpcbox_stream),
     ok.
 
 send_packet_down_test() ->
     application:ensure_all_started(gproc),
+
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
 
     #{public := PubKey0} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin0 = libp2p_crypto:pubkey_to_bin(PubKey0),
@@ -186,6 +195,7 @@ send_packet_down_test() ->
     timer:sleep(10),
     ?assertEqual({error, not_found}, ?MODULE:send_packet_down(PubKeyBin1, PacketDown)),
 
+    meck:unload(hpr_metrics),
     application:stop(gproc),
     ok.
 
