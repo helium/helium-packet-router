@@ -141,15 +141,22 @@ handle_info_test() ->
     EnvDown = hpr_envelope_down:new(PacketDown),
     meck:expect(grpcbox_stream, send, [false, EnvDown, stream_state], stream_state),
 
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
+
     ?assertEqual(stream_state, ?MODULE:handle_info({packet_down, PacketDown}, stream_state)),
     ?assertEqual(stream_state, ?MODULE:handle_info(msg, stream_state)),
     ?assertEqual(1, meck:num_calls(grpcbox_stream, send, 3)),
 
+    meck:unload(hpr_metrics),
     meck:unload(grpcbox_stream),
     ok.
 
 send_packet_down_test() ->
     application:ensure_all_started(gproc),
+
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
 
     #{public := PubKey0} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin0 = libp2p_crypto:pubkey_to_bin(PubKey0),
@@ -188,6 +195,7 @@ send_packet_down_test() ->
     timer:sleep(10),
     ?assertEqual({error, not_found}, ?MODULE:send_packet_down(PubKeyBin1, PacketDown)),
 
+    meck:unload(hpr_metrics),
     application:stop(gproc),
     ok.
 

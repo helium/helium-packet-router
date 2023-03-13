@@ -1,4 +1,8 @@
+-ifdef(TEST).
+-define(METRICS_TICK_INTERVAL, timer:seconds(1)).
+-else.
 -define(METRICS_TICK_INTERVAL, timer:seconds(10)).
+-endif.
 -define(METRICS_TICK, '_hpr_metrics_tick').
 
 -define(METRICS_GRPC_CONNECTION_GAUGE, "hpr_grpc_connection_gauge").
