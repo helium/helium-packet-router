@@ -9,10 +9,7 @@
         {iot_config_service, #{
             transport => "${HPR_IOT_CONFIG_TRANSPORT}",
             host => "${HPR_IOT_CONFIG_HOST}",
-            port => "${HPR_IOT_CONFIG_PORT}",
-            route => #{
-                file_backup_path => "/var/data/route_worker.backup"
-            }
+            port => "${HPR_IOT_CONFIG_PORT}"
         }},
         {http_roaming_downlink_port, 8090},
         {no_routes, [{"${HPR_PP_HOST_1}", 8080}, {"${HPR_PP_HOST_2}", 8080}]},

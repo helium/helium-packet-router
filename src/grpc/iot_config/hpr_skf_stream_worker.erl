@@ -101,7 +101,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
 %% GRPC stream callbacks
 handle_info({data, _StreamID, SKFStreamRes}, State) ->
     lager:debug("sfk update"),
-    ok = process_res(SKFStreamRes),
+    _ = erlang:spawn(fun() -> ok = process_res(SKFStreamRes) end),
     {noreply, State};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
