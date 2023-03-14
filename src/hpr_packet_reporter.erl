@@ -34,8 +34,8 @@
 -define(UPLOAD, upload).
 
 -record(state, {
-    aws_client_args :: map(),
     bucket :: binary(),
+    bucket_region :: binary(),
     report_max_size :: non_neg_integer(),
     report_interval :: non_neg_integer(),
     current_packets = [] :: [binary()],
@@ -45,14 +45,10 @@
 -type state() :: #state{}.
 
 -type packet_reporter_opts() :: #{
-    aws_key => binary(),
-    aws_secret => binary(),
-    aws_region => binary(),
     aws_bucket => binary(),
+    aws_bucket_region => binary(),
     report_interval => non_neg_integer(),
-    report_max_size => non_neg_integer(),
-    local_host => binary(),
-    local_port => binary()
+    report_max_size => non_neg_integer()
 }.
 
 %% ------------------------------------------------------------------
@@ -79,8 +75,8 @@ get_bucket(#state{bucket = Bucket}) ->
     Bucket.
 
 -spec get_client(state()) -> aws_client:aws_client().
-get_client(#state{aws_client_args = Args}) ->
-    setup_aws(Args).
+get_client(State) ->
+    setup_aws(State).
 
 -endif.
 
@@ -91,6 +87,7 @@ get_client(#state{aws_client_args = Args}) ->
 init(
     #{
         aws_bucket := Bucket,
+        aws_bucket_region := BucketRegion,
         report_max_size := MaxSize,
         report_interval := Interval
     } = Args
@@ -98,8 +95,8 @@ init(
     lager:info(maps:to_list(Args), "started"),
     ok = schedule_upload(Interval),
     {ok, #state{
-        aws_client_args = Args,
         bucket = Bucket,
+        bucket_region = BucketRegion,
         report_max_size = MaxSize,
         report_interval = Interval
     }}.
@@ -111,6 +108,7 @@ handle_cast(
     {report_packet, EncodedPacket},
     #state{report_max_size = MaxSize, current_packets = Packets, current_size = Size} = State
 ) when Size < MaxSize ->
+    lager:debug("got packet"),
     {noreply, State#state{
         current_packets = [EncodedPacket | Packets],
         current_size = erlang:size(EncodedPacket) + Size
@@ -149,23 +147,24 @@ encode_packet(Packet, PacketRoute) ->
     PacketSize = erlang:size(EncodedPacket),
     <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>.
 
--spec setup_aws(packet_reporter_opts()) -> aws_client:aws_client().
-setup_aws(#{
-    local_port := LocalPort,
-    local_host := LocalHost
+-spec setup_aws(state()) -> aws_client:aws_client().
+setup_aws(#state{
+    bucket_region = <<"local">>
 }) ->
     #{
         access_key_id := AccessKey,
         secret_access_key := Secret
-    } = aws_credentials:get_credentials(),
+    } = aws_credentials:force_credentials_refresh(),
+    {LocalHost, LocalPort} = get_local_host_port(),
     aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
-setup_aws(_Options) ->
+setup_aws(#state{
+    bucket_region = BucketRegion
+}) ->
     #{
         access_key_id := AccessKey,
-        secret_access_key := Secret,
-        region := Region
-    } = aws_credentials:get_credentials(),
-    aws_client:make_client(AccessKey, Secret, Region).
+        secret_access_key := Secret
+    } = aws_credentials:force_credentials_refresh(),
+    aws_client:make_client(AccessKey, Secret, BucketRegion).
 
 -spec upload(state()) -> state().
 upload(#state{current_packets = []} = State) ->
@@ -173,13 +172,13 @@ upload(#state{current_packets = []} = State) ->
     State;
 upload(
     #state{
-        aws_client_args = AWSClientArgs,
         bucket = Bucket,
         current_packets = Packets,
         current_size = Size
     } = State
 ) ->
-    AWSClient = setup_aws(AWSClientArgs),
+    StartTime = erlang:system_time(millisecond),
+    AWSClient = setup_aws(State),
 
     Timestamp = erlang:system_time(millisecond),
     FileName = erlang:list_to_binary("packetreport." ++ erlang:integer_to_list(Timestamp) ++ ".gz"),
@@ -205,9 +204,11 @@ upload(
     of
         {ok, _, _Response} ->
             lager:info(MD, "upload success"),
+            ok = hpr_metrics:observe_packet_report(ok, StartTime),
             State#state{current_packets = [], current_size = 0};
         _Error ->
             lager:error(MD, "upload failed ~p", [_Error]),
+            ok = hpr_metrics:observe_packet_report(ok, StartTime),
             State
     end.
 
@@ -215,3 +216,25 @@ upload(
 schedule_upload(Interval) ->
     _ = erlang:send_after(Interval, self(), ?UPLOAD),
     ok.
+
+-spec get_local_host_port() -> {binary(), binary()}.
+get_local_host_port() ->
+    get_local_host_port(
+        os:getenv("HPR_PACKET_REPORTER_LOCAL_HOST", []),
+        os:getenv("HPR_PACKET_REPORTER_LOCAL_PORT", [])
+    ).
+
+-spec get_local_host_port(Host :: string() | binary(), Port :: string() | binary()) ->
+    {binary(), binary()}.
+get_local_host_port([], []) ->
+    {<<"localhost">>, <<"4556">>};
+get_local_host_port([], Port) ->
+    get_local_host_port(<<"localhost">>, Port);
+get_local_host_port(Host, []) ->
+    get_local_host_port(Host, <<"4556">>);
+get_local_host_port(Host, Port) when is_list(Host) ->
+    get_local_host_port(erlang:list_to_binary(Host), Port);
+get_local_host_port(Host, Port) when is_list(Port) ->
+    get_local_host_port(Host, erlang:list_to_binary(Port));
+get_local_host_port(Host, Port) when is_binary(Host) andalso is_binary(Port) ->
+    {Host, Port}.

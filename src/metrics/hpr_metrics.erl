@@ -11,7 +11,8 @@
     start_link/1,
     observe_packet_up/4,
     packet_up_per_oui/2,
-    packet_down/1
+    packet_down/1,
+    observe_packet_report/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -69,6 +70,17 @@ packet_up_per_oui(Type, OUI) ->
 packet_down(Status) ->
     _ = prometheus_counter:inc(?METRICS_PACKET_DOWN_COUNTER, [Status]),
     ok.
+
+-spec observe_packet_report(
+    Status :: ok | error,
+    Start :: non_neg_integer()
+) -> ok.
+observe_packet_report(Status, Start) ->
+    prometheus_histogram:observe(
+        ?METRICS_PACKET_REPORT_HISTOGRAM,
+        [Status],
+        erlang:system_time(millisecond) - Start
+    ).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
