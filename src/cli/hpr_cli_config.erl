@@ -119,10 +119,14 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
     DevAddrHeader = io_lib:format("- DevAddr Ranges~n", []),
 
     FormatDevAddr = fun({S, E}) ->
-        io_lib:format("  - ~s -> ~s~n", [hpr_utils:int_to_hex(S), hpr_utils:int_to_hex(E)])
+        io_lib:format("  - ~s -> ~s~n", [
+            hpr_utils:int_to_hex_string(S), hpr_utils:int_to_hex_string(E)
+        ])
     end,
     FormatEUI = fun({App, Dev}) ->
-        io_lib:format("  - (~s, ~s)~n", [hpr_utils:int_to_hex(App), hpr_utils:int_to_hex(Dev)])
+        io_lib:format("  - (~s, ~s)~n", [
+            hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
+        ])
     end,
 
     MkRow = fun(Route) ->
@@ -177,7 +181,7 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
         {ok, SKFs} ->
             MkRow = fun(SKF) ->
                 [
-                    {" Session Key ", hpr_utils:bin_to_hex(SKF)},
+                    {" Session Key ", hpr_utils:bin_to_hex_string(SKF)},
                     {" DevAddr ", DevAddrString}
                 ]
             end,

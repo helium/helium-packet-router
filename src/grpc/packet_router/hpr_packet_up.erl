@@ -167,28 +167,28 @@ md(PacketUp) ->
                 {stream, StreamPid},
                 {gateway, GatewayName},
                 {packet_type, FType},
-                {phash, hpr_utils:bin_to_hex(?MODULE:phash(PacketUp))}
+                {phash, hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp))}
             ]);
         {join_req, {AppEUI, DevEUI}} ->
             lager:md([
                 {stream, StreamPid},
                 {gateway, GatewayName},
-                {app_eui, hpr_utils:int_to_hex(AppEUI)},
-                {dev_eui, hpr_utils:int_to_hex(DevEUI)},
+                {app_eui, hpr_utils:int_to_hex_string(AppEUI)},
+                {dev_eui, hpr_utils:int_to_hex_string(DevEUI)},
                 {app_eui_int, AppEUI},
                 {dev_eui_int, DevEUI},
                 {packet_type, join_req},
-                {phash, hpr_utils:bin_to_hex(?MODULE:phash(PacketUp))}
+                {phash, hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp))}
             ]);
         {uplink, {Type, DevAddr}} ->
             lager:md([
                 {stream, StreamPid},
                 {gateway, GatewayName},
-                {devaddr, hpr_utils:int_to_hex(DevAddr)},
+                {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
                 %% TODO: Add net id (warning they might not have one)
                 {devaddr_int, DevAddr},
                 {packet_type, Type},
-                {phash, hpr_utils:bin_to_hex(?MODULE:phash(PacketUp))}
+                {phash, hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp))}
             ])
     end.
 
