@@ -50,7 +50,7 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-create_route_test(Config) ->
+create_route_test(_Config) ->
     %% Let it startup
     timer:sleep(500),
 
@@ -108,18 +108,6 @@ create_route_test(Config) ->
         end
     ),
 
-    %% Check backup file
-    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
-    case file:read_file(FilePath) of
-        {ok, Binary} ->
-            {RouteMap, EUIPairs, DevAddrRanges} = erlang:binary_to_term(Binary),
-            ?assertEqual(Route, maps:get(RouteID, RouteMap)),
-            ?assertEqual(EUIPairs, [EUIPair]),
-            ?assertEqual(DevAddrRanges, [DevAddrRange]);
-        {error, Reason} ->
-            ct:fail(Reason)
-    end,
-
     %% Check that we can query route via config
     ?assertEqual(
         [Route], hpr_route_ets:lookup_devaddr_range(16#00000005)
@@ -130,7 +118,7 @@ create_route_test(Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     ok.
 
-update_route_test(Config) ->
+update_route_test(_Config) ->
     %% Let it startup
     timer:sleep(500),
 
@@ -171,17 +159,6 @@ update_route_test(Config) ->
         end
     ),
 
-    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
-    case file:read_file(FilePath) of
-        {ok, Binary} ->
-            {RouteMap, EUIPairs, DevAddrRanges} = erlang:binary_to_term(Binary),
-            ?assertEqual(Route1, maps:get(Route1ID, RouteMap)),
-            ?assertEqual(EUIPairs, [EUIPair1]),
-            ?assertEqual(DevAddrRanges, [DevAddrRange1]);
-        {error, Reason} ->
-            ct:fail(Reason)
-    end,
-
     %% Check that we can query route via config
     ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
     ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
@@ -205,14 +182,7 @@ update_route_test(Config) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            case file:read_file(FilePath) of
-                {ok, Bin} ->
-                    {_RouteMap1, EUIPairs1, DevAddrRanges1} = erlang:binary_to_term(Bin),
-                    EUIPairs1 =:= [EUIPair1, EUIPair2] andalso
-                        DevAddrRanges1 =:= [DevAddrRange1, DevAddrRange2];
-                {error, _Reason} ->
-                    false
-            end
+            2 =:= ets:info(hpr_route_ets_eui_pairs, size)
         end
     ),
 
@@ -226,7 +196,7 @@ update_route_test(Config) ->
 
     ok.
 
-delete_route_test(Config) ->
+delete_route_test(_Config) ->
     %% Let it startup
     timer:sleep(500),
 
@@ -265,16 +235,6 @@ delete_route_test(Config) ->
             1 =:= ets:info(hpr_route_ets_routes, size)
         end
     ),
-    FilePath = proplists:get_value(router_worker_file_backup_path, Config),
-    case file:read_file(FilePath) of
-        {ok, Binary} ->
-            {RouteMap, EUIPairs, DevAddrRanges} = erlang:binary_to_term(Binary),
-            ?assertEqual(Route1, maps:get(Route1ID, RouteMap)),
-            ?assertEqual(EUIPairs, [EUIPair1]),
-            ?assertEqual(DevAddrRanges, [DevAddrRange1]);
-        {error, _Reason} ->
-            ct:fail(_Reason)
-    end,
 
     %% Check that we can query route via config
     ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
@@ -351,16 +311,6 @@ delete_route_test(Config) ->
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000005)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 12)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
-
-    case file:read_file(FilePath) of
-        {ok, Binary1} ->
-            {RouteMap1, EUIPairs1, DevAddrRanges1} = erlang:binary_to_term(Binary1),
-            ?assertEqual(#{}, RouteMap1),
-            ?assertEqual(EUIPairs1, []),
-            ?assertEqual(DevAddrRanges1, []);
-        {error, _Reason1} ->
-            ct:fail(_Reason1)
-    end,
 
     ok.
 

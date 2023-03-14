@@ -91,7 +91,7 @@ init([]) ->
 
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
 
-        ?WORKER(hpr_route_stream_worker, [maps:get(route, ConfigServiceConfig, #{})]),
+        ?WORKER(hpr_route_stream_worker, [#{}]),
         ?WORKER(hpr_skf_stream_worker, [#{}]),
 
         ?SUP(hpr_gwmp_sup, []),

@@ -82,11 +82,8 @@
 
 -record(state, {
     stream :: grpcbox_client:stream() | undefined,
-    file_backup_path :: path(),
     conn_backoff :: backoff:backoff()
 }).
-
--type path() :: string() | undefined.
 
 -define(SERVER, ?MODULE).
 -define(INIT_STREAM, init_stream).
@@ -106,14 +103,11 @@ start_link(Args) ->
 %% ------------------------------------------------------------------
 
 init(Args) ->
-    Path = maps:get(file_backup_path, Args, undefined),
     Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
-    lager:info("starting route worker file=~s", [Path]),
-    ok = maybe_init_from_file(Path),
+    lager:info("starting ~p with ~p", [?MODULE, Args]),
     self() ! ?INIT_STREAM,
     {ok, #state{
         stream = undefined,
-        file_backup_path = Path,
         conn_backoff = Backoff
     }}.
 
@@ -148,13 +142,12 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
             {noreply, State#state{conn_backoff = Backoff1}}
     end;
 %% GRPC stream callbacks
-handle_info({data, _StreamID, RouteStreamRes}, #state{file_backup_path = Path} = State) ->
+handle_info({data, _StreamID, RouteStreamRes}, State) ->
     Action = hpr_route_stream_res:action(RouteStreamRes),
     Data = hpr_route_stream_res:data(RouteStreamRes),
     {Type, _} = Data,
     lager:debug([{action, Action}, {type, Type}], "got route stream update"),
-    ok = process_route_stream_res(Action, Data),
-    ok = maybe_cache_response(Path, Action, Data),
+    _ = erlang:spawn(fun() -> ok = process_route_stream_res(Action, Data) end),
     {noreply, State};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
@@ -233,132 +226,3 @@ process_route_stream_res(remove, {eui_pair, EUIPair}) ->
     hpr_route_ets:delete_eui_pair(EUIPair);
 process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
     hpr_route_ets:delete_devaddr_range(DevAddrRange).
-
--spec maybe_cache_response(
-    Path :: path(),
-    RouteStreamRes :: hpr_route_stream_res:action(),
-    Data ::
-        {route, hpr_route:route()}
-        | {eui_pair, hpr_eui_pair:eui_pair()}
-        | {devaddr_range, hpr_devaddr_range:devaddr_range()}
-) -> ok.
-maybe_cache_response(undefined, _Action, _Data) ->
-    ok;
-maybe_cache_response(Path, add, {route, Route}) ->
-    case open_backup_file(Path) of
-        {error, _Reason} ->
-            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
-        {ok, {RoutesMap, EUIPairs, DevAddrRanges}} ->
-            RoutesMap1 = maps:put(hpr_route:id(Route), Route, RoutesMap),
-            Binary = erlang:term_to_binary({RoutesMap1, EUIPairs, DevAddrRanges}),
-            file:write_file(Path, Binary)
-    end;
-maybe_cache_response(Path, add, {eui_pair, EUIPair}) ->
-    case open_backup_file(Path) of
-        {error, _Reason} ->
-            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
-        {ok, {RoutesMap, EUIPairs, DevAddrRanges}} ->
-            EUIPairs1 = lists:usort([EUIPair | EUIPairs]),
-            Binary = erlang:term_to_binary({RoutesMap, EUIPairs1, DevAddrRanges}),
-            file:write_file(Path, Binary)
-    end;
-maybe_cache_response(Path, add, {devaddr_range, DevAddrRange}) ->
-    case open_backup_file(Path) of
-        {error, _Reason} ->
-            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
-        {ok, {RoutesMap, EUIPairs, DevAddrRanges}} ->
-            DevAddrRanges1 = lists:usort([DevAddrRange | DevAddrRanges]),
-            Binary = erlang:term_to_binary({RoutesMap, EUIPairs, DevAddrRanges1}),
-            file:write_file(Path, Binary)
-    end;
-maybe_cache_response(Path, remove, {route, Route}) ->
-    case open_backup_file(Path) of
-        {error, _Reason} ->
-            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
-        {ok, {RoutesMap, EUIPairs, DevAddrRanges}} ->
-            RouteID = hpr_route:id(Route),
-            RoutesMap1 = maps:remove(RouteID, RoutesMap),
-            EUIPairs1 = lists:dropwhile(
-                fun(EUIPair) -> hpr_eui_pair:route_id(EUIPair) == RouteID end,
-                EUIPairs
-            ),
-            DevAddrRanges1 = lists:dropwhile(
-                fun(DevAddrRange) -> hpr_devaddr_range:route_id(DevAddrRange) == RouteID end,
-                DevAddrRanges
-            ),
-            Binary = erlang:term_to_binary({RoutesMap1, EUIPairs1, DevAddrRanges1}),
-            file:write_file(Path, Binary)
-    end;
-maybe_cache_response(Path, remove, {eui_pair, EUIPair}) ->
-    case open_backup_file(Path) of
-        {error, _Reason} ->
-            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
-        {ok, {RoutesMap, EUIPairs, DevAddrRanges}} ->
-            EUIPair1 = lists:delete(EUIPair, EUIPairs),
-            Binary = erlang:term_to_binary({RoutesMap, EUIPair1, DevAddrRanges}),
-            file:write_file(Path, Binary)
-    end;
-maybe_cache_response(Path, remove, {devaddr_range, DevAddrRange}) ->
-    case open_backup_file(Path) of
-        {error, _Reason} ->
-            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
-        {ok, {RoutesMap, EUIPairs, DevAddrRanges}} ->
-            DevAddrRanges1 = lists:delete(DevAddrRange, DevAddrRanges),
-            Binary = erlang:term_to_binary({RoutesMap, EUIPairs, DevAddrRanges1}),
-            file:write_file(Path, Binary)
-    end.
-
--spec maybe_init_from_file(path()) -> ok.
-maybe_init_from_file(undefined) ->
-    ok;
-maybe_init_from_file(Path) ->
-    ok = filelib:ensure_dir(Path),
-    case open_backup_file(Path) of
-        {error, enoent} ->
-            lager:warning("file does not exist creating"),
-            ok = file:write_file(Path, erlang:term_to_binary(#{}));
-        {error, _Reason} ->
-            lager:error("failed to open backup file (~s) ~p", [Path, _Reason]);
-        {ok, {RoutesMap, EUIPairs, DevAddrRanges}} ->
-            maps:foreach(
-                fun(_ID, Route) ->
-                    hpr_route_ets:insert_route(Route)
-                end,
-                RoutesMap
-            ),
-            lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-            lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges)
-    end.
-
--spec open_backup_file(Path :: string()) -> {ok, {map(), list(), list()}} | {error, any()}.
-open_backup_file(Path) ->
-    Default = {#{}, [], []},
-    case file:read_file(Path) of
-        {error, _Reason} = Error ->
-            Error;
-        {ok, Binary} ->
-            try erlang:binary_to_term(Binary) of
-                {RoutesMap, EUIPairs, DevAddrRanges} when is_map(RoutesMap) ->
-                    case
-                        lists:all(fun hpr_route:is_valid_record/1, maps:values(RoutesMap)) andalso
-                            lists:all(fun hpr_eui_pair:is_valid_record/1, EUIPairs) andalso
-                            lists:all(fun hpr_devaddr_range:is_valid_record/1, DevAddrRanges)
-                    of
-                        true ->
-                            {ok, {RoutesMap, EUIPairs, DevAddrRanges}};
-                        false ->
-                            lager:error("could not parse route record, fixing"),
-                            ok = file:write_file(Path, erlang:term_to_binary(Default)),
-                            {ok, Default}
-                    end;
-                _ ->
-                    ok = file:write_file(Path, erlang:term_to_binary(Default)),
-                    lager:warning("binary_to_term failed, fixing"),
-                    {ok, Default}
-            catch
-                _E:_R ->
-                    ok = file:write_file(Path, erlang:term_to_binary(Default)),
-                    lager:warning("binary_to_term crash ~p ~p, fixing", [_E, _R]),
-                    {ok, Default}
-            end
-    end.
