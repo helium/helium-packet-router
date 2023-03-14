@@ -108,7 +108,6 @@ handle_cast(
     {report_packet, EncodedPacket},
     #state{report_max_size = MaxSize, current_packets = Packets, current_size = Size} = State
 ) when Size < MaxSize ->
-    lager:debug("got packet"),
     {noreply, State#state{
         current_packets = [EncodedPacket | Packets],
         current_size = erlang:size(EncodedPacket) + Size
@@ -208,7 +207,7 @@ upload(
             State#state{current_packets = [], current_size = 0};
         _Error ->
             lager:error(MD, "upload failed ~p", [_Error]),
-            ok = hpr_metrics:observe_packet_report(ok, StartTime),
+            ok = hpr_metrics:observe_packet_report(error, StartTime),
             State
     end.
 

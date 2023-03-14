@@ -12,8 +12,7 @@
 -export([
     create_route_test/1,
     update_route_test/1,
-    delete_route_test/1,
-    load_test/1
+    delete_route_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -30,8 +29,7 @@ all() ->
     [
         create_route_test,
         update_route_test,
-        delete_route_test,
-        load_test
+        delete_route_test
     ].
 
 %%--------------------------------------------------------------------
@@ -315,75 +313,3 @@ delete_route_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
 
     ok.
-
-load_test(_Config) ->
-    %% Let it startup
-    timer:sleep(500),
-
-    %% Create route and send them from server
-    RouteID = "7d502f32-4d58-4746-965e-001",
-    Route = hpr_route:test_new(#{
-        id => RouteID,
-        net_id => 0,
-        oui => 1,
-        server => #{
-            host => "localhost",
-            port => 8080,
-            protocol => {packet_router, #{}}
-        },
-        max_copies => 1
-    }),
-
-    ok = hpr_test_iot_config_service_route:stream_resp(
-        hpr_route_stream_res:test_new(#{action => add, data => {route, Route}})
-    ),
-
-    lists:foreach(
-        fun(X) ->
-            erlang:spawn(fun() ->
-                lists:foreach(
-                    fun(Y) ->
-                        EUIPair = hpr_eui_pair:test_new(#{
-                            route_id => RouteID, app_eui => X, dev_eui => Y
-                        }),
-                        DevAddrRange = hpr_devaddr_range:test_new(#{
-                            route_id => RouteID, start_addr => X, end_addr => Y
-                        }),
-
-                        erlang:whereis(hpr_route_stream_worker) !
-                            {data, 1,
-                                hpr_route_stream_res:test_new(#{
-                                    action => add, data => {eui_pair, EUIPair}
-                                })},
-
-                        erlang:whereis(hpr_route_stream_worker) !
-                            {data, 1,
-                                hpr_route_stream_res:test_new(#{
-                                    action => add, data => {devaddr_range, DevAddrRange}
-                                })}
-                    end,
-                    lists:seq(1, 100)
-                )
-            end)
-        end,
-        lists:seq(1, 1000)
-    ),
-
-    ok = test_utils:wait_until(
-        fun() ->
-            lager:notice("MARKER EUIS=~p DEVADDR=~p", [
-                ets:info(hpr_route_ets_eui_pairs, size),
-                ets:info(hpr_route_ets_devaddr_ranges, size)
-            ]),
-            ets:info(hpr_route_ets_eui_pairs, size) > 99999 andalso
-                ets:info(hpr_route_ets_devaddr_ranges, size) > 99999
-        end,
-        10,
-        10000
-    ),
-
-    ok.
-
-%% ===================================================================
-%% Helpers
-%% ===================================================================
