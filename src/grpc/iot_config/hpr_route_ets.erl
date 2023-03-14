@@ -79,8 +79,8 @@ insert_eui_pair(EUIPair) ->
     ]),
     lager:debug(
         [
-            {app_eui, hpr_utils:int_to_hex(hpr_eui_pair:app_eui(EUIPair))},
-            {dev_eui, hpr_utils:int_to_hex(hpr_eui_pair:dev_eui(EUIPair))},
+            {app_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:app_eui(EUIPair))},
+            {dev_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:dev_eui(EUIPair))},
             {route_id, hpr_eui_pair:route_id(EUIPair)}
         ],
         "inserted eui pair"
@@ -95,8 +95,8 @@ delete_eui_pair(EUIPair) ->
     }),
     lager:debug(
         [
-            {app_eui, hpr_utils:int_to_hex(hpr_eui_pair:app_eui(EUIPair))},
-            {dev_eui, hpr_utils:int_to_hex(hpr_eui_pair:dev_eui(EUIPair))},
+            {app_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:app_eui(EUIPair))},
+            {dev_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:dev_eui(EUIPair))},
             {route_id, hpr_eui_pair:route_id(EUIPair)}
         ],
         "deleted eui pair"
@@ -128,8 +128,8 @@ insert_devaddr_range(DevAddrRange) ->
     ]),
     lager:debug(
         [
-            {start_addr, hpr_utils:int_to_hex(hpr_devaddr_range:start_addr(DevAddrRange))},
-            {end_addr, hpr_utils:int_to_hex(hpr_devaddr_range:end_addr(DevAddrRange))},
+            {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
+            {end_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:end_addr(DevAddrRange))},
             {route_id, hpr_devaddr_range:route_id(DevAddrRange)}
         ],
         "inserted devaddr range"
@@ -144,8 +144,8 @@ delete_devaddr_range(DevAddrRange) ->
     }),
     lager:debug(
         [
-            {start_addr, hpr_utils:int_to_hex(hpr_devaddr_range:start_addr(DevAddrRange))},
-            {end_addr, hpr_utils:int_to_hex(hpr_devaddr_range:end_addr(DevAddrRange))},
+            {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
+            {end_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:end_addr(DevAddrRange))},
             {route_id, hpr_devaddr_range:route_id(DevAddrRange)}
         ],
         "deleted devaddr range"

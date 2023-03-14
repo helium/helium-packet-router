@@ -107,7 +107,7 @@ md(Route) ->
         {route_id, ?MODULE:id(Route)},
         {oui, ?MODULE:oui(Route)},
         {protocol_type, ?MODULE:protocol_type(Server)},
-        {net_id, hpr_utils:int_to_hex(hpr_route:net_id(Route))},
+        {net_id, hpr_utils:int_to_hex_string(hpr_route:net_id(Route))},
         {lns, erlang:binary_to_list(hpr_route:lns(Route))},
         {active, ?MODULE:active(Route)},
         {locked, ?MODULE:locked(Route)}

@@ -125,7 +125,7 @@ mic_check_test(_Config) ->
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
-    BadSessionKey = crypto:strong_rand_bytes(16),
+    BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     hpr_skf_ets:insert(
         hpr_skf:test_new(#{
             oui => 1, devaddr => DevAddr, session_key => BadSessionKey
@@ -139,7 +139,9 @@ mic_check_test(_Config) ->
     ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
 
     hpr_skf_ets:insert(
-        hpr_skf:test_new(#{oui => 1, devaddr => DevAddr, session_key => NwkSessionKey})
+        hpr_skf:test_new(#{
+            oui => 1, devaddr => DevAddr, session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+        })
     ),
     ok = test_utils:wait_until(
         fun() ->
@@ -159,7 +161,9 @@ mic_check_test(_Config) ->
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
     hpr_skf_ets:delete(
-        hpr_skf:test_new(#{oui => 1, devaddr => DevAddr, session_key => NwkSessionKey})
+        hpr_skf:test_new(#{
+            oui => 1, devaddr => DevAddr, session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+        })
     ),
     ok = test_utils:wait_until(
         fun() ->
