@@ -12,6 +12,7 @@
 -define(METRICS_ROUTES_GAUGE, "hpr_routes_gauge").
 -define(METRICS_EUI_PAIRS_GAUGE, "hpr_eui_pairs_gauge").
 -define(METRICS_SKFS_GAUGE, "hpr_skfs_gauge").
+-define(METRICS_PACKET_REPORT_HISTOGRAM, "hpr_packet_report_histogram").
 
 -define(METRICS_VM_ETS_MEMORY, "hpr_vm_ets_memory").
 -define(METRICS_VM_PROC_Q, "hpr_vm_process_queue").
@@ -27,5 +28,6 @@
     {?METRICS_EUI_PAIRS_GAUGE, prometheus_gauge, [], "Number of EUI Pairs"},
     {?METRICS_SKFS_GAUGE, prometheus_gauge, [], "Number of SKFs"},
     {?METRICS_VM_ETS_MEMORY, prometheus_gauge, [name], "HPR ets memory"},
-    {?METRICS_VM_PROC_Q, prometheus_gauge, [name], "HPR process queue"}
+    {?METRICS_VM_PROC_Q, prometheus_gauge, [name], "Process queue"},
+    {?METRICS_PACKET_REPORT_HISTOGRAM, prometheus_histogram, [status], "Packet Reports"}
 ]).

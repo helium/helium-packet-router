@@ -3,13 +3,16 @@
 %% To run this SUITE:
 %% - `docker-compose -f docker-compose-ct.yaml up`
 %% - Set HPR_PACKET_REPORTER_LOCAL_HOST=localhost
+%% - Set HPR_PACKET_REPORTER_LOCAL_PORT=4556
+%% HPR_PACKET_REPORTER_LOCAL_HOST=localhost HPR_PACKET_REPORTER_LOCAL_PORT=4566 ./rebar3 ct --suite=hpr_packet_reporter_SUITE
 %% @end
 %%--------------------------------------------------------------------
 -module(hpr_packet_reporter_SUITE).
 
--include("hpr.hrl").
-
 -include_lib("eunit/include/eunit.hrl").
+
+-include("hpr.hrl").
+-include("hpr_metrics.hrl").
 
 -export([
     all/0,
@@ -40,20 +43,17 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    case os:getenv("HPR_PACKET_REPORTER_LOCAL_HOST") of
-        false ->
-            {skip, env_var_not_set};
-        [] ->
-            {skip, env_var_empty};
-        OSEnv ->
-            ReporterCfg = application:get_env(?APP, packet_reporter, #{}),
-
-            ok = application:set_env(
-                ?APP,
-                packet_reporter,
-                ReporterCfg#{local_host => erlang:list_to_binary(OSEnv)},
-                [{persistent, true}]
-            ),
+    case
+        {
+            os:getenv("HPR_PACKET_REPORTER_LOCAL_HOST", []),
+            os:getenv("HPR_PACKET_REPORTER_LOCAL_PORT", [])
+        }
+    of
+        {[], _} ->
+            {skip, env_host_empty};
+        {_, []} ->
+            {skip, env_post_empty};
+        _ ->
             test_utils:init_per_testcase(TestCase, Config)
     end.
 
@@ -165,6 +165,12 @@ upload_test(_Config) ->
     {ok, #{<<"Body">> := Compressed}, _} = aws_s3:get_object(AWSClient, Bucket, FileName),
     ExtractedPackets = extract_packets(Compressed),
     ?assertEqual(ExpectedPackets, ExtractedPackets),
+
+    timer:sleep(100),
+    ?assertNotEqual(
+        undefined,
+        prometheus_histogram:value(?METRICS_PACKET_REPORT_HISTOGRAM, [ok])
+    ),
 
     ok.
 

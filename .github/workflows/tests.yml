@@ -150,6 +150,7 @@ jobs:
           - "/var/run/docker.sock:/var/run/docker.sock"
     env:
       HPR_PACKET_REPORTER_LOCAL_HOST: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_HOST }}
+      HPR_PACKET_REPORTER_LOCAL_PORT: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_PORT }}
     steps:
       - name: checkout
         uses: actions/checkout@v2

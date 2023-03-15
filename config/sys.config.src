@@ -3,6 +3,7 @@
         {key, "/var/data/hpr.key"},
         {packet_reporter, #{
             aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
+            aws_bucket_region => <<"${HPR_PACKET_REPORTER_AWS_BUCKET_REGION}">>,
             report_interval => 300_000,
             report_max_size => 50_000_000
         }},
