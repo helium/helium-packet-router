@@ -6,7 +6,8 @@
     init/0,
     insert/1,
     delete/1,
-    lookup_devaddr/1
+    lookup_devaddr/1,
+    delete_all/0
 ]).
 
 -define(ETS, hpr_skf_ets).
@@ -57,6 +58,11 @@ lookup_devaddr(DevAddr) ->
         SKFs -> {ok, [SessionKey || {_DevAddr, SessionKey} <- SKFs]}
     end.
 
+-spec delete_all() -> ok.
+delete_all() ->
+    ets:delete_all_objects(?ETS),
+    ok.
+
 %% ------------------------------------------------------------------
 %% EUnit tests
 %% ------------------------------------------------------------------
@@ -70,7 +76,8 @@ all_test_() ->
         {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
             ?_test(test_insert()),
             ?_test(test_delete()),
-            ?_test(test_lookup_devaddr())
+            ?_test(test_lookup_devaddr()),
+            ?_test(test_delete_all())
         ]}}.
 
 setup() ->
@@ -141,5 +148,22 @@ new_skf() ->
         session_key => SessionKeys
     },
     hpr_skf:test_new(SKFMap).
+
+test_delete_all() ->
+    SKF1 = new_skf(),
+    SKF2 = new_skf(),
+    ?assertEqual(ok, ?MODULE:insert(SKF1)),
+    ?assertEqual(ok, ?MODULE:insert(SKF2)),
+    DevAddr = hpr_skf:devaddr(SKF1),
+    ?assertEqual(
+        [
+            {DevAddr, hpr_utils:hex_to_bin(hpr_skf:session_key(SKF1))},
+            {DevAddr, hpr_utils:hex_to_bin(hpr_skf:session_key(SKF2))}
+        ],
+        ets:lookup(?ETS, DevAddr)
+    ),
+    ?assertEqual(ok, ?MODULE:delete_all()),
+    ?assertEqual([], ets:tab2list(?ETS)),
+    ok.
 
 -endif.
