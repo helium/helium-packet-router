@@ -153,7 +153,7 @@ setup_aws(#state{
     #{
         access_key_id := AccessKey,
         secret_access_key := Secret
-    } = aws_credentials:force_credentials_refresh(),
+    } = aws_credentials:get_credentials(),
     {LocalHost, LocalPort} = get_local_host_port(),
     aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
 setup_aws(#state{
@@ -161,9 +161,10 @@ setup_aws(#state{
 }) ->
     #{
         access_key_id := AccessKey,
-        secret_access_key := Secret
-    } = aws_credentials:force_credentials_refresh(),
-    aws_client:make_client(AccessKey, Secret, BucketRegion).
+        secret_access_key := Secret,
+        token := Token
+    } = aws_credentials:get_credentials(),
+    aws_client:make_temporary_client(AccessKey, Secret, Token, BucketRegion).
 
 -spec upload(state()) -> state().
 upload(#state{current_packets = []} = State) ->
