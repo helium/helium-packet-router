@@ -34,6 +34,11 @@
 ]).
 
 -define(SERVER, ?MODULE).
+-ifdef(TEST).
+-define(CLEANUP_TIME, timer:seconds(1)).
+-else.
+-define(CLEANUP_TIME, timer:seconds(30)).
+-endif.
 
 -type pull_data_map() :: #{
     socket_dest() => acknowledged | #{timer_ref := reference(), token := binary()}
@@ -173,8 +178,8 @@ handle_info(
     {{'DOWN', PubKeyBin}, _Monitor, process, _Pid, _ExitReason},
     #state{pubkeybin = PubKeyBin} = State
 ) ->
-    lager:debug("gateway stream ~p went down: ~p waiting 30s", [_Pid, _ExitReason]),
-    timer:sleep(timer:seconds(30)),
+    lager:debug("gateway stream ~p went down: ~p waiting ~wms", [_Pid, _ExitReason, ?CLEANUP_TIME]),
+    timer:sleep(?CLEANUP_TIME),
     case hpr_packet_router_service:locate(PubKeyBin) of
         {error, _Reason} ->
             lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
