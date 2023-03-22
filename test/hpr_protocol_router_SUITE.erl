@@ -285,16 +285,18 @@ gateway_disconnect_test(_Config) ->
     ),
 
     ok = gen_server:stop(GatewayPid),
-    timer:sleep(timer:seconds(2)),
-
     ok =
         receive
             {hpr_test_gateway, GatewayPid,
                 {terminate, #{channel := GatewayChannelPid, stream_pid := GatewayStreamPid}}} ->
-                ?assert(erlang:is_process_alive(GatewayChannelPid)),
-                ?assertNot(erlang:is_process_alive(GatewayStreamPid)),
-                ?assertNot(erlang:is_process_alive(GatewayPid))
-        after timer:seconds(2) -> ct:fail(no_terminate_rcvd)
+                ok = test_utils:wait_until(
+                    fun() ->
+                        true == erlang:is_process_alive(GatewayChannelPid) andalso
+                            false == erlang:is_process_alive(GatewayStreamPid) andalso
+                            false == erlang:is_process_alive(GatewayPid)
+                    end
+                )
+        after timer:seconds(3) -> ct:fail(no_terminate_rcvd)
         end,
 
     ?assertEqual([], ets:lookup(hpr_protocol_router_ets, {Gateway, LNS})),
