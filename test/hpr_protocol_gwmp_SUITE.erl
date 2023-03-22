@@ -330,6 +330,7 @@ multi_gw_single_lns_test(_Config) ->
     PacketUp1 = fake_join_up_packet(),
     #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    ok = hpr_packet_router_service:register(PubKeyBin),
     PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{gateway = PubKeyBin},
 
     {Route, _, _} = test_route(1777),
@@ -499,11 +500,13 @@ region_port_redirect_test(_Config) ->
 
     #{public := EUPubKey} = libp2p_crypto:generate_keys(ed25519),
     EUPubKeyBin = libp2p_crypto:pubkey_to_bin(EUPubKey),
+    ok = hpr_packet_router_service:register(EUPubKeyBin),
 
     %% This gateway will have no mapping, and should result in sending to the
     %% fallback port.
     #{public := CNPubKey} = libp2p_crypto:generate_keys(ed25519),
     CNPubKeyBin = libp2p_crypto:pubkey_to_bin(CNPubKey),
+    ok = hpr_packet_router_service:register(CNPubKeyBin),
 
     %% NOTE: Hotspot needs to be changed because 1 hotspot can't send from 2 regions.
     USPacketUp = fake_join_up_packet(),
