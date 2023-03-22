@@ -46,7 +46,7 @@ handle_trailers(_Status, _Message, _Metadata, CBData) ->
 -spec handle_eos(state()) -> {ok, state()}.
 handle_eos(#state{gateway = Gateway, lns = LNS} = CBData) ->
     GatewayName = hpr_utils:gateway_name(Gateway),
-    true = hpr_protocol_router:remove_stream(Gateway, LNS),
+    ok = hpr_protocol_router:remove_stream(Gateway, LNS),
     lager:info(
         [{gateway, GatewayName}, {lns, erlang:binary_to_list(LNS)}],
         "stream going down"

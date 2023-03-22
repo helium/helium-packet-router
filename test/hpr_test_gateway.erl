@@ -178,7 +178,9 @@ handle_info(_Msg, State) ->
     lager:debug("unknown info ~p", [_Msg]),
     {noreply, State}.
 
-terminate(_Reason, #state{}) ->
+terminate(_Reason, #state{forward = Pid, stream = Stream}) ->
+    ok = grpcbox_client:close_send(Stream),
+    Pid ! {?MODULE, self(), {terminate, Stream}},
     lager:debug("terminate ~p", [_Reason]),
     ok.
 
