@@ -180,24 +180,18 @@ handle_info(
     #state{pubkeybin = PubKeyBin} = State
 ) ->
     lager:debug("gateway stream ~p went down: ~p waiting ~wms", [_Pid, _ExitReason, ?CLEANUP_TIME]),
-    Self = erlang:self(),
-    _ = erlang:spawn(fun() ->
-        timer:sleep(?CLEANUP_TIME),
-        case hpr_packet_router_service:locate(PubKeyBin) of
-            {error, _Reason} ->
-                Self ! {?CLEANUP, _Reason};
-            {ok, StreamPid} ->
-                Self ! {?CLEANUP, StreamPid}
-        end
-    end),
+    _ = erlang:send_after(?CLEANUP_TIME, self(), ?CLEANUP),
     {noreply, State};
-handle_info({?CLEANUP, StreamPid}, #state{pubkeybin = PubKeyBin} = State) when is_pid(StreamPid) ->
-    _ = erlang:monitor(process, StreamPid, [{tag, {'DOWN', PubKeyBin}}]),
-    lager:debug("found a new gateway stream ~p, monitoring", [StreamPid]),
-    {noreply, State};
-handle_info({?CLEANUP, Reason}, State) ->
-    lager:debug("connot find a gateway stream: ~p, shutting down", [Reason]),
-    {stop, normal, State};
+handle_info(?CLEANUP, #state{pubkeybin = PubKeyBin} = State) ->
+    case hpr_packet_router_service:locate(PubKeyBin) of
+        {error, _Reason} ->
+            lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
+            {stop, normal, State};
+        {ok, StreamPid} ->
+            _ = erlang:monitor(process, StreamPid, [{tag, {'DOWN', PubKeyBin}}]),
+            lager:debug("found a new gateway stream ~p, monitoring", [StreamPid]),
+            {noreply, State}
+    end;
 handle_info(_Msg, State) ->
     {noreply, State}.
 
