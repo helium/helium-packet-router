@@ -14,6 +14,7 @@
 -record(state, {
     gateway :: libp2p_crypto:pubkey_bin(),
     lns :: binary(),
+    conn_pid :: pid() | undefined,
     stream_id :: stream_id() | undefined
 }).
 
@@ -24,31 +25,45 @@
 new_state(Gateway, LNS) ->
     #state{gateway = Gateway, lns = LNS}.
 
--spec init(pid(), stream_id(), term()) -> {ok, state()}.
-init(_ConnectionPid, StreamId, State) ->
-    {ok, State#state{stream_id = StreamId}}.
+-spec init(pid(), stream_id(), state()) -> {ok, state()}.
+init(ConnectionPid, StreamId, State) ->
+    State1 = State#state{conn_pid = ConnectionPid, stream_id = StreamId},
+    lager:debug(state_to_md(State1), "init"),
+    {ok, State1}.
 
 -spec handle_message(hpr_envelop_down:envelope(), state()) -> {ok, state()}.
-handle_message(EnvDown, #state{gateway = Gateway} = CBData) ->
-    lager:debug("sending router downlink"),
+handle_message(EnvDown, #state{gateway = Gateway} = State) ->
+    lager:debug(state_to_md(State), "sending router downlink"),
     {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
     ok = hpr_packet_router_service:send_packet_down(Gateway, PacketDown),
-    {ok, CBData}.
+    {ok, State}.
 
 -spec handle_headers(map(), state()) -> {ok, state()}.
-handle_headers(_Metadata, CBData) ->
-    {ok, CBData}.
+handle_headers(_Metadata, State) ->
+    lager:debug(state_to_md(State), "got headers ~p", [_Metadata]),
+    {ok, State}.
 
 -spec handle_trailers(binary(), term(), map(), state()) -> {ok, state()}.
-handle_trailers(_Status, _Message, _Metadata, CBData) ->
-    {ok, CBData}.
+handle_trailers(_Status, _Message, _Metadata, State) ->
+    lager:debug(state_to_md(State), "got trailers ~s ~p ~p", [_Status, _Message, _Metadata]),
+    {ok, State}.
 
 -spec handle_eos(state()) -> {ok, state()}.
-handle_eos(#state{gateway = Gateway, lns = LNS} = CBData) ->
-    GatewayName = hpr_utils:gateway_name(Gateway),
+handle_eos(#state{gateway = Gateway, lns = LNS} = State) ->
     ok = hpr_protocol_router:remove_stream(Gateway, LNS),
-    lager:info(
-        [{gateway, GatewayName}, {lns, erlang:binary_to_list(LNS)}],
-        "stream going down"
-    ),
-    {ok, CBData}.
+    lager:info(state_to_md(State), "stream going down"),
+    {ok, State}.
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
+-spec state_to_md(state()) -> list().
+state_to_md(#state{conn_pid = ConnectionPid, stream_id = StreamId, gateway = Gateway, lns = LNS}) ->
+    GatewayName = hpr_utils:gateway_name(Gateway),
+    [
+        {conn_pid, ConnectionPid},
+        {stream_id, StreamId},
+        {gateway, GatewayName},
+        {lns, erlang:binary_to_list(LNS)}
+    ].
