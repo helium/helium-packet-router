@@ -94,6 +94,8 @@ init([]) ->
         ?WORKER(hpr_route_stream_worker, [#{}]),
         ?WORKER(hpr_skf_stream_worker, [#{}]),
 
+        ?WORKER(hpr_protocol_router, [#{}]),
+
         ?SUP(hpr_gwmp_sup, []),
 
         ?SUP(hpr_http_roaming_sup, []),

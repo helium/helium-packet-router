@@ -17,7 +17,8 @@
     pull_data_test/1,
     pull_ack_test/1,
     pull_ack_hostname_test/1,
-    region_port_redirect_test/1
+    region_port_redirect_test/1,
+    gateway_disconnect_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -45,7 +46,8 @@ all() ->
         pull_data_test,
         pull_ack_test,
         pull_ack_hostname_test,
-        region_port_redirect_test
+        region_port_redirect_test,
+        gateway_disconnect_test
     ].
 
 %%--------------------------------------------------------------------
@@ -330,6 +332,7 @@ multi_gw_single_lns_test(_Config) ->
     PacketUp1 = fake_join_up_packet(),
     #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    ok = hpr_packet_router_service:register(PubKeyBin),
     PacketUp2 = PacketUp1#packet_router_packet_up_v1_pb{gateway = PubKeyBin},
 
     {Route, _, _} = test_route(1777),
@@ -499,11 +502,13 @@ region_port_redirect_test(_Config) ->
 
     #{public := EUPubKey} = libp2p_crypto:generate_keys(ed25519),
     EUPubKeyBin = libp2p_crypto:pubkey_to_bin(EUPubKey),
+    ok = hpr_packet_router_service:register(EUPubKeyBin),
 
     %% This gateway will have no mapping, and should result in sending to the
     %% fallback port.
     #{public := CNPubKey} = libp2p_crypto:generate_keys(ed25519),
     CNPubKeyBin = libp2p_crypto:pubkey_to_bin(CNPubKey),
+    ok = hpr_packet_router_service:register(CNPubKeyBin),
 
     %% NOTE: Hotspot needs to be changed because 1 hotspot can't send from 2 regions.
     USPacketUp = fake_join_up_packet(),
@@ -536,6 +541,45 @@ region_port_redirect_test(_Config) ->
     ok = gen_udp:close(FallbackSocket),
     ok = gen_udp:close(USSocket),
     ok = gen_udp:close(EUSocket),
+
+    ok.
+
+gateway_disconnect_test(_Config) ->
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    {Route, EUIPairs, DevAddrRanges} = test_route(1777),
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(), route => Route, eui_pairs => EUIPairs, devaddr_ranges => DevAddrRanges
+    }),
+
+    %% Send packet and route directly through interface
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
+
+    PacketUp =
+        case hpr_test_gateway:receive_send_packet(GatewayPid) of
+            {ok, EnvUp} ->
+                {packet, PUp} = hpr_envelope_up:data(EnvUp),
+                PUp;
+            {error, timeout} ->
+                ct:fail(receive_send_packet)
+        end,
+
+    %% Initial PULL_DATA
+    {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
+    %% PUSH_DATA
+    {ok, Data} = expect_push_data(RcvSocket, router_push_data),
+    ok = verify_push_data(PacketUp, Data),
+
+    ?assertEqual(1, proplists:get_value(active, supervisor:count_children(hpr_gwmp_sup))),
+
+    ok = gen_server:stop(GatewayPid),
+    ok = test_utils:wait_until(
+        fun() ->
+            0 == proplists:get_value(active, supervisor:count_children(hpr_gwmp_sup))
+        end
+    ),
+
+    ok = gen_udp:close(RcvSocket),
 
     ok.
 

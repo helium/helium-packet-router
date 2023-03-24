@@ -34,6 +34,12 @@
 ]).
 
 -define(SERVER, ?MODULE).
+-define(CLEANUP, cleanup).
+-ifdef(TEST).
+-define(CLEANUP_TIME, timer:seconds(1)).
+-else.
+-define(CLEANUP_TIME, timer:seconds(30)).
+-endif.
 
 -type pull_data_map() :: #{
     socket_dest() => acknowledged | #{timer_ref := reference(), token := binary()}
@@ -71,11 +77,9 @@ push_data(WorkerPid, PacketUp, SocketDest) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
-init(Args) ->
+init(#{pubkeybin := PubKeyBin} = Args) ->
     process_flag(trap_exit, true),
     lager:info("~p init with ~p", [?SERVER, Args]),
-
-    #{pubkeybin := PubKeyBin} = Args,
 
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
@@ -87,10 +91,12 @@ init(Args) ->
 
     {ok, Socket} = gen_udp:open(0, [binary, {active, true}]),
 
+    {ok, Pid} = hpr_packet_router_service:locate(PubKeyBin),
+    _ = erlang:monitor(process, Pid, [{tag, {'DOWN', PubKeyBin}}]),
+
     %% NOTE: Pull data is sent at the first push_data to
     %% initiate the connection and allow downlinks to start
     %% flowing.
-
     {ok, #state{
         pubkeybin = PubKeyBin,
         socket = Socket,
@@ -169,6 +175,23 @@ handle_info(
 ) ->
     handle_pull_data_timeout(PullDataTimer, SocketDest),
     {noreply, State};
+handle_info(
+    {{'DOWN', PubKeyBin}, _Monitor, process, _Pid, _ExitReason},
+    #state{pubkeybin = PubKeyBin} = State
+) ->
+    lager:debug("gateway stream ~p went down: ~p waiting ~wms", [_Pid, _ExitReason, ?CLEANUP_TIME]),
+    _ = erlang:send_after(?CLEANUP_TIME, self(), ?CLEANUP),
+    {noreply, State};
+handle_info(?CLEANUP, #state{pubkeybin = PubKeyBin} = State) ->
+    case hpr_packet_router_service:locate(PubKeyBin) of
+        {error, _Reason} ->
+            lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
+            {stop, normal, State};
+        {ok, StreamPid} ->
+            _ = erlang:monitor(process, StreamPid, [{tag, {'DOWN', PubKeyBin}}]),
+            lager:debug("found a new gateway stream ~p, monitoring", [StreamPid]),
+            {noreply, State}
+    end;
 handle_info(_Msg, State) ->
     {noreply, State}.
 

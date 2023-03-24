@@ -1,30 +1,49 @@
 -module(hpr_protocol_router).
 
+-behaviour(gen_server).
+
 %% ------------------------------------------------------------------
-%% Routing Function Exports
+%% API Function Exports
 %% ------------------------------------------------------------------
 -export([
+    start_link/1,
     init/0,
-    send/2
+    send/2,
+    get_stream/3,
+    remove_stream/2
 ]).
 
 %% ------------------------------------------------------------------
-%% Protocol Function Exports
+%% gen_server Function Exports
 %% ------------------------------------------------------------------
 -export([
-    get_stream/3,
-    remove_stream/2
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2
 ]).
 
 -ifdef(TEST).
 -export([all_streams/0]).
 -endif.
 
+-define(SERVER, ?MODULE).
 -define(STREAM_ETS, hpr_protocol_router_ets).
+-ifdef(TEST).
+-define(CLEANUP_TIME, timer:seconds(1)).
+-else.
+-define(CLEANUP_TIME, timer:seconds(30)).
+-endif.
+
+-record(state, {}).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
+
+start_link(Args) ->
+    gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
 
 -spec init() -> ok.
 init() ->
@@ -46,10 +65,6 @@ send(PacketUp, Route) ->
         {error, _} = Err ->
             Err
     end.
-
-%% ------------------------------------------------------------------
-%% Protocol Function Definitions
-%% ------------------------------------------------------------------
 
 -spec get_stream(
     Gateway :: libp2p_crypto:pubkey_bin(),
@@ -98,14 +113,71 @@ get_stream(Gateway, LNS, Server) ->
                             Error;
                         {ok, Stream} ->
                             true = ets:insert(?STREAM_ETS, {{Gateway, LNS}, Stream}),
+                            ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS}),
                             get_stream(Gateway, LNS, Server)
                     end
             end
     end.
 
--spec remove_stream(libp2p_crypto:pubkey_bin(), binary()) -> true.
+-spec remove_stream(libp2p_crypto:pubkey_bin(), binary()) -> ok.
 remove_stream(Gateway, LNS) ->
-    ets:delete(?STREAM_ETS, {Gateway, LNS}).
+    case ets:lookup(?STREAM_ETS, {Gateway, LNS}) of
+        [{_, Stream}] ->
+            ok = grpcbox_client:close_send(Stream),
+            true = ets:delete(?STREAM_ETS, {Gateway, LNS}),
+            lager:debug("closed stream"),
+            ok;
+        [] ->
+            lager:debug("did not close stream"),
+            ok
+    end.
+
+%% ------------------------------------------------------------------
+%% gen_server Function Definitions
+%% ------------------------------------------------------------------
+
+init(_Args) ->
+    {ok, #state{}}.
+
+-spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
+handle_call(Msg, _From, State) ->
+    {stop, {unimplemented_call, Msg}, State}.
+
+handle_cast({monitor, Gateway, LNS}, State) ->
+    {ok, Pid} = hpr_packet_router_service:locate(Gateway),
+    _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Gateway, LNS}}]),
+    lager:debug("monitoring gateway stream ~p", [Pid]),
+    {noreply, State};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+handle_info(
+    {{'DOWN', Gateway, LNS}, _Monitor, process, _Pid, _ExitReason},
+    #state{} = State
+) ->
+    lager:debug("gateway stream ~p went down: ~p waiting ~wms", [_Pid, _ExitReason, ?CLEANUP_TIME]),
+    erlang:spawn(fun() ->
+        timer:sleep(?CLEANUP_TIME),
+        case hpr_packet_router_service:locate(Gateway) of
+            {error, _Reason} ->
+                lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
+                ?MODULE:remove_stream(Gateway, LNS);
+            {ok, StreamPid} ->
+                lager:debug("found a new gateway stream ~p", [StreamPid])
+        end
+    end),
+
+    {noreply, State};
+handle_info(_Msg, State) ->
+    lager:warning("unknown info ~p", [_Msg]),
+    {noreply, State}.
+
+terminate(_Reason, _State = #state{}) ->
+    ok.
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
 %% ------------------------------------------------------------------
 %% Tests Functions
