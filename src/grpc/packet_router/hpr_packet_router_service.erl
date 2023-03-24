@@ -54,6 +54,10 @@ handle_info({packet_down, PacketDown}, StreamState) ->
     EnvDown = hpr_envelope_down:new(PacketDown),
     _ = hpr_metrics:packet_down(ok),
     grpcbox_stream:send(false, EnvDown, StreamState);
+handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
+    lager:info("give_away registration to ~p", [NewPid]),
+    gproc:give_away({n, l, ?REG_KEY(PubKeyBin)}, NewPid),
+    StreamState;
 handle_info(_Msg, StreamState) ->
     StreamState.
 
@@ -83,9 +87,20 @@ locate(PubKeyBin) ->
 
 -spec register(PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
 register(PubKeyBin) ->
-    true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
-    lager:info("register"),
-    ok.
+    Self = self(),
+    case ?MODULE:locate(PubKeyBin) of
+        {error, not_found} ->
+            true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
+            lager:info("register"),
+            ok;
+        {ok, Self} ->
+            lager:info("nothing to do, already registered"),
+            ok;
+        {ok, OldPid} ->
+            lager:warning("already registered to ~p, trying to give away", [OldPid]),
+            OldPid ! {give_away, Self, PubKeyBin},
+            ok
+    end.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
@@ -124,6 +139,21 @@ route_register_test() ->
     ?assertEqual({stop, stream_state}, ?MODULE:route(hpr_envelope_up:new(Reg), stream_state)),
     ?assertEqual({ok, stream_state}, ?MODULE:route(hpr_envelope_up:new(RegSigned), stream_state)),
     ?assertEqual(Self, gproc:lookup_local_name(?REG_KEY(Gateway))),
+
+    Pid = erlang:spawn(fun() ->
+        ok = ?MODULE:register(Gateway),
+        timer:sleep(5000)
+    end),
+
+    receive
+        {give_away, Pid, Gateway} ->
+            ?assertEqual(Pid, gproc:give_away({n, l, ?REG_KEY(Gateway)}, Pid))
+    after 1000 ->
+        ?assert(true == timeout)
+    end,
+
+    % timer:sleep(100),
+    ?assertEqual(Pid, gproc:lookup_local_name(?REG_KEY(Gateway))),
 
     application:stop(gproc),
     ok.
