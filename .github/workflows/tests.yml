@@ -165,7 +165,7 @@ jobs:
       cancel-in-progress: true
     services:
       localstack:
-        image: localstack/localstack
+        image: localstack/localstack:1.4
         env:
           SERVICES: s3
         ports: 
