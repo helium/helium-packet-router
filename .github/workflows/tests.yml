@@ -130,13 +130,40 @@ jobs:
         run: make
       - name: dialyzer
         run: ./rebar3 dialyzer
-  ct:
-    needs: build
+  suites:
     runs-on: ubuntu-latest
     container:
       image: erlang:24.3-alpine
+    outputs:
+      test_suites: ${{ steps.gen_test_suites.outputs.test_suites }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: gen_test_suites
+        id: gen_test_suites
+        run: |
+          SUITES="["
+          for F in ./test/*_SUITE.erl
+          do
+            SUITES+="\"$(basename $F)\",";
+          done
+          # remove last comma
+          SUITES=${SUITES%,};
+          # close array
+          SUITES+="]"
+          echo "We are in $(pwd)"
+          echo "::set-output name=test_suites::${SUITES}"
+  ct:
+    needs: [build, suites]
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: "${{ fromJSON(needs.suites.outputs.test_suites) }}"
     concurrency: 
-      group: ${{ github.workflow }}-${{ github.ref }}-ct
+      group: ${{ github.workflow }}-${{ github.ref }}-ct-${{ matrix.suite }}
       cancel-in-progress: true
     services:
       localstack:
@@ -179,7 +206,7 @@ jobs:
       - name: build
         run: make
       - name: ct
-        run: ./rebar3 ct --readable=true
+        run: CT_LAGER=DEBUG ./rebar3 ct --suite=${{ matrix.suite }} --readable=true
   release:
     needs: build
     runs-on: ubuntu-latest
