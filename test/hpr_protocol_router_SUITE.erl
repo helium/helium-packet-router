@@ -98,6 +98,9 @@ basic_test(_Config) ->
         after timer:seconds(2) -> ct:fail(no_msg_rcvd)
         end,
 
+    %% TODO: remove me
+    timer:sleep(5000),
+
     ok = gen_server:stop(GatewayPid),
     ok = gen_server:stop(ServerPid),
 
