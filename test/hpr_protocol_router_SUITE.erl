@@ -164,7 +164,7 @@ downlink_test(_Config) ->
 server_crash_test(_Config) ->
     %% Startup Router server
     ListenOpts = #{port => 8082, ip => {0, 0, 0, 0}},
-    {ok, _RouterServerPid} = grpcbox:start_server(#{
+    {ok, RouterServerPid} = grpcbox:start_server(#{
         grpc_opts => #{
             service_protos => [packet_router_pb],
             services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
@@ -209,14 +209,21 @@ server_crash_test(_Config) ->
     %% ===================================================================
     %% We're stopping the test server to make sure we don't try to deliver
     %% multiple times for a connection we cannot make or has gone down.
-    %% Also, resetting the mock to make sure route is called once.
     ok = grpcbox_services_simple_sup:terminate_child(ListenOpts),
+    erlang:exit(RouterServerPid, kill),
+    Gateway = hpr_test_gateway:pubkey_bin(GatewayPid),
+    LNS = hpr_route:lns(Route),
+    [{_, #{channel := ChannelPid, stream_pid := StreamPid}}] = ets:lookup(
+        hpr_protocol_router_ets, {Gateway, LNS}
+    ),
+    erlang:exit(StreamPid, kill),
+    erlang:exit(ChannelPid, kill),
 
     %% Send another packet
     ok = hpr_test_gateway:send_packet(GatewayPid, #{fcnt => 2}),
 
     receive
-        {packet_up, Something} -> ct:fail(Something)
+        {packet_up, Something} -> ct:fail("we got something ~p", [Something])
     after timer:seconds(2) -> ok
     end,
 
