@@ -156,9 +156,6 @@ downlink_test(_Config) ->
             ct:fail(receive_env_down)
     end,
 
-    %% TODO: remove me
-    timer:sleep(5000),
-
     ok = gen_server:stop(RouterServerPid),
     ok = gen_server:stop(GatewayPid),
 
