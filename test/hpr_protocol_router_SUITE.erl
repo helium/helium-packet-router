@@ -71,7 +71,7 @@ basic_test(_Config) ->
         fun(Env, StreamState) ->
             {packet, Packet} = hpr_envelope_up:data(Env),
             Self ! {packet_up, Packet},
-            StreamState
+            {ok, StreamState}
         end
     ),
 
@@ -97,9 +97,6 @@ basic_test(_Config) ->
             {packet_up, RvcPacketUp} -> ?assertEqual(RvcPacketUp, PacketUp)
         after timer:seconds(2) -> ct:fail(no_msg_rcvd)
         end,
-
-    %% TODO: remove me
-    timer:sleep(5000),
 
     ok = gen_server:stop(GatewayPid),
     ok = gen_server:stop(ServerPid),
@@ -186,7 +183,7 @@ server_crash_test(_Config) ->
         fun(Env, StreamState) ->
             {packet, Packet} = hpr_envelope_up:data(Env),
             Self ! {packet_up, Packet},
-            StreamState
+            {ok, StreamState}
         end
     ),
 
