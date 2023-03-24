@@ -132,8 +132,6 @@ jobs:
         run: ./rebar3 dialyzer
   suites:
     runs-on: ubuntu-latest
-    container:
-      image: erlang:24.3-alpine
     outputs:
       test_suites: ${{ steps.gen_test_suites.outputs.test_suites }}
     steps:
