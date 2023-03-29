@@ -48,19 +48,19 @@ handle_info(_Msg, StreamState) ->
     StreamState.
 
 list(_Ctx, _SKFListReq) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 get(_Ctx, _SKFListReq) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 create(_Ctx, _SKFListReq) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 update(_Ctx, _SKFListReq) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 delete(_Ctx, _SKFListReq) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 stream(SKFStreamReq, StreamState) ->
     lager:notice("stream_req ~p", [SKFStreamReq]),
@@ -69,7 +69,7 @@ stream(SKFStreamReq, StreamState) ->
     case hpr_skf_stream_req:verify(SKFStreamReq, Signer) of
         false ->
             lager:notice("PERMISSION_DENIED"),
-            {grpc_error, {7, <<"PERMISSION_DENIED">>}};
+            {grpc_error, {<<"7">>, <<"PERMISSION_DENIED">>}};
         true ->
             lager:notice("OK"),
             {ok, StreamState}

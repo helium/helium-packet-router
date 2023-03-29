@@ -106,15 +106,15 @@ maybe_deliver_packet(Packet, [Route | Routes], Routed) ->
             Key = crypto:hash(sha256, <<
                 (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
             >>),
-            case hpr_max_copies:update_counter(Key, hpr_route:max_copies(Route)) of
+            case hpr_multi_buy:update_counter(Key, hpr_route:max_copies(Route)) of
                 {error, Reason} ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
                     maybe_deliver_packet(Packet, Routes, Routed);
-                ok ->
+                {ok, IsFree} ->
                     case deliver_packet(Protocol, Packet, Route) of
                         ok ->
                             lager:debug(RouteMD, "delivered"),
-                            ok = hpr_packet_reporter:report_packet(Packet, Route),
+                            ok = hpr_packet_reporter:report_packet(Packet, Route, IsFree),
                             {Type, _} = hpr_packet_up:type(Packet),
                             ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
                             maybe_deliver_packet(Packet, Routes, Routed + 1);

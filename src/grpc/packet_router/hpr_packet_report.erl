@@ -3,7 +3,7 @@
 -include("../autogen/packet_router_pb.hrl").
 
 -export([
-    new/2,
+    new/2, new/3,
     gateway_timestamp_ms/1,
     oui/1,
     net_id/1,
@@ -33,6 +33,10 @@
 
 -spec new(hpr_packet_up:packet(), hpr_route:route()) -> packet_report().
 new(Packet, Route) ->
+    ?MODULE:new(Packet, Route, false).
+
+-spec new(hpr_packet_up:packet(), hpr_route:route(), IsFree :: boolean()) -> packet_report().
+new(Packet, Route, IsFree) ->
     #packet_router_packet_report_v1_pb{
         gateway_timestamp_ms = hpr_packet_up:timestamp(Packet),
         oui = hpr_route:oui(Route),
@@ -44,7 +48,8 @@ new(Packet, Route) ->
         region = hpr_packet_up:region(Packet),
         gateway = hpr_packet_up:gateway(Packet),
         payload_hash = hpr_packet_up:phash(Packet),
-        payload_size = erlang:byte_size(hpr_packet_up:payload(Packet))
+        payload_size = erlang:byte_size(hpr_packet_up:payload(Packet)),
+        free = IsFree
     }.
 
 -spec gateway_timestamp_ms(PacketReport :: packet_report()) -> non_neg_integer() | undefined.

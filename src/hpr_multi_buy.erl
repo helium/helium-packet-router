@@ -1,4 +1,7 @@
--module(hpr_max_copies).
+-module(hpr_multi_buy).
+
+-include("grpc/autogen/multi_buy_pb.hrl").
+-include("hpr.hrl").
 
 -export([
     init/0,
@@ -6,9 +9,9 @@
     cleanup/1
 ]).
 
--define(ETS, hpr_max_copies_ets).
--define(MAX_COPIES, max_copies).
--define(MAX_TOO_LOW, max_copies_max_too_low).
+-define(ETS, hpr_multi_buy_ets).
+-define(MULTIBUY, multi_buy).
+-define(MAX_TOO_LOW, multi_buy_max_too_low).
 -define(CLEANUP_TIME, timer:hours(1)).
 
 -spec init() -> ok.
@@ -25,19 +28,29 @@ init() ->
     ok.
 
 -spec update_counter(Key :: binary(), Max :: non_neg_integer()) ->
-    ok | {error, ?MAX_TOO_LOW | ?MAX_COPIES}.
+    {ok, boolean()} | {error, ?MAX_TOO_LOW | ?MULTIBUY}.
 update_counter(_Key, Max) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
 update_counter(Key, Max) ->
-    case
-        ets:update_counter(
-            ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
-        )
-    of
-        C when C > Max ->
-            {error, ?MAX_COPIES};
-        _C ->
-            ok
+    case request(Key) of
+        {ok, C} when C > Max ->
+            {error, ?MULTIBUY};
+        {ok, _C} ->
+            {ok, false};
+        {error, Reason} ->
+            lager:error("failed to get a counter for ~s: ~p", [
+                hpr_utils:bin_to_hex_string(Key), Reason
+            ]),
+            case
+                ets:update_counter(
+                    ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
+                )
+            of
+                C when C > Max ->
+                    {error, ?MULTIBUY};
+                _C ->
+                    {ok, true}
+            end
     end.
 
 -spec cleanup(Duration :: non_neg_integer()) -> ok.
@@ -59,6 +72,16 @@ cleanup(Duration) ->
 scheduled_cleanup(Duration) ->
     {ok, _} = timer:apply_interval(Duration, ?MODULE, cleanup, [Duration]),
     ok.
+
+-spec request(Key :: binary()) -> {ok, non_neg_integer()} | {error, any()}.
+request(Key) ->
+    Req = #multi_buy_get_req_v1_pb{key = hpr_utils:bin_to_hex_string(Key)},
+    case helium_multi_buy_multi_buy_client:get(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
+        {ok, #multi_buy_get_res_v1_pb{count = Count}, _} ->
+            {ok, Count};
+        _Any ->
+            {error, _Any}
+    end.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -98,7 +121,7 @@ test_update_counter() ->
     ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
     ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
     ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({error, ?MAX_COPIES}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max)),
     ok.
 
 test_cleanup() ->

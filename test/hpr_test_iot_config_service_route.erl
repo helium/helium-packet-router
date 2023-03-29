@@ -54,44 +54,44 @@ handle_info(_Msg, StreamState) ->
     StreamState.
 
 list(_Ctx, _Msg) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 get(_Ctx, _Msg) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 create(_Ctx, _Msg) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 update(_Ctx, _Msg) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 delete(_Ctx, _Msg) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 get_euis(_Msg, _Stream) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 update_euis(_Msg, _Stream) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 delete_euis(_Ctx, _Msg) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 get_devaddr_ranges(_Msg, _Stream) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 update_devaddr_ranges(_Msg, _Stream) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 delete_devaddr_ranges(_Ctx, _Msg) ->
-    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+    {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}.
 
 stream(RouteStreamReq, StreamState) ->
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
     Signer = HandlerState#state.signer,
     case hpr_route_stream_req:verify(RouteStreamReq, Signer) of
         false ->
-            {grpc_error, {7, <<"PERMISSION_DENIED">>}};
+            {grpc_error, {<<"7">>, <<"PERMISSION_DENIED">>}};
         true ->
             {ok, StreamState}
     end.
