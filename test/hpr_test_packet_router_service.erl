@@ -18,7 +18,7 @@ init(RPC, StreamState) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 route(Env, StreamState) ->
     % ct:pal("TEST: route: ~p, MARKER ~p", [Env, self()]),
-    F = application:get_env(hpr, packet_service_route_fun, fun(_, S) -> {ok, S} end),
+    F = application:get_env(hpr, test_packet_router_service_route, fun(_, S) -> {ok, S} end),
     F(Env, StreamState).
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().

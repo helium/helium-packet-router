@@ -75,13 +75,17 @@ scheduled_cleanup(Duration) ->
 
 -spec request(Key :: binary()) -> {ok, non_neg_integer()} | {error, any()}.
 request(Key) ->
-    Req = #multi_buy_get_req_v1_pb{key = hpr_utils:bin_to_hex_string(Key)},
-    case helium_multi_buy_multi_buy_client:get(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
-        {ok, #multi_buy_get_res_v1_pb{count = Count}, _} ->
-            {ok, Count};
-        _Any ->
-            {error, _Any}
-    end.
+    {Time, Result} = timer:tc(fun() ->
+        Req = #multi_buy_get_req_v1_pb{key = hpr_utils:bin_to_hex_string(Key)},
+        case helium_multi_buy_multi_buy_client:get(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
+            {ok, #multi_buy_get_res_v1_pb{count = Count}, _} ->
+                {ok, Count};
+            _Any ->
+                {error, _Any}
+        end
+    end),
+    hpr_metrics:observe_multi_buy(Result, Time),
+    Result.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
