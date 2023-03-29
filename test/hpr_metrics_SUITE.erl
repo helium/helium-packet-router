@@ -74,7 +74,7 @@ main_test(_Config) ->
     ),
     application:set_env(
         hpr,
-        packet_service_route_fun,
+        test_packet_router_service_route,
         fun(Env, StreamState) ->
             {packet, Packet} = hpr_envelope_up:data(Env),
             Self ! {packet_up, Packet},
@@ -168,6 +168,11 @@ main_test(_Config) ->
     ?assertEqual(
         0,
         prometheus_gauge:value(?METRICS_SKFS_GAUGE)
+    ),
+
+    ?assertNotEqual(
+        undefined,
+        prometheus_histogram:value(?METRICS_MULTI_BUY_GET_HISTOGRAM, [ok])
     ),
 
     ok = gen_server:stop(GatewayPid),

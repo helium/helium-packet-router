@@ -67,7 +67,7 @@ basic_test(_Config) ->
     Self = self(),
     application:set_env(
         hpr,
-        packet_service_route_fun,
+        test_packet_router_service_route,
         fun(Env, StreamState) ->
             {packet, Packet} = hpr_envelope_up:data(Env),
             Self ! {packet_up, Packet},
@@ -140,7 +140,7 @@ downlink_test(_Config) ->
     ),
     application:set_env(
         hpr,
-        packet_service_route_fun,
+        test_packet_router_service_route,
         fun(_Env, StreamState) ->
             {ok, EnvDown, StreamState}
         end
@@ -176,7 +176,7 @@ server_crash_test(_Config) ->
     Self = self(),
     application:set_env(
         hpr,
-        packet_service_route_fun,
+        test_packet_router_service_route,
         fun(Env, StreamState) ->
             {packet, Packet} = hpr_envelope_up:data(Env),
             Self ! {packet_up, Packet},
@@ -255,7 +255,7 @@ gateway_disconnect_test(_Config) ->
     Self = self(),
     application:set_env(
         hpr,
-        packet_service_route_fun,
+        test_packet_router_service_route,
         fun(Env, StreamState) ->
             {packet, Packet} = hpr_envelope_up:data(Env),
             Self ! {packet_up, Packet},
