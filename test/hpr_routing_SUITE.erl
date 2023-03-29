@@ -1,6 +1,7 @@
 -module(hpr_routing_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("../src/grpc/autogen/multi_buy_pb.hrl").
 -include("hpr.hrl").
 
 -export([
@@ -14,7 +15,8 @@
     invalid_packet_type_test/1,
     bad_signature_test/1,
     mic_check_test/1,
-    max_copies_test/1,
+    multi_buy_without_service_test/1,
+    multi_buy_with_service_test/1,
     active_locked_route_test/1,
     success_test/1,
     no_routes_test/1,
@@ -37,7 +39,8 @@ all() ->
         invalid_packet_type_test,
         bad_signature_test,
         mic_check_test,
-        max_copies_test,
+        multi_buy_without_service_test,
+        multi_buy_with_service_test,
         active_locked_route_test,
         success_test,
         no_routes_test,
@@ -227,7 +230,21 @@ mic_check_test(_Config) ->
 
     ok.
 
-max_copies_test(_Config) ->
+multi_buy_without_service_test(_Config) ->
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    meck:new(hpr_packet_reporter, [passthrough]),
+    meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _) -> ok end),
+
+    application:set_env(
+        hpr,
+        test_multi_buy_service_get,
+        fun(_Ctx, _Req) ->
+            {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}
+        end
+    ),
+
     MaxCopies = 2,
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -259,9 +276,6 @@ max_copies_test(_Config) ->
     ok = hpr_route_ets:insert_route(Route),
     ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
     ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
-
-    meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
@@ -348,8 +362,171 @@ max_copies_test(_Config) ->
 
     ?assertEqual([Received1, Received2, Received3], meck:history(hpr_protocol_router)),
 
+    %% Checking that packet got reported free
+    [
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree1]}, _},
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree2]}, _},
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree3]}, _}
+    ] = meck:history(
+        hpr_packet_reporter
+    ),
+    ?assert(IsFree1),
+    ?assert(IsFree2),
+    ?assert(IsFree3),
+    %% We sent 2 packets fnt 1 and 2
+    ?assertEqual(2, ets:info(hpr_multi_buy_ets, size)),
+
+    application:unset_env(hpr, test_multi_buy_service_get),
+
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
+    ?assert(meck:validate(hpr_packet_reporter)),
+    meck:unload(hpr_packet_reporter),
+
+    ok.
+
+multi_buy_with_service_test(_Config) ->
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    meck:new(hpr_packet_reporter, [passthrough]),
+    meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _) -> ok end),
+
+    MaxCopies = 2,
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => MaxCopies
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        }),
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 2
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
+    SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
+    Gateway1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+
+    UplinkPacketUp1 = test_utils:uplink_packet_up(#{
+        gateway => Gateway1,
+        sig_fun => SigFun1,
+        devaddr => DevAddr,
+        fcnt => 1,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
+    }),
+
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ed25519),
+    SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
+    Gateway2 = libp2p_crypto:pubkey_to_bin(PubKey2),
+
+    UplinkPacketUp2 = test_utils:uplink_packet_up(#{
+        gateway => Gateway2,
+        sig_fun => SigFun2,
+        devaddr => DevAddr,
+        fcnt => 1,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
+    }),
+
+    #{secret := PrivKey3, public := PubKey3} = libp2p_crypto:generate_keys(ed25519),
+    SigFun3 = libp2p_crypto:mk_sig_fun(PrivKey3),
+    Gateway3 = libp2p_crypto:pubkey_to_bin(PubKey3),
+
+    UplinkPacketUp3 = test_utils:uplink_packet_up(#{
+        gateway => Gateway3,
+        sig_fun => SigFun3,
+        devaddr => DevAddr,
+        fcnt => 1,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
+    }),
+
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3)),
+
+    Self = self(),
+    Received1 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp1,
+                Route
+            ]},
+            ok},
+    Received2 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp2,
+                Route
+            ]},
+            ok},
+
+    ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),
+
+    UplinkPacketUp4 = test_utils:uplink_packet_up(#{
+        gateway => Gateway3,
+        sig_fun => SigFun3,
+        devaddr => DevAddr,
+        fcnt => 2,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
+    }),
+
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4)),
+
+    Received3 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp4,
+                Route
+            ]},
+            ok},
+
+    ?assertEqual([Received1, Received2, Received3], meck:history(hpr_protocol_router)),
+
+    %% Checking that packet dit not get reported free
+    [
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree1]}, _},
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree2]}, _},
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree3]}, _}
+    ] = meck:history(
+        hpr_packet_reporter
+    ),
+    ?assertNot(IsFree1),
+    ?assertNot(IsFree2),
+    ?assertNot(IsFree3),
+    %% We sent 2 packets fnt 1 and 2 but nothing should be in ets
+    ?assertEqual(0, ets:info(hpr_multi_buy_ets, size)),
+
+    ?assert(meck:validate(hpr_protocol_router)),
+    meck:unload(hpr_protocol_router),
+    ?assert(meck:validate(hpr_packet_reporter)),
+    meck:unload(hpr_packet_reporter),
     ok.
 
 active_locked_route_test(_Config) ->
@@ -536,7 +713,7 @@ success_test(_Config) ->
 
 no_routes_test(_Config) ->
     ok = meck:new(hpr_packet_reporter, [passthrough]),
-    ok = meck:expect(hpr_packet_reporter, report_packet, 2, ok),
+    ok = meck:expect(hpr_packet_reporter, report_packet, 3, ok),
 
     Port1 = 8180,
     Port2 = 8280,
@@ -629,7 +806,7 @@ no_routes_test(_Config) ->
     ok = gen_server:stop(ServerPid2),
 
     %% Ensure packets sent to no_routes do not get reported.
-    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 2)),
+    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 3)),
     meck:unload(hpr_packet_reporter),
 
     application:set_env(

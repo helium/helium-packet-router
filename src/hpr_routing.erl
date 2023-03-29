@@ -52,8 +52,8 @@ handle_packet(Packet) ->
                     hpr_metrics:observe_packet_up(PacketType, ok, 0, Start),
                     ok;
                 {ok, Routes} ->
-                    Routed = maybe_deliver_packet(Packet, Routes, 0),
-                    ok = maybe_report_packet(Routes, Routed, Packet),
+                    {Routed, IsFree} = maybe_deliver_packet(Packet, Routes, 0, false),
+                    ok = maybe_report_packet(Routes, Routed, IsFree, Packet),
                     N = erlang:length(Routes),
                     lager:debug(
                         [{routes, N}, {routed, Routed}],
@@ -148,36 +148,37 @@ maybe_deliver_no_routes(Packet) ->
 -spec maybe_deliver_packet(
     Packet :: hpr_packet_up:packet(),
     Routes :: [hpr_route:route()],
-    Routed :: non_neg_integer()
-) -> non_neg_integer().
-maybe_deliver_packet(_Packet, [], Routed) ->
-    Routed;
-maybe_deliver_packet(Packet, [Route | Routes], Routed) ->
+    Routed :: non_neg_integer(),
+    IsFree :: boolean()
+) -> {non_neg_integer(), boolean()}.
+maybe_deliver_packet(_Packet, [], Routed, IsFree) ->
+    {Routed, IsFree};
+maybe_deliver_packet(Packet, [Route | Routes], Routed, IsFree0) ->
     RouteMD = hpr_route:md(Route),
     case hpr_route:active(Route) andalso hpr_route:locked(Route) == false of
         false ->
             lager:debug(RouteMD, "not sending, route locked or inactive"),
-            maybe_deliver_packet(Packet, Routes, Routed);
+            maybe_deliver_packet(Packet, Routes, Routed, IsFree0);
         true ->
             Server = hpr_route:server(Route),
             Protocol = hpr_route:protocol(Server),
             Key = crypto:hash(sha256, <<
                 (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
             >>),
-            case hpr_max_copies:update_counter(Key, hpr_route:max_copies(Route)) of
+            case hpr_multi_buy:update_counter(Key, hpr_route:max_copies(Route)) of
                 {error, Reason} ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
-                    maybe_deliver_packet(Packet, Routes, Routed);
-                ok ->
+                    maybe_deliver_packet(Packet, Routes, Routed, IsFree0);
+                {ok, IsFree1} ->
                     case deliver_packet(Protocol, Packet, Route) of
                         ok ->
                             lager:debug(RouteMD, "delivered"),
                             {Type, _} = hpr_packet_up:type(Packet),
                             ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
-                            maybe_deliver_packet(Packet, Routes, Routed + 1);
+                            maybe_deliver_packet(Packet, Routes, Routed + 1, IsFree1);
                         {error, Reason} ->
                             lager:warning(RouteMD, "error ~p", [Reason]),
-                            maybe_deliver_packet(Packet, Routes, Routed)
+                            maybe_deliver_packet(Packet, Routes, Routed, IsFree1)
                     end
             end
     end.
@@ -197,15 +198,18 @@ deliver_packet(_OtherProtocol, _Packet, _Route) ->
     lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
 
 -spec maybe_report_packet(
-    Routes :: [hpr_route:route()], Routed :: non_neg_integer(), Packet :: hpr_packet_up:packet()
+    Routes :: [hpr_route:route()],
+    Routed :: non_neg_integer(),
+    IsFree :: boolean(),
+    Packet :: hpr_packet_up:packet()
 ) -> ok.
-maybe_report_packet(_Routes, 0, _Packet) ->
+maybe_report_packet(_Routes, 0, _IsFree, _Packet) ->
     lager:debug("not reporting packet");
-maybe_report_packet([Route | _] = Routes, Routed, Packet) when Routed > 0 ->
+maybe_report_packet([Route | _] = Routes, Routed, IsFree, Packet) when Routed > 0 ->
     UniqueOUINetID = lists:usort([{hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]),
     case erlang:length(UniqueOUINetID) of
         1 ->
-            ok = hpr_packet_reporter:report_packet(Packet, Route);
+            ok = hpr_packet_reporter:report_packet(Packet, Route, IsFree);
         _ ->
             lager:error("routed packet to non unique OUI/Net ID ~p", [
                 [{hpr_route:id(R), hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]
