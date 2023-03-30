@@ -137,18 +137,31 @@ remove_stream(Gateway, LNS) ->
 %% ------------------------------------------------------------------
 
 init(_Args) ->
+    lager:info("~p started", [?MODULE]),
     {ok, #state{}}.
 
 -spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
 handle_call(Msg, _From, State) ->
+    lager:warning("unknown call ~p", [Msg]),
     {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast({monitor, Gateway, LNS}, State) ->
-    {ok, Pid} = hpr_packet_router_service:locate(Gateway),
-    _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Gateway, LNS}}]),
-    lager:debug("monitoring gateway stream ~p", [Pid]),
+    case hpr_packet_router_service:locate(Gateway) of
+        {ok, Pid} ->
+            _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Gateway, LNS}}]),
+            lager:debug("monitoring gateway stream ~p", [Pid]);
+        {error, _Reason} ->
+            lager:debug("failed to monitor gateway (~s) stream for lns (~s) ~p", [
+                hpr_utils:gateway_name(Gateway), LNS, _Reason
+            ]),
+            %% Instead of doing a remove_stream, we trigger a fake DOWN message so that we dont kill
+            %% the stream to Router right away so if a downlink comes back and the gateway reconnected
+            %% we can still send that downlink
+            self() ! {{'DOWN', Gateway, LNS}, erlang:make_ref(), process, undefined, monitor_failed}
+    end,
     {noreply, State};
 handle_cast(_Msg, State) ->
+    lager:warning("unknown cast ~p", [_Msg]),
     {noreply, State}.
 
 handle_info(
@@ -162,11 +175,11 @@ handle_info(
             {error, _Reason} ->
                 lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
                 ?MODULE:remove_stream(Gateway, LNS);
-            {ok, StreamPid} ->
-                lager:debug("found a new gateway stream ~p", [StreamPid])
+            {ok, NewPid} ->
+                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS}),
+                lager:debug("monitoring new gateway stream ~p", [NewPid])
         end
     end),
-
     {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unknown info ~p", [_Msg]),
@@ -198,17 +211,85 @@ all_streams() ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-% send/3: happy path
-send_test() ->
-    ?MODULE:init(),
+all_test_() ->
+    {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
+        ?_test(test_full()),
+        ?_test(test_cannot_locate_stream())
+    ]}.
+
+foreach_setup() ->
+    application:ensure_all_started(gproc),
+    meck:new(grpcbox_channel),
     meck:new(grpcbox_client),
+    ?MODULE:init(),
+    {ok, Pid} = ?MODULE:start_link(#{}),
+    Pid.
+
+foreach_cleanup(Pid) ->
+    ok = gen_server:stop(Pid),
+    true = ets:delete(?STREAM_ETS),
+    meck:unload(grpcbox_channel),
+    meck:unload(grpcbox_client),
+    application:stop(gproc),
+    ok.
+
+test_full() ->
+    Route = test_route(),
+
+    meck:expect(grpcbox_channel, pick, fun(_LNS, stream) -> {ok, {undefined, undefined}} end),
+
+    Stream = #{channel => self(), stream_pid => self()},
+    meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
+        {ok, Stream}
+    end),
+
+    meck:expect(grpcbox_client, send, fun(_, _) -> ok end),
+
+    PubKeyBin = <<"PubKeyBin">>,
+    ok = hpr_packet_router_service:register(PubKeyBin),
+
+    HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
+    ?assertEqual(ok, ?MODULE:send(HprPacketUp, Route)),
+
+    timer:sleep(?CLEANUP_TIME + 100),
+    ok = test_utils:wait_until(
+        fun() ->
+            1 == ets:info(?STREAM_ETS, size)
+        end
+    ),
+    ?assert(erlang:is_process_alive(erlang:whereis(?MODULE))),
+    ok.
+
+%% We do not register a gateway to trigger cleanup
+test_cannot_locate_stream() ->
+    Route = test_route(),
+
+    meck:expect(grpcbox_channel, pick, fun(_LNS, stream) -> {ok, {undefined, undefined}} end),
+
+    Stream = #{channel => self(), stream_pid => self()},
+    meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
+        {ok, Stream}
+    end),
+
+    meck:expect(grpcbox_client, send, fun(_, _) -> ok end),
+    meck:expect(grpcbox_client, close_send, fun(_) -> ok end),
 
     PubKeyBin = <<"PubKeyBin">>,
     HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
-    EnvUp = hpr_envelope_up:new(HprPacketUp),
+    ?assertEqual(ok, ?MODULE:send(HprPacketUp, Route)),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            0 == ets:info(?STREAM_ETS, size)
+        end
+    ),
+    ?assert(erlang:is_process_alive(erlang:whereis(?MODULE))),
+    ok.
+
+test_route() ->
     Host = "example-lns.com",
     Port = 4321,
-    Route = hpr_route:test_new(#{
+    hpr_route:test_new(#{
         id => "7d502f32-4d58-4746-965e-8c7dfdcfc624",
         net_id => 1,
         devaddr_ranges => [],
@@ -221,18 +302,6 @@ send_test() ->
         },
         max_copies => 1,
         nonce => 1
-    }),
-    FakeStream = #{channel => self(), stream_pid => self()},
-
-    true = ets:insert(?STREAM_ETS, {{PubKeyBin, hpr_route:lns(Route)}, FakeStream}),
-    meck:expect(grpcbox_client, send, [FakeStream, EnvUp], ok),
-
-    ResponseValue = send(HprPacketUp, Route),
-
-    ?assertEqual(ok, ResponseValue),
-    ?assertEqual(1, meck:num_calls(grpcbox_client, send, 2)),
-
-    true = ets:delete(?STREAM_ETS),
-    meck:unload(grpcbox_client).
+    }).
 
 -endif.
