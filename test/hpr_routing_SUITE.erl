@@ -186,7 +186,7 @@ multi_buy_without_service_test(_Config) ->
 
     application:set_env(
         hpr,
-        test_multi_buy_service_get,
+        test_multi_buy_service_inc,
         fun(_Ctx, _Req) ->
             {grpc_error, {<<"12">>, <<"UNIMPLEMENTED">>}}
         end
@@ -323,7 +323,7 @@ multi_buy_without_service_test(_Config) ->
     %% We sent 2 packets fnt 1 and 2
     ?assertEqual(2, ets:info(hpr_multi_buy_ets, size)),
 
-    application:unset_env(hpr, test_multi_buy_service_get),
+    application:unset_env(hpr, test_multi_buy_service_inc),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),

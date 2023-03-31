@@ -6,7 +6,7 @@
 
 -export([
     init/2,
-    get/2,
+    inc/2,
     handle_info/2
 ]).
 
@@ -14,17 +14,17 @@
 init(_RPC, StreamState) ->
     StreamState.
 
--spec get(ctx:ctx(), multi_buy_pb:multi_buy_get_req_v1_pb()) ->
-    {ok, multi_buy_pb:multi_buy_get_res_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-get(Ctx, Req) ->
-    F = application:get_env(hpr, test_multi_buy_service_get, fun(
-        Ctx0, #multi_buy_get_req_v1_pb{key = Key}
+-spec inc(ctx:ctx(), multi_buy_pb:multi_buy_inc_req_v1_pb()) ->
+    {ok, multi_buy_pb:multi_buy_inc_res_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+inc(Ctx, Req) ->
+    F = application:get_env(hpr, test_multi_buy_service_inc, fun(
+        Ctx0, #multi_buy_inc_req_v1_pb{key = Key}
     ) ->
-        Map = persistent_term:get(test_multi_buy_service_get_map, #{}),
+        Map = persistent_term:get(test_multi_buy_service_inc_map, #{}),
         OldCount = maps:get(Key, Map, 0),
         NewCount = OldCount + 1,
-        persistent_term:put(test_multi_buy_service_get_map, Map#{Key => NewCount}),
-        {ok, #multi_buy_get_res_v1_pb{count = NewCount}, Ctx0}
+        persistent_term:put(test_multi_buy_service_inc_map, Map#{Key => NewCount}),
+        {ok, #multi_buy_inc_res_v1_pb{count = NewCount}, Ctx0}
     end),
     F(Ctx, Req).
 
