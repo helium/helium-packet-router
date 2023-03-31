@@ -76,9 +76,9 @@ scheduled_cleanup(Duration) ->
 -spec request(Key :: binary()) -> {ok, non_neg_integer()} | {error, any()}.
 request(Key) ->
     {Time, Result} = timer:tc(fun() ->
-        Req = #multi_buy_get_req_v1_pb{key = hpr_utils:bin_to_hex_string(Key)},
-        case helium_multi_buy_multi_buy_client:get(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
-            {ok, #multi_buy_get_res_v1_pb{count = Count}, _} ->
+        Req = #multi_buy_inc_req_v1_pb{key = hpr_utils:bin_to_hex_string(Key)},
+        case helium_multi_buy_multi_buy_client:inc(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
+            {ok, #multi_buy_inc_res_v1_pb{count = Count}, _} ->
                 {ok, Count};
             _Any ->
                 {error, _Any}
@@ -101,16 +101,25 @@ all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         ?_test(test_max_too_low()),
         ?_test(test_update_counter()),
+        ?_test(test_update_counter_with_service()),
         ?_test(test_cleanup()),
         ?_test(test_scheduled_cleanup())
     ]}.
 
 foreach_setup() ->
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
+    meck:new(helium_multi_buy_multi_buy_client, [passthrough]),
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(_, _) -> {error, not_implemented} end),
     ok = ?MODULE:init(),
     ok.
 
 foreach_cleanup(ok) ->
     _ = catch ets:delete(?ETS),
+    ?assert(meck:validate(hpr_metrics)),
+    meck:unload(hpr_metrics),
+    ?assert(meck:validate(helium_multi_buy_multi_buy_client)),
+    meck:unload(helium_multi_buy_multi_buy_client),
     ok.
 
 test_max_too_low() ->
@@ -122,9 +131,26 @@ test_max_too_low() ->
 test_update_counter() ->
     Key = crypto:strong_rand_bytes(16),
     Max = 3,
-    ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual(ok, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max)),
+    ok.
+
+test_update_counter_with_service() ->
+    Key = crypto:strong_rand_bytes(16),
+    Max = 3,
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(#multi_buy_inc_req_v1_pb{key = K}, _) ->
+        Map = persistent_term:get(test_update_counter_with_service_map, #{}),
+        OldCount = maps:get(K, Map, 0),
+        NewCount = OldCount + 1,
+        persistent_term:put(test_update_counter_with_service_map, Map#{K => NewCount}),
+        {ok, #multi_buy_inc_res_v1_pb{count = NewCount}, undefined}
+    end),
+
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
     ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max)),
     ok.
 
@@ -132,8 +158,8 @@ test_cleanup() ->
     Key1 = crypto:strong_rand_bytes(16),
     Key2 = crypto:strong_rand_bytes(16),
     Max = 1,
-    ?assertEqual(ok, ?MODULE:update_counter(Key1, Max)),
-    ?assertEqual(ok, ?MODULE:update_counter(Key2, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key1, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key2, Max)),
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
@@ -149,8 +175,8 @@ test_scheduled_cleanup() ->
     Key1 = crypto:strong_rand_bytes(16),
     Key2 = crypto:strong_rand_bytes(16),
     Max = 1,
-    ?assertEqual(ok, ?MODULE:update_counter(Key1, Max)),
-    ?assertEqual(ok, ?MODULE:update_counter(Key2, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key1, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key2, Max)),
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
