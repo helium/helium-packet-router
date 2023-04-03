@@ -139,7 +139,7 @@ handle_info({monitor_stream, AttemptCnt}, #state{pubkeybin = PubKeyBin} = State)
         {?MONITOR_STREAM_MAX_ATTEMPT, _} ->
             lager:info(MD, "monitor stream failed at max attempt"),
             {stop, max_monitor_attempt, State};
-        {error, not_found} ->
+        {_, {error, not_found}} ->
             lager:info(MD, "monitor stream failed"),
             erlang:send_after(?MONITOR_STREAM_TIMEOUT, self(), {monitor_stream, AttemptCnt + 1}),
             {noreply, State}
