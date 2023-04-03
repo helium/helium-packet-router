@@ -37,8 +37,12 @@
 -define(CLEANUP, cleanup).
 -ifdef(TEST).
 -define(CLEANUP_TIME, timer:seconds(1)).
+-define(MONITOR_STREAM_TIMEOUT, timer:seconds(1)).
+-define(MONITOR_STREAM_MAX_ATTEMPT, 1).
 -else.
 -define(CLEANUP_TIME, timer:seconds(30)).
+-define(MONITOR_STREAM_TIMEOUT, timer:seconds(5)).
+-define(MONITOR_STREAM_MAX_ATTEMPT, 10).
 -endif.
 
 -type pull_data_map() :: #{
@@ -91,8 +95,7 @@ init(#{pubkeybin := PubKeyBin} = Args) ->
 
     {ok, Socket} = gen_udp:open(0, [binary, {active, true}]),
 
-    {ok, Pid} = hpr_packet_router_service:locate(PubKeyBin),
-    _ = erlang:monitor(process, Pid, [{tag, {'DOWN', PubKeyBin}}]),
+    _ = erlang:send_after(500, self(), {monitor_stream, 0}),
 
     %% NOTE: Pull data is sent at the first push_data to
     %% initiate the connection and allow downlinks to start
@@ -126,6 +129,21 @@ handle_cast(
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info({monitor_stream, AttemptCnt}, #state{pubkeybin = PubKeyBin} = State) ->
+    MD = [{attempt, AttemptCnt}],
+    case {AttemptCnt, hpr_packet_router_service:locate(PubKeyBin)} of
+        {_, {ok, Pid}} ->
+            lager:info(MD, "monitor stream success"),
+            _ = erlang:monitor(process, Pid, [{tag, {'DOWN', PubKeyBin}}]),
+            {noreply, State};
+        {?MONITOR_STREAM_MAX_ATTEMPT, _} ->
+            lager:info(MD, "monitor stream failed at max attempt"),
+            {stop, max_monitor_attempt, State};
+        {error, not_found} ->
+            lager:info(MD, "monitor stream failed"),
+            erlang:send_after(?MONITOR_STREAM_TIMEOUT, self(), {monitor_stream, AttemptCnt + 1}),
+            {noreply, State}
+    end;
 handle_info(
     {udp, Socket, Address, Port, Data},
     #state{socket = Socket} = State
