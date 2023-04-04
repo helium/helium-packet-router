@@ -35,7 +35,7 @@ init(ConnectionPid, StreamId, State) ->
 handle_message(EnvDown, #state{gateway = Gateway} = State) ->
     lager:debug(state_to_md(State), "sending router downlink"),
     {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
-    ok = hpr_packet_router_service:send_packet_down(Gateway, PacketDown),
+    _ = hpr_packet_router_service:send_packet_down(Gateway, PacketDown),
     {ok, State}.
 
 -spec handle_headers(map(), state()) -> {ok, state()}.
