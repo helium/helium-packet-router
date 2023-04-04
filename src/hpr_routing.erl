@@ -35,7 +35,7 @@ handle_packet(Packet) ->
     PacketType = hpr_packet_up:type(Packet),
     case execute_checks(Packet, Checks) of
         {error, _Reason} = Error ->
-            lager:error("packet failed verification: ~p", [_Reason]),
+            lager:debug("packet failed verification: ~p", [_Reason]),
             hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
             Error;
         ok ->
@@ -111,8 +111,7 @@ maybe_deliver_packet(Packet, [Route | Routes], Routed) ->
                 ok ->
                     case deliver_packet(Protocol, Packet, Route) of
                         ok ->
-                            %% Leave me at info, used by stats
-                            lager:info(RouteMD, "delivered"),
+                            lager:debug(RouteMD, "delivered"),
                             ok = hpr_packet_reporter:report_packet(Packet, Route),
                             {Type, _} = hpr_packet_up:type(Packet),
                             ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
