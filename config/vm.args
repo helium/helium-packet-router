@@ -3,3 +3,6 @@
 
 ## Cookie for distributed erlang
 -setcookie hpr
+
+## Up the number of processes allowed
++P 2097151
