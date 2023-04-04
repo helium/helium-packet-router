@@ -24,21 +24,23 @@ init() ->
 -spec handle_packet(Packet :: hpr_packet_up:packet()) -> hpr_routing_response().
 handle_packet(Packet) ->
     Start = erlang:system_time(millisecond),
-    ok = hpr_packet_up:md(Packet),
     lager:debug("received packet"),
     Checks = [
-        {fun throttle_check/1, gateway_limit_exceeded},
         {fun packet_type_check/1, invalid_packet_type},
         {fun hpr_packet_up:verify/1, bad_signature},
-        {fun mic_check/1, invalid_mic}
+        {fun mic_check/1, invalid_mic},
+        {fun throttle_check/1, gateway_limit_exceeded}
     ],
     PacketType = hpr_packet_up:type(Packet),
     case execute_checks(Packet, Checks) of
         {error, _Reason} = Error ->
-            lager:debug("packet failed verification: ~p", [_Reason]),
+            Gateway = hpr_packet_up:gateway(Packet),
+            GatewayName = hpr_utils:gateway_name(Gateway),
+            lager:debug([{gateway, GatewayName}], "packet failed verification: ~p", [_Reason]),
             hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
             Error;
         ok ->
+            ok = hpr_packet_up:md(Packet),
             case find_routes(PacketType) of
                 [] ->
                     lager:debug("no routes found"),
