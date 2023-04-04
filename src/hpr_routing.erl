@@ -4,7 +4,8 @@
 
 -export([
     init/0,
-    handle_packet/1
+    check_packet/1,
+    handle_valid_packet/2
 ]).
 
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
@@ -21,43 +22,38 @@ init() ->
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     ok.
 
--spec handle_packet(Packet :: hpr_packet_up:packet()) -> hpr_routing_response().
-handle_packet(Packet) ->
-    Start = erlang:system_time(millisecond),
-    lager:debug("received packet"),
+-spec check_packet(PacketUp :: hpr_packet_up:packet()) -> hpr_routing_response().
+check_packet(PacketUp) ->
     Checks = [
         {fun packet_type_check/1, invalid_packet_type},
         {fun hpr_packet_up:verify/1, bad_signature},
         {fun mic_check/1, invalid_mic},
         {fun throttle_check/1, gateway_limit_exceeded}
     ],
-    PacketType = hpr_packet_up:type(Packet),
-    case execute_checks(Packet, Checks) of
-        {error, _Reason} = Error ->
-            Gateway = hpr_packet_up:gateway(Packet),
-            GatewayName = hpr_utils:gateway_name(Gateway),
-            lager:debug([{gateway, GatewayName}], "packet failed verification: ~p", [_Reason]),
-            hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
-            Error;
-        ok ->
-            ok = hpr_packet_up:md(Packet),
-            case find_routes(PacketType) of
-                [] ->
-                    lager:debug("no routes found"),
-                    ok = maybe_deliver_no_routes(Packet),
-                    hpr_metrics:observe_packet_up(PacketType, ok, 0, Start),
-                    ok;
-                Routes ->
-                    Routed = maybe_deliver_packet(Packet, Routes, 0),
-                    N = erlang:length(Routes),
-                    lager:debug(
-                        [{routes, N}, {routed, Routed}],
-                        "~w routes and delivered to ~w routes",
-                        [N, Routed]
-                    ),
-                    hpr_metrics:observe_packet_up(PacketType, ok, Routed, Start),
-                    ok
-            end
+    execute_checks(PacketUp, Checks).
+
+-spec handle_valid_packet(PacketUp :: hpr_packet_up:packet(), Start :: non_neg_integer()) ->
+    hpr_routing_response().
+handle_valid_packet(PacketUp, Start) ->
+    ok = hpr_packet_up:md(PacketUp),
+    lager:debug("received packet"),
+    PacketUpType = hpr_packet_up:type(PacketUp),
+    case find_routes(PacketUpType) of
+        [] ->
+            lager:debug("no routes found"),
+            ok = maybe_deliver_no_routes(PacketUp),
+            hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
+            ok;
+        Routes ->
+            Routed = maybe_deliver_packet(PacketUp, Routes, 0),
+            N = erlang:length(Routes),
+            lager:debug(
+                [{routes, N}, {routed, Routed}],
+                "~w routes and delivered to ~w routes",
+                [N, Routed]
+            ),
+            hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Start),
+            ok
     end.
 
 %% ------------------------------------------------------------------

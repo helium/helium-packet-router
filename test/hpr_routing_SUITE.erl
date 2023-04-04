@@ -72,7 +72,7 @@ gateway_limit_exceeded_test(_Config) ->
         fun(_) ->
             erlang:spawn(
                 fun() ->
-                    R = hpr_routing:handle_packet(JoinPacketUpValid),
+                    R = hpr_packet_router_service:handle_packet_up(JoinPacketUpValid),
                     Self ! {gateway_limit_exceeded_test, R}
                 end
             )
@@ -90,7 +90,8 @@ invalid_packet_type_test(_Config) ->
         gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid)
+        {error, invalid_packet_type},
+        hpr_packet_router_service:handle_packet_up(JoinPacketUpInvalid)
     ),
     ok.
 
@@ -101,7 +102,9 @@ bad_signature_test(_Config) ->
     JoinPacketBadSig = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
+    ?assertEqual(
+        {error, bad_signature}, hpr_packet_router_service:handle_packet_up(JoinPacketBadSig)
+    ),
     ok.
 
 mic_check_test(_Config) ->
@@ -123,7 +126,7 @@ mic_check_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(JoinPacketUpValid)),
 
     BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     hpr_skf_ets:insert(
@@ -136,7 +139,7 @@ mic_check_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual({error, invalid_mic}, hpr_packet_router_service:handle_packet_up(PacketUp)),
 
     hpr_skf_ets:insert(
         hpr_skf:test_new(#{
@@ -148,7 +151,7 @@ mic_check_test(_Config) ->
             2 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(PacketUp)),
 
     hpr_skf_ets:delete(
         hpr_skf:test_new(#{oui => 1, devaddr => DevAddr, session_key => BadSessionKey})
@@ -158,7 +161,7 @@ mic_check_test(_Config) ->
             1 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(PacketUp)),
 
     hpr_skf_ets:delete(
         hpr_skf:test_new(#{
@@ -170,7 +173,7 @@ mic_check_test(_Config) ->
             0 =:= ets:info(hpr_skf_ets, size)
         end
     ),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(PacketUp)),
 
     ok.
 
@@ -252,9 +255,9 @@ max_copies_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp2)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp3)),
 
     Self = self(),
     Received1 =
@@ -283,7 +286,7 @@ max_copies_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp4)),
 
     Received3 =
         {Self,
@@ -349,7 +352,7 @@ active_locked_route_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp1)),
 
     Self = self(),
     Received1 =
@@ -377,7 +380,7 @@ active_locked_route_test(_Config) ->
         locked => false
     }),
     ok = hpr_route_ets:insert_route(Route2),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp1)),
 
     ?assertEqual([], meck:history(hpr_protocol_router)),
 
@@ -395,7 +398,7 @@ active_locked_route_test(_Config) ->
         locked => true
     }),
     ok = hpr_route_ets:insert_route(Route3),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp1)),
 
     ?assertEqual([], meck:history(hpr_protocol_router)),
 
@@ -446,7 +449,7 @@ success_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(JoinPacketUpValid)),
 
     Received1 =
         {Self,
@@ -460,7 +463,7 @@ success_test(_Config) ->
     UplinkPacketUp = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
+    ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp)),
 
     Received2 =
         {Self,

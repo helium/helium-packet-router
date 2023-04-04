@@ -14,6 +14,14 @@
     register/1
 ]).
 
+-ifdef(TEST).
+
+-export([
+    handle_packet_up/1
+]).
+
+-endif.
+
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
 
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
@@ -28,7 +36,7 @@ route(eos, StreamState) ->
 route(EnvUp, StreamState) ->
     try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
-            _ = erlang:spawn(hpr_routing, handle_packet, [PacketUp]),
+            _ = handle_packet_up(PacketUp),
             {ok, StreamState};
         {register, Reg} ->
             PubKeyBin = hpr_register:gateway(Reg),
@@ -61,6 +69,10 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
 handle_info(_Msg, StreamState) ->
     StreamState.
 
+%% ------------------------------------------------------------------
+%% NOT Handler functions
+%% ------------------------------------------------------------------
+
 -spec send_packet_down(
     PubKeyBin :: libp2p_crypto:pubkey_bin(), PacketDown :: hpr_envelope_down:packet()
 ) -> ok | {error, not_found}.
@@ -91,7 +103,7 @@ register(PubKeyBin) ->
     case ?MODULE:locate(PubKeyBin) of
         {error, not_found} ->
             true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
-            lager:info("register"),
+            lager:debug("register"),
             ok;
         {ok, Self} ->
             lager:info("nothing to do, already registered"),
@@ -100,6 +112,24 @@ register(PubKeyBin) ->
             lager:warning("already registered to ~p, trying to give away", [OldPid]),
             OldPid ! {give_away, Self, PubKeyBin},
             ok
+    end.
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
+-spec handle_packet_up(hpr_packet_up:packet()) -> ok | {error, any()}.
+handle_packet_up(PacketUp) ->
+    Start = erlang:system_time(millisecond),
+    case hpr_routing:check_packet(PacketUp) of
+        ok ->
+            _ = erlang:spawn(hpr_routing, handle_valid_packet, [PacketUp, Start]),
+            ok;
+        {error, _Reason} = Error ->
+            PacketUpType = hpr_packet_up:type(PacketUp),
+            lager:debug("packet failed verification: ~p", [_Reason]),
+            hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
+            Error
     end.
 
 %% ------------------------------------------------------------------
@@ -117,13 +147,17 @@ route_packet_test() ->
     meck:new(hpr_routing, [passthrough]),
     PacketUp = hpr_packet_up:test_new(#{}),
     EnvUp = hpr_envelope_up:new(PacketUp),
-    meck:expect(hpr_routing, handle_packet, [PacketUp], ok),
+    meck:expect(hpr_routing, check_packet, fun(_) -> ok end),
+
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, observe_packet_up, fun(_, _, _, _) -> ok end),
 
     ?assertEqual({ok, stream_state}, ?MODULE:route(EnvUp, stream_state)),
 
-    ?assertEqual(1, meck:num_calls(hpr_routing, handle_packet, 1)),
+    ?assertEqual(1, meck:num_calls(hpr_routing, check_packet, 1)),
 
     meck:unload(hpr_routing),
+    meck:unload(hpr_metrics),
     ok.
 
 route_register_test() ->
