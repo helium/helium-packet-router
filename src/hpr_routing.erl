@@ -35,7 +35,7 @@ handle_packet(Packet) ->
     PacketType = hpr_packet_up:type(Packet),
     case execute_checks(Packet, Checks) of
         {error, _Reason} = Error ->
-            lager:error("packet failed verification: ~p", [_Reason]),
+            lager:debug("packet failed verification: ~p", [_Reason]),
             hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
             Error;
         ok ->
