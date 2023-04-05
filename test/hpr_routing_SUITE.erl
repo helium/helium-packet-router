@@ -259,23 +259,26 @@ max_copies_test(_Config) ->
     ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp2)),
     ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp3)),
 
-    Self = self(),
-    Received1 =
-        {Self,
-            {hpr_protocol_router, send, [
-                UplinkPacketUp1,
-                Route
-            ]},
-            ok},
-    Received2 =
-        {Self,
-            {hpr_protocol_router, send, [
-                UplinkPacketUp2,
-                Route
-            ]},
-            ok},
-
-    ?assertEqual([Received1, Received2], meck:history(hpr_protocol_router)),
+    FunCall1 =
+        {hpr_protocol_router, send, [
+            UplinkPacketUp1,
+            Route
+        ]},
+    FunCall2 =
+        {hpr_protocol_router, send, [
+            UplinkPacketUp2,
+            Route
+        ]},
+    Result1 = ok,
+    ok = test_utils:wait_until(
+        fun() ->
+            case meck:history(hpr_protocol_router) of
+                [{_, FunCall1, Result1}, {_, FunCall2, Result1}] -> true;
+                _ -> false
+            end
+        end
+    ),
+    meck:reset(hpr_protocol_router),
 
     UplinkPacketUp4 = test_utils:uplink_packet_up(#{
         gateway => Gateway3,
@@ -288,15 +291,21 @@ max_copies_test(_Config) ->
 
     ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp4)),
 
-    Received3 =
-        {Self,
-            {hpr_protocol_router, send, [
-                UplinkPacketUp4,
-                Route
-            ]},
-            ok},
+    FunCall3 =
+        {hpr_protocol_router, send, [
+            UplinkPacketUp4,
+            Route
+        ]},
+    Result3 = ok,
 
-    ?assertEqual([Received1, Received2, Received3], meck:history(hpr_protocol_router)),
+    ok = test_utils:wait_until(
+        fun() ->
+            case meck:history(hpr_protocol_router) of
+                [{_, FunCall3, Result3}] -> true;
+                _ -> false
+            end
+        end
+    ),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
@@ -354,17 +363,21 @@ active_locked_route_test(_Config) ->
 
     ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp1)),
 
-    Self = self(),
-    Received1 =
-        {Self,
-            {hpr_protocol_router, send, [
-                UplinkPacketUp1,
-                Route1
-            ]},
-            ok},
-
-    ?assertEqual([Received1], meck:history(hpr_protocol_router)),
-    ok = meck:reset(hpr_protocol_router),
+    FunCall1 =
+        {hpr_protocol_router, send, [
+            UplinkPacketUp1,
+            Route1
+        ]},
+    Result1 = ok,
+    ok = test_utils:wait_until(
+        fun() ->
+            case meck:history(hpr_protocol_router) of
+                [{_, FunCall1, Result1}] -> true;
+                _ -> false
+            end
+        end
+    ),
+    meck:reset(hpr_protocol_router),
 
     Route2 = hpr_route:test_new(#{
         id => RouteID,
@@ -382,6 +395,7 @@ active_locked_route_test(_Config) ->
     ok = hpr_route_ets:insert_route(Route2),
     ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp1)),
 
+    timer:sleep(100),
     ?assertEqual([], meck:history(hpr_protocol_router)),
 
     Route3 = hpr_route:test_new(#{
@@ -400,6 +414,7 @@ active_locked_route_test(_Config) ->
     ok = hpr_route_ets:insert_route(Route3),
     ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp1)),
 
+    timer:sleep(100),
     ?assertEqual([], meck:history(hpr_protocol_router)),
 
     ?assert(meck:validate(hpr_protocol_router)),
@@ -407,7 +422,6 @@ active_locked_route_test(_Config) ->
     ok.
 
 success_test(_Config) ->
-    Self = self(),
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
@@ -451,33 +465,40 @@ success_test(_Config) ->
     }),
     ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(JoinPacketUpValid)),
 
-    Received1 =
-        {Self,
-            {hpr_protocol_router, send, [
-                JoinPacketUpValid,
-                Route
-            ]},
-            ok},
-    ?assertEqual([Received1], meck:history(hpr_protocol_router)),
+    FunCall1 =
+        {hpr_protocol_router, send, [
+            JoinPacketUpValid,
+            Route
+        ]},
+    Result1 = ok,
+    ok = test_utils:wait_until(
+        fun() ->
+            case meck:history(hpr_protocol_router) of
+                [{_, FunCall1, Result1}] -> true;
+                _ -> false
+            end
+        end
+    ),
+    meck:reset(hpr_protocol_router),
 
     UplinkPacketUp = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
     ?assertEqual(ok, hpr_packet_router_service:handle_packet_up(UplinkPacketUp)),
 
-    Received2 =
-        {Self,
-            {hpr_protocol_router, send, [
-                UplinkPacketUp,
-                Route
-            ]},
-            ok},
-    ?assertEqual(
-        [
-            Received1,
-            Received2
-        ],
-        meck:history(hpr_protocol_router)
+    FunCall2 =
+        {hpr_protocol_router, send, [
+            UplinkPacketUp,
+            Route
+        ]},
+    Result2 = ok,
+    ok = test_utils:wait_until(
+        fun() ->
+            case meck:history(hpr_protocol_router) of
+                [{_, FunCall2, Result2}] -> true;
+                _ -> false
+            end
+        end
     ),
 
     ?assert(meck:validate(hpr_protocol_router)),
