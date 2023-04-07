@@ -10,8 +10,7 @@
     basic_test/1,
     connection_refused_test/1,
     downlink_test/1,
-    server_crash_test/1,
-    gateway_disconnect_test/1
+    server_crash_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -31,8 +30,7 @@ all() ->
         basic_test,
         connection_refused_test,
         downlink_test,
-        server_crash_test,
-        gateway_disconnect_test
+        server_crash_test
     ].
 
 -define(SERVER_PORT, 8080).
@@ -214,10 +212,9 @@ server_crash_test(_Config) ->
     %% multiple times for a connection we cannot make or has gone down.
     ok = grpcbox_services_simple_sup:terminate_child(ListenOpts),
     erlang:exit(RouterServerPid, kill),
-    Gateway = hpr_test_gateway:pubkey_bin(GatewayPid),
     LNS = hpr_route:lns(Route),
     [{_, #{channel := ChannelPid, stream_pid := StreamPid}}] = ets:lookup(
-        hpr_protocol_router_ets, {Gateway, LNS}
+        hpr_protocol_router_ets, LNS
     ),
     erlang:exit(StreamPid, kill),
     erlang:exit(ChannelPid, kill),
@@ -233,88 +230,10 @@ server_crash_test(_Config) ->
     %% Make sure the stream is gone, and we can't get another.
     ok = test_utils:wait_until(
         fun() ->
-            {error, {shutdown, econnrefused}} ==
-                hpr_protocol_router:get_stream(
-                    hpr_test_gateway:pubkey_bin(GatewayPid),
-                    hpr_route:lns(Route),
-                    hpr_route:server(Route)
-                )
+            {error, {shutdown, econnrefused}} == hpr_protocol_router:get_stream(Route)
         end
     ),
     ?assertEqual(0, erlang:length(hpr_protocol_router:all_streams())),
-    ok.
-
-gateway_disconnect_test(_Config) ->
-    %% Startup Router server
-    {ok, ServerPid} = grpcbox:start_server(#{
-        grpc_opts => #{
-            service_protos => [packet_router_pb],
-            services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
-        },
-        listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
-    }),
-
-    %% Interceptor
-    Self = self(),
-    application:set_env(
-        hpr,
-        packet_service_route_fun,
-        fun(Env, StreamState) ->
-            {packet, Packet} = hpr_envelope_up:data(Env),
-            Self ! {packet_up, Packet},
-            StreamState
-        end
-    ),
-
-    {Route, EUIPairs, DevAddrRanges} = test_route(),
-    {ok, GatewayPid} = hpr_test_gateway:start(#{
-        forward => self(), route => Route, eui_pairs => EUIPairs, devaddr_ranges => DevAddrRanges
-    }),
-
-    %% Send packet and route directly through interface
-    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
-
-    PacketUp =
-        case hpr_test_gateway:receive_send_packet(GatewayPid) of
-            {ok, EnvUp} ->
-                {packet, PUp} = hpr_envelope_up:data(EnvUp),
-                PUp;
-            {error, timeout} ->
-                ct:fail(receive_send_packet)
-        end,
-
-    ok =
-        receive
-            {packet_up, RvcPacketUp} -> ?assertEqual(RvcPacketUp, PacketUp)
-        after timer:seconds(2) -> ct:fail(no_msg_rcvd)
-        end,
-
-    Gateway = hpr_test_gateway:pubkey_bin(GatewayPid),
-    LNS = hpr_route:lns(Route),
-    [{_, #{channel := ChannelPid, stream_pid := StreamPid}}] = ets:lookup(
-        hpr_protocol_router_ets, {Gateway, LNS}
-    ),
-
-    ok = gen_server:stop(GatewayPid),
-    ok =
-        receive
-            {hpr_test_gateway, GatewayPid,
-                {terminate, #{channel := GatewayChannelPid, stream_pid := GatewayStreamPid}}} ->
-                ok = test_utils:wait_until(
-                    fun() ->
-                        true == erlang:is_process_alive(GatewayChannelPid) andalso
-                            false == erlang:is_process_alive(GatewayStreamPid) andalso
-                            false == erlang:is_process_alive(GatewayPid)
-                    end
-                )
-        after timer:seconds(3) -> ct:fail(no_terminate_rcvd)
-        end,
-
-    ?assertEqual([], ets:lookup(hpr_protocol_router_ets, {Gateway, LNS})),
-    ?assertNot(erlang:is_process_alive(ChannelPid)),
-    ?assertNot(erlang:is_process_alive(StreamPid)),
-
-    ok = gen_server:stop(ServerPid),
     ok.
 
 %% ===================================================================

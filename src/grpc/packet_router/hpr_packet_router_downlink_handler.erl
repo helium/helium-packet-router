@@ -3,7 +3,7 @@
 -behaviour(grpcbox_client_stream).
 
 -export([
-    new_state/2,
+    new_state/1,
     init/3,
     handle_message/2,
     handle_headers/2,
@@ -12,7 +12,6 @@
 ]).
 
 -record(state, {
-    gateway :: libp2p_crypto:pubkey_bin(),
     lns :: binary(),
     conn_pid :: pid() | undefined,
     stream_id :: stream_id() | undefined
@@ -21,9 +20,9 @@
 -type stream_id() :: non_neg_integer().
 -type state() :: #state{}.
 
--spec new_state(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> state().
-new_state(Gateway, LNS) ->
-    #state{gateway = Gateway, lns = LNS}.
+-spec new_state(LNS :: binary()) -> state().
+new_state(LNS) ->
+    #state{lns = LNS}.
 
 -spec init(pid(), stream_id(), state()) -> {ok, state()}.
 init(ConnectionPid, StreamId, State) ->
@@ -32,10 +31,13 @@ init(ConnectionPid, StreamId, State) ->
     {ok, State1}.
 
 -spec handle_message(hpr_envelop_down:envelope(), state()) -> {ok, state()}.
-handle_message(EnvDown, #state{gateway = Gateway} = State) ->
+handle_message(EnvDown, State) ->
     lager:debug(state_to_md(State), "sending router downlink"),
-    {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
-    _ = hpr_packet_router_service:send_packet_down(Gateway, PacketDown),
+    _ = erlang:spawn(fun() ->
+        {packet, PacketDown} = hpr_envelope_down:data(EnvDown),
+        Gateway = hpr_packet_down:gateway(PacketDown),
+        _ = hpr_packet_router_service:send_packet_down(Gateway, PacketDown)
+    end),
     {ok, State}.
 
 -spec handle_headers(map(), state()) -> {ok, state()}.
@@ -49,8 +51,7 @@ handle_trailers(_Status, _Message, _Metadata, State) ->
     {ok, State}.
 
 -spec handle_eos(state()) -> {ok, state()}.
-handle_eos(#state{gateway = Gateway, lns = LNS} = State) ->
-    ok = hpr_protocol_router:remove_stream(Gateway, LNS),
+handle_eos(State) ->
     lager:info(state_to_md(State), "stream going down"),
     {ok, State}.
 
@@ -59,11 +60,9 @@ handle_eos(#state{gateway = Gateway, lns = LNS} = State) ->
 %% ------------------------------------------------------------------
 
 -spec state_to_md(state()) -> list().
-state_to_md(#state{conn_pid = ConnectionPid, stream_id = StreamId, gateway = Gateway, lns = LNS}) ->
-    GatewayName = hpr_utils:gateway_name(Gateway),
+state_to_md(#state{conn_pid = ConnectionPid, stream_id = StreamId, lns = LNS}) ->
     [
         {conn_pid, ConnectionPid},
         {stream_id, StreamId},
-        {gateway, GatewayName},
         {lns, erlang:binary_to_list(LNS)}
     ].
