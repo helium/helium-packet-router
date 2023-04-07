@@ -43,6 +43,7 @@ fake_down() ->
         1,
         2,
         'SF12BW125',
+        <<"gateway">>,
         undefined
     ).
 

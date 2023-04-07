@@ -268,8 +268,9 @@ packet_up_to_push_data(Up, GatewayTime) ->
     ),
     {Token, Data}.
 
--spec txpk_to_packet_down(TxPkBin :: binary()) -> hpr_packet_down:packet().
-txpk_to_packet_down(TxPkBin) ->
+-spec txpk_to_packet_down(TxPkBin :: binary(), PubKeyBin :: libp2p_crypto:pubkey_bin()) ->
+    hpr_packet_down:packet().
+txpk_to_packet_down(TxPkBin, PubKeyBin) ->
     TxPk = semtech_udp:json_data(TxPkBin),
     Map = maps:get(<<"txpk">>, TxPk),
     JSONData0 = base64:decode(maps:get(<<"data">>, Map)),
@@ -280,13 +281,15 @@ txpk_to_packet_down(TxPkBin) ->
                 JSONData0,
                 maps:get(<<"tmst">>, Map),
                 erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
-                erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
+                erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map)),
+                PubKeyBin
             );
         true ->
             hpr_packet_down:new_imme_downlink(
                 JSONData0,
                 erlang:round(maps:get(<<"freq">>, Map) * 1_000_000),
-                erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map))
+                erlang:binary_to_existing_atom(maps:get(<<"datr">>, Map)),
+                PubKeyBin
             )
     end.
 
@@ -410,7 +413,7 @@ handle_pull_ack(Data, DataSrc, PullDataMap, PullDataTimer) ->
     ok.
 handle_pull_resp(Data, DataSrc, PubKeyBin, Socket) ->
     %% Send downlink to grpc handler
-    PacketDown = txpk_to_packet_down(Data),
+    PacketDown = txpk_to_packet_down(Data, PubKeyBin),
     lager:debug("sending gwmp downlink to  ~p", [hpr_utils:gateway_name(PubKeyBin)]),
     _ = hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown),
     %% Ack the downlink
@@ -546,7 +549,7 @@ verify_downlink_test() ->
             50, 85, 85, 48, 89, 100, 57, 54, 72, 78, 106, 85, 115, 114, 121, 115, 82, 55, 86, 107,
             69, 118, 75, 70, 86, 88, 79, 34, 125, 125>>,
 
-    Downlink = txpk_to_packet_down(TxPkBin),
+    Downlink = txpk_to_packet_down(TxPkBin, <<>>),
     ?assertEqual(ok, packet_router_pb:verify_msg(Downlink)),
 
     ok.

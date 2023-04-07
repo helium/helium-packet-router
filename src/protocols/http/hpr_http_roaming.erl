@@ -197,6 +197,7 @@ handle_prstart_ans(#{
         hpr_http_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
         FrequencyMhz * 1000000,
         hpr_lorawan:index_to_datarate(Region, DR),
+        PubKeyBin,
         rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
     ),
     {join_accept, {PubKeyBin, DownlinkPacket}};
@@ -223,6 +224,7 @@ handle_prstart_ans(#{
                 hpr_http_roaming_utils:uint32(PacketTime + ?JOIN2_DELAY),
                 FrequencyMhz * 1000000,
                 DataRate,
+                PubKeyBin,
                 undefined
             ),
             {join_accept, {PubKeyBin, DownlinkPacket}}
@@ -300,6 +302,7 @@ handle_xmitdata_req(#{
                 hpr_http_roaming_utils:uint32(PacketTime + (Delay1 * ?RX1_DELAY)),
                 FrequencyMhz1 * 1000000,
                 DataRate1,
+                PubKeyBin,
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?RX2_DELAY)
             ),
             {downlink, PayloadResponse, {PubKeyBin, DownlinkPacket}, {DestURL, FlowType}}
@@ -346,7 +349,8 @@ handle_xmitdata_req(#{
                         hpr_packet_down:new_imme_downlink(
                             hpr_http_roaming_utils:hexstring_to_binary(Payload),
                             FrequencyMhz * 1000000,
-                            DataRate
+                            DataRate,
+                            PubKeyBin
                         );
                     <<"A">> ->
                         Timeout = PacketTime + (Delay1 * ?RX1_DELAY) + ?RX1_DELAY,
@@ -355,6 +359,7 @@ handle_xmitdata_req(#{
                             hpr_http_roaming_utils:uint32(Timeout),
                             FrequencyMhz * 1000000,
                             DataRate,
+                            PubKeyBin,
                             undefined
                         )
                 end,

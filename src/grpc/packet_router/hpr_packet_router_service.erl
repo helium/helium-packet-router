@@ -166,6 +166,7 @@ handle_info_test() ->
         1,
         2,
         'SF12BW125',
+        <<"gateway">>,
         undefined
     ),
     EnvDown = hpr_envelope_down:new(PacketDown),
@@ -195,6 +196,7 @@ send_packet_down_test() ->
         1,
         2,
         'SF12BW125',
+        <<"gateway">>,
         undefined
     ),
 

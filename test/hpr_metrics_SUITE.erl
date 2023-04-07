@@ -61,27 +61,6 @@ main_test(_Config) ->
         listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
     }),
 
-    %% Interceptor
-    Self = self(),
-    %% Queue up a downlink from the testing server
-    EnvDown = hpr_envelope_down:new(
-        hpr_packet_down:new_downlink(
-            base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
-            erlang:system_time(millisecond) band 16#FFFF_FFFF,
-            904_100_000,
-            'SF11BW125'
-        )
-    ),
-    application:set_env(
-        hpr,
-        packet_service_route_fun,
-        fun(Env, StreamState) ->
-            {packet, Packet} = hpr_envelope_up:data(Env),
-            Self ! {packet_up, Packet},
-            {ok, EnvDown, StreamState}
-        end
-    ),
-
     RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
     Route = hpr_route:test_new(#{
         id => RouteID,
@@ -107,6 +86,30 @@ main_test(_Config) ->
     {ok, GatewayPid} = hpr_test_gateway:start(#{
         forward => self(), route => Route, eui_pairs => EUIPairs, devaddr_ranges => DevAddrRanges
     }),
+
+    PubKeyBin = hpr_test_gateway:pubkey_bin(GatewayPid),
+
+    %% Interceptor
+    Self = self(),
+    %% Queue up a downlink from the testing server
+    EnvDown = hpr_envelope_down:new(
+        hpr_packet_down:new_downlink(
+            base64:encode(<<"H3P3N2i9qc4yt7rK7ldqoeCVJGBybzPY5h1Dd7P7p8v">>),
+            erlang:system_time(millisecond) band 16#FFFF_FFFF,
+            904_100_000,
+            'SF11BW125',
+            PubKeyBin
+        )
+    ),
+    application:set_env(
+        hpr,
+        packet_service_route_fun,
+        fun(Env, StreamState) ->
+            {packet, Packet} = hpr_envelope_up:data(Env),
+            Self ! {packet_up, Packet},
+            {ok, EnvDown, StreamState}
+        end
+    ),
 
     %% Send packet and route directly through interface
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
