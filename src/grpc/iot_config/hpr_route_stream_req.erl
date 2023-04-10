@@ -73,7 +73,8 @@ signer_test() ->
     ?assertEqual(
         Signer,
         ?MODULE:signer(?MODULE:new(Signer))
-    )
+    ),
+    ok.
 
 signature_test() ->
     Signer = <<"Signer">>,
