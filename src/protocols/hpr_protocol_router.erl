@@ -87,8 +87,9 @@ get_stream(Gateway, LNS, Server) ->
                     %% No connection
                     Host = hpr_route:host(Server),
                     Port = hpr_route:port(Server),
+                    Endpoints = lists:map(fun(X) -> {http, Host, Port, [X]} end, lists:seq(1, 10)),
                     case
-                        grpcbox_client:connect(LNS, [{http, Host, Port, []}], #{
+                        grpcbox_client:connect(LNS, Endpoints, #{
                             sync_start => true
                         })
                     of
@@ -113,13 +114,13 @@ get_stream(Gateway, LNS, Server) ->
                             Error;
                         {ok, Stream} ->
                             true = ets:insert(?STREAM_ETS, {{Gateway, LNS}, Stream}),
-                            ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS}),
-                            get_stream(Gateway, LNS, Server)
+                            ok = maybe_trigger_monitor(Gateway, LNS),
+                            {ok, Stream}
                     end
             end
     end.
 
--spec remove_stream(libp2p_crypto:pubkey_bin(), binary()) -> ok.
+-spec remove_stream(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
 remove_stream(Gateway, LNS) ->
     case ets:lookup(?STREAM_ETS, {Gateway, LNS}) of
         [{_, Stream}] ->
@@ -145,20 +146,9 @@ handle_call(Msg, _From, State) ->
     lager:warning("unknown call ~p", [Msg]),
     {stop, {unimplemented_call, Msg}, State}.
 
-handle_cast({monitor, Gateway, LNS}, State) ->
-    case hpr_packet_router_service:locate(Gateway) of
-        {ok, Pid} ->
-            _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Gateway, LNS}}]),
-            lager:debug("monitoring gateway stream ~p", [Pid]);
-        {error, _Reason} ->
-            lager:debug("failed to monitor gateway (~s) stream for lns (~s) ~p", [
-                hpr_utils:gateway_name(Gateway), LNS, _Reason
-            ]),
-            %% Instead of doing a remove_stream, we trigger a fake DOWN message so that we dont kill
-            %% the stream to Router right away so if a downlink comes back and the gateway reconnected
-            %% we can still send that downlink
-            self() ! {{'DOWN', Gateway, LNS}, erlang:make_ref(), process, undefined, monitor_failed}
-    end,
+handle_cast({monitor, Gateway, LNS, Pid}, State) ->
+    _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Gateway, LNS}}]),
+    lager:debug("monitoring gateway stream ~p", [Pid]),
     {noreply, State};
 handle_cast(_Msg, State) ->
     lager:warning("unknown cast ~p", [_Msg]),
@@ -169,17 +159,7 @@ handle_info(
     #state{} = State
 ) ->
     lager:debug("gateway stream ~p went down: ~p waiting ~wms", [_Pid, _ExitReason, ?CLEANUP_TIME]),
-    erlang:spawn(fun() ->
-        timer:sleep(?CLEANUP_TIME),
-        case hpr_packet_router_service:locate(Gateway) of
-            {error, _Reason} ->
-                lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
-                ?MODULE:remove_stream(Gateway, LNS);
-            {ok, NewPid} ->
-                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS}),
-                lager:debug("monitoring new gateway stream ~p", [NewPid])
-        end
-    end),
+    ok = maybe_trigger_cleanup(Gateway, LNS),
     {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unknown info ~p", [_Msg]),
@@ -191,6 +171,42 @@ terminate(_Reason, _State = #state{}) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+-spec maybe_trigger_monitor(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
+maybe_trigger_monitor(Gateway, LNS) ->
+    erlang:spawn(fun() ->
+        case hpr_packet_router_service:locate(Gateway) of
+            {ok, Pid} ->
+                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS, Pid});
+            {error, _Reason} ->
+                lager:debug(
+                    "failed to monitor gateway (~s) stream for lns (~s) ~p",
+                    [
+                        hpr_utils:gateway_name(Gateway), LNS, _Reason
+                    ]
+                ),
+                %% Instead of doing a remove_stream, we trigger a maybe cleaup so that we dont kill
+                %% the stream to Router right away so if a downlink comes back and the gateway reconnected
+                %% we can still send that downlink
+                ok = maybe_trigger_cleanup(Gateway, LNS)
+        end
+    end),
+    ok.
+
+-spec maybe_trigger_cleanup(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
+maybe_trigger_cleanup(Gateway, LNS) ->
+    erlang:spawn(fun() ->
+        timer:sleep(?CLEANUP_TIME),
+        case hpr_packet_router_service:locate(Gateway) of
+            {error, _Reason} ->
+                lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
+                ?MODULE:remove_stream(Gateway, LNS);
+            {ok, NewPid} ->
+                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS, NewPid}),
+                lager:debug("monitoring new gateway stream ~p", [NewPid])
+        end
+    end),
+    ok.
 
 %% ------------------------------------------------------------------
 %% Tests Functions
