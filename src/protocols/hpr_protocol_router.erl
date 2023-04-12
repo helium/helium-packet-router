@@ -141,9 +141,37 @@ terminate(_Reason, _State = #state{}) ->
 get_stream(Gateway, LNS, Server, Backoff0) ->
     {Delay, BackoffFailed} = backoff:fail(Backoff0),
     case ets:lookup(?STREAM_ETS, ?KEY(Gateway, LNS)) of
-        [{_, ?CONNECTING}] ->
-            timer:sleep(Delay),
-            get_stream(Gateway, LNS, Server, BackoffFailed);
+        [{_, {?CONNECTING, Pid}} = OldLock] ->
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    timer:sleep(Delay),
+                    get_stream(Gateway, LNS, Server, BackoffFailed);
+                false ->
+                    Lock = {?KEY(Gateway, LNS), {?CONNECTING, self()}},
+                    case
+                        ets:select_replace(
+                            ?STREAM_ETS,
+                            [{OldLock, [], [{const, Lock}]}]
+                        )
+                    of
+                        %% we grabbed the lock, proceed by reconnecting
+                        1 ->
+                            case create_stream(Gateway, LNS, Server) of
+                                {error, _} = Error ->
+                                    true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
+                                    Error;
+                                {ok, Stream} = OK ->
+                                    1 = ets:select_replace(?STREAM_ETS, [
+                                        {Lock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
+                                    ]),
+                                    ok = maybe_trigger_monitor(Gateway, LNS),
+                                    OK
+                            end;
+                        0 ->
+                            timer:sleep(Delay),
+                            get_stream(Gateway, LNS, Server, BackoffFailed)
+                    end
+            end;
         [{_, #{channel := ChannelPid, stream_pid := StreamPid} = Stream}] ->
             case erlang:is_process_alive(ChannelPid) andalso erlang:is_process_alive(StreamPid) of
                 true ->
@@ -153,29 +181,50 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                     get_stream(Gateway, LNS, Server, BackoffFailed)
             end;
         [] ->
-            true = ets:insert(?STREAM_ETS, {?KEY(Gateway, LNS), ?CONNECTING}),
-            case connect(Gateway, LNS, Server) of
-                {error, _} = Error ->
-                    true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
-                    Error;
-                ok ->
-                    case
-                        helium_packet_router_packet_client:route(#{
-                            channel => LNS,
-                            callback_module => {
-                                hpr_packet_router_downlink_handler,
-                                hpr_packet_router_downlink_handler:new_state(Gateway, LNS)
-                            }
-                        })
-                    of
+            Lock = {?KEY(Gateway, LNS), {?CONNECTING, self()}},
+            case ets:insert_new(?STREAM_ETS, Lock) of
+                %% some process already got the lock we will wait
+                false ->
+                    timer:sleep(Delay),
+                    get_stream(Gateway, LNS, Server, BackoffFailed);
+                true ->
+                    case create_stream(Gateway, LNS, Server) of
                         {error, _} = Error ->
                             true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
                             Error;
-                        {ok, Stream} ->
-                            true = ets:insert(?STREAM_ETS, {?KEY(Gateway, LNS), Stream}),
+                        {ok, Stream} = OK ->
+                            1 = ets:select_replace(?STREAM_ETS, [
+                                {Lock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
+                            ]),
                             ok = maybe_trigger_monitor(Gateway, LNS),
-                            {ok, Stream}
+                            OK
                     end
+            end
+    end.
+
+-spec create_stream(
+    Gateway :: libp2p_crypto:pubkey_bin(),
+    LNS :: binary(),
+    Server :: hpr_route:server()
+) -> {ok, grpcbox_client:stream()} | {error, any()}.
+create_stream(Gateway, LNS, Server) ->
+    case connect(Gateway, LNS, Server) of
+        {error, _} = Error ->
+            Error;
+        ok ->
+            case
+                helium_packet_router_packet_client:route(#{
+                    channel => LNS,
+                    callback_module => {
+                        hpr_packet_router_downlink_handler,
+                        hpr_packet_router_downlink_handler:new_state(Gateway, LNS)
+                    }
+                })
+            of
+                {error, _} = Error ->
+                    Error;
+                {ok, Stream} ->
+                    {ok, Stream}
             end
     end.
 
@@ -311,9 +360,8 @@ test_full() ->
     NumPackets = 3,
     Self = self(),
     lists:foreach(
-        fun(X) ->
+        fun(_X) ->
             erlang:spawn(fun() ->
-                SleepRandom(X * 3),
                 R = ?MODULE:send(HprPacketUp, Route),
                 Self ! {send_result, R}
             end)
