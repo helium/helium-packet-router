@@ -239,7 +239,7 @@ connect(Gateway, LNS, Server) ->
             %% No connection
             Host = hpr_route:host(Server),
             Port = hpr_route:port(Server),
-            MaxCon = application:get_env(hpr, hpr_protocol_router_max_conn, 25),
+            MaxCon = application:get_env(hpr, hpr_protocol_router_max_conn, 1),
             Endpoints = lists:map(
                 fun(X) -> {http, Host, Port, [X]} end, lists:seq(1, MaxCon)
             ),
