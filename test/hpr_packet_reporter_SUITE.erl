@@ -121,7 +121,7 @@ upload_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             State = sys:get_state(hpr_packet_reporter),
-            N == erlang:length(erlang:element(6, State))
+            N == erlang:length(erlang:element(7, State))
         end
     ),
 
@@ -186,7 +186,7 @@ extract_packets(Compressed) ->
 -spec extract_packets(Rest :: binary(), Acc :: [hpr_packet_report:packet_report()]) ->
     [hpr_packet_report:packet_report()].
 extract_packets(<<>>, Acc) ->
-    lists:reverse(Acc);
+    Acc;
 extract_packets(<<Size:32/big-integer-unsigned, Rest/binary>>, Acc) ->
     <<EncodedPacket:Size/binary, Rest2/binary>> = Rest,
     Packet = hpr_packet_report:decode(EncodedPacket),
