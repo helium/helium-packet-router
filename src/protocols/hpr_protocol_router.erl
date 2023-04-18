@@ -35,6 +35,8 @@
 -define(BACKOFF_MIN, 10).
 -define(BACKOFF_MAX, timer:seconds(1)).
 
+-define(THROTTLE, create_stream_throttle).
+
 -ifdef(TEST).
 -define(CLEANUP_TIME, timer:seconds(1)).
 -else.
@@ -83,6 +85,10 @@ get_stream(Gateway, LNS, Server) ->
 -spec remove_stream(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
 remove_stream(Gateway, LNS) ->
     case ets:lookup(?STREAM_ETS, ?KEY(Gateway, LNS)) of
+        [{_, {?CONNECTING, _Pid}}] ->
+            true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
+            lager:debug("delete connecting pid"),
+            ok;
         [{_, Stream}] ->
             ok = grpcbox_client:close_send(Stream),
             true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
@@ -140,33 +146,44 @@ terminate(_Reason, _State = #state{}) ->
 ) -> {ok, grpcbox_client:stream()} | {error, any()}.
 get_stream(Gateway, LNS, Server, Backoff0) ->
     {Delay, BackoffFailed} = backoff:fail(Backoff0),
+
+    Self = self(),
+    NewLock = {?KEY(Gateway, LNS), {?CONNECTING, Self}},
+
+    CreateStream = fun() ->
+        case create_stream(Gateway, LNS, Server) of
+            {error, _} = Error ->
+                true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
+                Error;
+            {ok, Stream} = OK ->
+                1 = ets:select_replace(?STREAM_ETS, [
+                    {NewLock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
+                ]),
+                ok = maybe_trigger_monitor(Gateway, LNS),
+                OK
+        end
+    end,
+
     case ets:lookup(?STREAM_ETS, ?KEY(Gateway, LNS)) of
+        [{_, {?CONNECTING, Self}}] ->
+            %% No idea how we get here but lets go and create the stream
+            CreateStream();
         [{_, {?CONNECTING, Pid}} = OldLock] ->
             case erlang:is_process_alive(Pid) of
+                %% Somebody else is trying to connect
                 true ->
                     timer:sleep(Delay),
                     get_stream(Gateway, LNS, Server, BackoffFailed);
                 false ->
-                    Lock = {?KEY(Gateway, LNS), {?CONNECTING, self()}},
                     case
                         ets:select_replace(
                             ?STREAM_ETS,
-                            [{OldLock, [], [{const, Lock}]}]
+                            [{OldLock, [], [{const, NewLock}]}]
                         )
                     of
                         %% we grabbed the lock, proceed by reconnecting
                         1 ->
-                            case create_stream(Gateway, LNS, Server) of
-                                {error, _} = Error ->
-                                    true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
-                                    Error;
-                                {ok, Stream} = OK ->
-                                    1 = ets:select_replace(?STREAM_ETS, [
-                                        {Lock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
-                                    ]),
-                                    ok = maybe_trigger_monitor(Gateway, LNS),
-                                    OK
-                            end;
+                            CreateStream();
                         0 ->
                             timer:sleep(Delay),
                             get_stream(Gateway, LNS, Server, BackoffFailed)
@@ -176,29 +193,19 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
             case erlang:is_process_alive(ChannelPid) andalso erlang:is_process_alive(StreamPid) of
                 true ->
                     {ok, Stream};
+                %% Connection or Stream are not alive lets delete and try to get a new one
                 false ->
                     true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
                     get_stream(Gateway, LNS, Server, BackoffFailed)
             end;
         [] ->
-            Lock = {?KEY(Gateway, LNS), {?CONNECTING, self()}},
-            case ets:insert_new(?STREAM_ETS, Lock) of
+            case ets:insert_new(?STREAM_ETS, NewLock) of
                 %% some process already got the lock we will wait
                 false ->
                     timer:sleep(Delay),
                     get_stream(Gateway, LNS, Server, BackoffFailed);
                 true ->
-                    case create_stream(Gateway, LNS, Server) of
-                        {error, _} = Error ->
-                            true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
-                            Error;
-                        {ok, Stream} = OK ->
-                            1 = ets:select_replace(?STREAM_ETS, [
-                                {Lock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
-                            ]),
-                            ok = maybe_trigger_monitor(Gateway, LNS),
-                            OK
-                    end
+                    CreateStream()
             end
     end.
 
@@ -208,11 +215,11 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
     Server :: hpr_route:server()
 ) -> {ok, grpcbox_client:stream()} | {error, any()}.
 create_stream(Gateway, LNS, Server) ->
-    case connect(Gateway, LNS, Server) of
+    case connect(LNS, Server) of
         {error, _} = Error ->
             Error;
         ok ->
-            case
+            try
                 helium_packet_router_packet_client:route(#{
                     channel => LNS,
                     callback_module => {
@@ -225,31 +232,29 @@ create_stream(Gateway, LNS, Server) ->
                     Error;
                 {ok, Stream} ->
                     {ok, Stream}
+            catch
+                _E:Reason:_S ->
+                    {error, Reason}
             end
     end.
 
 -spec connect(
-    Gateway :: libp2p_crypto:pubkey_bin(),
     LNS :: binary(),
     Server :: hpr_route:server()
 ) -> ok | {error, any()}.
-connect(Gateway, LNS, Server) ->
+connect(LNS, Server) ->
     case grpcbox_channel:pick(LNS, stream) of
+        %% No connection, lets try to connect
         {error, _} ->
-            %% No connection
             Host = hpr_route:host(Server),
             Port = hpr_route:port(Server),
-            MaxCon = application:get_env(hpr, hpr_protocol_router_max_conn, 1),
-            Endpoints = lists:map(
-                fun(X) -> {http, Host, Port, [X]} end, lists:seq(1, MaxCon)
-            ),
             case
-                grpcbox_client:connect(LNS, Endpoints, #{
+                grpcbox_client:connect(LNS, [{http, Host, Port, []}], #{
                     sync_start => true
                 })
             of
-                {ok, _Conn, _} -> connect(Gateway, LNS, Server);
-                {ok, _Conn} -> connect(Gateway, LNS, Server);
+                {ok, _Conn, _} -> connect(LNS, Server);
+                {ok, _Conn} -> connect(LNS, Server);
                 {error, _} = Error -> Error
             end;
         {ok, {_Conn, _Interceptor}} ->
@@ -269,9 +274,9 @@ maybe_trigger_monitor(Gateway, LNS) ->
                         hpr_utils:gateway_name(Gateway), LNS, _Reason
                     ]
                 ),
-                %% Instead of doing a remove_stream, we trigger a maybe cleaup so that we dont kill
-                %% the stream to Router right away so if a downlink comes back and the gateway reconnected
-                %% we can still send that downlink
+                %% Instead of doing a remove_stream, we trigger a maybe cleaup, we dont kill
+                %% the stream to Router right away so if a downlink comes back and
+                %% the gateway reconnected we can still send that downlink
                 ok = maybe_trigger_cleanup(Gateway, LNS)
         end
     end),
