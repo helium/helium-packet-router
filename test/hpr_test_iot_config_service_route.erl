@@ -13,13 +13,16 @@
     create/2,
     update/2,
     delete/2,
+    stream/2,
     get_euis/2,
     update_euis/2,
     delete_euis/2,
     get_devaddr_ranges/2,
     update_devaddr_ranges/2,
     delete_devaddr_ranges/2,
-    stream/2
+    get_skfs/2,
+    list_skfs/2,
+    update_skfs/2
 ]).
 
 -export([
@@ -55,6 +58,16 @@ update(_Ctx, _Msg) ->
 delete(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
+stream(RouteStreamReq, StreamState) ->
+    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    Signer = HandlerState#state.signer,
+    case hpr_route_stream_req:verify(RouteStreamReq, Signer) of
+        false ->
+            {grpc_error, {7, <<"PERMISSION_DENIED">>}};
+        true ->
+            {ok, StreamState}
+    end.
+
 get_euis(_Msg, _Stream) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
@@ -73,13 +86,14 @@ update_devaddr_ranges(_Msg, _Stream) ->
 delete_devaddr_ranges(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
-stream(RouteStreamReq, StreamState) ->
-    case hpr_route_stream_req:verify(RouteStreamReq) of
-        false ->
-            {grpc_error, {7, <<"PERMISSION_DENIED">>}};
-        true ->
-            {ok, StreamState}
-    end.
+get_skfs(_Ctx, _Msg) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+
+list_skfs(_Ctx, _Msg) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
+
+update_skfs(_Ctx, _Msg) ->
+    {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
 -spec stream_resp(RouteStreamResp :: hpr_route_stream_res:res()) -> ok.
 stream_resp(RouteStreamResp) ->

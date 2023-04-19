@@ -135,8 +135,8 @@ http_sync_uplink_join_test(_Config) ->
 
     lager:debug(
         [
-            {devaddr, ets:tab2list(hpr_route_ets_devaddr_ranges)},
-            {eui, ets:tab2list(hpr_route_ets_eui_pairs)}
+            {devaddr, ets:tab2list(hpr_route_devaddr_ranges_ets)},
+            {eui, ets:tab2list(hpr_route_eui_pairs_ets)}
         ],
         "config ets"
     ),
@@ -571,7 +571,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     end,
 
     uplink_test_route(),
-    lager:debug("routes by devaddr: ~p", [ets:tab2list(hpr_route_ets_devaddr_ranges)]),
+    lager:debug("routes by devaddr: ~p", [ets:tab2list(hpr_route_devaddr_ranges_ets)]),
 
     {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY, 0),
     Payload = hpr_packet_up:payload(PacketUp),

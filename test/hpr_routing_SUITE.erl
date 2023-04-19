@@ -120,56 +120,107 @@ mic_check_test(_Config) ->
         sig_fun => SigFun
     }),
 
+    %% TEST 1: Join always works
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
-    BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    hpr_skf_ets:insert(
-        hpr_skf:test_new(#{
-            oui => 1, devaddr => DevAddr, session_key => BadSessionKey
-        })
-    ),
+    %% TEST 2:  No SFK for devaddr
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+
+    %% TEST 3:  Good key but no routes
+    SKFNoRoutes = hpr_skf:test_new(#{
+        route_id => "empty",
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+    }),
+    hpr_route_ets:insert_skf(SKFNoRoutes),
     ok = test_utils:wait_until(
         fun() ->
-            1 =:= ets:info(hpr_skf_ets, size)
+            1 =:= ets:info(hpr_route_skfs_ets, size)
+        end
+    ),
+
+    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
+
+    ok = hpr_route_ets:delete_skf(SKFNoRoutes),
+
+    %% TEST 4:  Bad key and no routes
+    BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SKFBadKeyNoRoute = hpr_skf:test_new(#{
+        route_id => "empty", devaddr => DevAddr, session_key => BadSessionKey
+    }),
+    hpr_route_ets:insert_skf(SKFBadKeyNoRoute),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_route_skfs_ets, size)
         end
     ),
     ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
 
-    hpr_skf_ets:insert(
-        hpr_skf:test_new(#{
-            oui => 1, devaddr => DevAddr, session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
-        })
-    ),
+    ok = hpr_route_ets:delete_skf(SKFBadKeyNoRoute),
+
+    %% TEST 5: Bad key and route exist
+    Route = hpr_route:test_new(#{
+        id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "lns1.testdomain.com",
+            port => 80,
+            protocol => {http_roaming, #{}}
+        },
+        max_copies => 1
+    }),
+    RouteID = hpr_route:id(Route),
+    ?assertEqual(ok, hpr_route_ets:insert_route(Route)),
+
+    SKFBadKeyAndRouteExitst = hpr_skf:test_new(#{
+        route_id => RouteID, devaddr => DevAddr, session_key => BadSessionKey
+    }),
+    hpr_route_ets:insert_skf(SKFBadKeyAndRouteExitst),
+
     ok = test_utils:wait_until(
         fun() ->
-            2 =:= ets:info(hpr_skf_ets, size)
+            1 =:= ets:info(hpr_route_skfs_ets, size)
         end
     ),
+
+    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
+
+    ok = hpr_route_ets:delete_skf(SKFBadKeyAndRouteExitst),
+
+    %% TEST 6:  Good key and route exist
+    %% We leave old route inserted and do not delete good skf for next test
+
+    SKFGoodKeyAndRouteExitst = hpr_skf:test_new(#{
+        route_id => RouteID,
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+    }),
+    hpr_route_ets:insert_skf(SKFGoodKeyAndRouteExitst),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_route_skfs_ets, size)
+        end
+    ),
+
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
-    hpr_skf_ets:delete(
-        hpr_skf:test_new(#{oui => 1, devaddr => DevAddr, session_key => BadSessionKey})
-    ),
-    ok = test_utils:wait_until(
-        fun() ->
-            1 =:= ets:info(hpr_skf_ets, size)
-        end
-    ),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    %% TEST 7:  Good key and route exist
+    %% Adding a bad key to make sure it still works
 
-    hpr_skf_ets:delete(
-        hpr_skf:test_new(#{
-            oui => 1, devaddr => DevAddr, session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
-        })
-    ),
+    hpr_route_ets:insert_skf(SKFBadKeyNoRoute),
+
     ok = test_utils:wait_until(
         fun() ->
-            0 =:= ets:info(hpr_skf_ets, size)
+            2 =:= ets:info(hpr_route_skfs_ets, size)
         end
     ),
+
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
     ok.

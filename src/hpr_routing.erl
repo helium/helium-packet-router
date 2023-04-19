@@ -11,7 +11,8 @@
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
 -type hpr_routing_response() ::
-    ok | {error, gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic}.
+    ok
+    | {error, gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic}.
 
 -export_type([hpr_routing_response/0]).
 
@@ -28,7 +29,6 @@ handle_packet(Packet) ->
     Checks = [
         {fun packet_type_check/1, invalid_packet_type},
         {fun hpr_packet_up:verify/1, bad_signature},
-        {fun mic_check/1, invalid_mic},
         {fun throttle_check/1, gateway_limit_exceeded}
     ],
     PacketType = hpr_packet_up:type(Packet),
@@ -41,13 +41,17 @@ handle_packet(Packet) ->
             Error;
         ok ->
             ok = hpr_packet_up:md(Packet),
-            case find_routes(PacketType) of
-                [] ->
+            case find_routes(PacketType, Packet) of
+                {error, _Reason} = Error ->
+                    lager:debug("failed to find routes: ~p", [_Reason]),
+                    hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
+                    Error;
+                {ok, []} ->
                     lager:debug("no routes found"),
                     ok = maybe_deliver_no_routes(Packet),
                     hpr_metrics:observe_packet_up(PacketType, ok, 0, Start),
                     ok;
-                Routes ->
+                {ok, Routes} ->
                     Routed = maybe_deliver_packet(Packet, Routes, 0),
                     N = erlang:length(Routes),
                     lager:debug(
@@ -63,11 +67,16 @@ handle_packet(Packet) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
--spec find_routes(hpr_packet_up:type()) -> [hpr_route:route()].
-find_routes({join_req, {AppEUI, DevEUI}}) ->
-    hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI);
-find_routes({uplink, {_Type, DevAddr}}) ->
-    hpr_route_ets:lookup_devaddr_range(DevAddr).
+-spec find_routes(hpr_packet_up:type(), Packet :: hpr_packet_up:packet()) ->
+    {ok, [hpr_route:route()]} | {error, invalid_mic}.
+find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
+    {ok, hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI)};
+find_routes({uplink, {_Type, DevAddr}}, Packet) ->
+    case mic_check(Packet) of
+        false -> {error, invalid_mic};
+        true -> {ok, hpr_route_ets:lookup_devaddr_range(DevAddr)};
+        {true, Routes} -> {ok, Routes}
+    end.
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
 maybe_deliver_no_routes(Packet) ->
@@ -155,28 +164,6 @@ packet_type_check(Packet) ->
         {uplink, _} -> true
     end.
 
--spec mic_check(Packet :: hpr_packet_up:packet()) -> boolean().
-mic_check(Packet) ->
-    case hpr_packet_up:type(Packet) of
-        {undefined, _} ->
-            true;
-        {join_req, _} ->
-            true;
-        {uplink, {_Type, DevAddr}} ->
-            case hpr_skf_ets:lookup_devaddr(DevAddr) of
-                {error, not_found} ->
-                    true;
-                {ok, Keys} ->
-                    Payload = hpr_packet_up:payload(Packet),
-                    lists:any(
-                        fun(Key) ->
-                            hpr_lorawan:key_matches_mic(Key, Payload)
-                        end,
-                        Keys
-                    )
-            end
-    end.
-
 -spec execute_checks(Packet :: hpr_packet_up:packet(), [{fun(), any()}]) -> ok | {error, any()}.
 execute_checks(_Packet, []) ->
     ok;
@@ -186,4 +173,42 @@ execute_checks(Packet, [{Fun, ErrorReason} | Rest]) ->
             {error, ErrorReason};
         true ->
             execute_checks(Packet, Rest)
+    end.
+
+-spec mic_check(Packet :: hpr_packet_up:packet()) -> boolean() | {true, [hpr_route:route()]}.
+mic_check(Packet) ->
+    case hpr_packet_up:type(Packet) of
+        {undefined, _} ->
+            true;
+        {join_req, _} ->
+            true;
+        {uplink, {_Type, DevAddr}} ->
+            case hpr_route_ets:lookup_skf(DevAddr) of
+                [] ->
+                    true;
+                SKFs ->
+                    Payload = hpr_packet_up:payload(Packet),
+                    Filtered = lists:filtermap(
+                        fun({Key, RouteID}) ->
+                            case hpr_lorawan:key_matches_mic(Key, Payload) of
+                                false ->
+                                    false;
+                                true ->
+                                    case hpr_route_ets:lookup_route(RouteID) of
+                                        %% Note: this would mark packet as invalid_mic
+                                        %% but we are just missing the route
+                                        [] -> false;
+                                        Routes -> {true, Routes}
+                                    end
+                            end
+                        end,
+                        SKFs
+                    ),
+                    case Filtered of
+                        [] ->
+                            false;
+                        _ ->
+                            {true, lists:usort(lists:flatten(Filtered))}
+                    end
+            end
     end.

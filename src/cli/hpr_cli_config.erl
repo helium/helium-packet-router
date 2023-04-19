@@ -175,13 +175,14 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
     <<DevAddr:32/integer-unsigned-little>> = hpr_utils:hex_to_bin(
         erlang:list_to_binary(DevAddrString)
     ),
-    case hpr_skf_ets:lookup_devaddr(DevAddr) of
-        {error, _} ->
+    case hpr_route_ets:lookup_skf(DevAddr) of
+        [] ->
             c_text("No SKF found");
-        {ok, SKFs} ->
-            MkRow = fun(SKF) ->
+        SKFs ->
+            MkRow = fun({Key, RouteID}) ->
                 [
-                    {" Session Key ", hpr_utils:bin_to_hex_string(SKF)},
+                    {" Route ID ", RouteID},
+                    {" Session Key ", hpr_utils:bin_to_hex_string(Key)},
                     {" DevAddr ", DevAddrString}
                 ]
             end,
