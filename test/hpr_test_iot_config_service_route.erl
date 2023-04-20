@@ -2,6 +2,8 @@
 
 -behaviour(helium_iot_config_route_bhvr).
 
+-include("../src/grpc/autogen/iot_config_pb.hrl").
+
 -export([
     init/2,
     handle_info/2
@@ -59,9 +61,7 @@ delete(_Ctx, _Msg) ->
     {grpc_error, {12, <<"UNIMPLEMENTED">>}}.
 
 stream(RouteStreamReq, StreamState) ->
-    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    Signer = HandlerState#state.signer,
-    case hpr_route_stream_req:verify(RouteStreamReq, Signer) of
+    case hpr_route_stream_req:verify(RouteStreamReq) of
         false ->
             {grpc_error, {7, <<"PERMISSION_DENIED">>}};
         true ->
