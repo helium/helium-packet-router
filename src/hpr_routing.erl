@@ -67,15 +67,63 @@ handle_packet(Packet) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
 -spec find_routes(hpr_packet_up:type(), Packet :: hpr_packet_up:packet()) ->
     {ok, [hpr_route:route()]} | {error, invalid_mic}.
 find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
     {ok, hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI)};
-find_routes({uplink, {_Type, DevAddr}}, Packet) ->
-    case mic_check(Packet) of
-        false -> {error, invalid_mic};
-        true -> {ok, hpr_route_ets:lookup_devaddr_range(DevAddr)};
-        {true, Routes} -> {ok, Routes}
+find_routes({uplink, _}, Packet) ->
+    find_routes_for_uplink(Packet).
+
+-spec find_routes_for_uplink(Packet :: hpr_packet_up:packet()) ->
+    {ok, [hpr_route:route()]} | {error, invalid_mic}.
+find_routes_for_uplink(Packet) ->
+    {uplink, {_Type, DevAddr}} = hpr_packet_up:type(Packet),
+    case hpr_route_ets:lookup_skf(DevAddr) of
+        %% If they aren't any SKF for that devaddr we can move on the packet is valid
+        [] ->
+            {ok, hpr_route_ets:lookup_devaddr_range(DevAddr)};
+        SKFs ->
+            %% First, we get all the unique Routes we find in that SKFs list and
+            %% all the Routes that devaddr is included into and make the delta.
+            %% Getting us the Routes that do not have SKFs for that devaddr.
+            SKFsRoutes = lists:usort([RouteID || {_Key, RouteID} <- SKFs]),
+            RoutesWithNoSKF = lists:filtermap(
+                fun(Route) ->
+                    RouteID = hpr_route:id(Route),
+                    not lists:member(RouteID, SKFsRoutes)
+                end,
+                hpr_route_ets:lookup_devaddr_range(DevAddr)
+            ),
+            %% Then, we actually check each SKF agaisnt the payload.
+            Payload = hpr_packet_up:payload(Packet),
+            MicFilteredRoutes = lists:filtermap(
+                fun({Key, RouteID}) ->
+                    case hpr_lorawan:key_matches_mic(Key, Payload) of
+                        %% If failed we remove that entry
+                        false ->
+                            false;
+                        %% If match we try to get the Route and included it.
+                        true ->
+                            case hpr_route_ets:lookup_route(RouteID) of
+                                %% Note: this would mark packet as invalid_mic
+                                %% but we are just missing the route
+                                [] -> false;
+                                Routes -> {true, Routes}
+                            end
+                    end
+                end,
+                SKFs
+            ),
+            %% We have to flatten as `hpr_route_ets:lookup_route/1` returns a list of Routes
+            %% and `usort` it just in case there were any duplicates in the SKF.
+            %% We can then add the Routes that did not include SKFs.
+            case lists:usort(lists:flatten(MicFilteredRoutes)) ++ RoutesWithNoSKF of
+                %% If we could not find any routes including with or without SKF then sorry
+                %% you are not passing this test
+                [] -> {error, invalid_mic};
+                List -> {ok, List}
+            end
     end.
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
@@ -175,40 +223,215 @@ execute_checks(Packet, [{Fun, ErrorReason} | Rest]) ->
             execute_checks(Packet, Rest)
     end.
 
--spec mic_check(Packet :: hpr_packet_up:packet()) -> boolean() | {true, [hpr_route:route()]}.
-mic_check(Packet) ->
-    case hpr_packet_up:type(Packet) of
-        {undefined, _} ->
-            true;
-        {join_req, _} ->
-            true;
-        {uplink, {_Type, DevAddr}} ->
-            case hpr_route_ets:lookup_skf(DevAddr) of
-                [] ->
-                    true;
-                SKFs ->
-                    Payload = hpr_packet_up:payload(Packet),
-                    Filtered = lists:filtermap(
-                        fun({Key, RouteID}) ->
-                            case hpr_lorawan:key_matches_mic(Key, Payload) of
-                                false ->
-                                    false;
-                                true ->
-                                    case hpr_route_ets:lookup_route(RouteID) of
-                                        %% Note: this would mark packet as invalid_mic
-                                        %% but we are just missing the route
-                                        [] -> false;
-                                        Routes -> {true, Routes}
-                                    end
-                            end
-                        end,
-                        SKFs
-                    ),
-                    case Filtered of
-                        [] ->
-                            false;
-                        _ ->
-                            {true, lists:usort(lists:flatten(Filtered))}
-                    end
-            end
-    end.
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+all_test_() ->
+    {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
+        ?_test(find_routes_for_uplink_no_skf()),
+        ?_test(find_routes_for_uplink_single_route_success()),
+        ?_test(find_routes_for_uplink_single_route_failed()),
+        ?_test(find_routes_for_uplink_multi_route_success()),
+        ?_test(find_routes_for_uplink_multi_route_failed())
+    ]}.
+
+foreach_setup() ->
+    meck:new(hpr_route_ets, [passthrough]),
+    ok.
+
+foreach_cleanup(ok) ->
+    meck:unload(hpr_route_ets),
+    ok.
+
+find_routes_for_uplink_no_skf() ->
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> [] end),
+    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [] end),
+
+    PacketUp = test_utils:uplink_packet_up(#{}),
+
+    ?assertEqual({ok, []}, find_routes_for_uplink(PacketUp)),
+    ok.
+
+find_routes_for_uplink_single_route_success() ->
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1,
+        active => true,
+        locked => false
+    }),
+    SKF1 = crypto:strong_rand_bytes(16),
+    SKFs = [{SKF1, RouteID1}],
+
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs end),
+    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [Route1] end),
+    meck:expect(hpr_route_ets, lookup_route, fun(_) -> [Route1] end),
+
+    PacketUp = test_utils:uplink_packet_up(#{nwk_session_key => SKF1}),
+
+    ?assertEqual({ok, [Route1]}, find_routes_for_uplink(PacketUp)),
+    ok.
+
+find_routes_for_uplink_single_route_failed() ->
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1,
+        active => true,
+        locked => false
+    }),
+    SKF1 = crypto:strong_rand_bytes(16),
+    SKFs = [{SKF1, RouteID1}],
+
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs end),
+    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [Route1] end),
+    meck:expect(hpr_route_ets, lookup_route, fun(_) -> [Route1] end),
+
+    PacketUp = test_utils:uplink_packet_up(#{nwk_session_key => crypto:strong_rand_bytes(16)}),
+
+    ?assertEqual({error, invalid_mic}, find_routes_for_uplink(PacketUp)),
+    ok.
+
+find_routes_for_uplink_multi_route_success() ->
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1,
+        active => true,
+        locked => false
+    }),
+    RouteID2 = "route_id_2",
+    Route2 = hpr_route:test_new(#{
+        id => RouteID2,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1,
+        active => true,
+        locked => false
+    }),
+    SKF1 = crypto:strong_rand_bytes(16),
+    SKFs1 = [{SKF1, RouteID1}],
+
+    %% Testing with only Route1 having a SKF
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs1 end),
+    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [Route1, Route2] end),
+    meck:expect(hpr_route_ets, lookup_route, fun(ID) ->
+        case ID of
+            RouteID1 -> [Route1];
+            RouteID2 -> [Route2]
+        end
+    end),
+
+    PacketUp = test_utils:uplink_packet_up(#{nwk_session_key => SKF1}),
+
+    ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
+
+    %% Testing with both Routes having a good SKF
+    SKFs2 = [{SKF1, RouteID1}, {SKF1, RouteID2}],
+
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs2 end),
+
+    ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
+
+    %% No SKF at all
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> [] end),
+
+    ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
+
+    ok.
+
+find_routes_for_uplink_multi_route_failed() ->
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1,
+        active => true,
+        locked => false
+    }),
+    RouteID2 = "route_id_2",
+    Route2 = hpr_route:test_new(#{
+        id => RouteID2,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1,
+        active => true,
+        locked => false
+    }),
+    SKF1 = crypto:strong_rand_bytes(16),
+    SKFs1 = [{SKF1, RouteID1}],
+
+    %% Testing with only Route1 having a bad SKF and other no SKF
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs1 end),
+    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [Route1, Route2] end),
+    meck:expect(hpr_route_ets, lookup_route, fun(ID) ->
+        case ID of
+            RouteID1 -> [Route1];
+            RouteID2 -> [Route2]
+        end
+    end),
+
+    PacketUp1 = test_utils:uplink_packet_up(#{nwk_session_key => crypto:strong_rand_bytes(16)}),
+
+    ?assertEqual({ok, [Route2]}, find_routes_for_uplink(PacketUp1)),
+
+    %% Testing with both Routes having a bad SKF
+    SKFs2 = [{SKF1, RouteID1}, {SKF1, RouteID2}],
+
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs2 end),
+
+    ?assertEqual({error, invalid_mic}, find_routes_for_uplink(PacketUp1)),
+
+    %% Testing one good SKF and one bad SKF
+    SKF2 = crypto:strong_rand_bytes(16),
+    SKFs3 = [{SKF1, RouteID1}, {SKF2, RouteID2}],
+
+    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs3 end),
+    PacketUp2 = test_utils:uplink_packet_up(#{nwk_session_key => SKF1}),
+
+    ?assertEqual({ok, [Route1]}, find_routes_for_uplink(PacketUp2)),
+
+    ok.
+
+-endif.
