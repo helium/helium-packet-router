@@ -53,6 +53,7 @@ handle_packet(Packet) ->
                     ok;
                 {ok, Routes} ->
                     Routed = maybe_deliver_packet(Packet, Routes, 0),
+                    ok = maybe_report_packet(Routes, Routed, Packet),
                     N = erlang:length(Routes),
                     lager:debug(
                         [{routes, N}, {routed, Routed}],
@@ -171,7 +172,6 @@ maybe_deliver_packet(Packet, [Route | Routes], Routed) ->
                     case deliver_packet(Protocol, Packet, Route) of
                         ok ->
                             lager:debug(RouteMD, "delivered"),
-                            ok = hpr_packet_reporter:report_packet(Packet, Route),
                             {Type, _} = hpr_packet_up:type(Packet),
                             ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
                             maybe_deliver_packet(Packet, Routes, Routed + 1);
@@ -195,6 +195,23 @@ deliver_packet({http_roaming, _}, Packet, Route) ->
     hpr_protocol_http_roaming:send(Packet, Route);
 deliver_packet(_OtherProtocol, _Packet, _Route) ->
     lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
+
+%% TODO: test this in CT
+-spec maybe_report_packet(
+    Routes :: [hpr_route:route()], Routed :: non_neg_integer(), Packet :: hpr_packet_up:packet()
+) -> ok.
+maybe_report_packet(_Routes, 0, _Packet) ->
+    lager:debug("not reporting packet");
+maybe_report_packet([Route | _] = Routes, Routed, Packet) when Routed > 0 ->
+    UniqueOUINetID = lists:usort([{hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]),
+    case erlang:length(UniqueOUINetID) of
+        1 ->
+            ok = hpr_packet_reporter:report_packet(Packet, Route);
+        _ ->
+            lager:error("routed packet to non unique OUI/Net ID ~p", [
+                [{hpr_route:id(R), hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]
+            ])
+    end.
 
 -spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
 throttle_check(Packet) ->
