@@ -261,8 +261,6 @@ skfs_for_route(RouteID) ->
     MS = [{{'$1', {'$2', RouteID}}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS_DEVADDR_RANGES, MS).
 
-%% TODO: Add skf for route for CLI
-
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
