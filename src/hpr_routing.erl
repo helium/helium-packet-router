@@ -196,7 +196,6 @@ deliver_packet({http_roaming, _}, Packet, Route) ->
 deliver_packet(_OtherProtocol, _Packet, _Route) ->
     lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
 
-%% TODO: test this in CT
 -spec maybe_report_packet(
     Routes :: [hpr_route:route()], Routed :: non_neg_integer(), Packet :: hpr_packet_up:packet()
 ) -> ok.
