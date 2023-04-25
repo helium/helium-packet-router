@@ -121,11 +121,12 @@ main_test(_Config) ->
 
     LNS = <<"stress_test">>,
     ChannelName = LNS,
-    {ok, Channel} = grpcbox_client:connect(ChannelName, [{http, "localhost", 8082, []}], #{
+    {ok, Channel} = grpcbox_client:connect(ChannelName, [{http, "localhost", 8083, []}], #{
         sync_start => true
     }),
     {links, [_, SubChannel]} = recon:info(Channel, links),
-    {ok, ConnPid, _} = grpcbox_subchannel:conn(SubChannel),
+    {ok, StreamSet, _Info} = grpcbox_subchannel:conn(SubChannel),
+    ConnPid = h2_stream_set:connection(StreamSet),
 
     timer:sleep(5000),
 
@@ -142,9 +143,9 @@ main_test(_Config) ->
     MaxHotspots = 60000,
     SendPacketSleep = timer:seconds(5),
 
-    Throttle = hotspot_connect,
-    ok = throttle:setup(Throttle, 1000, per_second),
-    Backoff0 = backoff:type(backoff:init(timer:seconds(1), timer:seconds(10)), normal),
+    % Throttle = hotspot_connect,
+    % ok = throttle:setup(Throttle, 1000, per_second),
+    % Backoff0 = backoff:type(backoff:init(timer:seconds(1), timer:seconds(10)), normal),
 
     erlang:spawn(
         fun() ->
@@ -159,7 +160,11 @@ main_test(_Config) ->
 
                         timer:sleep(rand:uniform(2500)),
 
-                        case create_stream(Throttle, ChannelName, Backoff0) of
+                        case
+                            helium_packet_router_packet_client:route(#{
+                                channel => ChannelName
+                            })
+                        of
                             {ok, Stream} ->
                                 send_packet(SendPacketSleep, Stream, PubKeyBin, SigFun);
                             _Err ->
@@ -229,16 +234,14 @@ hpr_protocol_router_test(_Config) ->
     LNS = hpr_route:lns(Route),
     ChannelName = LNS,
 
-    MaxCon = 10,
-    Endpoints = lists:map(
-        fun(X) -> {http, "localhost", 8082, [X]} end, lists:seq(1, MaxCon)
-    ),
+    Endpoints = [{http, "localhost", 8082, []}],
 
     {ok, Channel} = grpcbox_client:connect(ChannelName, Endpoints, #{
         sync_start => true
     }),
     {links, [_, SubChannel | _]} = recon:info(Channel, links),
-    {ok, ConnPid, _} = grpcbox_subchannel:conn(SubChannel),
+    {ok, StreamSet, _Info} = grpcbox_subchannel:conn(SubChannel),
+    ConnPid = h2_stream_set:connection(StreamSet),
 
     timer:sleep(5000),
 
@@ -287,24 +290,25 @@ hpr_protocol_router_test(_Config) ->
 spawn_hotspot(SendPacketSleep, Route, PubKeyBin, SigFun) ->
     erlang:spawn(fun() ->
         ok = hpr_packet_router_service:register(PubKeyBin),
-        timer:sleep(rand:uniform(2500)),
+        % timer:sleep(rand:uniform(2500)),
+        timer:sleep(10),
         _ = send_packet_via_protocol(SendPacketSleep, Route, PubKeyBin, SigFun, rand:uniform(250)),
         spawn_hotspot(SendPacketSleep, Route, PubKeyBin, SigFun)
     end).
 
-create_stream(Throttle, ChannelName, Backoff0) ->
-    case throttle:check(Throttle, ChannelName) of
-        {limit_exceeded, _, _} ->
-            {Delay, Backoff1} = backoff:fail(Backoff0),
-            % lager:error("limit_exceeded ~w", [Delay]),
-            timer:sleep(Delay),
-            create_stream(Throttle, ChannelName, Backoff1);
-        _ ->
-            % timer:sleep(rand:uniform(250)),
-            helium_packet_router_packet_client:route(#{
-                channel => ChannelName
-            })
-    end.
+% create_stream(Throttle, ChannelName, Backoff0) ->
+%     case throttle:check(Throttle, ChannelName) of
+%         {limit_exceeded, _, _} ->
+%             {Delay, Backoff1} = backoff:fail(Backoff0),
+%             % lager:error("limit_exceeded ~w", [Delay]),
+%             timer:sleep(Delay),
+%             create_stream(Throttle, ChannelName, Backoff1);
+%         _ ->
+%             % timer:sleep(rand:uniform(250)),
+%             helium_packet_router_packet_client:route(#{
+%                 channel => ChannelName
+%             })
+%     end.
 
 send_packet(Sleep, Stream, PubKeyBin, SigFun) ->
     PacketUp = test_utils:uplink_packet_up(#{

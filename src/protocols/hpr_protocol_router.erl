@@ -35,8 +35,6 @@
 -define(BACKOFF_MIN, 10).
 -define(BACKOFF_MAX, timer:seconds(1)).
 
--define(THROTTLE, create_stream_throttle).
-
 -ifdef(TEST).
 -define(CLEANUP_TIME, timer:seconds(1)).
 -else.
@@ -189,8 +187,9 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                             get_stream(Gateway, LNS, Server, BackoffFailed)
                     end
             end;
-        [{_, #{channel := ChannelPid, stream_pid := StreamPid} = Stream}] ->
-            case erlang:is_process_alive(ChannelPid) andalso erlang:is_process_alive(StreamPid) of
+        [{_, #{channel := StreamSet, stream_pid := StreamPid} = Stream}] ->
+            ConnPid = h2_stream_set:connection(StreamSet),
+            case erlang:is_process_alive(ConnPid) andalso erlang:is_process_alive(StreamPid) of
                 true ->
                     {ok, Stream};
                 %% Connection or Stream are not alive lets delete and try to get a new one
