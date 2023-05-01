@@ -17,7 +17,8 @@
     max_copies_test/1,
     active_locked_route_test/1,
     success_test/1,
-    no_routes_test/1
+    no_routes_test/1,
+    maybe_report_packet_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -39,7 +40,8 @@ all() ->
         max_copies_test,
         active_locked_route_test,
         success_test,
-        no_routes_test
+        no_routes_test,
+        maybe_report_packet_test
     ].
 
 %%--------------------------------------------------------------------
@@ -120,56 +122,107 @@ mic_check_test(_Config) ->
         sig_fun => SigFun
     }),
 
+    %% TEST 1: Join always works
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
 
-    BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    hpr_skf_ets:insert(
-        hpr_skf:test_new(#{
-            oui => 1, devaddr => DevAddr, session_key => BadSessionKey
-        })
-    ),
+    %% TEST 2:  No SFK for devaddr
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+
+    %% TEST 3:  Good key but no routes
+    SKFNoRoutes = hpr_skf:test_new(#{
+        route_id => "empty",
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+    }),
+    hpr_route_ets:insert_skf(SKFNoRoutes),
     ok = test_utils:wait_until(
         fun() ->
-            1 =:= ets:info(hpr_skf_ets, size)
+            1 =:= ets:info(hpr_route_skfs_ets, size)
+        end
+    ),
+
+    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
+
+    ok = hpr_route_ets:delete_skf(SKFNoRoutes),
+
+    %% TEST 4:  Bad key and no routes
+    BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SKFBadKeyNoRoute = hpr_skf:test_new(#{
+        route_id => "empty", devaddr => DevAddr, session_key => BadSessionKey
+    }),
+    hpr_route_ets:insert_skf(SKFBadKeyNoRoute),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_route_skfs_ets, size)
         end
     ),
     ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
 
-    hpr_skf_ets:insert(
-        hpr_skf:test_new(#{
-            oui => 1, devaddr => DevAddr, session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
-        })
-    ),
+    ok = hpr_route_ets:delete_skf(SKFBadKeyNoRoute),
+
+    %% TEST 5: Bad key and route exist
+    Route = hpr_route:test_new(#{
+        id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "lns1.testdomain.com",
+            port => 80,
+            protocol => {http_roaming, #{}}
+        },
+        max_copies => 1
+    }),
+    RouteID = hpr_route:id(Route),
+    ?assertEqual(ok, hpr_route_ets:insert_route(Route)),
+
+    SKFBadKeyAndRouteExitst = hpr_skf:test_new(#{
+        route_id => RouteID, devaddr => DevAddr, session_key => BadSessionKey
+    }),
+    hpr_route_ets:insert_skf(SKFBadKeyAndRouteExitst),
+
     ok = test_utils:wait_until(
         fun() ->
-            2 =:= ets:info(hpr_skf_ets, size)
+            1 =:= ets:info(hpr_route_skfs_ets, size)
         end
     ),
+
+    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
+
+    ok = hpr_route_ets:delete_skf(SKFBadKeyAndRouteExitst),
+
+    %% TEST 6:  Good key and route exist
+    %% We leave old route inserted and do not delete good skf for next test
+
+    SKFGoodKeyAndRouteExitst = hpr_skf:test_new(#{
+        route_id => RouteID,
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+    }),
+    hpr_route_ets:insert_skf(SKFGoodKeyAndRouteExitst),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            1 =:= ets:info(hpr_route_skfs_ets, size)
+        end
+    ),
+
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
-    hpr_skf_ets:delete(
-        hpr_skf:test_new(#{oui => 1, devaddr => DevAddr, session_key => BadSessionKey})
-    ),
-    ok = test_utils:wait_until(
-        fun() ->
-            1 =:= ets:info(hpr_skf_ets, size)
-        end
-    ),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    %% TEST 7:  Good key and route exist
+    %% Adding a bad key to make sure it still works
 
-    hpr_skf_ets:delete(
-        hpr_skf:test_new(#{
-            oui => 1, devaddr => DevAddr, session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
-        })
-    ),
+    hpr_route_ets:insert_skf(SKFBadKeyNoRoute),
+
     ok = test_utils:wait_until(
         fun() ->
-            0 =:= ets:info(hpr_skf_ets, size)
+            2 =:= ets:info(hpr_route_skfs_ets, size)
         end
     ),
+
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
     ok.
@@ -585,6 +638,147 @@ no_routes_test(_Config) ->
         [],
         [{persistent, true}]
     ),
+    ok.
+
+maybe_report_packet_test(_Config) ->
+    Self = self(),
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:new(hpr_packet_reporter, [passthrough]),
+
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        }),
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 2
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+
+    JoinPacketUpValid = test_utils:join_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+
+    Received1 =
+        {Self,
+            {hpr_protocol_router, send, [
+                JoinPacketUpValid,
+                Route
+            ]},
+            ok},
+    ?assertEqual([Received1], meck:history(hpr_protocol_router)),
+
+    UplinkPacketUp1 = test_utils:uplink_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr, fcnt => 1
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+
+    Received2 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp1,
+                Route
+            ]},
+            ok},
+    ?assertEqual(
+        [
+            Received1,
+            Received2
+        ],
+        meck:history(hpr_protocol_router)
+    ),
+
+    ?assertEqual(2, meck:num_calls(hpr_packet_reporter, report_packet, 2)),
+
+    ok = meck:reset(hpr_packet_reporter),
+
+    %% We are adding a route with diff OUI but same dev ranges (This should not be allowed by CS)
+    BadRouteID = "11502f32-4d58-4746-965e-8c7dfdcfc624",
+    BadRoute = hpr_route:test_new(#{
+        id => BadRouteID,
+        net_id => NetID,
+        oui => 2,
+        server => #{
+            host => "localhost",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1
+    }),
+    BadDevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => BadRouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(BadRoute),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, BadDevAddrRanges),
+
+    UplinkPacketUp2 = test_utils:uplink_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr, fcnt => 2
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
+
+    Received3 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp2,
+                BadRoute
+            ]},
+            ok},
+    Received4 =
+        {Self,
+            {hpr_protocol_router, send, [
+                UplinkPacketUp2,
+                Route
+            ]},
+            ok},
+
+    %% Packet is still send to both Routes
+    ?assertEqual(
+        [
+            Received1,
+            Received2,
+            Received3,
+            Received4
+        ],
+        meck:history(hpr_protocol_router)
+    ),
+
+    %% But no report is done
+    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 2)),
+
+    ?assert(meck:validate(hpr_protocol_router)),
+    meck:unload(hpr_protocol_router),
+    ?assert(meck:validate(hpr_packet_reporter)),
+    meck:unload(hpr_packet_reporter),
     ok.
 
 %% ===================================================================

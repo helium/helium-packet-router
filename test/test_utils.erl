@@ -108,15 +108,6 @@ init_per_testcase(TestCase, Config) ->
         20,
         500
     ),
-    ok = test_utils:wait_until(
-        fun() ->
-            {state, Stream, _Backoff} = sys:get_state(hpr_skf_stream_worker),
-            Stream =/= undefined andalso
-                erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_skf))
-        end,
-        20,
-        500
-    ),
 
     Config.
 

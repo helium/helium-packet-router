@@ -36,6 +36,7 @@ config_usage() ->
             "config ls                                   - List\n",
             "config oui <oui>                            - Info for OUI\n",
             "    [--display_euis] default: false (EUIs not included)\n",
+            "    [--display_skfs] default: false (SKFs not included)\n",
             "config skf <devaddr>                        - List all Session Key Filters for Devaddr\n",
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
         ]
@@ -47,7 +48,10 @@ config_cmd() ->
         [
             ["config", "oui", '*'],
             [],
-            [{display_euis, [{longname, "display_euis"}, {datatype, boolean}]}],
+            [
+                {display_euis, [{longname, "display_euis"}, {datatype, boolean}]},
+                {display_skfs, [{longname, "display_skfs"}, {datatype, boolean}]}
+            ],
             fun config_oui_list/3
         ],
         [["config", "skf", '*'], [], [], fun config_skf/3],
@@ -83,9 +87,10 @@ config_list(["config", "ls"], [], []) ->
             {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" Protocol ", hpr_route:protocol_type(Server)},
             {" Max Copies ", hpr_route:max_copies(Route)},
-            {" Addr Range Cnt ",
+            {" Addr Ranges Cnt ",
                 erlang:length(hpr_route_ets:devaddr_ranges_for_route(hpr_route:id(Route)))},
-            {" EUI Cnt ", erlang:length(hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)))},
+            {" EUIs Cnt ", erlang:length(hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)))},
+            {" SKFs Cnt ", erlang:length(hpr_route_ets:skfs_for_route(hpr_route:id(Route)))},
             {" Route ID ", hpr_route:id(Route)}
         ]
     end,
@@ -128,17 +133,23 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
             hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
         ])
     end,
+    FormatSKF = fun({DevAddr, SKF}) ->
+        io_lib:format("  - (~s, ~s)~n", [
+            hpr_utils:int_to_hex_string(DevAddr), hpr_utils:bin_to_hex_string(SKF)
+        ])
+    end,
 
     MkRow = fun(Route) ->
+        RouteID = hpr_route:id(Route),
         NetID = hpr_route:net_id(Route),
         Server = hpr_route:server(Route),
 
         DevAddrRanges = lists:map(
-            FormatDevAddr, hpr_route_ets:devaddr_ranges_for_route(hpr_route:id(Route))
+            FormatDevAddr, hpr_route_ets:devaddr_ranges_for_route(RouteID)
         ),
         DevAddrInfo = [DevAddrHeader | DevAddrRanges],
 
-        EUIs = hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)),
+        EUIs = hpr_route_ets:eui_pairs_for_route(RouteID),
         EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [erlang:length(EUIs)]),
         EUIInfo =
             case maps:is_key(display_euis, Options) of
@@ -148,15 +159,25 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
                     [EUIHeader | lists:map(FormatEUI, EUIs)]
             end,
 
+        SKFs = hpr_route_ets:skfs_for_route(RouteID),
+        SKFHeader = io_lib:format("- SKF (DevAddr, SKF) :: ~p~n", [erlang:length(SKFs)]),
+        SKFInfo =
+            case maps:is_key(display_euis, Options) of
+                false ->
+                    [SKFHeader];
+                true ->
+                    [SKFHeader | lists:map(FormatSKF, SKFs)]
+            end,
+
         Info = [
-            io_lib:format("- ID         :: ~s~n", [hpr_route:id(Route)]),
+            io_lib:format("- ID         :: ~s~n", [RouteID]),
             io_lib:format("- Net ID     :: ~s (~p)~n", [hpr_utils:net_id_display(NetID), NetID]),
             io_lib:format("- Max Copies :: ~p~n", [hpr_route:max_copies(Route)]),
             io_lib:format("- Server     :: ~s~n", [hpr_route:lns(Route)]),
             io_lib:format("- Protocol   :: ~p~n", [hpr_route:protocol(Server)])
         ],
 
-        Info ++ DevAddrInfo ++ EUIInfo
+        Info ++ DevAddrInfo ++ EUIInfo ++ SKFInfo
     end,
 
     c_list(
@@ -175,13 +196,14 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
     <<DevAddr:32/integer-unsigned-little>> = hpr_utils:hex_to_bin(
         erlang:list_to_binary(DevAddrString)
     ),
-    case hpr_skf_ets:lookup_devaddr(DevAddr) of
-        {error, _} ->
+    case hpr_route_ets:lookup_skf(DevAddr) of
+        [] ->
             c_text("No SKF found");
-        {ok, SKFs} ->
-            MkRow = fun(SKF) ->
+        SKFs ->
+            MkRow = fun({Key, RouteID}) ->
                 [
-                    {" Session Key ", hpr_utils:bin_to_hex_string(SKF)},
+                    {" Route ID ", RouteID},
+                    {" Session Key ", hpr_utils:bin_to_hex_string(Key)},
                     {" DevAddr ", DevAddrString}
                 ]
             end,

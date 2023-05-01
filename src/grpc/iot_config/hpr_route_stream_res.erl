@@ -25,7 +25,8 @@ action(RouteStreamRes) ->
 -spec data(RouteStreamRes :: res()) ->
     {route, hpr_route:route()}
     | {eui_pair, hpr_eui_pair:eui_pair()}
-    | {devaddr_range, hpr_devaddr_range:devaddr_range()}.
+    | {devaddr_range, hpr_devaddr_range:devaddr_range()}
+    | {skf, hpr_skf:skf()}.
 data(RouteStreamRes) ->
     RouteStreamRes#iot_config_route_stream_res_v1_pb.data.
 

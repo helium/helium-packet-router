@@ -69,7 +69,6 @@ init([]) ->
     ok = hpr_max_copies:init(),
     ok = hpr_protocol_router:init(),
     ok = hpr_route_ets:init(),
-    ok = hpr_skf_ets:init(),
 
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
     ConfigServiceConfig = application:get_env(?APP, iot_config_service, #{}),
@@ -92,7 +91,6 @@ init([]) ->
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
 
         ?WORKER(hpr_route_stream_worker, [#{}]),
-        ?WORKER(hpr_skf_stream_worker, [#{}]),
 
         ?WORKER(hpr_protocol_router, [#{}]),
 

@@ -42,7 +42,7 @@ stream(Req, StreamState) ->
     Signer = HandlerState#state.signer,
     case hpr_http_roaming_register:verify(Req, Signer) of
         false ->
-            {grpc_error, {7, <<"PERMISSION_DENIED">>}};
+            {grpc_error, {grpcbox_stream:code_to_status(7), <<"PERMISSION_DENIED">>}};
         true ->
             {ok, StreamState}
     end.

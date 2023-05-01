@@ -159,7 +159,7 @@ declare_metrics() ->
 
 -spec record_routes() -> ok.
 record_routes() ->
-    case ets:info(hpr_route_ets_routes, size) of
+    case ets:info(hpr_routes_ets, size) of
         undefined ->
             _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], 0);
         N ->
@@ -169,7 +169,7 @@ record_routes() ->
 
 -spec record_eui_pairs() -> ok.
 record_eui_pairs() ->
-    case ets:info(hpr_route_ets_eui_pairs, size) of
+    case ets:info(hpr_route_eui_pairs_ets, size) of
         undefined ->
             _ = prometheus_gauge:set(?METRICS_EUI_PAIRS_GAUGE, [], 0);
         N ->
@@ -179,7 +179,7 @@ record_eui_pairs() ->
 
 -spec record_skfs() -> ok.
 record_skfs() ->
-    case ets:info(hpr_skf_ets, size) of
+    case ets:info(hpr_route_skfs_ets, size) of
         undefined ->
             _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], 0);
         N ->

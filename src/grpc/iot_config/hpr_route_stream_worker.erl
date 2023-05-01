@@ -124,7 +124,6 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
     SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
     StreamOptions = #{channel => ?IOT_CONFIG_CHANNEL},
-
     case helium_iot_config_route_client:stream(SignedRouteStreamReq, StreamOptions) of
         {ok, Stream} ->
             lager:info("stream initialized"),
@@ -214,6 +213,7 @@ terminate(_Reason, _State) ->
         {route, hpr_route:route()}
         | {eui_pair, hpr_eui_pair:eui_pair()}
         | {devaddr_range, hpr_devaddr_range:devaddr_range()}
+        | {skf, hpr_skf:skf()}
 ) -> ok.
 process_route_stream_res(add, {route, Route}) ->
     hpr_route_ets:insert_route(Route);
@@ -221,9 +221,13 @@ process_route_stream_res(add, {eui_pair, EUIPair}) ->
     hpr_route_ets:insert_eui_pair(EUIPair);
 process_route_stream_res(add, {devaddr_range, DevAddrRange}) ->
     hpr_route_ets:insert_devaddr_range(DevAddrRange);
+process_route_stream_res(add, {skf, SKF}) ->
+    hpr_route_ets:insert_skf(SKF);
 process_route_stream_res(remove, {route, Route}) ->
     hpr_route_ets:delete_route(Route);
 process_route_stream_res(remove, {eui_pair, EUIPair}) ->
     hpr_route_ets:delete_eui_pair(EUIPair);
 process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
-    hpr_route_ets:delete_devaddr_range(DevAddrRange).
+    hpr_route_ets:delete_devaddr_range(DevAddrRange);
+process_route_stream_res(remove, {skf, SKF}) ->
+    hpr_route_ets:delete_skf(SKF).
