@@ -893,7 +893,7 @@ maybe_report_packet_test(_Config) ->
         meck:history(hpr_protocol_router)
     ),
 
-    ?assertEqual(2, meck:num_calls(hpr_packet_reporter, report_packet, 2)),
+    ?assertEqual(2, meck:num_calls(hpr_packet_reporter, report_packet, 3)),
 
     ok = meck:reset(hpr_packet_reporter),
 
@@ -950,7 +950,7 @@ maybe_report_packet_test(_Config) ->
     ),
 
     %% But no report is done
-    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 2)),
+    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 3)),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
