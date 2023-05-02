@@ -20,8 +20,6 @@
 -define(RFU, 2#110).
 -define(PRIORITY, 2#111).
 
--define(CONFIG_SERVICE_PORT, 8085).
-
 init_per_testcase(TestCase, Config) ->
     Suite = proplists:get_value(suite, proplists:get_value(tc_group_properties, Config)),
     BaseDir = filename:join([Suite, TestCase]),
@@ -84,18 +82,6 @@ init_per_testcase(TestCase, Config) ->
 
     %% Startup a config service test server (look at ct.config)
     _ = application:ensure_all_started(grpcbox),
-
-    %% Setup route worker
-    application:set_env(
-        hpr,
-        iot_config_service,
-        #{
-            transport => http,
-            host => "localhost",
-            port => ?CONFIG_SERVICE_PORT
-        },
-        [{persistent, true}]
-    ),
 
     application:ensure_all_started(?APP),
 

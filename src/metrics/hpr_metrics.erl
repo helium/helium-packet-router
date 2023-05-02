@@ -12,7 +12,8 @@
     observe_packet_up/4,
     packet_up_per_oui/2,
     packet_down/1,
-    observe_packet_report/2
+    observe_packet_report/2,
+    observe_multi_buy/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -80,6 +81,17 @@ observe_packet_report(Status, Start) ->
         ?METRICS_PACKET_REPORT_HISTOGRAM,
         [Status],
         erlang:system_time(millisecond) - Start
+    ).
+
+-spec observe_multi_buy(
+    Status :: {ok, non_neg_integer()} | {error, any()},
+    Time :: non_neg_integer()
+) -> ok.
+observe_multi_buy({Status, _}, Time) ->
+    prometheus_histogram:observe(
+        ?METRICS_MULTI_BUY_GET_HISTOGRAM,
+        [Status],
+        Time
     ).
 
 %% ------------------------------------------------------------------

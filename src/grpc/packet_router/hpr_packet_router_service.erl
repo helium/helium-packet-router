@@ -173,6 +173,7 @@ handle_info_test() ->
 
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
+    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
 
     ?assertEqual(stream_state, ?MODULE:handle_info({packet_down, PacketDown}, stream_state)),
     ?assertEqual(stream_state, ?MODULE:handle_info(msg, stream_state)),
@@ -187,6 +188,7 @@ send_packet_down_test() ->
 
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
+    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
 
     #{public := PubKey0} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin0 = libp2p_crypto:pubkey_to_bin(PubKey0),

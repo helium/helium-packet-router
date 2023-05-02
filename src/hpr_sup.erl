@@ -66,18 +66,20 @@ init([]) ->
     ok = persistent_term:put(?HPR_KEY, Key),
 
     ok = hpr_routing:init(),
-    ok = hpr_max_copies:init(),
+    ok = hpr_multi_buy:init(),
     ok = hpr_protocol_router:init(),
     ok = hpr_route_ets:init(),
 
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
     ConfigServiceConfig = application:get_env(?APP, iot_config_service, #{}),
     DownlinkServiceConfig = application:get_env(?APP, downlink_service, #{}),
+    MultiBuyServiceConfig = application:get_env(?APP, multi_buy_service, #{}),
 
     %% Starting config service client channel here because of the way we get
     %% .env vars into the app.
     _ = maybe_start_channel(ConfigServiceConfig, ?IOT_CONFIG_CHANNEL),
     _ = maybe_start_channel(DownlinkServiceConfig, ?DOWNLINK_CHANNEL),
+    _ = maybe_start_channel(MultiBuyServiceConfig, ?MULTI_BUY_CHANNEL),
 
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},

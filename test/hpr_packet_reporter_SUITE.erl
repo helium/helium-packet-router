@@ -109,7 +109,7 @@ upload_test(_Config) ->
     ExpectedPackets = lists:foldl(
         fun(X, Acc) ->
             Packet = test_utils:uplink_packet_up(#{rssi => X}),
-            hpr_packet_reporter:report_packet(Packet, Route),
+            hpr_packet_reporter:report_packet(Packet, Route, false),
             PacketReport = hpr_packet_report:new(Packet, Route),
             [PacketReport | Acc]
         end,
