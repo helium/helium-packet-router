@@ -524,7 +524,11 @@ test_delete_route() ->
 
     AppEUI2 = 10,
     DevEUI2 = 20,
-    EUIPair2 = hpr_eui_pair:test_new(#{route_id => RouteID2, app_eui => AppEUI2, dev_eui => DevEUI2}),
+    EUIPair2 = hpr_eui_pair:test_new(#{
+        route_id => RouteID2,
+        app_eui => AppEUI2,
+        dev_eui => DevEUI2
+    }),
     StartAddr2 = 16#00000010,
     EndAddr2 = 16#000000A0,
     DevAddrRange2 = hpr_devaddr_range:test_new(#{

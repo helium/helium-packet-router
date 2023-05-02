@@ -348,7 +348,11 @@ test_full() ->
         {ok, {undefined, undefined}}
     end),
 
-    Stream = #{channel => self(), stream_pid => self()},
+    Stream = #{
+        channel =>
+            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+        stream_pid => self()
+    },
     meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
         SleepRandom(25),
         {ok, Stream}
@@ -393,7 +397,11 @@ test_cannot_locate_stream() ->
 
     meck:expect(grpcbox_channel, pick, fun(_LNS, stream) -> {ok, {undefined, undefined}} end),
 
-    Stream = #{channel => self(), stream_pid => self()},
+    Stream = #{
+        channel =>
+            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+        stream_pid => self()
+    },
     meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
         {ok, Stream}
     end),
