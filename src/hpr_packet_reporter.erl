@@ -32,13 +32,15 @@
 
 -define(SERVER, ?MODULE).
 -define(UPLOAD, upload).
+-define(MAX_WBITS, 15).
 
 -record(state, {
     bucket :: binary(),
     bucket_region :: binary(),
     report_max_size :: non_neg_integer(),
     report_interval :: non_neg_integer(),
-    current_packets = [] :: [binary()],
+    compressor,
+    current_packets = [] :: [iodata()],
     current_size = 0 :: non_neg_integer()
 }).
 
@@ -96,8 +98,11 @@ init(
 ) ->
     lager:info(maps:to_list(Args), "started"),
     ok = schedule_upload(Interval),
+    Compressor = zlib:open(),
+    ok = zlib:deflateInit(Compressor, default, deflated, 16 + ?MAX_WBITS, 8, default),
     {ok, #state{
         bucket = Bucket,
+        compressor = Compressor,
         bucket_region = BucketRegion,
         report_max_size = MaxSize,
         report_interval = Interval
@@ -108,21 +113,33 @@ handle_call(_Msg, _From, State) ->
 
 handle_cast(
     {report_packet, EncodedPacket},
-    #state{report_max_size = MaxSize, current_packets = Packets, current_size = Size} = State
+    #state{
+        report_max_size = MaxSize,
+        current_packets = Packets,
+        current_size = Size,
+        compressor = Compressor
+    } = State
 ) when Size < MaxSize ->
+    CompressedPacket = zlib:deflate(Compressor, EncodedPacket),
     {noreply, State#state{
-        current_packets = [EncodedPacket | Packets],
-        current_size = erlang:size(EncodedPacket) + Size
+        current_packets = [CompressedPacket | Packets],
+        current_size = iolist_size(CompressedPacket) + Size
     }};
 handle_cast(
     {report_packet, EncodedPacket},
-    #state{report_max_size = MaxSize, current_packets = Packets, current_size = Size} = State
+    #state{
+        report_max_size = MaxSize,
+        current_packets = Packets,
+        current_size = Size,
+        compressor = Compressor
+    } = State
 ) when Size >= MaxSize ->
     lager:info("got packet, size too big"),
+    CompressedPacket = zlib:deflate(Compressor, EncodedPacket),
     {noreply,
         upload(State#state{
-            current_packets = [EncodedPacket | Packets],
-            current_size = erlang:size(EncodedPacket) + Size
+            current_packets = [CompressedPacket | Packets],
+            current_size = iolist_size(CompressedPacket) + Size
         })};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -178,7 +195,8 @@ upload(
     #state{
         bucket = Bucket,
         current_packets = Packets,
-        current_size = Size
+        current_size = Size,
+        compressor = Compressor
     } = State
 ) ->
     StartTime = erlang:system_time(millisecond),
@@ -186,13 +204,18 @@ upload(
 
     Timestamp = erlang:system_time(millisecond),
     FileName = erlang:list_to_binary("packetreport." ++ erlang:integer_to_list(Timestamp) ++ ".gz"),
-    Compressed = zlib:gzip(Packets),
+    Last = zlib:deflate(Compressor, [], finish),
+    zlib:deflateEnd(Compressor),
+    zlib:close(Compressor),
+
+    NewCompressor = zlib:open(),
+    ok = zlib:deflateInit(NewCompressor, default, deflated, 16 + ?MAX_WBITS, 8, default),
 
     MD = [
         {filename, erlang:binary_to_list(FileName)},
         {bucket, erlang:binary_to_list(Bucket)},
         {packet_cnt, erlang:length(Packets)},
-        {gzip_bytes, erlang:size(Compressed)},
+        {gzip_bytes, Size + erlang:iolist_size(Last)},
         {bytes, Size}
     ],
     lager:info(MD, "uploading report"),
@@ -202,18 +225,20 @@ upload(
             Bucket,
             FileName,
             #{
-                <<"Body">> => Compressed
+                <<"Body">> => lists:reverse([Last | Packets])
             }
         )
     of
         {ok, _, _Response} ->
             lager:info(MD, "upload success"),
             ok = hpr_metrics:observe_packet_report(ok, StartTime),
-            State#state{current_packets = [], current_size = 0};
+            State#state{current_packets = [], current_size = 0, compressor = NewCompressor};
         _Error ->
+            %% XXX the zlib compressor is not reusable
+            %% XXX we should put the failed upload somewhere
             lager:error(MD, "upload failed ~p", [_Error]),
             ok = hpr_metrics:observe_packet_report(error, StartTime),
-            State
+            State#state{current_packets = [], current_size = 0, compressor = NewCompressor}
     end.
 
 -spec schedule_upload(Interval :: non_neg_integer()) -> ok.

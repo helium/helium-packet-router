@@ -30,6 +30,11 @@
 
 -define(SERVER, ?MODULE).
 -define(STREAM_ETS, hpr_protocol_router_ets).
+-define(KEY(Gateway, LNS), {Gateway, LNS}).
+-define(CONNECTING, connecting).
+-define(BACKOFF_MIN, 10).
+-define(BACKOFF_MAX, timer:seconds(1)).
+
 -ifdef(TEST).
 -define(CLEANUP_TIME, timer:seconds(1)).
 -else.
@@ -72,59 +77,19 @@ send(PacketUp, Route) ->
     Server :: hpr_route:server()
 ) -> {ok, grpcbox_client:stream()} | {error, any()}.
 get_stream(Gateway, LNS, Server) ->
-    case ets:lookup(?STREAM_ETS, {Gateway, LNS}) of
-        [{_, #{channel := ChannelPid, stream_pid := StreamPid} = Stream}] ->
-            case erlang:is_process_alive(ChannelPid) andalso erlang:is_process_alive(StreamPid) of
-                true ->
-                    {ok, Stream};
-                false ->
-                    ets:delete(?STREAM_ETS, {Gateway, LNS}),
-                    get_stream(Gateway, LNS, Server)
-            end;
-        [] ->
-            case grpcbox_channel:pick(LNS, stream) of
-                {error, _} ->
-                    %% No connection
-                    Host = hpr_route:host(Server),
-                    Port = hpr_route:port(Server),
-                    case
-                        grpcbox_client:connect(LNS, [{http, Host, Port, []}], #{
-                            sync_start => true
-                        })
-                    of
-                        {ok, _Conn, _} ->
-                            get_stream(Gateway, LNS, Server);
-                        {ok, _Conn} ->
-                            get_stream(Gateway, LNS, Server);
-                        {error, _} = Error ->
-                            Error
-                    end;
-                {ok, {_Conn, _Interceptor}} ->
-                    case
-                        helium_packet_router_packet_client:route(#{
-                            channel => LNS,
-                            callback_module => {
-                                hpr_packet_router_downlink_handler,
-                                hpr_packet_router_downlink_handler:new_state(Gateway, LNS)
-                            }
-                        })
-                    of
-                        {error, _} = Error ->
-                            Error;
-                        {ok, Stream} ->
-                            true = ets:insert(?STREAM_ETS, {{Gateway, LNS}, Stream}),
-                            ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS}),
-                            get_stream(Gateway, LNS, Server)
-                    end
-            end
-    end.
+    Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
+    get_stream(Gateway, LNS, Server, Backoff).
 
--spec remove_stream(libp2p_crypto:pubkey_bin(), binary()) -> ok.
+-spec remove_stream(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
 remove_stream(Gateway, LNS) ->
-    case ets:lookup(?STREAM_ETS, {Gateway, LNS}) of
+    case ets:lookup(?STREAM_ETS, ?KEY(Gateway, LNS)) of
+        [{_, {?CONNECTING, _Pid}}] ->
+            true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
+            lager:debug("delete connecting pid"),
+            ok;
         [{_, Stream}] ->
             ok = grpcbox_client:close_send(Stream),
-            true = ets:delete(?STREAM_ETS, {Gateway, LNS}),
+            true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
             lager:debug("closed stream"),
             ok;
         [] ->
@@ -145,20 +110,9 @@ handle_call(Msg, _From, State) ->
     lager:warning("unknown call ~p", [Msg]),
     {stop, {unimplemented_call, Msg}, State}.
 
-handle_cast({monitor, Gateway, LNS}, State) ->
-    case hpr_packet_router_service:locate(Gateway) of
-        {ok, Pid} ->
-            _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Gateway, LNS}}]),
-            lager:debug("monitoring gateway stream ~p", [Pid]);
-        {error, _Reason} ->
-            lager:debug("failed to monitor gateway (~s) stream for lns (~s) ~p", [
-                hpr_utils:gateway_name(Gateway), LNS, _Reason
-            ]),
-            %% Instead of doing a remove_stream, we trigger a fake DOWN message so that we dont kill
-            %% the stream to Router right away so if a downlink comes back and the gateway reconnected
-            %% we can still send that downlink
-            self() ! {{'DOWN', Gateway, LNS}, erlang:make_ref(), process, undefined, monitor_failed}
-    end,
+handle_cast({monitor, Gateway, LNS, Pid}, State) ->
+    _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Gateway, LNS}}]),
+    lager:debug("monitoring gateway stream ~p", [Pid]),
     {noreply, State};
 handle_cast(_Msg, State) ->
     lager:warning("unknown cast ~p", [_Msg]),
@@ -169,17 +123,7 @@ handle_info(
     #state{} = State
 ) ->
     lager:debug("gateway stream ~p went down: ~p waiting ~wms", [_Pid, _ExitReason, ?CLEANUP_TIME]),
-    erlang:spawn(fun() ->
-        timer:sleep(?CLEANUP_TIME),
-        case hpr_packet_router_service:locate(Gateway) of
-            {error, _Reason} ->
-                lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
-                ?MODULE:remove_stream(Gateway, LNS);
-            {ok, NewPid} ->
-                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS}),
-                lager:debug("monitoring new gateway stream ~p", [NewPid])
-        end
-    end),
+    ok = maybe_trigger_cleanup(Gateway, LNS),
     {noreply, State};
 handle_info(_Msg, State) ->
     lager:warning("unknown info ~p", [_Msg]),
@@ -191,6 +135,166 @@ terminate(_Reason, _State = #state{}) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+-spec get_stream(
+    Gateway :: libp2p_crypto:pubkey_bin(),
+    LNS :: binary(),
+    Server :: hpr_route:server(),
+    Backoff :: backoff:backoff()
+) -> {ok, grpcbox_client:stream()} | {error, any()}.
+get_stream(Gateway, LNS, Server, Backoff0) ->
+    {Delay, BackoffFailed} = backoff:fail(Backoff0),
+
+    Self = self(),
+    NewLock = {?KEY(Gateway, LNS), {?CONNECTING, Self}},
+
+    CreateStream = fun() ->
+        case create_stream(Gateway, LNS, Server) of
+            {error, _} = Error ->
+                true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
+                Error;
+            {ok, Stream} = OK ->
+                1 = ets:select_replace(?STREAM_ETS, [
+                    {NewLock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
+                ]),
+                ok = maybe_trigger_monitor(Gateway, LNS),
+                OK
+        end
+    end,
+
+    case ets:lookup(?STREAM_ETS, ?KEY(Gateway, LNS)) of
+        [{_, {?CONNECTING, Self}}] ->
+            %% No idea how we get here but lets go and create the stream
+            CreateStream();
+        [{_, {?CONNECTING, Pid}} = OldLock] ->
+            case erlang:is_process_alive(Pid) of
+                %% Somebody else is trying to connect
+                true ->
+                    timer:sleep(Delay),
+                    get_stream(Gateway, LNS, Server, BackoffFailed);
+                false ->
+                    case
+                        ets:select_replace(
+                            ?STREAM_ETS,
+                            [{OldLock, [], [{const, NewLock}]}]
+                        )
+                    of
+                        %% we grabbed the lock, proceed by reconnecting
+                        1 ->
+                            CreateStream();
+                        0 ->
+                            timer:sleep(Delay),
+                            get_stream(Gateway, LNS, Server, BackoffFailed)
+                    end
+            end;
+        [{_, #{channel := StreamSet, stream_pid := StreamPid} = Stream}] ->
+            ConnPid = h2_stream_set:connection(StreamSet),
+            case erlang:is_process_alive(ConnPid) andalso erlang:is_process_alive(StreamPid) of
+                true ->
+                    {ok, Stream};
+                %% Connection or Stream are not alive lets delete and try to get a new one
+                false ->
+                    true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
+                    get_stream(Gateway, LNS, Server, BackoffFailed)
+            end;
+        [] ->
+            case ets:insert_new(?STREAM_ETS, NewLock) of
+                %% some process already got the lock we will wait
+                false ->
+                    timer:sleep(Delay),
+                    get_stream(Gateway, LNS, Server, BackoffFailed);
+                true ->
+                    CreateStream()
+            end
+    end.
+
+-spec create_stream(
+    Gateway :: libp2p_crypto:pubkey_bin(),
+    LNS :: binary(),
+    Server :: hpr_route:server()
+) -> {ok, grpcbox_client:stream()} | {error, any()}.
+create_stream(Gateway, LNS, Server) ->
+    case connect(LNS, Server) of
+        {error, _} = Error ->
+            Error;
+        ok ->
+            try
+                helium_packet_router_packet_client:route(#{
+                    channel => LNS,
+                    callback_module => {
+                        hpr_packet_router_downlink_handler,
+                        hpr_packet_router_downlink_handler:new_state(Gateway, LNS)
+                    }
+                })
+            of
+                {error, _} = Error ->
+                    Error;
+                {ok, Stream} ->
+                    {ok, Stream}
+            catch
+                _E:Reason:_S ->
+                    {error, Reason}
+            end
+    end.
+
+-spec connect(
+    LNS :: binary(),
+    Server :: hpr_route:server()
+) -> ok | {error, any()}.
+connect(LNS, Server) ->
+    case grpcbox_channel:pick(LNS, stream) of
+        %% No connection, lets try to connect
+        {error, _} ->
+            Host = hpr_route:host(Server),
+            Port = hpr_route:port(Server),
+            case
+                grpcbox_client:connect(LNS, [{http, Host, Port, []}], #{
+                    sync_start => true
+                })
+            of
+                {ok, _Conn, _} -> connect(LNS, Server);
+                {ok, _Conn} -> connect(LNS, Server);
+                {error, _} = Error -> Error
+            end;
+        {ok, {_Conn, _Interceptor}} ->
+            ok
+    end.
+
+-spec maybe_trigger_monitor(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
+maybe_trigger_monitor(Gateway, LNS) ->
+    erlang:spawn(fun() ->
+        case hpr_packet_router_service:locate(Gateway) of
+            {ok, Pid} ->
+                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS, Pid});
+            {error, _Reason} ->
+                lager:debug(
+                    "failed to monitor gateway (~s) stream for lns (~s) ~p",
+                    [
+                        hpr_utils:gateway_name(Gateway), LNS, _Reason
+                    ]
+                ),
+                %% Instead of doing a remove_stream, we trigger a maybe cleaup, we dont kill
+                %% the stream to Router right away so if a downlink comes back and
+                %% the gateway reconnected we can still send that downlink
+                ok = maybe_trigger_cleanup(Gateway, LNS)
+        end
+    end),
+    ok.
+
+-spec maybe_trigger_cleanup(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
+maybe_trigger_cleanup(Gateway, LNS) ->
+    erlang:spawn(fun() ->
+        timer:sleep(?CLEANUP_TIME),
+        case hpr_packet_router_service:locate(Gateway) of
+            {error, _Reason} ->
+                lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
+                ?MODULE:remove_stream(Gateway, LNS);
+            {ok, NewPid} ->
+                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS, NewPid}),
+                lager:debug("monitoring new gateway stream ~p", [NewPid])
+        end
+    end),
+    ok.
 
 %% ------------------------------------------------------------------
 %% Tests Functions
@@ -235,11 +339,22 @@ foreach_cleanup(Pid) ->
 
 test_full() ->
     Route = test_route(),
+    LNS = hpr_route:lns(Route),
 
-    meck:expect(grpcbox_channel, pick, fun(_LNS, stream) -> {ok, {undefined, undefined}} end),
+    SleepRandom = fun(X) -> timer:sleep(rand:uniform(X)) end,
 
-    Stream = #{channel => self(), stream_pid => self()},
+    meck:expect(grpcbox_channel, pick, fun(_LNS, stream) ->
+        SleepRandom(25),
+        {ok, {undefined, undefined}}
+    end),
+
+    Stream = #{
+        channel =>
+            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+        stream_pid => self()
+    },
     meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
+        SleepRandom(25),
         {ok, Stream}
     end),
 
@@ -249,14 +364,30 @@ test_full() ->
     ok = hpr_packet_router_service:register(PubKeyBin),
 
     HprPacketUp = test_utils:join_packet_up(#{gateway => PubKeyBin}),
-    ?assertEqual(ok, ?MODULE:send(HprPacketUp, Route)),
 
+    NumPackets = 3,
+    Self = self(),
+    lists:foreach(
+        fun(_X) ->
+            erlang:spawn(fun() ->
+                R = ?MODULE:send(HprPacketUp, Route),
+                Self ! {send_result, R}
+            end)
+        end,
+        lists:seq(1, NumPackets)
+    ),
     timer:sleep(?CLEANUP_TIME + 100),
+
     ok = test_utils:wait_until(
         fun() ->
-            1 == ets:info(?STREAM_ETS, size)
+            NumPackets == rcv_send_result(0)
         end
     ),
+
+    ?assertEqual(
+        [{?KEY(PubKeyBin, LNS), Stream}], ets:lookup(?STREAM_ETS, ?KEY(PubKeyBin, LNS))
+    ),
+    ?assertEqual(1, meck:num_calls(grpcbox_channel, pick, [LNS, stream])),
     ?assert(erlang:is_process_alive(erlang:whereis(?MODULE))),
     ok.
 
@@ -266,7 +397,11 @@ test_cannot_locate_stream() ->
 
     meck:expect(grpcbox_channel, pick, fun(_LNS, stream) -> {ok, {undefined, undefined}} end),
 
-    Stream = #{channel => self(), stream_pid => self()},
+    Stream = #{
+        channel =>
+            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+        stream_pid => self()
+    },
     meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
         {ok, Stream}
     end),
@@ -285,6 +420,14 @@ test_cannot_locate_stream() ->
     ),
     ?assert(erlang:is_process_alive(erlang:whereis(?MODULE))),
     ok.
+
+rcv_send_result(C) ->
+    receive
+        {send_result, ok} ->
+            rcv_send_result(C + 1)
+    after 1000 ->
+        C
+    end.
 
 test_route() ->
     Host = "example-lns.com",
