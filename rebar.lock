@@ -54,7 +54,7 @@
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.9.0">>},0},
  {<<"grpcbox">>,
   {git,"https://github.com/novalabsxyz/grpcbox.git",
-       {ref,"2d5f518abd0178c619eeeef570fd6dab9fa1bed9"}},
+       {ref,"0fe71ca0a5e49743f675f7a5b3e25f49a54300dc"}},
   0},
  {<<"hackney">>,{pkg,<<"hackney">>,<<"1.17.0">>},0},
  {<<"helium_proto">>,

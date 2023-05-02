@@ -213,12 +213,16 @@ server_crash_test(_Config) ->
     erlang:exit(RouterServerPid, kill),
     Gateway = hpr_test_gateway:pubkey_bin(GatewayPid),
     LNS = hpr_route:lns(Route),
-    [{_, #{channel := StreamSet, stream_pid := StreamPid}}] = ets:lookup(
-        hpr_protocol_router_ets, {Gateway, LNS}
+
+    ok = test_utils:wait_until(
+        fun() ->
+            [{_, #{channel := StreamSet}}] = ets:lookup(
+                hpr_protocol_router_ets, {Gateway, LNS}
+            ),
+            ConnPid = h2_stream_set:connection(StreamSet),
+            erlang:is_process_alive(ConnPid) =/= true
+        end
     ),
-    ConnPid = h2_stream_set:connection(StreamSet),
-    erlang:exit(StreamPid, kill),
-    erlang:exit(ConnPid, kill),
 
     %% Send another packet
     ok = hpr_test_gateway:send_packet(GatewayPid, #{fcnt => 2}),
@@ -238,12 +242,16 @@ server_crash_test(_Config) ->
                     hpr_route:server(Route)
                 )
             of
-                {ok, _} -> false;
-                {error, _} -> true
+                {error, {shutdown, econnrefused}} ->
+                    true;
+                _Else ->
+                    ct:pal("MARKER ~p~n", [_Else]),
+                    false
             end
         end
     ),
     ?assertEqual(0, erlang:length(hpr_protocol_router:all_streams())),
+
     ok.
 
 gateway_disconnect_test(_Config) ->
