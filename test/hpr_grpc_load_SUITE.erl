@@ -8,7 +8,8 @@
 
 -export([
     main_test/1,
-    hpr_protocol_router_test/1
+    hpr_protocol_router_test/1,
+    multi_buy_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -284,28 +285,117 @@ hpr_protocol_router_test(_Config) ->
     ok = gen_server:stop(ServerPid),
     ok.
 
+multi_buy_test(Config) ->
+    test_utils:init_per_testcase(multi_buy_test, Config),
+
+    ok = application:set_env(lager, traces, [
+        {lager_console_backend, [{module, ?MODULE}], debug}
+    ]),
+
+    lager:notice("STARTED", []),
+
+    {ok, ServerPid} = grpcbox:start_server(#{
+        grpc_opts => #{
+            service_protos => [packet_router_pb],
+            services => #{'helium.packet_router.packet' => hpr_test_packet_router_service}
+        },
+        listen_opts => #{port => 8082, ip => {0, 0, 0, 0}}
+    }),
+
+    Self = self(),
+
+    application:set_env(
+        hpr,
+        packet_service_route_fun,
+        fun(_Env, StreamState) ->
+            Self ! {packet, _Env},
+            {ok, StreamState}
+        end
+    ),
+
+    application:set_env(
+        hpr,
+        packet_service_init_fun,
+        fun(_Rpc, StreamState) ->
+            Self ! init,
+            StreamState
+        end
+    ),
+
+    MaxCopies = 2,
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 8082,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => MaxCopies
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        }),
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 2
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+
+    MaxHotspots = 10,
+
+    erlang:spawn(
+        fun() ->
+            lists:foreach(
+                fun(_X) ->
+                    erlang:spawn(fun() ->
+                        {ok, GatewayPid} = hpr_test_gateway:start(#{
+                            forward => self(),
+                            route => Route,
+                            eui_pairs => EUIPairs,
+                            devaddr_ranges => DevAddrRanges
+                        }),
+                        ok = send_packet(
+                            GatewayPid, #{devaddr => 16#00000001}, rand:uniform(250) + 40
+                        )
+                    end)
+                end,
+                lists:seq(1, MaxHotspots)
+            )
+        end
+    ),
+
+    rcv_loop(0, 0),
+
+    ok = gen_server:stop(ServerPid),
+
+    test_utils:end_per_testcase(multi_buy_test, Config),
+    ok.
+
+send_packet(GatewayPid, Map, Sleep) ->
+    ok = hpr_test_gateway:send_packet(GatewayPid, Map),
+    timer:sleep(Sleep),
+    send_packet(GatewayPid, Map, Sleep).
+
 spawn_hotspot(SendPacketSleep, Route, PubKeyBin, SigFun) ->
     erlang:spawn(fun() ->
         ok = hpr_packet_router_service:register(PubKeyBin),
-        % timer:sleep(rand:uniform(2500)),
         timer:sleep(10),
         _ = send_packet_via_protocol(SendPacketSleep, Route, PubKeyBin, SigFun, rand:uniform(250)),
         spawn_hotspot(SendPacketSleep, Route, PubKeyBin, SigFun)
     end).
-
-% create_stream(Throttle, ChannelName, Backoff0) ->
-%     case throttle:check(Throttle, ChannelName) of
-%         {limit_exceeded, _, _} ->
-%             {Delay, Backoff1} = backoff:fail(Backoff0),
-%             % lager:error("limit_exceeded ~w", [Delay]),
-%             timer:sleep(Delay),
-%             create_stream(Throttle, ChannelName, Backoff1);
-%         _ ->
-%             % timer:sleep(rand:uniform(250)),
-%             helium_packet_router_packet_client:route(#{
-%                 channel => ChannelName
-%             })
-%     end.
 
 send_packet(Sleep, Stream, PubKeyBin, SigFun) ->
     PacketUp = test_utils:uplink_packet_up(#{
@@ -328,9 +418,6 @@ send_packet_via_protocol(Sleep, Route, PubKeyBin, SigFun, X) ->
         devaddr => 16#00000000,
         data => crypto:strong_rand_bytes(16)
     }),
-
-    timer:sleep(rand:uniform(2500)),
-
     hpr_protocol_router:send(PacketUp, Route),
     timer:sleep(Sleep),
     send_packet_via_protocol(Sleep, Route, PubKeyBin, SigFun, X - 1).
