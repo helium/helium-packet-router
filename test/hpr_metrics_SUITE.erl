@@ -175,7 +175,16 @@ main_test(_Config) ->
         prometheus_histogram:value(?METRICS_MULTI_BUY_GET_HISTOGRAM, [ok])
     ),
 
-    ok = gen_server:stop(GatewayPid),
     ok = gen_server:stop(ServerPid),
+    ok = gen_server:stop(GatewayPid),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            undefined =/=
+                prometheus_histogram:value(?METRICS_GRPC_CONNECTION_HISTOGRAM, [
+                    hpr_packet_router_service
+                ])
+        end
+    ),
 
     ok.

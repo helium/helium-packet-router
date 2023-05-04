@@ -12,6 +12,7 @@
 ]).
 
 -record(state, {
+    started :: non_neg_integer(),
     gateway :: libp2p_crypto:pubkey_bin(),
     lns :: binary(),
     conn_pid :: pid() | undefined,
@@ -27,7 +28,9 @@ new_state(Gateway, LNS) ->
 
 -spec init(pid(), stream_id(), state()) -> {ok, state()}.
 init(ConnectionPid, StreamId, State) ->
-    State1 = State#state{conn_pid = ConnectionPid, stream_id = StreamId},
+    State1 = State#state{
+        started = erlang:system_time(millisecond), conn_pid = ConnectionPid, stream_id = StreamId
+    },
     lager:debug(state_to_md(State1), "init"),
     {ok, State1}.
 
@@ -49,8 +52,9 @@ handle_trailers(_Status, _Message, _Metadata, State) ->
     {ok, State}.
 
 -spec handle_eos(state()) -> {ok, state()}.
-handle_eos(#state{gateway = Gateway, lns = LNS} = State) ->
+handle_eos(#state{started = Started, gateway = Gateway, lns = LNS} = State) ->
     ok = hpr_protocol_router:remove_stream(Gateway, LNS),
+    _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
     lager:info(state_to_md(State), "stream going down"),
     {ok, State}.
 

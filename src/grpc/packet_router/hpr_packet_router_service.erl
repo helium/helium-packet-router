@@ -16,13 +16,18 @@
 
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
 
--spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
-init(_RPC, StreamState) ->
-    StreamState.
+-record(state, {started :: non_neg_integer()}).
+
+-spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
+init(_Rpc, StreamState) ->
+    HandlerState = #state{started = erlang:system_time(millisecond)},
+    grpcbox_stream:stream_handler_state(StreamState, HandlerState).
 
 -spec route(hpr_envelope_up:envelope(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | {stop, grpcbox_stream:t()}.
 route(eos, StreamState) ->
+    #state{started = Started} = grpcbox_stream:stream_handler_state(StreamState),
+    _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
     lager:debug("received eos for stream"),
     {stop, StreamState};
 route(EnvUp, StreamState) ->
@@ -36,6 +41,8 @@ route(EnvUp, StreamState) ->
             case hpr_register:verify(Reg) of
                 false ->
                     lager:info("failed to verify"),
+                    #state{started = Started} = grpcbox_stream:stream_handler_state(StreamState),
+                    _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
                     {stop, StreamState};
                 true ->
                     ok = ?MODULE:register(PubKeyBin),
@@ -45,6 +52,8 @@ route(EnvUp, StreamState) ->
         _E:_R ->
             lager:warning("reason  ~p", [_R]),
             lager:warning("bad envelope ~p", [EnvUp]),
+            #state{started = Started} = grpcbox_stream:stream_handler_state(StreamState),
+            _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
             {stop, StreamState}
     end.
 
