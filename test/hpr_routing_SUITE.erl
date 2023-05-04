@@ -923,31 +923,33 @@ maybe_report_packet_test(_Config) ->
     }),
     ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
 
-    Received3 =
-        {Self,
-            {hpr_protocol_router, send, [
-                UplinkPacketUp2,
-                BadRoute
-            ]},
-            ok},
-    Received4 =
-        {Self,
-            {hpr_protocol_router, send, [
-                UplinkPacketUp2,
-                Route
-            ]},
-            ok},
+    CallExpected3 =
+        {hpr_protocol_router, send, [
+            UplinkPacketUp2,
+            BadRoute
+        ]},
+    CallExpected4 =
+        {hpr_protocol_router, send, [
+            UplinkPacketUp2,
+            Route
+        ]},
 
     %% Packet is still send to both Routes
-    ?assertEqual(
-        [
-            Received1,
-            Received2,
-            Received3,
-            Received4
-        ],
-        meck:history(hpr_protocol_router)
-    ),
+    [
+        History1,
+        History2,
+        {Pid3, Call3, Result3},
+        {Pid4, Call4, Result4}
+    ] = meck:history(hpr_protocol_router),
+
+    ?assertEqual(Received1, History1),
+    ?assertEqual(Received2, History2),
+    ?assert(erlang:is_pid(Pid3)),
+    ?assert(erlang:is_pid(Pid4)),
+    ?assertEqual(CallExpected3, Call3),
+    ?assertEqual(CallExpected4, Call4),
+    ?assertEqual(ok, Result3),
+    ?assertEqual(ok, Result4),
 
     %% But no report is done
     ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 3)),
