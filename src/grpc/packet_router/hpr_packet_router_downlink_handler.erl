@@ -24,7 +24,7 @@
 
 -spec new_state(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> state().
 new_state(Gateway, LNS) ->
-    #state{gateway = Gateway, lns = LNS}.
+    #state{started = erlang:system_time(millisecond), gateway = Gateway, lns = LNS}.
 
 -spec init(pid(), stream_id(), state()) -> {ok, state()}.
 init(ConnectionPid, StreamId, State) ->
