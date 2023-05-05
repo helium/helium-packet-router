@@ -123,8 +123,8 @@ main_test(_Config) ->
         sync_start => true
     }),
     {links, [_, SubChannel]} = recon:info(Channel, links),
-    {ok, StreamSet, _Info} = grpcbox_subchannel:conn(SubChannel),
-    ConnPid = h2_stream_set:connection(StreamSet),
+    {ok, ConnPid, _Info} = grpcbox_subchannel:conn(SubChannel),
+    % ConnPid = h2_stream_set:connection(StreamSet),
 
     timer:sleep(5000),
 
@@ -238,8 +238,8 @@ hpr_protocol_router_test(_Config) ->
         sync_start => true
     }),
     {links, [_, SubChannel | _]} = recon:info(Channel, links),
-    {ok, StreamSet, _Info} = grpcbox_subchannel:conn(SubChannel),
-    ConnPid = h2_stream_set:connection(StreamSet),
+    {ok, ConnPid, _Info} = grpcbox_subchannel:conn(SubChannel),
+    % ConnPid = h2_stream_set:connection(StreamSet),
 
     timer:sleep(5000),
 
