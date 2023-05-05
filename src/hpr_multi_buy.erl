@@ -32,29 +32,15 @@ init() ->
 update_counter(_Key, Max) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
 update_counter(Key, Max) ->
-    case application:get_env(hpr, multi_buy_enabled, false) of
-        true ->
-            case request(Key) of
-                {ok, C} when C > Max ->
-                    {error, ?MULTIBUY};
-                {ok, _C} ->
-                    {ok, false};
-                {error, Reason} ->
-                    lager:error("failed to get a counter for ~s: ~p", [
-                        hpr_utils:bin_to_hex_string(Key), Reason
-                    ]),
-                    case
-                        ets:update_counter(
-                            ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
-                        )
-                    of
-                        C when C > Max ->
-                            {error, ?MULTIBUY};
-                        _C ->
-                            {ok, true}
-                    end
-            end;
-        false ->
+    case request(Key) of
+        {ok, C} when C > Max ->
+            {error, ?MULTIBUY};
+        {ok, _C} ->
+            {ok, false};
+        {error, Reason} ->
+            lager:error("failed to get a counter for ~s: ~p", [
+                hpr_utils:bin_to_hex_string(Key), Reason
+            ]),
             case
                 ets:update_counter(
                     ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
@@ -63,7 +49,7 @@ update_counter(Key, Max) ->
                 C when C > Max ->
                     {error, ?MULTIBUY};
                 _C ->
-                    {ok, false}
+                    {ok, true}
             end
     end.
 
@@ -125,7 +111,6 @@ foreach_setup() ->
     meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
     meck:new(helium_multi_buy_multi_buy_client, [passthrough]),
     meck:expect(helium_multi_buy_multi_buy_client, inc, fun(_, _) -> {error, not_implemented} end),
-    application:set_env(hpr, multi_buy_enabled, true),
     ok = ?MODULE:init(),
     ok.
 
@@ -135,7 +120,6 @@ foreach_cleanup(ok) ->
     meck:unload(hpr_metrics),
     ?assert(meck:validate(helium_multi_buy_multi_buy_client)),
     meck:unload(helium_multi_buy_multi_buy_client),
-    application:set_env(hpr, multi_buy_enabled, false),
     ok.
 
 test_max_too_low() ->
