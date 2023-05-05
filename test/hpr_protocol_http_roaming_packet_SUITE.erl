@@ -157,8 +157,8 @@ http_sync_uplink_join_test(_Config) ->
         {200, RespBody}
     } = http_rcv(
         #{
-            <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"ProtocolVersion">> => <<"1.0">>,
+            %% <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -205,7 +205,7 @@ http_sync_uplink_join_test(_Config) ->
     case
         test_utils:match_map(
             #{
-                <<"ProtocolVersion">> => <<"1.1">>,
+                <<"ProtocolVersion">> => <<"1.0">>,
                 <<"TransactionID">> => TransactionID,
                 <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
                 <<"ReceiverID">> => <<"0xC00053">>,
@@ -284,7 +284,7 @@ http_sync_downlink_test(_Config) ->
     %% case
     %%     test_utils:match_map(
     %%         #{
-    %%             <<"ProtocolVersion">> => <<"1.1">>,
+    %%             <<"ProtocolVersion">> => <<"1.0">>,
     %%             <<"TransactionID">> => TransactionID,
     %%             <<"SenderID">> => <<"0xC00053">>,
     %%             <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
@@ -359,8 +359,8 @@ http_async_uplink_join_test(_Config) ->
         <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
     }} = roamer_expect_uplink_data(
         #{
-            <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"ProtocolVersion">> => <<"1.0">>,
+            %% <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -408,7 +408,7 @@ http_async_uplink_join_test(_Config) ->
 
     %% 6. Forwarder receive http downlink
     {ok, _Data} = forwarder_expect_downlink_data(#{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"TransactionID">> => TransactionID,
         <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
         <<"ReceiverID">> => <<"0xC00053">>,
@@ -481,7 +481,7 @@ http_async_downlink_test(_Config) ->
 
     %% 4. forwarder receive http downlink
     {ok, #{<<"TransactionID">> := TransactionID}} = forwarder_expect_downlink_data(#{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"ReceiverID">> => <<"0xC00053">>,
         <<"TransactionID">> => TransactionID,
@@ -508,7 +508,7 @@ http_async_downlink_test(_Config) ->
     {ok, _Data} = roamer_expect_uplink_data(#{
         <<"DLFreq1">> => DownlinkFreq,
         <<"MessageType">> => <<"XmitDataAns">>,
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"SenderID">> => <<"0xC00053">>,
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
@@ -544,7 +544,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
             response => #{
                 <<"SenderID">> => <<"000002">>,
                 <<"ReceiverID">> => <<"C00053">>,
-                <<"ProtocolVersion">> => <<"1.1">>,
+                <<"ProtocolVersion">> => <<"1.0">>,
                 <<"TransactionID">> => 601913476,
                 <<"MessageType">> => <<"PRStartAns">>,
                 <<"Result">> => #{
@@ -586,8 +586,8 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
         {200, _RespBody}
     } = http_rcv(
         #{
-            <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"ProtocolVersion">> => <<"1.0">>,
+            %% <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -668,8 +668,8 @@ http_uplink_packet_test(_Config) ->
         {200, _RespBody}
     } = http_rcv(
         #{
-            <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"ProtocolVersion">> => <<"1.0">>,
+            %% <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -741,7 +741,7 @@ http_class_c_downlink_test(_Config) ->
     RXDelay = 0,
 
     DownlinkBody = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"ReceiverID">> => <<"0xC00053">>,
         <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
@@ -767,7 +767,7 @@ http_class_c_downlink_test(_Config) ->
 
     %% 3. forwarder receive http downlink
     {ok, #{<<"TransactionID">> := TransactionID}} = forwarder_expect_downlink_data(#{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"ReceiverID">> => <<"0xC00053">>,
         <<"TransactionID">> => TransactionID,
@@ -791,7 +791,7 @@ http_class_c_downlink_test(_Config) ->
     {ok, _Data} = roamer_expect_uplink_data(#{
         <<"DLFreq2">> => DownlinkFreq,
         <<"MessageType">> => <<"XmitDataAns">>,
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"SenderID">> => <<"0xC00053">>,
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
@@ -862,8 +862,8 @@ http_multiple_gateways_test(_Config) ->
         {200, _RespBody}
     } =
         http_rcv(#{
-            <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"ProtocolVersion">> => <<"1.0">>,
+            %% <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -986,8 +986,8 @@ http_multiple_gateways_single_shot_test(_Config) ->
 
     MakeBaseExpect = fun(GatewayInfo) ->
         #{
-            <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"ProtocolVersion">> => <<"1.0">>,
+            %% <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -1136,8 +1136,8 @@ http_uplink_packet_late_test(_Config) ->
         {200, _RespBody}
     } = http_rcv(
         #{
-            <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"ProtocolVersion">> => <<"1.0">>,
+            %% <<"SenderNSID">> => fun erlang:is_binary/1,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -1345,7 +1345,7 @@ downlink_test_route(FlowType) ->
 
 downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
     DownlinkBody = #{
-        'ProtocolVersion' => <<"1.1">>,
+        'ProtocolVersion' => <<"1.0">>,
         'SenderID' => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         'ReceiverID' => <<"0xC00053">>,
         'TransactionID' => TransactionID,

@@ -122,8 +122,8 @@ make_uplink_payload(
     Token = make_uplink_token(PubKeyBin, Region, PacketTime, Destination, FlowType),
 
     VersionBase = #{
-        'ProtocolVersion' => <<"1.1">>,
-        'SenderNSID' => <<"">>,
+        'ProtocolVersion' => <<"1.0">>,
+        %% 'SenderNSID' => <<"">>,
         'DedupWindowSize' => DedupWindowSize
     },
 
@@ -492,7 +492,7 @@ class_c_downlink_test() ->
     ),
 
     Input = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"ReceiverID">> => <<"0xc00053">>,
         <<"SenderID">> => <<"0x600013">>,
@@ -527,7 +527,7 @@ chirpstack_join_accept_test() ->
     ),
 
     A = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"MessageType">> => <<"PRStartAns">>,
         <<"ReceiverID">> => <<"C00053">>,
         <<"SenderID">> => <<"600013">>,
@@ -575,7 +575,7 @@ rx1_timestamp_test() ->
 
     MakeInput = fun(RXDelay) ->
         #{
-            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"ProtocolVersion">> => <<"1.0">>,
             <<"SenderID">> => <<"0x600013">>,
             <<"ReceiverID">> => <<"0xc00053">>,
             <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
@@ -632,7 +632,7 @@ rx1_downlink_test() ->
     ),
 
     Input = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"SenderID">> => <<"0x600013">>,
         <<"ReceiverID">> => <<"0xc00053">>,
         <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
@@ -685,7 +685,7 @@ rx2_downlink_test() ->
     ),
 
     Input = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"SenderID">> => <<"0x600013">>,
         <<"ReceiverID">> => <<"0xc00053">>,
         <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
