@@ -16,13 +16,18 @@
 
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
 
--spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
-init(_RPC, StreamState) ->
-    StreamState.
+-record(handler_state, {started :: non_neg_integer()}).
+
+-spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
+init(_Rpc, StreamState) ->
+    HandlerState = #handler_state{started = erlang:system_time(millisecond)},
+    grpcbox_stream:stream_handler_state(StreamState, HandlerState).
 
 -spec route(hpr_envelope_up:envelope(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | {stop, grpcbox_stream:t()}.
 route(eos, StreamState) ->
+    #handler_state{started = Started} = grpcbox_stream:stream_handler_state(StreamState),
+    _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
     lager:debug("received eos for stream"),
     {stop, StreamState};
 route(EnvUp, StreamState) ->
@@ -36,6 +41,10 @@ route(EnvUp, StreamState) ->
             case hpr_register:verify(Reg) of
                 false ->
                     lager:info("failed to verify"),
+                    #handler_state{started = Started} = grpcbox_stream:stream_handler_state(
+                        StreamState
+                    ),
+                    _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
                     {stop, StreamState};
                 true ->
                     ok = ?MODULE:register(PubKeyBin),
@@ -45,6 +54,8 @@ route(EnvUp, StreamState) ->
         _E:_R ->
             lager:warning("reason  ~p", [_R]),
             lager:warning("bad envelope ~p", [EnvUp]),
+            #handler_state{started = Started} = grpcbox_stream:stream_handler_state(StreamState),
+            _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
             {stop, StreamState}
     end.
 
@@ -109,8 +120,36 @@ register(PubKeyBin) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
+-record(state, {
+    handler,
+    stream_handler_state,
+    socket,
+    auth_fun,
+    buffer,
+    ctx,
+    services_table,
+    req_headers = [],
+    full_method,
+    connection_pid,
+    request_encoding,
+    response_encoding,
+    content_type,
+    resp_headers = [],
+    resp_trailers = [],
+    headers_sent = false,
+    trailers_sent = false,
+    unary_interceptor,
+    stream_interceptor,
+    stream_id,
+    method,
+    stats_handler,
+    stats
+}).
+
 init_test() ->
-    ?assertEqual(stream_state, ?MODULE:init(rpc, stream_state)),
+    StreamState = ?MODULE:init(rpc, #state{}),
+    #handler_state{started = Started} = grpcbox_stream:stream_handler_state(StreamState),
+    ?assert(Started > 0),
     ok.
 
 route_packet_test() ->
@@ -127,6 +166,8 @@ route_packet_test() ->
     ok.
 
 route_register_test() ->
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, observe_grpc_connection, fun(_, _) -> ok end),
     application:ensure_all_started(gproc),
 
     Self = self(),
@@ -136,8 +177,9 @@ route_register_test() ->
     Reg = hpr_register:test_new(Gateway),
     RegSigned = hpr_register:sign(Reg, SigFun),
 
-    ?assertEqual({stop, stream_state}, ?MODULE:route(hpr_envelope_up:new(Reg), stream_state)),
-    ?assertEqual({ok, stream_state}, ?MODULE:route(hpr_envelope_up:new(RegSigned), stream_state)),
+    StreamState = ?MODULE:init(rpc, #state{}),
+    ?assertMatch({stop, _}, ?MODULE:route(hpr_envelope_up:new(Reg), StreamState)),
+    ?assertMatch({ok, _}, ?MODULE:route(hpr_envelope_up:new(RegSigned), StreamState)),
     ?assertEqual(Self, gproc:lookup_local_name(?REG_KEY(Gateway))),
 
     Pid = erlang:spawn(fun() ->
@@ -152,10 +194,10 @@ route_register_test() ->
         ?assert(true == timeout)
     end,
 
-    % timer:sleep(100),
     ?assertEqual(Pid, gproc:lookup_local_name(?REG_KEY(Gateway))),
 
     application:stop(gproc),
+    meck:unload(hpr_metrics),
     ok.
 
 handle_info_test() ->

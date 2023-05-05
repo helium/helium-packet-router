@@ -187,8 +187,8 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                             get_stream(Gateway, LNS, Server, BackoffFailed)
                     end
             end;
-        [{_, #{channel := StreamSet, stream_pid := StreamPid} = Stream}] ->
-            ConnPid = h2_stream_set:connection(StreamSet),
+        [{_, #{channel := ConnPid, stream_pid := StreamPid} = Stream}] ->
+            % ConnPid = h2_stream_set:connection(StreamSet),
             case erlang:is_process_alive(ConnPid) andalso erlang:is_process_alive(StreamPid) of
                 true ->
                     {ok, Stream};
@@ -349,8 +349,9 @@ test_full() ->
     end),
 
     Stream = #{
-        channel =>
-            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+        %     channel =>
+        %         {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+        channel => self(),
         stream_pid => self()
     },
     meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
@@ -398,8 +399,9 @@ test_cannot_locate_stream() ->
     meck:expect(grpcbox_channel, pick, fun(_LNS, stream) -> {ok, {undefined, undefined}} end),
 
     Stream = #{
-        channel =>
-            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+        %  channel =>
+        %     {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+        channel => self(),
         stream_pid => self()
     },
     meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->

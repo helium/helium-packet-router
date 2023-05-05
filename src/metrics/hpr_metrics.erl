@@ -13,7 +13,8 @@
     packet_up_per_oui/2,
     packet_down/1,
     observe_packet_report/2,
-    observe_multi_buy/2
+    observe_multi_buy/2,
+    observe_grpc_connection/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -92,6 +93,17 @@ observe_multi_buy({Status, _}, Time) ->
         ?METRICS_MULTI_BUY_GET_HISTOGRAM,
         [Status],
         Time
+    ).
+
+-spec observe_grpc_connection(
+    Type :: atom(),
+    Start :: non_neg_integer()
+) -> ok.
+observe_grpc_connection(Type, Start) ->
+    prometheus_histogram:observe(
+        ?METRICS_GRPC_CONNECTION_HISTOGRAM,
+        [Type],
+        erlang:system_time(millisecond) - Start
     ).
 
 %% ------------------------------------------------------------------

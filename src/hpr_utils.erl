@@ -9,7 +9,8 @@
     pubkeybin_to_mac/1,
     net_id_display/1,
     trace/2,
-    stop_trace/1
+    stop_trace/1,
+    pmap/2, pmap/3
 ]).
 
 -type trace() :: gateway | devaddr | app_eui | dev_eui.
@@ -91,6 +92,58 @@ stop_trace(Data) ->
         DeviceTraces
     ),
     ok.
+
+pmap(F, L) ->
+    Width = validation_width(),
+    pmap(F, L, Width).
+
+pmap(F, L, Width) ->
+    Parent = self(),
+    Len = erlang:length(L),
+    Min = erlang:floor(Len / Width),
+    Rem = Len rem Width,
+    Lengths = lists:duplicate(Rem, Min + 1) ++ lists:duplicate(Width - Rem, Min),
+    OL = partition_list(L, Lengths, []),
+    St = lists:foldl(
+        fun
+            ([], N) ->
+                N;
+            (IL, N) ->
+                erlang:spawn_opt(
+                    fun() ->
+                        Parent ! {pmap, N, lists:map(F, IL)}
+                    end,
+                    [{fullsweep_after, 0}]
+                ),
+                N + 1
+        end,
+        0,
+        OL
+    ),
+    L2 = [
+        receive
+            {pmap, N, R} -> {N, R}
+        end
+     || _ <- lists:seq(1, St)
+    ],
+    {_, L3} = lists:unzip(lists:keysort(1, L2)),
+    lists:flatten(L3).
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
+partition_list([], [], Acc) ->
+    lists:reverse(Acc);
+partition_list(L, [0 | T], Acc) ->
+    partition_list(L, T, Acc);
+partition_list(L, [H | T], Acc) ->
+    {Take, Rest} = lists:split(H, L),
+    partition_list(Rest, T, [Take | Acc]).
+
+validation_width() ->
+    Ct = erlang:system_info(schedulers_online),
+    erlang:max(2, erlang:ceil(Ct / 2) + 1).
 
 -spec get_device_traces(Data :: string()) ->
     list({{lager_file_backend, string()}, list(), atom()}).

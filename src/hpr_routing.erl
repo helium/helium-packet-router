@@ -52,7 +52,7 @@ handle_packet(Packet) ->
                     hpr_metrics:observe_packet_up(PacketType, ok, 0, Start),
                     ok;
                 {ok, Routes} ->
-                    {Routed, IsFree} = maybe_deliver_packet(Packet, Routes, 0, false),
+                    {Routed, IsFree} = maybe_deliver_packet_to_routes(Packet, Routes),
                     ok = maybe_report_packet(Routes, Routed, IsFree, Packet),
                     N = erlang:length(Routes),
                     lager:debug(
@@ -145,20 +145,49 @@ maybe_deliver_no_routes(Packet) ->
             )
     end.
 
--spec maybe_deliver_packet(
+-spec maybe_deliver_packet_to_routes(
     Packet :: hpr_packet_up:packet(),
-    Routes :: [hpr_route:route()],
-    Routed :: non_neg_integer(),
-    IsFree :: boolean()
+    Routes :: [hpr_route:route()]
 ) -> {non_neg_integer(), boolean()}.
-maybe_deliver_packet(_Packet, [], Routed, IsFree) ->
-    {Routed, IsFree};
-maybe_deliver_packet(Packet, [Route | Routes], Routed, IsFree0) ->
+maybe_deliver_packet_to_routes(Packet, Routes) ->
+    case erlang:length(Routes) of
+        1 ->
+            [Route] = Routes,
+            case maybe_deliver_packet_to_route(Packet, Route) of
+                {ok, IsFree} -> {1, IsFree};
+                {error, _} -> {0, false}
+            end;
+        X when X > 1 ->
+            MaybeDelivered = hpr_utils:pmap(
+                fun(Route) ->
+                    maybe_deliver_packet_to_route(Packet, Route)
+                end,
+                Routes
+            ),
+            lists:foldl(
+                fun
+                    ({ok, _}, {Routed, true}) ->
+                        {Routed + 1, true};
+                    ({ok, IsFree}, {Routed, false}) ->
+                        {Routed + 1, IsFree};
+                    ({error, _}, {Routed, IsFree}) ->
+                        {Routed, IsFree}
+                end,
+                {0, false},
+                MaybeDelivered
+            )
+    end.
+
+-spec maybe_deliver_packet_to_route(
+    Packet :: hpr_packet_up:packet(),
+    Routes :: hpr_route:route()
+) -> {ok, boolean()} | {error, any()}.
+maybe_deliver_packet_to_route(Packet, Route) ->
     RouteMD = hpr_route:md(Route),
     case hpr_route:active(Route) andalso hpr_route:locked(Route) == false of
         false ->
             lager:debug(RouteMD, "not sending, route locked or inactive"),
-            maybe_deliver_packet(Packet, Routes, Routed, IsFree0);
+            {error, inactive};
         true ->
             Server = hpr_route:server(Route),
             Protocol = hpr_route:protocol(Server),
@@ -166,19 +195,19 @@ maybe_deliver_packet(Packet, [Route | Routes], Routed, IsFree0) ->
                 (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
             >>),
             case hpr_multi_buy:update_counter(Key, hpr_route:max_copies(Route)) of
-                {error, Reason} ->
+                {error, Reason} = Error ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
-                    maybe_deliver_packet(Packet, Routes, Routed, IsFree0);
-                {ok, IsFree1} ->
+                    Error;
+                {ok, IsFree} ->
                     case deliver_packet(Protocol, Packet, Route) of
+                        {error, Reason} = Error ->
+                            lager:warning(RouteMD, "error ~p", [Reason]),
+                            Error;
                         ok ->
                             lager:debug(RouteMD, "delivered"),
                             {Type, _} = hpr_packet_up:type(Packet),
                             ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
-                            maybe_deliver_packet(Packet, Routes, Routed + 1, IsFree1);
-                        {error, Reason} ->
-                            lager:warning(RouteMD, "error ~p", [Reason]),
-                            maybe_deliver_packet(Packet, Routes, Routed, IsFree1)
+                            {ok, IsFree}
                     end
             end
     end.
