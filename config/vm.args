@@ -6,3 +6,5 @@
 
 ## Up the number of processes allowed
 +P 2097151
+
+-env FULLSWEEP_AFTER 20
