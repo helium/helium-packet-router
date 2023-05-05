@@ -946,8 +946,9 @@ maybe_report_packet_test(_Config) ->
     ?assertEqual(Received2, History2),
     ?assert(erlang:is_pid(Pid3)),
     ?assert(erlang:is_pid(Pid4)),
-    ?assertEqual(CallExpected3, Call3),
-    ?assertEqual(CallExpected4, Call4),
+    %% Order can be messed up due to spanwing
+    ?assert(CallExpected3 == Call3 orelse CallExpected3 == Call4),
+    ?assert(CallExpected4 == Call3 orelse CallExpected4 == Call4),
     ?assertEqual(ok, Result3),
     ?assertEqual(ok, Result4),
 
