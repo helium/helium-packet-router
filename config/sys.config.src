@@ -56,7 +56,7 @@
                     header_table_size => 4096,
                     enable_push => 1,
                     max_concurrent_streams => unlimited,
-                    initial_window_size => 65535,
+                    initial_window_size => 16777216,
                     max_frame_size => 16384,
                     max_header_list_size => unlimited
                 }
