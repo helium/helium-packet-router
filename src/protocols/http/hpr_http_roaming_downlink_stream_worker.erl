@@ -73,7 +73,7 @@ handle_cast(Msg, State) ->
 
 handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    {_PubKey, SigFun} = persistent_term:get(?HPR_KEY),
+    SigFun = hpr_utils:sig_fun(),
     %% TODO: Region hardcoded from now until it is used on server side
     Req = hpr_http_roaming_register:new('US915'),
     SignedReq = hpr_http_roaming_register:sign(Req, SigFun),

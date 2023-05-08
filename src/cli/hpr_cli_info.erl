@@ -45,8 +45,7 @@ info_cmd() ->
     ].
 
 info_key(["info", "key"], [], []) ->
-    {PubKey, _SigFun} = persistent_term:get(?HPR_KEY),
-    B58 = libp2p_crypto:pubkey_to_b58(PubKey),
+    B58 = hpr_utils:b58(),
     c_text("KEY=~s", [B58]);
 info_key(_, _, _) ->
     usage.
