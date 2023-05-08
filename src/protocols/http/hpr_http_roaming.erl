@@ -123,7 +123,7 @@ make_uplink_payload(
 
     VersionBase = #{
         'ProtocolVersion' => <<"1.1">>,
-        'SenderNSID' => <<"">>,
+        'SenderNSID' => hpr_utils:sender_nsid(),
         'DedupWindowSize' => DedupWindowSize
     },
 
