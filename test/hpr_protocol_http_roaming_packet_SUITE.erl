@@ -158,7 +158,7 @@ http_sync_uplink_join_test(_Config) ->
     } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -360,7 +360,7 @@ http_async_uplink_join_test(_Config) ->
     }} = roamer_expect_uplink_data(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -587,7 +587,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -669,7 +669,7 @@ http_uplink_packet_test(_Config) ->
     } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -863,7 +863,7 @@ http_multiple_gateways_test(_Config) ->
     } =
         http_rcv(#{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -987,7 +987,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
     MakeBaseExpect = fun(GatewayInfo) ->
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -1137,7 +1137,7 @@ http_uplink_packet_late_test(_Config) ->
     } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
