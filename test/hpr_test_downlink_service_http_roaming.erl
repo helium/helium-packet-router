@@ -25,8 +25,7 @@
 init(_RPC, StreamState) ->
     Self = self(),
     true = erlang:register(?MODULE, self()),
-    {PubKey, _SigFun} = persistent_term:get(?HPR_KEY, {undefined, undefined}),
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    PubKeyBin = hpr_utils:pubkey_bin(),
     lager:notice("init ~p @ ~p with signer ~p", [?MODULE, Self, PubKeyBin]),
     grpcbox_stream:stream_handler_state(StreamState, #state{signer = PubKeyBin}).
 

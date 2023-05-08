@@ -4,6 +4,7 @@
 
 -define(HPR_PUBKEY_BIN, hpr_pubkey_bin).
 -define(HPR_SENDER_NSID, hpr_sender_nsid).
+-define(HPR_B58, hpr_b58).
 -define(HPR_SIG_FUN, hpr_sig_fun).
 
 -export([
@@ -19,10 +20,10 @@
     pmap/2, pmap/3,
     %%
     load_key/1,
-    get_key/0,
     pubkey_bin/0,
     sig_fun/0,
-    sender_nsid/0
+    sender_nsid/0,
+    b58/0
 ]).
 
 -type trace() :: gateway | devaddr | app_eui | dev_eui.
@@ -46,19 +47,11 @@ load_key(KeyFileName) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
     ok = persistent_term:put(?HPR_PUBKEY_BIN, PubKeyBin),
+    %% Keep as binary for http protocol jsx encoding/decoding
     ok = persistent_term:put(?HPR_SENDER_NSID, erlang:list_to_binary(B58)),
+    ok = persistent_term:put(?HPR_B58, B58),
     ok = persistent_term:put(?HPR_SIG_FUN, SigFun),
     ok = persistent_term:put(?HPR_KEY, Key).
-
--spec get_key() ->
-    {
-        libp2p_crypto:public_key(),
-        libp2p_crypto:sig_fun(),
-        libp2p_crypto:ecdh_fun()
-    }
-    | undefined.
-get_key() ->
-    persistent_term:get(?HPR_KEY, undefined).
 
 -spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
 pubkey_bin() ->
@@ -68,9 +61,13 @@ pubkey_bin() ->
 sig_fun() ->
     persistent_term:get(?HPR_SIG_FUN, undefined).
 
--spec sender_nsid() -> binary().
+-spec sender_nsid() -> string().
 sender_nsid() ->
     persistent_term:get(?HPR_SENDER_NSID, undefined).
+
+-spec b58() -> binary().
+b58() ->
+    persistent_term:get(?HPR_B58, undefined).
 
 -spec gateway_name(PubKeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
 gateway_name(PubKeyBin) when is_binary(PubKeyBin) ->
