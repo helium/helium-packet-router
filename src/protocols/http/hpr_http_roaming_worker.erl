@@ -48,6 +48,7 @@
     send_data_timer_ref :: undefined | reference(),
     flow_type :: async | sync,
     auth_header :: null | binary(),
+    receiver_nsid :: binary(),
     should_shutdown = false :: boolean(),
     shutdown_timer_ref :: undefined | reference()
 }).
@@ -76,7 +77,8 @@ init(Args) ->
             endpoint = Address,
             flow_type = FlowType,
             dedupe_timeout = DedupeTimeout,
-            auth_header = Auth
+            auth_header = Auth,
+            receiver_nsid = ReceiverNSID
         },
         net_id := NetID
     } = Args,
@@ -87,7 +89,8 @@ init(Args) ->
         transaction_id = next_transaction_id(),
         send_data_timer = DedupeTimeout,
         flow_type = FlowType,
-        auth_header = Auth
+        auth_header = Auth,
+        receiver_nsid = ReceiverNSID
     }}.
 
 handle_call(_Msg, _From, State) ->
@@ -192,6 +195,7 @@ send_data(
         transaction_id = TransactionID,
         flow_type = FlowType,
         auth_header = Auth,
+        receiver_nsid = ReceiverNSID,
         send_data_timer = DedupWindow
     }
 ) ->
@@ -201,7 +205,8 @@ send_data(
         TransactionID,
         DedupWindow,
         Address,
-        FlowType
+        FlowType,
+        ReceiverNSID
     ),
     Data1 = jsx:encode(Data),
 

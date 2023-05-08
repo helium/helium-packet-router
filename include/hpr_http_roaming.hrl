@@ -12,5 +12,6 @@
     endpoint :: binary(),
     flow_type :: async | sync,
     dedupe_timeout :: non_neg_integer(),
-    auth_header :: null | binary()
+    auth_header :: null | binary(),
+    receiver_nsid :: binary()
 }).

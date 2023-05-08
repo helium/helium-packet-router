@@ -25,7 +25,8 @@
     http_roaming_flow_type/1,
     http_roaming_dedupe_timeout/1,
     http_roaming_path/1,
-    http_auth_header/1
+    http_auth_header/1,
+    http_receiver_nsid/1
 ]).
 
 -ifdef(TEST).
@@ -187,6 +188,15 @@ http_auth_header(Route) ->
         V -> V
     end.
 
+-spec http_receiver_nsid(Route :: route()) -> binary().
+http_receiver_nsid(Route) ->
+    Server = ?MODULE:server(Route),
+    {http_roaming, HttpRoamingProtocol} = ?MODULE:protocol(Server),
+    case HttpRoamingProtocol#iot_config_protocol_http_roaming_v1_pb.receiver_nsid of
+        [] -> <<"">>;
+        V -> erlang:list_to_binary(V)
+    end.
+
 %% ------------------------------------------------------------------
 %% Tests Functions
 %% ------------------------------------------------------------------
@@ -233,6 +243,11 @@ mk_protocol({http_roaming, HttpMap}) ->
         path = maps:get(path, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.path),
         auth_header = maps:get(
             auth_header, HttpMap, Template#iot_config_protocol_http_roaming_v1_pb.auth_header
+        ),
+        receiver_nsid = maps:get(
+            receiver_nsid,
+            HttpMap,
+            Template#iot_config_protocol_http_roaming_v1_pb.receiver_nsid
         )
     }};
 mk_protocol(undefined) ->

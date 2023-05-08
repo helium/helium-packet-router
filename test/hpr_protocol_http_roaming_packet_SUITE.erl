@@ -159,6 +159,7 @@ http_sync_uplink_join_test(_Config) ->
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-join-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -361,6 +362,7 @@ http_async_uplink_join_test(_Config) ->
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-join-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -588,6 +590,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -670,6 +673,7 @@ http_uplink_packet_test(_Config) ->
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -864,6 +868,7 @@ http_multiple_gateways_test(_Config) ->
         http_rcv(#{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -988,6 +993,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -1138,6 +1144,7 @@ http_uplink_packet_late_test(_Config) ->
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -1265,7 +1272,8 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteID) ->
             protocol =>
                 {http_roaming, #{
                     flow_type => FlowType,
-                    path => "/uplink"
+                    path => "/uplink",
+                    receiver_nsid => "test-join-receiver-id"
                 }}
         },
         max_copies => 2
@@ -1293,7 +1301,8 @@ uplink_test_route(InputMap) ->
                     flow_type => maps:get(flow_type, InputMap, sync),
                     dedupe_timeout => maps:get(dedupe_timeout, InputMap, 250),
                     path => "/uplink",
-                    auth_header => maps:get(auth_header, InputMap, null)
+                    auth_header => maps:get(auth_header, InputMap, null),
+                    receiver_nsid => "test-uplink-receiver-id"
                 }}
         },
         max_copies => 2

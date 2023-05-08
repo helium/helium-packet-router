@@ -11,7 +11,7 @@
 
 %% Uplinking
 -export([
-    make_uplink_payload/6,
+    make_uplink_payload/7,
     select_best/1
 ]).
 
@@ -95,7 +95,8 @@ new_packet(PacketUp, GatewayTime) ->
     TransactionID :: integer(),
     DedupWindowSize :: non_neg_integer(),
     Destination :: binary(),
-    FlowType :: sync | async
+    FlowType :: sync | async,
+    ReceiverNSID :: binary()
 ) -> prstart_req().
 make_uplink_payload(
     NetID,
@@ -103,7 +104,8 @@ make_uplink_payload(
     TransactionID,
     DedupWindowSize,
     Destination,
-    FlowType
+    FlowType,
+    ReceiverNSID
 ) ->
     #packet{
         packet_up = PacketUp,
@@ -124,7 +126,8 @@ make_uplink_payload(
     VersionBase = #{
         'ProtocolVersion' => <<"1.1">>,
         'SenderNSID' => hpr_utils:sender_nsid(),
-        'DedupWindowSize' => DedupWindowSize
+        'DedupWindowSize' => DedupWindowSize,
+        'ReceiverNSID' => ReceiverNSID
     },
 
     VersionBase#{
