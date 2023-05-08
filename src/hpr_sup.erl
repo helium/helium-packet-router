@@ -51,19 +51,7 @@ init([]) ->
     lager:info("KeyFileName ~s", [KeyFileName]),
 
     ok = filelib:ensure_dir(KeyFileName),
-    Key =
-        case libp2p_crypto:load_keys(KeyFileName) of
-            {ok, #{secret := PrivKey, public := PubKey}} ->
-                {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)};
-            {error, enoent} ->
-                KeyMap =
-                    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(
-                        ed25519
-                    ),
-                ok = libp2p_crypto:save_keys(KeyMap, KeyFileName),
-                {PubKey, libp2p_crypto:mk_sig_fun(PrivKey)}
-        end,
-    ok = persistent_term:put(?HPR_KEY, Key),
+    ok = hpr_utils:load_key(KeyFileName),
 
     ok = hpr_routing:init(),
     ok = hpr_multi_buy:init(),
