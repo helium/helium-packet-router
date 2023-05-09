@@ -82,7 +82,8 @@
 
 -record(state, {
     stream :: grpcbox_client:stream() | undefined,
-    conn_backoff :: backoff:backoff()
+    conn_backoff :: backoff:backoff(),
+    stream_awaiting_data = false :: boolean()
 }).
 
 -define(SERVER, ?MODULE).
@@ -108,7 +109,8 @@ init(Args) ->
     self() ! ?INIT_STREAM,
     {ok, #state{
         stream = undefined,
-        conn_backoff = Backoff
+        conn_backoff = Backoff,
+        stream_awaiting_data = false
     }}.
 
 handle_call(Msg, _From, State) ->
@@ -128,8 +130,7 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
-            ok = hpr_route_ets:delete_all(),
-            {noreply, State#state{stream = Stream, conn_backoff = Backoff1}};
+            {noreply, State#state{stream = Stream, conn_backoff = Backoff1, stream_awaiting_data = true}};
         {error, undefined_channel} ->
             lager:error(
                 "`iot_config_channel` is not defined, or not started. Not attempting to reconnect."
@@ -142,6 +143,10 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
             {noreply, State#state{conn_backoff = Backoff1}}
     end;
 %% GRPC stream callbacks
+handle_info({data, _, _} = Msg, #state{stream_awaiting_data = true} = State) ->
+    %% Only delete route_ets when we start receiving data.
+    ok = hpr_route_ets:delete_all(),
+    ?MODULE:handle_info(Msg, State#state{stream_awaiting_data = false});
 handle_info({data, _StreamID, RouteStreamRes}, State) ->
     Action = hpr_route_stream_res:action(RouteStreamRes),
     Data = hpr_route_stream_res:data(RouteStreamRes),
