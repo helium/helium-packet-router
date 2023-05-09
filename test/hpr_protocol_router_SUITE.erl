@@ -216,10 +216,10 @@ server_crash_test(_Config) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            [{_, #{channel := ConnPid}}] = ets:lookup(
+            [{_, #{channel := StreamSet}}] = ets:lookup(
                 hpr_protocol_router_ets, {Gateway, LNS}
             ),
-            % ConnPid = h2_stream_set:connection(StreamSet),
+            ConnPid = h2_stream_set:connection(StreamSet),
             erlang:is_process_alive(ConnPid) =/= true
         end
     ),
@@ -301,17 +301,17 @@ gateway_disconnect_test(_Config) ->
 
     Gateway = hpr_test_gateway:pubkey_bin(GatewayPid),
     LNS = hpr_route:lns(Route),
-    [{_, #{channel := ConnPid, stream_pid := StreamPid}}] = ets:lookup(
+    [{_, #{channel := StreamSet, stream_pid := StreamPid}}] = ets:lookup(
         hpr_protocol_router_ets, {Gateway, LNS}
     ),
-    % ConnPid = h2_stream_set:connection(StreamSet),
+    ConnPid = h2_stream_set:connection(StreamSet),
 
     ok = gen_server:stop(GatewayPid),
     ok =
         receive
             {hpr_test_gateway, GatewayPid,
-                {terminate, #{channel := GatewayConnPid, stream_pid := GatewayStreamPid}}} ->
-                % GatewayConnPid = h2_stream_set:connection(GatewayStreamSet),
+                {terminate, #{channel := GatewayStreamSet, stream_pid := GatewayStreamPid}}} ->
+                GatewayConnPid = h2_stream_set:connection(GatewayStreamSet),
                 ok = test_utils:wait_until(
                     fun() ->
                         true == erlang:is_process_alive(GatewayConnPid) andalso
