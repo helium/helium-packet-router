@@ -32,7 +32,7 @@ init() ->
 update_counter(_Key, Max) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
 update_counter(Key, Max) ->
-    case application:get_env(hpr, multi_buy_enabled, false) of
+    case application:get_env(hpr, multi_buy_enabled, true) of
         false ->
             case
                 ets:update_counter(
