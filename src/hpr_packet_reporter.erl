@@ -225,7 +225,8 @@ upload(
             Bucket,
             FileName,
             #{
-                <<"Body">> => lists:reverse([Last | Packets])
+                <<"Body">> => lists:reverse([Last | Packets]),
+                <<"ContentType">> => <<"application/octet-stream">>
             }
         )
     of
