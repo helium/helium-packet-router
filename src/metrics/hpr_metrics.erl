@@ -232,15 +232,20 @@ record_grpc_connections() ->
 record_ets() ->
     lists:foreach(
         fun(ETS) ->
-            Name = ets:info(ETS, name),
             case ets:info(ETS, memory) of
                 undefined ->
                     ok;
                 Memory ->
+                    Name = ets:info(ETS, name),
+                    Table =
+                        case ets:info(ETS, named_table) of
+                            true -> Name;
+                            false -> erlang:atom_to_list(Name) ++ erlang:ref_to_list(ETS)
+                        end,
                     Bytes = Memory * erlang:system_info(wordsize),
                     case Bytes > 1000000 of
                         false -> ok;
-                        true -> _ = prometheus_gauge:set(?METRICS_VM_ETS_MEMORY, [Name], Bytes)
+                        true -> _ = prometheus_gauge:set(?METRICS_VM_ETS_MEMORY, [Table], Bytes)
                     end
             end
         end,
