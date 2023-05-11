@@ -130,7 +130,9 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
-            {noreply, State#state{stream = Stream, conn_backoff = Backoff1, stream_awaiting_data = true}};
+            {noreply, State#state{
+                stream = Stream, conn_backoff = Backoff1, stream_awaiting_data = true
+            }};
         {error, undefined_channel} ->
             lager:error(
                 "`iot_config_channel` is not defined, or not started. Not attempting to reconnect."
