@@ -239,8 +239,10 @@ record_ets() ->
                     Name = ets:info(ETS, name),
                     Table =
                         case ets:info(ETS, named_table) of
-                            true -> Name;
-                            false -> erlang:atom_to_list(Name) ++ erlang:ref_to_list(ETS)
+                            true ->
+                                Name;
+                            false ->
+                                erlang:atom_to_list(Name) ++ erlang:ref_to_list(ets:info(ETS, id))
                         end,
                     Bytes = Memory * erlang:system_info(wordsize),
                     case Bytes > 1000000 of
