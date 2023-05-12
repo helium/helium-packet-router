@@ -350,7 +350,8 @@ test_full() ->
 
     Stream = #{
         channel =>
-            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined,
+                false},
         stream_pid => self()
     },
     meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
@@ -399,7 +400,8 @@ test_cannot_locate_stream() ->
 
     Stream = #{
         channel =>
-            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined},
+            {stream_set, client, undefined, undefined, self(), undefined, undefined, undefined,
+                false},
         stream_pid => self()
     },
     meck:expect(grpcbox_client, stream, fun(_Ctx, <<"/helium.packet_router.packet/route">>, _, _) ->
