@@ -347,7 +347,9 @@ http_async_uplink_join_test(_Config) ->
     end,
 
     %% 2. load Roamer into the config
-    join_test_route(DevEUI, AppEUI, async, <<"route1">>),
+    join_test_route(DevEUI, AppEUI, async, <<"route1">>, #{
+        auth_header => <<"expected auth header">>
+    }),
 
     %% 3. send packet
     {ok, PacketUp, GatewayTime} = SendPacketFun(),
@@ -355,10 +357,12 @@ http_async_uplink_join_test(_Config) ->
     PacketTime = hpr_packet_up:timestamp(PacketUp),
 
     %% 4. Roamer receive http uplink
-    {ok, #{
-        <<"TransactionID">> := TransactionID,
-        <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
-    }} = roamer_expect_uplink_data(
+    {ok,
+        #{
+            <<"TransactionID">> := TransactionID,
+            <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
+        },
+        Headers} = roamer_expect_uplink_data(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
@@ -399,6 +403,7 @@ http_async_uplink_join_test(_Config) ->
             }
         }
     ),
+    ?assertEqual(<<"expected auth header">>, proplists:get_value(<<"Authorization">>, Headers)),
 
     ?assertMatch(
         {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, async},
@@ -507,7 +512,7 @@ http_async_downlink_test(_Config) ->
     ok = roamer_expect_response(200),
 
     %% 6. roamer receives http downlink ack (xmitdata_ans)
-    {ok, _Data} = roamer_expect_uplink_data(#{
+    {ok, _Data, _Headers} = roamer_expect_uplink_data(#{
         <<"DLFreq1">> => DownlinkFreq,
         <<"MessageType">> => <<"XmitDataAns">>,
         <<"ProtocolVersion">> => <<"1.1">>,
@@ -792,7 +797,7 @@ http_class_c_downlink_test(_Config) ->
     ok = roamer_expect_response(200),
 
     %% 5. roamer receives http downlink ack (xmitdata_ans)
-    {ok, _Data} = roamer_expect_uplink_data(#{
+    {ok, _Data, _Headers} = roamer_expect_uplink_data(#{
         <<"DLFreq2">> => DownlinkFreq,
         <<"MessageType">> => <<"XmitDataAns">>,
         <<"ProtocolVersion">> => <<"1.1">>,
@@ -937,8 +942,8 @@ http_multiple_joins_same_dest_test(_Config) ->
         timestamp => GatewayTime
     }),
 
-    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ACTILITY, <<"route1">>),
-    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ORANGE, <<"route2">>),
+    join_test_route(DevEUI1, AppEUI1, sync, <<"route1">>, #{net_id => ?NET_ID_ACTILITY}),
+    join_test_route(DevEUI1, AppEUI1, sync, <<"route2">>, #{net_id => ?NET_ID_ORANGE}),
 
     ok = start_uplink_listener(#{port => 3002, callback_args => #{forward => self()}}),
 
@@ -1259,12 +1264,12 @@ http_auth_header_test(_Config) ->
 %% ------------------------------------------------------------------
 
 join_test_route(DevEUI, AppEUI, FlowType, RouteID) ->
-    join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY, RouteID).
+    join_test_route(DevEUI, AppEUI, FlowType, RouteID, #{}).
 
-join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteID) ->
+join_test_route(DevEUI, AppEUI, FlowType, RouteID, Options) ->
     Route = hpr_route:test_new(#{
         id => RouteID,
-        net_id => NetId,
+        net_id => maps:get(net_id, Options, ?NET_ID_ACTILITY),
         oui => 0,
         server => #{
             host => "127.0.0.1",
@@ -1273,7 +1278,8 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteID) ->
                 {http_roaming, #{
                     flow_type => FlowType,
                     path => "/uplink",
-                    receiver_nsid => "test-join-receiver-id"
+                    receiver_nsid => "test-join-receiver-id",
+                    auth_header => maps:get(auth_header, Options, <<>>)
                 }}
         },
         max_copies => 2
@@ -1452,21 +1458,12 @@ handle('POST', [<<"uplink">>], Req, Args) ->
                 maps:get(flow_type, Args, sync)
         end,
 
-    ok = message_type_from_uplink_ok(MessageType, FlowType),
-
-    ResponseBody =
-        case maps:get(response, Args, undefined) of
-            undefined ->
-                make_response_body(jsx:decode(Body));
-            Resp ->
-                ct:pal("Using canned response: ~p", [Resp]),
-                Resp
-        end,
-
-    case FlowType of
-        async ->
-            Response = {200, [], <<>>},
-            Forward ! {http_uplink_data, Body},
+    case message_type_from_uplink_ok(MessageType, FlowType) of
+        noop ->
+            ct:print("nothing to do for message type"),
+            Response = {200, [], jsx:encode(#{})},
+            Forward ! {http_msg, Body, Req, Response},
+            Forward ! {http_uplink_data, Req},
             Forward ! {http_uplink_data_response, 200},
             spawn(fun() ->
                 timer:sleep(250),
@@ -1484,7 +1481,29 @@ handle('POST', [<<"uplink">>], Req, Args) ->
             Response = {200, [], jsx:encode(ResponseBody)},
             Forward ! {http_msg, Body, Req, Response},
 
-            Response
+            case FlowType of
+                async ->
+                    Response = {200, [], <<>>},
+                    Forward ! {http_uplink_data, Req},
+                    Forward ! {http_uplink_data_response, 200},
+                    spawn(fun() ->
+                        timer:sleep(250),
+                        Res = hackney:post(
+                            <<"http://127.0.0.1:3003/downlink">>,
+                            [{<<"Host">>, <<"localhost">>}],
+                            jsx:encode(ResponseBody),
+                            [with_body]
+                        ),
+                        ct:pal("Downlink Res: ~p", [Res])
+                    end),
+
+                    Response;
+                sync ->
+                    Response = {200, [], jsx:encode(ResponseBody)},
+                    Forward ! {http_msg, Body, Req, Response},
+
+                    Response
+            end
     end.
 
 handle_event(_Event, _Data, _Args) ->
@@ -1631,10 +1650,10 @@ not_http_rcv(Delay) ->
     end.
 
 roamer_expect_uplink_data(Expected) ->
-    {ok, Got} = roamer_expect_uplink_data(),
+    {ok, Got, Headers} = roamer_expect_uplink_data(),
     case test_utils:match_map(Expected, Got) of
         true ->
-            {ok, Got};
+            {ok, Got, Headers};
         {false, Reason} ->
             ct:pal("FAILED got: ~n~p~n expected: ~n~p", [Got, Expected]),
             ct:fail({roamer_expect_uplink_data, Reason})
@@ -1642,8 +1661,8 @@ roamer_expect_uplink_data(Expected) ->
 
 roamer_expect_uplink_data() ->
     receive
-        http_uplink_data -> ct:fail({http_uplink_data_err, no_payload});
-        {http_uplink_data, Payload} -> {ok, jsx:decode(Payload)}
+        {http_uplink_data, Request} ->
+            {ok, jsx:decode(elli_request:body(Request)), elli_request:headers(Request)}
     after 1000 -> ct:fail(http_uplink_data_timeout)
     end.
 

@@ -158,7 +158,7 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
         {error, _} = Err ->
             lager:error("dowlink handle message error ~p", [Err]),
             {500, <<"An error occurred">>};
-        {join_accept, {PubKeyBin, PacketDown}} ->
+        {join_accept, {PubKeyBin, PacketDown, PRStartNofif}} ->
             lager:debug(
                 [{gateway, hpr_utils:gateway_name(PubKeyBin)}], "sending downlink [gateway: ~p]", [
                     hpr_utils:gateway_name(PubKeyBin)
@@ -166,6 +166,7 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
             ),
             case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                 ok ->
+                    _ = hackney:post(Endpoint, [], jsx:encode(PRStartNotif), [with_body]),
                     {200, <<"downlink sent: 1">>};
                 {error, not_found} ->
                     {404, <<"Not Found">>}
@@ -193,17 +194,13 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                                         lager:debug(
                                             [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
                                             "async downlink response ~w, Endpoint: ~s",
-                                            [
-                                                Code, Endpoint
-                                            ]
+                                            [Code, Endpoint]
                                         );
                                     {error, Reason} ->
                                         lager:debug(
                                             [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
                                             "async downlink response ~s, Endpoint: ~s",
-                                            [
-                                                Reason, Endpoint
-                                            ]
+                                            [Reason, Endpoint]
                                         )
                                 end
                             end),

@@ -183,6 +183,9 @@ handle_message(#{<<"MessageType">> := MT} = M) ->
 handle_prstart_ans(#{
     <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
     <<"MessageType">> := <<"PRStartAns">>,
+    <<"SenderID">> := ReceiverID,
+    <<"SenderNSID">> := ReceiverNSID,
+    <<"TransactionID">> := TransactionID,
 
     <<"PHYPayload">> := Payload,
     <<"DevEUI">> := _DevEUI,
@@ -193,19 +196,35 @@ handle_prstart_ans(#{
         <<"FNSULToken">> := Token
     } = DLMeta
 }) ->
-    {ok, PubKeyBin, Region, PacketTime, _, _} = parse_uplink_token(Token),
-
-    DownlinkPacket = hpr_packet_down:new_downlink(
-        hpr_http_roaming_utils:hexstring_to_binary(Payload),
-        hpr_http_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
-        FrequencyMhz * 1000000,
-        hpr_lorawan:index_to_datarate(Region, DR),
-        rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
-    ),
-    {join_accept, {PubKeyBin, DownlinkPacket}};
+    case parse_uplink_token(Token) of
+        {error, _} = Err ->
+            Err;
+        {ok, PubKeyBin, Region, PacketTime, _, _} ->
+            DownlinkPacket = hpr_packet_down:new_downlink(
+                hpr_http_roaming_utils:hexstring_to_binary(Payload),
+                hpr_http_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
+                FrequencyMhz * 1000000,
+                hpr_lorawan:index_to_datarate(Region, DR),
+                rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
+            ),
+            PRStartNotif = #{
+                'ProtocolVersion' => <<"1.1">>,
+                'SenderID' => <<"0xC00053">>,
+                'ReceiverID' => ReceiverID,
+                'TransactionID' => TransactionID,
+                'MessageType' => <<"PRStartNotif">>,
+                'SenderNSID' => hpt_utils:sender_nsid(),
+                'ReceiverNSID' => ReceiverNSID,
+                'Result' => #{'ResultCode' => <<"Success">>}
+            },
+            {join_accept, {PubKeyBin, DownlinkPacket, PRStartNotif}}
+    end;
 handle_prstart_ans(#{
     <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
     <<"MessageType">> := <<"PRStartAns">>,
+    <<"SenderID">> := ReceiverID,
+    <<"SenderNSID">> := ReceiverNSID,
+    <<"TransactionID">> := TransactionID,
 
     <<"PHYPayload">> := Payload,
     <<"DevEUI">> := _DevEUI,
@@ -228,7 +247,17 @@ handle_prstart_ans(#{
                 DataRate,
                 undefined
             ),
-            {join_accept, {PubKeyBin, DownlinkPacket}}
+            PRStartNotif = #{
+                'ProtocolVersion' => <<"1.1">>,
+                'SenderID' => <<"0xC00053">>,
+                'ReceiverID' => ReceiverID,
+                'TransactionID' => TransactionID,
+                'MessageType' => <<"PRStartNotif">>,
+                'SenderNSID' => hpt_utils:sender_nsid(),
+                'ReceiverNSID' => ReceiverNSID,
+                'Result' => #{'ResultCode' => <<"Success">>}
+            },
+            {join_accept, {PubKeyBin, DownlinkPacket, PRStartNotif}}
     end;
 handle_prstart_ans(#{
     <<"MessageType">> := <<"PRStartAns">>,
