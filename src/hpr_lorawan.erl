@@ -27,13 +27,32 @@ datarate_to_index(Region, DR) ->
     Plan = lora_plan:region_to_plan(Region),
     lora_plan:datarate_to_index(Plan, DR).
 
+%%--------------------------------------------------------------------
+%% @doc
+%%
+%% The Frame Counter in a payload uses 16 bits, but the MIC is calculated with a
+%% 32 bit version of the Frame Counter. Here we check the MIC, adding up to 3
+%% additional bits to the Frame Counter to see if we are dealing with a device
+%% with an fcnt over 2^16.
+%%
+%% @end
+%%--------------------------------------------------------------------
 -spec key_matches_mic(Key :: binary(), Payload :: binary()) -> boolean().
 key_matches_mic(Key, Payload) ->
     ExpectedMIC = mic(Payload),
-    FCnt = fcnt_low(Payload),
-    B0 = b0(Payload, FCnt),
-    ComputedMIC = crypto:macN(cmac, aes_128_cbc, Key, B0, 4),
-    ComputedMIC =:= ExpectedMIC.
+    FCntLow = fcnt_low(Payload),
+    lists:any(
+        fun(HighBits) ->
+            FCnt = binary:decode_unsigned(
+                <<FCntLow:16/integer-unsigned-little, HighBits:16/integer-unsigned-little>>,
+                little
+            ),
+            B0 = b0(Payload, FCnt),
+            ComputedMIC = crypto:macN(cmac, aes_128_cbc, Key, B0, 4),
+            ComputedMIC =:= ExpectedMIC
+        end,
+        lists:seq(2#000, 2#111)
+    ).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -89,5 +108,20 @@ key_matches_mic_test() ->
     ?assert(?MODULE:key_matches_mic(NwkSessionKey, Payload)),
     ?assertNot(?MODULE:key_matches_mic(crypto:strong_rand_bytes(16), Payload)),
     ok.
+
+key_matches_mic_overflow_fcnt_test() ->
+    %% Valid frame count for this payload is 197,444
+    Payload =
+        <<64, 143, 1, 0, 72, 0, 68, 3, 1, 107, 147, 204, 92, 31, 53, 22, 254, 104, 129, 196, 14, 73,
+            57, 180, 67, 70, 109, 93, 137, 45, 173, 198, 24, 151, 136, 175, 126, 159, 139, 153, 11,
+            69, 209, 224, 164, 240, 78, 109, 116, 196, 41, 138, 113, 244, 180, 164, 241, 235, 133,
+            107, 148, 40, 82, 15, 90, 131, 171, 65, 219, 243, 33, 5, 94, 9, 109, 123, 9, 210, 192,
+            197, 158, 68, 159, 209, 235, 187, 62, 226, 106, 22, 156, 233, 59, 226, 189, 61, 129,
+            179, 25, 227, 75, 146, 69, 46, 185, 99, 24, 69, 171, 111, 164, 223, 178, 177, 45, 237,
+            233, 156, 126, 249, 1, 208, 204, 167, 230, 52, 33, 238, 211, 119, 186, 76, 194, 82, 92,
+            236, 6, 215>>,
+
+    SessionKey = <<236, 133, 99, 189, 240, 193, 99, 222, 40, 78, 176, 12, 120, 166, 83, 214>>,
+    ?assert(?MODULE:key_matches_mic(SessionKey, Payload)).
 
 -endif.
