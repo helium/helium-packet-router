@@ -259,7 +259,7 @@ devaddr_ranges_for_route(RouteID) ->
 -spec skfs_for_route(RouteID :: string()) -> list({non_neg_integer(), binary()}).
 skfs_for_route(RouteID) ->
     MS = [{{'$1', {'$2', RouteID}}, [], [{{'$1', '$2'}}]}],
-    ets:select(?ETS_DEVADDR_RANGES, MS).
+    ets:select(?ETS_SKFS, MS).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
