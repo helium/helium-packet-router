@@ -186,7 +186,7 @@ http_sync_uplink_join_test(_Config) ->
                         <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -395,7 +395,7 @@ http_async_uplink_join_test(_Config) ->
                         ),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -620,7 +620,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
                         <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -702,7 +702,7 @@ http_uplink_packet_test(_Config) ->
                         <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -896,7 +896,7 @@ http_multiple_gateways_test(_Config) ->
                 <<"GWCnt">> => 2,
                 <<"GWInfo">> => [
                     #{
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin1)
                         ),
                         <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -905,7 +905,7 @@ http_multiple_gateways_test(_Config) ->
                         <<"DLAllowed">> => true
                     },
                     #{
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin2)
                         ),
                         <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -1026,7 +1026,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
 
     {ok, _Data1, _, {200, _RespBody1}} = http_rcv(
         MakeBaseExpect(#{
-            <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+            <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                 hpr_utils:pubkeybin_to_mac(PubKeyBin1)
             ),
             <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -1038,7 +1038,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
 
     {ok, _Data2, _, {200, _RespBody2}} = http_rcv(
         MakeBaseExpect(#{
-            <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+            <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                 hpr_utils:pubkeybin_to_mac(PubKeyBin2)
             ),
             <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -1172,7 +1172,7 @@ http_uplink_packet_late_test(_Config) ->
                 <<"GWCnt">> => 1,
                 <<"GWInfo">> => [
                     #{
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin1)
                         ),
                         <<"RFRegion">> => erlang:atom_to_binary(Region),

@@ -483,7 +483,7 @@ gw_info(#packet{packet_up = PacketUp}) ->
     RSSI = hpr_packet_up:rssi(PacketUp),
 
     GW = #{
-        'ID' => hpr_http_roaming_utils:binary_to_hexstring(hpr_utils:pubkeybin_to_mac(PubKeyBin)),
+        'GWID' => hpr_http_roaming_utils:binary_to_hexstring(hpr_utils:pubkeybin_to_mac(PubKeyBin)),
         'RFRegion' => Region,
         'RSSI' => RSSI,
         'SNR' => SNR,
