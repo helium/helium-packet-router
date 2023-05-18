@@ -985,9 +985,15 @@ http_multiple_joins_same_dest_test(_Config) ->
 
     ok = hpr_routing:handle_packet(PacketUp),
 
-    {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
+    HttpReceivePRStartReq = fun HTTPRECEIVEPRSTARTREQ() ->
+        case http_rcv() of
+            {ok, #{<<"MessageType">> := <<"PRStartReq">>} = Req, _, _} -> Req;
+            {ok, #{}, _, _} -> HTTPRECEIVEPRSTARTREQ()
+        end
+    end,
 
-    {ok, #{<<"ReceiverID">> := ReceiverTwo}, _, _} = http_rcv(),
+    #{<<"ReceiverID">> := ReceiverOne} = HttpReceivePRStartReq(),
+    #{<<"ReceiverID">> := ReceiverTwo} = HttpReceivePRStartReq(),
 
     ok = not_http_rcv(250),
 

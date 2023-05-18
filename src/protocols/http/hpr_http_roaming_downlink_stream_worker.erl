@@ -165,9 +165,20 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
             ),
             case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                 ok ->
-                    _ = hackney:post(Endpoint, [], jsx:encode(PRStartNotif), [with_body]),
+                    _ = hackney:post(
+                        Endpoint,
+                        [],
+                        jsx:encode(PRStartNotif),
+                        [with_body]
+                    ),
                     {200, <<"downlink sent: 1">>};
                 {error, not_found} ->
+                    _ = hackney:post(
+                        Endpoint,
+                        [],
+                        jsx:encode(PRStartNotif#{'Result' => #{'ResultCode' => <<"XmitFailed">>}}),
+                        [with_body]
+                    ),
                     {404, <<"Not Found">>}
             end;
         {downlink, PayloadResponse, {PubKeyBin, PacketDown}, {Endpoint, FlowType}} ->

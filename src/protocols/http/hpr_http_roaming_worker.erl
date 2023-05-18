@@ -233,12 +233,31 @@ send_data(
                                     lager:error("error handling response: ~p", [Err]),
                                     ok;
                                 {join_accept, {PubKeyBin, PacketDown, PRStartNotif, Endpoint}} ->
-                                    _ = hpr_packet_router_service:send_packet_down(
-                                        PubKeyBin, PacketDown
-                                    ),
-                                    lager:debug("got join_accept"),
-                                    _ = hackney:post(Endpoint, Headers, jsx:encode(PRStartNotif), [with_body]),
-                                    ok;
+                                    case
+                                        hpr_packet_router_service:send_packet_down(
+                                            PubKeyBin, PacketDown
+                                        )
+                                    of
+                                        ok ->
+                                            lager:debug("got join_accept"),
+                                            _ = hackney:post(
+                                                Endpoint,
+                                                Headers,
+                                                jsx:encode(PRStartNotif),
+                                                [with_body]
+                                            ),
+                                            ok;
+                                        {error, not_found} ->
+                                            _ = hackney:post(
+                                                Endpoint,
+                                                Headers,
+                                                jsx:encode(PRStartNotif#{
+                                                    'Result' => #{'ResultCode' => <<"XmitFailed">>}
+                                                }),
+                                                [with_body]
+                                            ),
+                                            ok
+                                    end;
                                 ok ->
                                     lager:debug("sent"),
                                     ok
