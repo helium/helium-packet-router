@@ -517,6 +517,8 @@ http_async_downlink_test(_Config) ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"ReceiverID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => <<"downlink-test-body-sender-nsid">>,
+        <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
         <<"TransactionID">> => TransactionID,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -544,6 +546,8 @@ http_async_downlink_test(_Config) ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"SenderID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => hpr_utils:sender_nsid(),
+        <<"ReceiverNSID">> => <<"downlink-test-body-sender-nsid">>,
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
         <<"TransactionID">> => TransactionID
     }),
@@ -780,6 +784,8 @@ http_class_c_downlink_test(_Config) ->
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"ReceiverID">> => <<"0xC00053">>,
         <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
+        <<"SenderNSID">> => <<"test-class-c-receiver-nsid">>,
+        <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
         <<"DLMetaData">> => #{
             <<"ClassMode">> => <<"C">>,
             <<"DLFreq2">> => DownlinkFreq,
@@ -805,6 +811,8 @@ http_class_c_downlink_test(_Config) ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"ReceiverID">> => <<"0xC00053">>,
+        <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
+        <<"SenderNSID">> => <<"test-class-c-receiver-nsid">>,
         <<"TransactionID">> => TransactionID,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -829,6 +837,8 @@ http_class_c_downlink_test(_Config) ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"SenderID">> => <<"0xC00053">>,
+        <<"ReceiverNSID">> => <<"test-class-c-receiver-nsid">>,
+        <<"SenderNSID">> => hpr_utils:sender_nsid(),
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
         <<"TransactionID">> => TransactionID
     }),
@@ -1262,9 +1272,13 @@ http_auth_header_test(_Config) ->
     _ = SendPacketFun(),
 
     %% 2. Expect a PRStartReq to the lns
-    {ok, _, Request1, _} = http_rcv(),
+    {ok, #{<<"MessageType">> := <<"PRStartReq">>}, Request1, _} = http_rcv(),
     Headers1 = elli_request:headers(Request1),
     ?assertEqual(<<"Basic: testing">>, proplists:get_value(<<"Authorization">>, Headers1)),
+    %% 2.1 Expect PRStartNotif to the lns
+    {ok, #{<<"MessageType">> := <<"PRStartNotif">>}, Request10, _} = http_rcv(),
+    Headers10 = elli_request:headers(Request10),
+    ?assertEqual(<<"Basic: testing">>, proplists:get_value(<<"Authorization">>, Headers10)),
 
     %% ===================================================================
     %% Expect no auth header in the request
@@ -1279,9 +1293,13 @@ http_auth_header_test(_Config) ->
     _ = SendPacketFun(),
 
     %% 2. Expect a PRStartReq to the lns
-    {ok, _, Request2, _} = http_rcv(),
+    {ok, #{<<"MessageType">> := <<"PRStartReq">>}, Request2, _} = http_rcv(),
     Headers2 = elli_request:headers(Request2),
     ?assertEqual(undefined, proplists:get_value(<<"Authorization">>, Headers2)),
+    %% 2.1 Expect PRStartNotif to the lns
+    {ok, #{<<"MessageType">> := <<"PRStartNotif">>}, Request20, _} = http_rcv(),
+    Headers20 = elli_request:headers(Request20),
+    ?assertEqual(undefined, proplists:get_value(<<"Authorization">>, Headers20)),
 
     ok.
 
@@ -1389,6 +1407,8 @@ downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
         'ProtocolVersion' => <<"1.1">>,
         'SenderID' => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         'ReceiverID' => <<"0xC00053">>,
+        'SenderNSID' => <<"downlink-test-body-sender-nsid">>,
+        'ReceiverNSID' => hpr_utils:sender_nsid(),
         'TransactionID' => TransactionID,
         'MessageType' => <<"XmitDataReq">>,
         'PHYPayload' => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -1491,21 +1511,6 @@ handle('POST', [<<"uplink">>], Req, Args) ->
             Forward ! {http_msg, Body, Req, Response},
             Forward ! {http_uplink_data, Req},
             Forward ! {http_uplink_data_response, 200},
-            spawn(fun() ->
-                timer:sleep(250),
-                Res = hackney:post(
-                    <<"http://127.0.0.1:3003/downlink">>,
-                    [{<<"Host">>, <<"localhost">>}],
-                    jsx:encode(ResponseBody),
-                    [with_body]
-                ),
-                ct:pal("Downlink Res: ~p", [Res])
-            end),
-
-            Response;
-        sync ->
-            Response = {200, [], jsx:encode(ResponseBody)},
-            Forward ! {http_msg, Body, Req, Response},
             Response;
         ok ->
             ResponseBody =
@@ -1555,7 +1560,7 @@ message_type_from_uplink(#{<<"MessageType">> := MessageType}) ->
 message_type_from_uplink_ok(<<"XmitDataAns">>, sync) ->
     throw(bad_message_type);
 message_type_from_uplink_ok(<<"XmitDataAns">>, async) ->
-    ok;
+    noop;
 message_type_from_uplink_ok(<<"PRStartReq">>, _FlowType) ->
     ok;
 message_type_from_uplink_ok(<<"PRStartNotif">>, _FlowType) ->
@@ -1611,7 +1616,10 @@ make_response_body(#{
     <<"ReceiverID">> := ReceiverID,
     <<"ReceiverNSID">> := ReceiverNSID,
     <<"SenderNSID">> := SenderNSID,
-    <<"TransactionID">> := TransactionID
+    <<"TransactionID">> := TransactionID,
+    <<"ULMetaData">> := #{
+        <<"DevAddr">> := _
+    }
 }) ->
     %% Ack to regular uplink
     #{
@@ -1626,7 +1634,20 @@ make_response_body(#{
         %% 11.3.1 Passive Roaming Start
         %% Step 6: stateless fNS operation
         'Lifetime' => 0
-    }.
+    };
+make_response_body(#{<<"MessageType">> := <<"PRStartReq">>} = PRStartReq) ->
+    ExpectedKeys = [
+        <<"ProtocolVersion">>,
+        <<"MessageType">>,
+        <<"ReceiverID">>,
+        <<"SenderID">>,
+        <<"ReceiverNSID">>,
+        <<"SenderNSID">>,
+        <<"TransactionID">>,
+        <<"ULMetaData">>
+    ],
+    MissingKeys = ExpectedKeys -- maps:keys(PRStartReq),
+    throw({pr_start_req_missing_keys, MissingKeys}).
 
 %% ------------------------------------------------------------------
 %% Helpers

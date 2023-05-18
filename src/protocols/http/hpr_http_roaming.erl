@@ -297,6 +297,7 @@ handle_xmitdata_req(#{
     <<"ProtocolVersion">> := ProtocolVersion,
     <<"TransactionID">> := IncomingTransactionID,
     <<"SenderID">> := SenderID,
+    <<"SenderNSID">> := SenderNSID,
     <<"PHYPayload">> := Payload,
     <<"DLMetaData">> := #{
         <<"ClassMode">> := <<"A">>,
@@ -311,6 +312,8 @@ handle_xmitdata_req(#{
         'MessageType' => <<"XmitDataAns">>,
         'ReceiverID' => SenderID,
         'SenderID' => <<"0xC00053">>,
+        'ReceiverNSID' => SenderNSID,
+        'SenderNSID' => hpr_utils:sender_nsid(),
         'Result' => #{'ResultCode' => <<"Success">>},
         'TransactionID' => IncomingTransactionID,
         'DLFreq1' => FrequencyMhz1
@@ -342,6 +345,7 @@ handle_xmitdata_req(#{
     <<"ProtocolVersion">> := ProtocolVersion,
     <<"TransactionID">> := IncomingTransactionID,
     <<"SenderID">> := SenderID,
+    <<"SenderNSID">> := SenderNSID,
     <<"PHYPayload">> := Payload,
     <<"DLMetaData">> := #{
         <<"ClassMode">> := DeviceClass,
@@ -355,6 +359,8 @@ handle_xmitdata_req(#{
         'ProtocolVersion' => ProtocolVersion,
         'MessageType' => <<"XmitDataAns">>,
         'ReceiverID' => SenderID,
+        'ReceiverNSID' => SenderNSID,
+        'SenderNSID' => hpr_utils:sender_nsid(),
         'SenderID' => <<"0xC00053">>,
         'Result' => #{'ResultCode' => <<"Success">>},
         'TransactionID' => IncomingTransactionID,
