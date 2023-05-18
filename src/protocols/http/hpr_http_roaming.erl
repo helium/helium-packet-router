@@ -175,6 +175,9 @@ handle_message(#{<<"MessageType">> := MT} = M) ->
             handle_prstart_ans(M);
         <<"XmitDataReq">> ->
             handle_xmitdata_req(M);
+        <<"ErrorNotif">> ->
+            lager:warning("sent bad roaming message message: ~p", [M]),
+            ok;
         _Err ->
             throw({bad_message, M})
     end.
