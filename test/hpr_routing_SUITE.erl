@@ -235,7 +235,7 @@ multi_buy_without_service_test(_Config) ->
     meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
     meck:new(hpr_packet_reporter, [passthrough]),
-    meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _) -> ok end),
+    meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _, _) -> ok end),
 
     application:set_env(
         hpr,
@@ -364,9 +364,9 @@ multi_buy_without_service_test(_Config) ->
 
     %% Checking that packet got reported free
     [
-        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree1]}, _},
-        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree2]}, _},
-        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree3]}, _}
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree1, _]}, _},
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree2, _]}, _},
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree3, _]}, _}
     ] = meck:history(
         hpr_packet_reporter
     ),
@@ -390,7 +390,7 @@ multi_buy_with_service_test(_Config) ->
     meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
     meck:new(hpr_packet_reporter, [passthrough]),
-    meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _) -> ok end),
+    meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _, _) -> ok end),
 
     MaxCopies = 2,
     DevAddr = 16#00000000,
@@ -511,9 +511,9 @@ multi_buy_with_service_test(_Config) ->
 
     %% Checking that packet dit not get reported free
     [
-        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree1]}, _},
-        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree2]}, _},
-        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree3]}, _}
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree1, _]}, _},
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree2, _]}, _},
+        {_, {hpr_packet_reporter, report_packet, [_, _, IsFree3, _]}, _}
     ] = meck:history(
         hpr_packet_reporter
     ),
@@ -713,7 +713,7 @@ success_test(_Config) ->
 
 no_routes_test(_Config) ->
     ok = meck:new(hpr_packet_reporter, [passthrough]),
-    ok = meck:expect(hpr_packet_reporter, report_packet, 3, ok),
+    ok = meck:expect(hpr_packet_reporter, report_packet, 4, ok),
 
     Port1 = 8180,
     Port2 = 8280,
@@ -806,7 +806,7 @@ no_routes_test(_Config) ->
     ok = gen_server:stop(ServerPid2),
 
     %% Ensure packets sent to no_routes do not get reported.
-    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 3)),
+    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 4)),
     meck:unload(hpr_packet_reporter),
 
     application:set_env(
@@ -893,7 +893,7 @@ maybe_report_packet_test(_Config) ->
         meck:history(hpr_protocol_router)
     ),
 
-    ?assertEqual(2, meck:num_calls(hpr_packet_reporter, report_packet, 3)),
+    ?assertEqual(2, meck:num_calls(hpr_packet_reporter, report_packet, 4)),
 
     ok = meck:reset(hpr_packet_reporter),
 
@@ -953,7 +953,7 @@ maybe_report_packet_test(_Config) ->
     ?assertEqual(ok, Result4),
 
     %% But no report is done
-    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 3)),
+    ?assertEqual(0, meck:num_calls(hpr_packet_reporter, report_packet, 4)),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
