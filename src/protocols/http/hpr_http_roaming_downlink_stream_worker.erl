@@ -158,11 +158,10 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
         {error, _} = Err ->
             lager:error("dowlink handle message error ~p", [Err]),
             {500, <<"An error occurred">>};
-        {join_accept, {PubKeyBin, PacketDown, PRStartNofif}} ->
+        {join_accept, {PubKeyBin, PacketDown, PRStartNotif, Endpoint}} ->
             lager:debug(
-                [{gateway, hpr_utils:gateway_name(PubKeyBin)}], "sending downlink [gateway: ~p]", [
-                    hpr_utils:gateway_name(PubKeyBin)
-                ]
+                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                "sending downlink"
             ),
             case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                 ok ->

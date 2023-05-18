@@ -232,12 +232,12 @@ send_data(
                                 {error, Err} ->
                                     lager:error("error handling response: ~p", [Err]),
                                     ok;
-                                {join_accept, {PubKeyBin, PacketDown, PRStartNotif}} ->
+                                {join_accept, {PubKeyBin, PacketDown, PRStartNotif, Endpoint}} ->
                                     _ = hpr_packet_router_service:send_packet_down(
                                         PubKeyBin, PacketDown
                                     ),
                                     lager:debug("got join_accept"),
-                                    _ = hackney:post(Address, Headers, PRStartNotif, [with_body]),
+                                    _ = hackney:post(Endpoint, Headers, jsx:encode(PRStartNotif), [with_body]),
                                     ok;
                                 ok ->
                                     lager:debug("sent"),

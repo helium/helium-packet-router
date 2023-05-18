@@ -9,8 +9,6 @@
 -module(hpr_protocol_http_roaming_packet_SUITE).
 -author("jonathanruttenberg").
 
--define(TRANSACTION_ETS, hpr_http_roaming_transaction_ets).
-
 -export([
     all/0,
     init_per_testcase/2,
@@ -210,6 +208,8 @@ http_sync_uplink_join_test(_Config) ->
                 <<"TransactionID">> => TransactionID,
                 <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
                 <<"ReceiverID">> => <<"0xC00053">>,
+                <<"SenderNSID">> => <<"test-join-receiver-id">>,
+                <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
                 <<"MessageType">> => <<"PRStartAns">>,
                 <<"Result">> => #{
                     <<"ResultCode">> => <<"Success">>
@@ -241,6 +241,18 @@ http_sync_uplink_join_test(_Config) ->
         ),
         ok
     end),
+
+    %% 5. Expect a PRStartNotif to the lns
+    {ok, _, _, _} = http_rcv(#{
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"MessageType">> => <<"PRStartNotif">>,
+        <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+        <<"ReceiverNSID">> => <<"test-join-receiver-id">>,
+        <<"SenderID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => hpr_utils:sender_nsid(),
+        <<"TransactionID">> => TransactionID,
+        <<"Result">> => #{<<"ResultCode">> => <<"Success">>}
+    }),
 
     ok.
 
@@ -419,6 +431,8 @@ http_async_uplink_join_test(_Config) ->
         <<"TransactionID">> => TransactionID,
         <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
         <<"ReceiverID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => <<"test-join-receiver-id">>,
+        <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
         <<"MessageType">> => <<"PRStartAns">>,
         <<"Result">> => #{
             <<"ResultCode">> => <<"Success">>
@@ -440,6 +454,18 @@ http_async_uplink_join_test(_Config) ->
         ?assertEqual('SF9BW125', hpr_packet_down:rx1_datarate(PacketDown)),
         ok
     end),
+
+    %% 9. Expect a PRStartNotif to the lns
+    {ok, _, _, _} = http_rcv(#{
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"MessageType">> => <<"PRStartNotif">>,
+        <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+        <<"ReceiverNSID">> => <<"test-join-receiver-id">>,
+        <<"SenderID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => hpr_utils:sender_nsid(),
+        <<"TransactionID">> => TransactionID,
+        <<"Result">> => #{<<"ResultCode">> => <<"Success">>}
+    }),
 
     ok.
 
@@ -1480,6 +1506,16 @@ handle('POST', [<<"uplink">>], Req, Args) ->
         sync ->
             Response = {200, [], jsx:encode(ResponseBody)},
             Forward ! {http_msg, Body, Req, Response},
+            Response;
+        ok ->
+            ResponseBody =
+                case maps:get(response, Args, undefined) of
+                    undefined ->
+                        make_response_body(jsx:decode(Body));
+                    Resp ->
+                        ct:pal("Using canned response: ~p", [Resp]),
+                        Resp
+                end,
 
             case FlowType of
                 async ->
@@ -1515,13 +1551,15 @@ handle_event(_Event, _Data, _Args) ->
 message_type_from_uplink(#{<<"MessageType">> := MessageType}) ->
     MessageType.
 
--spec message_type_from_uplink_ok(MessageType :: binary(), FlowType :: sync | async) -> ok.
+-spec message_type_from_uplink_ok(MessageType :: binary(), FlowType :: sync | async) -> ok | noop.
 message_type_from_uplink_ok(<<"XmitDataAns">>, sync) ->
     throw(bad_message_type);
 message_type_from_uplink_ok(<<"XmitDataAns">>, async) ->
     ok;
 message_type_from_uplink_ok(<<"PRStartReq">>, _FlowType) ->
     ok;
+message_type_from_uplink_ok(<<"PRStartNotif">>, _FlowType) ->
+    noop;
 message_type_from_uplink_ok(_MessageType, _FlowType) ->
     throw(bad_message_type).
 
@@ -1536,6 +1574,8 @@ make_response_body(#{
     <<"MessageType">> := <<"PRStartReq">>,
     <<"ReceiverID">> := ReceiverID,
     <<"SenderID">> := SenderID,
+    <<"ReceiverNSID">> := ReceiverNSID,
+    <<"SenderNSID">> := SenderNSID,
     <<"TransactionID">> := TransactionID,
     <<"ULMetaData">> := #{
         <<"ULFreq">> := Freq,
@@ -1549,6 +1589,8 @@ make_response_body(#{
         'ProtocolVersion' => ProtocolVersion,
         'SenderID' => ReceiverID,
         'ReceiverID' => SenderID,
+        'SenderNSID' => ReceiverNSID,
+        'ReceiverNSID' => SenderNSID,
         'TransactionID' => TransactionID,
         'MessageType' => <<"PRStartAns">>,
         'Result' => #{'ResultCode' => <<"Success">>},
@@ -1567,6 +1609,8 @@ make_response_body(#{
 make_response_body(#{
     <<"ProtocolVersion">> := ProtocolVersion,
     <<"ReceiverID">> := ReceiverID,
+    <<"ReceiverNSID">> := ReceiverNSID,
+    <<"SenderNSID">> := SenderNSID,
     <<"TransactionID">> := TransactionID
 }) ->
     %% Ack to regular uplink
@@ -1574,6 +1618,8 @@ make_response_body(#{
         'ProtocolVersion' => ProtocolVersion,
         'SenderID' => ReceiverID,
         'ReceiverID' => <<"0xC00053">>,
+        'SenderNSID' => ReceiverNSID,
+        'ReceiverNSID' => SenderNSID,
         'TransactionID' => TransactionID,
         'MessageType' => <<"PRStartAns">>,
         'Result' => #{'ResultCode' => <<"Success">>},

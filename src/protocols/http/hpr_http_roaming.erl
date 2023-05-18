@@ -199,7 +199,7 @@ handle_prstart_ans(#{
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, PubKeyBin, Region, PacketTime, _, _} ->
+        {ok, PubKeyBin, Region, PacketTime, DestURL, _} ->
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 hpr_http_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
@@ -213,11 +213,11 @@ handle_prstart_ans(#{
                 'ReceiverID' => ReceiverID,
                 'TransactionID' => TransactionID,
                 'MessageType' => <<"PRStartNotif">>,
-                'SenderNSID' => hpt_utils:sender_nsid(),
+                'SenderNSID' => hpr_utils:sender_nsid(),
                 'ReceiverNSID' => ReceiverNSID,
                 'Result' => #{'ResultCode' => <<"Success">>}
             },
-            {join_accept, {PubKeyBin, DownlinkPacket, PRStartNotif}}
+            {join_accept, {PubKeyBin, DownlinkPacket, PRStartNotif, DestURL}}
     end;
 handle_prstart_ans(#{
     <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
@@ -238,7 +238,7 @@ handle_prstart_ans(#{
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, PubKeyBin, Region, PacketTime, _, _} ->
+        {ok, PubKeyBin, Region, PacketTime, DestURL, _} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
@@ -253,11 +253,11 @@ handle_prstart_ans(#{
                 'ReceiverID' => ReceiverID,
                 'TransactionID' => TransactionID,
                 'MessageType' => <<"PRStartNotif">>,
-                'SenderNSID' => hpt_utils:sender_nsid(),
+                'SenderNSID' => hpr_utils:sender_nsid(),
                 'ReceiverNSID' => ReceiverNSID,
                 'Result' => #{'ResultCode' => <<"Success">>}
             },
-            {join_accept, {PubKeyBin, DownlinkPacket, PRStartNotif}}
+            {join_accept, {PubKeyBin, DownlinkPacket, PRStartNotif, DestURL}}
     end;
 handle_prstart_ans(#{
     <<"MessageType">> := <<"PRStartAns">>,
