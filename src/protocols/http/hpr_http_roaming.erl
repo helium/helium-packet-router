@@ -539,6 +539,8 @@ class_c_downlink_test() ->
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"ReceiverID">> => <<"0xc00053">>,
         <<"SenderID">> => <<"0x600013">>,
+        <<"SenderNSID">> => <<"">>,
+        <<"ReceiverNSID">> => <<"">>,
         <<"DLMetaData">> => #{
             <<"ClassMode">> => <<"C">>,
             <<"DLFreq2">> => 869.525,
@@ -574,6 +576,8 @@ chirpstack_join_accept_test() ->
         <<"MessageType">> => <<"PRStartAns">>,
         <<"ReceiverID">> => <<"C00053">>,
         <<"SenderID">> => <<"600013">>,
+        <<"SenderNSID">> => <<"">>,
+        <<"ReceiverNSID">> => <<"">>,
         <<"DLMetaData">> => #{
             <<"ClassMode">> => <<"A">>,
             <<"DLFreq1">> => 925.1,
@@ -621,6 +625,8 @@ rx1_timestamp_test() ->
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderID">> => <<"0x600013">>,
             <<"ReceiverID">> => <<"0xc00053">>,
+            <<"SenderNSID">> => <<"">>,
+            <<"ReceiverNSID">> => <<"">>,
             <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
             <<"MessageType">> => <<"XmitDataReq">>,
             <<"PHYPayload">> =>
@@ -678,6 +684,8 @@ rx1_downlink_test() ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => <<"0x600013">>,
         <<"ReceiverID">> => <<"0xc00053">>,
+        <<"SenderNSID">> => <<"">>,
+        <<"ReceiverNSID">> => <<"">>,
         <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> => Payload,
@@ -731,6 +739,8 @@ rx2_downlink_test() ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => <<"0x600013">>,
         <<"ReceiverID">> => <<"0xc00053">>,
+        <<"SenderNSID">> => <<"">>,
+        <<"ReceiverNSID">> => <<"">>,
         <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> =>
