@@ -51,6 +51,7 @@
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     PacketDown :: hpr_packet_down:downlink_packet()
 }.
+-type pr_start_notif() :: {PRStartNotif :: map(), Endpoint :: binary()}.
 
 -type region() :: atom().
 -type token() :: binary().
@@ -167,7 +168,7 @@ routing_key_and_value(PacketUp) ->
 -spec handle_message(prstart_ans() | xmitdata_req()) ->
     ok
     | {downlink, xmitdata_ans(), downlink(), {dest_url(), flow_type()}}
-    | {join_accept, downlink()}
+    | {join_accept, downlink(), pr_start_notif()}
     | {error, any()}.
 handle_message(#{<<"MessageType">> := MT} = M) ->
     case MT of
@@ -182,7 +183,8 @@ handle_message(#{<<"MessageType">> := MT} = M) ->
             throw({bad_message, M})
     end.
 
--spec handle_prstart_ans(prstart_ans()) -> ok | {join_accept, downlink()} | {error, any()}.
+-spec handle_prstart_ans(prstart_ans()) ->
+    ok | {join_accept, downlink(), pr_start_notif()} | {error, any()}.
 handle_prstart_ans(#{
     <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
     <<"MessageType">> := <<"PRStartAns">>,
@@ -220,7 +222,7 @@ handle_prstart_ans(#{
                 'ReceiverNSID' => ReceiverNSID,
                 'Result' => #{'ResultCode' => <<"Success">>}
             },
-            {join_accept, {PubKeyBin, DownlinkPacket, PRStartNotif, DestURL}}
+            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif, DestURL}}
     end;
 handle_prstart_ans(#{
     <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
@@ -260,7 +262,7 @@ handle_prstart_ans(#{
                 'ReceiverNSID' => ReceiverNSID,
                 'Result' => #{'ResultCode' => <<"Success">>}
             },
-            {join_accept, {PubKeyBin, DownlinkPacket, PRStartNotif, DestURL}}
+            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif, DestURL}}
     end;
 handle_prstart_ans(#{
     <<"MessageType">> := <<"PRStartAns">>,
@@ -597,7 +599,7 @@ chirpstack_join_accept_test() ->
         <<"TransactionID">> => TransactionID,
         <<"VSExtension">> => #{}
     },
-    ?assertMatch({join_accept, {PubKeyBin, _}}, ?MODULE:handle_message(A)),
+    ?assertMatch({join_accept, {PubKeyBin, _}, {_, _}}, ?MODULE:handle_message(A)),
 
     ok.
 

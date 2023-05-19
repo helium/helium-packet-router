@@ -232,7 +232,7 @@ send_data(
                                 {error, Err} ->
                                     lager:error("error handling response: ~p", [Err]),
                                     ok;
-                                {join_accept, {PubKeyBin, PacketDown, PRStartNotif, Endpoint}} ->
+                                {join_accept, {PubKeyBin, PacketDown},{ PRStartNotif, Endpoint}} ->
                                     case
                                         hpr_packet_router_service:send_packet_down(
                                             PubKeyBin, PacketDown
