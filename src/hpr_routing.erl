@@ -76,56 +76,81 @@ find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
 find_routes({uplink, _}, Packet) ->
     find_routes_for_uplink(Packet).
 
+-record(frfu, {
+    devaddr :: non_neg_integer(),
+    payload :: binary(),
+    routes :: [hpr_route:route()],
+    dev_range_routes :: [hpr_route:route()],
+    no_skf_routes :: [hpr_route:route()]
+}).
+
 -spec find_routes_for_uplink(Packet :: hpr_packet_up:packet()) ->
     {ok, [hpr_route:route()]} | {error, invalid_mic}.
 find_routes_for_uplink(Packet) ->
     {uplink, {_Type, DevAddr}} = hpr_packet_up:type(Packet),
-    case hpr_route_ets:lookup_skf(DevAddr) of
-        %% If they aren't any SKF for that devaddr we can move on the packet is valid
-        [] ->
+    case hpr_route_ets:select_skf(DevAddr) of
+        '$end_of_table' ->
             {ok, hpr_route_ets:lookup_devaddr_range(DevAddr)};
-        SKFs ->
-            %% First, we get all the unique Routes we find in that SKFs list and
-            %% all the Routes that devaddr is included into and make the delta.
-            %% Getting us the Routes that do not have SKFs for that devaddr.
-            SKFsRoutes = lists:usort([RouteID || {_Key, RouteID} <- SKFs]),
-            RoutesWithNoSKF = lists:filtermap(
-                fun(Route) ->
-                    RouteID = hpr_route:id(Route),
-                    not lists:member(RouteID, SKFsRoutes)
-                end,
-                hpr_route_ets:lookup_devaddr_range(DevAddr)
-            ),
-            %% Then, we actually check each SKF agaisnt the payload.
+        Any ->
             Payload = hpr_packet_up:payload(Packet),
-            MicFilteredRoutes = lists:filtermap(
-                fun({Key, RouteID}) ->
-                    case hpr_lorawan:key_matches_mic(Key, Payload) of
-                        %% If failed we remove that entry
-                        false ->
-                            false;
-                        %% If match we try to get the Route and included it.
-                        true ->
-                            case hpr_route_ets:lookup_route(RouteID) of
-                                %% Note: this would mark packet as invalid_mic
-                                %% but we are just missing the route
-                                [] -> false;
-                                Routes -> {true, Routes}
-                            end
-                    end
-                end,
-                SKFs
-            ),
-            %% We have to flatten as `hpr_route_ets:lookup_route/1` returns a list of Routes
-            %% and `usort` it just in case there were any duplicates in the SKF.
-            %% We can then add the Routes that did not include SKFs.
-            case lists:usort(lists:flatten(MicFilteredRoutes)) ++ RoutesWithNoSKF of
-                %% If we could not find any routes including with or without SKF then sorry
-                %% you are not passing this test
-                [] -> {error, invalid_mic};
-                List -> {ok, List}
-            end
+            find_routes_for_uplink(
+                #frfu{
+                    devaddr = DevAddr,
+                    payload = Payload,
+                    routes = [],
+                    dev_range_routes = hpr_route_ets:lookup_devaddr_range(DevAddr),
+                    no_skf_routes = []
+                },
+                Any
+            )
     end.
+
+find_routes_for_uplink(#frfu{routes = [], no_skf_routes = []}, '$end_of_table') ->
+    {error, invalid_mic};
+find_routes_for_uplink(#frfu{routes = Routes, no_skf_routes = NoSKFRoutes}, '$end_of_table') ->
+    {ok, lists:usort(Routes ++ NoSKFRoutes)};
+find_routes_for_uplink(
+    #frfu{
+        payload = Payload,
+        routes = Routes,
+        dev_range_routes = DevRangeRoutes,
+        no_skf_routes = NoSKFRoutes0
+    } = FRFU,
+    {SKFs, Continuation}
+) ->
+    MicFilteredRoutes = lists:filtermap(
+        fun({Key, RouteID}) ->
+            case hpr_lorawan:key_matches_mic(Key, Payload) of
+                %% If failed we remove that entry
+                false ->
+                    false;
+                %% If match we try to get the Route and included it.
+                true ->
+                    case hpr_route_ets:lookup_route(RouteID) of
+                        %% Note: this would mark packet as invalid_mic
+                        %% but we are just missing the route
+                        [] -> false;
+                        Rs -> {true, Rs}
+                    end
+            end
+        end,
+        SKFs
+    ),
+    SKFsRoutes = lists:usort([RouteID || {_Key, RouteID} <- SKFs]),
+    NoSKFRoutes1 = lists:filtermap(
+        fun(Route) ->
+            RouteID = hpr_route:id(Route),
+            not lists:member(RouteID, SKFsRoutes)
+        end,
+        DevRangeRoutes
+    ),
+    find_routes_for_uplink(
+        FRFU#frfu{
+            routes = lists:usort(lists:flatten(MicFilteredRoutes) ++ Routes),
+            no_skf_routes = lists:usort(NoSKFRoutes0 ++ NoSKFRoutes1)
+        },
+        Continuation
+    ).
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
 maybe_deliver_no_routes(Packet) ->
@@ -289,19 +314,18 @@ all_test_() ->
     ]}.
 
 foreach_setup() ->
-    meck:new(hpr_route_ets, [passthrough]),
+    hpr_route_ets:init(),
     ok.
 
 foreach_cleanup(ok) ->
-    meck:unload(hpr_route_ets),
+    true = ets:delete(hpr_routes_ets),
+    true = ets:delete(hpr_route_eui_pairs_ets),
+    true = ets:delete(hpr_route_devaddr_ranges_ets),
+    true = ets:delete(hpr_route_skfs_ets),
     ok.
 
 find_routes_for_uplink_no_skf() ->
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> [] end),
-    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [] end),
-
     PacketUp = test_utils:uplink_packet_up(#{}),
-
     ?assertEqual({ok, []}, find_routes_for_uplink(PacketUp)),
     ok.
 
@@ -320,14 +344,23 @@ find_routes_for_uplink_single_route_success() ->
         active => true,
         locked => false
     }),
-    SKF1 = crypto:strong_rand_bytes(16),
-    SKFs = [{SKF1, RouteID1}],
+    ok = hpr_route_ets:insert_route(Route1),
 
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs end),
-    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [Route1] end),
-    meck:expect(hpr_route_ets, lookup_route, fun(_) -> [Route1] end),
+    DevAddr1 = 16#00000001,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID1, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
 
-    PacketUp = test_utils:uplink_packet_up(#{nwk_session_key => SKF1}),
+    SessionKey1 = crypto:strong_rand_bytes(16),
+    SKF1 = hpr_skf:test_new(#{
+        route_id => RouteID1,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+    }),
+    ok = hpr_route_ets:insert_skf(SKF1),
+
+    PacketUp = test_utils:uplink_packet_up(#{devaddr => DevAddr1, nwk_session_key => SessionKey1}),
 
     ?assertEqual({ok, [Route1]}, find_routes_for_uplink(PacketUp)),
     ok.
@@ -347,14 +380,25 @@ find_routes_for_uplink_single_route_failed() ->
         active => true,
         locked => false
     }),
-    SKF1 = crypto:strong_rand_bytes(16),
-    SKFs = [{SKF1, RouteID1}],
+    ok = hpr_route_ets:insert_route(Route1),
 
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs end),
-    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [Route1] end),
-    meck:expect(hpr_route_ets, lookup_route, fun(_) -> [Route1] end),
+    DevAddr1 = 16#00000001,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID1, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
 
-    PacketUp = test_utils:uplink_packet_up(#{nwk_session_key => crypto:strong_rand_bytes(16)}),
+    SessionKey1 = crypto:strong_rand_bytes(16),
+    SKF1 = hpr_skf:test_new(#{
+        route_id => RouteID1,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+    }),
+    ok = hpr_route_ets:insert_skf(SKF1),
+
+    PacketUp = test_utils:uplink_packet_up(#{
+        devaddr => DevAddr1, nwk_session_key => crypto:strong_rand_bytes(16)
+    }),
 
     ?assertEqual({error, invalid_mic}, find_routes_for_uplink(PacketUp)),
     ok.
@@ -388,32 +432,47 @@ find_routes_for_uplink_multi_route_success() ->
         active => true,
         locked => false
     }),
-    SKF1 = crypto:strong_rand_bytes(16),
-    SKFs1 = [{SKF1, RouteID1}],
+    ok = hpr_route_ets:insert_route(Route1),
+    ok = hpr_route_ets:insert_route(Route2),
+
+    DevAddr1 = 16#00000001,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID1, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID2, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange2),
 
     %% Testing with only Route1 having a SKF
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs1 end),
-    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [Route1, Route2] end),
-    meck:expect(hpr_route_ets, lookup_route, fun(ID) ->
-        case ID of
-            RouteID1 -> [Route1];
-            RouteID2 -> [Route2]
-        end
-    end),
+    SessionKey1 = crypto:strong_rand_bytes(16),
+    SKF1 = hpr_skf:test_new(#{
+        route_id => RouteID1,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+    }),
+    ok = hpr_route_ets:insert_skf(SKF1),
 
-    PacketUp = test_utils:uplink_packet_up(#{nwk_session_key => SKF1}),
+    PacketUp = test_utils:uplink_packet_up(#{
+        devaddr => DevAddr1, nwk_session_key => SessionKey1
+    }),
 
     ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
 
     %% Testing with both Routes having a good SKF
-    SKFs2 = [{SKF1, RouteID1}, {SKF1, RouteID2}],
-
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs2 end),
+    SKF2 = hpr_skf:test_new(#{
+        route_id => RouteID2,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+    }),
+    ok = hpr_route_ets:insert_skf(SKF2),
 
     ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
 
     %% No SKF at all
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> [] end),
+    ok = hpr_route_ets:delete_skf(SKF1),
+    ok = hpr_route_ets:delete_skf(SKF2),
 
     ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
 
@@ -434,6 +493,7 @@ find_routes_for_uplink_multi_route_failed() ->
         active => true,
         locked => false
     }),
+    ok = hpr_route_ets:insert_route(Route1),
     RouteID2 = "route_id_2",
     Route2 = hpr_route:test_new(#{
         id => RouteID2,
@@ -448,36 +508,54 @@ find_routes_for_uplink_multi_route_failed() ->
         active => true,
         locked => false
     }),
-    SKF1 = crypto:strong_rand_bytes(16),
-    SKFs1 = [{SKF1, RouteID1}],
+    ok = hpr_route_ets:insert_route(Route2),
+
+    DevAddr1 = 16#00000001,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID1, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID2, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange2),
 
     %% Testing with only Route1 having a bad SKF and other no SKF
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs1 end),
-    meck:expect(hpr_route_ets, lookup_devaddr_range, fun(_) -> [Route1, Route2] end),
-    meck:expect(hpr_route_ets, lookup_route, fun(ID) ->
-        case ID of
-            RouteID1 -> [Route1];
-            RouteID2 -> [Route2]
-        end
-    end),
+    SessionKey1 = crypto:strong_rand_bytes(16),
+    SKF1 = hpr_skf:test_new(#{
+        route_id => RouteID1,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+    }),
+    ok = hpr_route_ets:insert_skf(SKF1),
 
-    PacketUp1 = test_utils:uplink_packet_up(#{nwk_session_key => crypto:strong_rand_bytes(16)}),
+    PacketUp1 = test_utils:uplink_packet_up(#{
+        devaddr => DevAddr1, nwk_session_key => crypto:strong_rand_bytes(16)
+    }),
 
     ?assertEqual({ok, [Route2]}, find_routes_for_uplink(PacketUp1)),
 
     %% Testing with both Routes having a bad SKF
-    SKFs2 = [{SKF1, RouteID1}, {SKF1, RouteID2}],
-
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs2 end),
+    SessionKey2 = crypto:strong_rand_bytes(16),
+    SKF2 = hpr_skf:test_new(#{
+        route_id => RouteID2,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey2)
+    }),
+    ok = hpr_route_ets:insert_skf(SKF2),
 
     ?assertEqual({error, invalid_mic}, find_routes_for_uplink(PacketUp1)),
 
     %% Testing one good SKF and one bad SKF
-    SKF2 = crypto:strong_rand_bytes(16),
-    SKFs3 = [{SKF1, RouteID1}, {SKF2, RouteID2}],
+    SessionKey3 = crypto:strong_rand_bytes(16),
+    SKF3 = hpr_skf:test_new(#{
+        route_id => RouteID1,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey3)
+    }),
+    ok = hpr_route_ets:insert_skf(SKF3),
 
-    meck:expect(hpr_route_ets, lookup_skf, fun(_) -> SKFs3 end),
-    PacketUp2 = test_utils:uplink_packet_up(#{nwk_session_key => SKF1}),
+    PacketUp2 = test_utils:uplink_packet_up(#{devaddr => DevAddr1, nwk_session_key => SessionKey3}),
 
     ?assertEqual({ok, [Route1]}, find_routes_for_uplink(PacketUp2)),
 

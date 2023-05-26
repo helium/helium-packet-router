@@ -18,6 +18,7 @@
     insert_skf/1,
     delete_skf/1,
     lookup_skf/1,
+    select_skf/1,
 
     delete_all/0
 ]).
@@ -226,6 +227,14 @@ lookup_skf(DevAddr) ->
         SKFs -> [{Filter, RouteID} || {_DevAddr, {Filter, RouteID}} <- SKFs]
     end.
 
+-spec select_skf(DevAddr :: non_neg_integer() | ets:continuation()) ->
+    {[{binary(), string()}], ets:continuation()} | '$end_of_table'.
+select_skf(DevAddr) when is_integer(DevAddr) ->
+    MS = [{{DevAddr, {'$1', '$2'}}, [], [{{'$1', '$2'}}]}],
+    ets:select(?ETS_SKFS, MS, 100);
+select_skf(Continuation) ->
+    ets:select(Continuation).
+
 -spec delete_all() -> ok.
 delete_all() ->
     ets:delete_all_objects(?ETS_SKFS),
@@ -274,18 +283,15 @@ skfs_for_route(RouteID) ->
 -include_lib("eunit/include/eunit.hrl").
 
 all_test_() ->
-    {setup, fun setup/0,
-        {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
-            ?_test(test_route()),
-            ?_test(test_eui_pair()),
-            ?_test(test_devaddr_range()),
-            ?_test(test_skf()),
-            ?_test(test_delete_route()),
-            ?_test(test_delete_all())
-        ]}}.
-
-setup() ->
-    ok.
+    {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
+        ?_test(test_route()),
+        ?_test(test_eui_pair()),
+        ?_test(test_devaddr_range()),
+        ?_test(test_skf()),
+        ?_test(test_select_skf()),
+        ?_test(test_delete_route()),
+        ?_test(test_delete_all())
+    ]}.
 
 foreach_setup() ->
     init(),
@@ -484,6 +490,41 @@ test_skf() ->
     ?assertEqual(ok, ?MODULE:delete_skf(SKF2)),
     ?assertEqual([], ?MODULE:lookup_skf(DevAddr2)),
 
+    ok.
+
+test_select_skf() ->
+    Route1 = hpr_route:test_new(#{
+        id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "lns1.testdomain.com",
+            port => 80,
+            protocol => {http_roaming, #{}}
+        },
+        max_copies => 1
+    }),
+    RouteID1 = hpr_route:id(Route1),
+
+    ?assertEqual(ok, ?MODULE:insert_route(Route1)),
+
+    DevAddr = 16#00000001,
+
+    lists:foreach(
+        fun(_) ->
+            SessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+            SKF = hpr_skf:test_new(#{
+                route_id => RouteID1, devaddr => DevAddr, session_key => SessionKey
+            }),
+            ?assertEqual(ok, ?MODULE:insert_skf(SKF))
+        end,
+        lists:seq(1, 200)
+    ),
+
+    {A, Continuation} = ?MODULE:select_skf(DevAddr),
+    {B, '$end_of_table'} = ?MODULE:select_skf(Continuation),
+
+    ?assertEqual(lists:usort(?MODULE:lookup_skf(DevAddr)), lists:usort(A ++ B)),
     ok.
 
 test_delete_route() ->
