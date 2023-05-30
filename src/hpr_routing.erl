@@ -18,7 +18,7 @@
 
 -spec init() -> ok.
 init() ->
-    GatewayRateLimit = application:get_env(hpr, gateway_rate_limit, ?DEFAULT_GATEWAY_THROTTLE),
+    GatewayRateLimit = application:get_env(?APP, gateway_rate_limit, ?DEFAULT_GATEWAY_THROTTLE),
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     ok.
 
@@ -74,7 +74,13 @@ handle_packet(Packet) ->
 find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
     {ok, hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI)};
 find_routes({uplink, _}, Packet) ->
-    find_routes_for_uplink(Packet).
+    case application:get_env(?APP, skf_enabled, true) of
+        true ->
+            find_routes_for_uplink(Packet);
+        false ->
+            {uplink, {_Type, DevAddr}} = hpr_packet_up:type(Packet),
+            {ok, hpr_route_ets:lookup_devaddr_range(DevAddr)}
+    end.
 
 -record(frfu, {
     devaddr :: non_neg_integer(),
@@ -149,7 +155,7 @@ find_routes_for_uplink(
             routes = lists:usort(lists:flatten(MicFilteredRoutes) ++ Routes),
             no_skf_routes = lists:usort(NoSKFRoutes0 ++ NoSKFRoutes1)
         },
-        Continuation
+        hpr_route_ets:select_skf(Continuation)
     ).
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
