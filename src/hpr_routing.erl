@@ -316,7 +316,8 @@ all_test_() ->
         ?_test(find_routes_for_uplink_single_route_success()),
         ?_test(find_routes_for_uplink_single_route_failed()),
         ?_test(find_routes_for_uplink_multi_route_success()),
-        ?_test(find_routes_for_uplink_multi_route_failed())
+        ?_test(find_routes_for_uplink_multi_route_failed()),
+        ?_test(find_routes_for_uplink_multi_route_skf_success())
     ]}.
 
 foreach_setup() ->
@@ -481,6 +482,107 @@ find_routes_for_uplink_multi_route_success() ->
     ok = hpr_route_ets:delete_skf(SKF2),
 
     ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
+
+    ok.
+
+find_routes_for_uplink_multi_route_skf_success() ->
+    Routes = lists:map(
+        fun(Idx) ->
+            RouteID = io_lib:format("route_id_~p", [Idx]),
+            Route = hpr_route:test_new(#{
+                id => RouteID,
+                net_id => 1,
+                oui => 10,
+                server => #{
+                    host => "lsn.lora.com",
+                    port => 80,
+                    protocol => {gwmp, #{mapping => []}}
+                },
+                max_copies => 1,
+                active => true,
+                locked => false
+            }),
+
+            ok = hpr_route_ets:insert_route(Route),
+            {RouteID, Route}
+        end,
+
+        lists:seq(1, 250)
+    ),
+
+    MatchDevaddrRouteIndex = [1, 2, 112, 211],
+    MatchSkfRouteIndex = [1, 211],
+    %% NOTE: The config service prevents us from having SKFs in routes that do
+    %% not have the corresponding devaddr range applied.
+    %% MatchSkf = [1, 30, 40, 200, 211],
+
+    DevAddr1 = 16#00000001,
+    %% Insert devaddr range for 4 routes
+    lists:foreach(
+        fun(RouteIndex) ->
+            {RouteID, _Route} = lists:nth(RouteIndex, Routes),
+            DevAddrRange1 = hpr_devaddr_range:test_new(#{
+                route_id => RouteID, start_addr => 16#00000000, end_addr => 16#00000002
+            }),
+            ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1)
+        end,
+        MatchDevaddrRouteIndex
+    ),
+
+    %% Insert session key filter for 5 routes
+    %% 2 of which overlap with the devaddr ranges.
+    SessionKey1 = crypto:strong_rand_bytes(16),
+    lists:foreach(
+        fun(RouteIndex) ->
+            {RouteID, _Route} = lists:nth(RouteIndex, Routes),
+            SKF1 = hpr_skf:test_new(#{
+                route_id => RouteID,
+                devaddr => DevAddr1,
+                session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+            }),
+            ok = hpr_route_ets:insert_skf(SKF1),
+
+            %% In between each valid session key filter, we're going to insert 100 fake
+            %% skfs, to get the ets to page.
+            lists:foreach(
+                fun(_) ->
+                    SKF2 = hpr_skf:test_new(#{
+                        route_id => RouteID,
+                        devaddr => DevAddr1,
+                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16))
+                    }),
+                    ok = hpr_route_ets:insert_skf(SKF2)
+                end,
+                lists:seq(1, 100)
+            )
+        end,
+        MatchSkfRouteIndex
+    ),
+
+    PacketUp = test_utils:uplink_packet_up(#{
+        devaddr => DevAddr1,
+        nwk_session_key => SessionKey1
+    }),
+
+    %% We should find 4 matching routes
+    %% - 1, 211 - Devaddr && SKF
+    %% - 2, 112 - Devaddr
+    %%
+    %% 3 routes should be excluded
+    %% - 30, 40, 200 - SKF only
+
+    {ok, Found0} = find_routes_for_uplink(PacketUp),
+    RouteIDs = lists:usort([erlang:list_to_binary(hpr_route:id(Route)) || Route <- Found0]),
+
+    ?assertEqual(
+        lists:usort([
+            <<"route_id_1">>,
+            <<"route_id_2">>,
+            <<"route_id_112">>,
+            <<"route_id_211">>
+        ]),
+        RouteIDs
+    ),
 
     ok.
 
