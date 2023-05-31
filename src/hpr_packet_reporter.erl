@@ -7,7 +7,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    report_packet/3
+    report_packet/4
 ]).
 
 %% ------------------------------------------------------------------
@@ -62,10 +62,13 @@ start_link(Args) ->
     gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
 
 -spec report_packet(
-    Packet :: hpr_packet_up:packet(), PacketRoute :: hpr_route:route(), IsFree :: boolean()
+    Packet :: hpr_packet_up:packet(),
+    PacketRoute :: hpr_route:route(),
+    IsFree :: boolean(),
+    ReceivedTime :: non_neg_integer()
 ) -> ok.
-report_packet(Packet, PacketRoute, IsFree) ->
-    EncodedPacket = encode_packet(Packet, PacketRoute, IsFree),
+report_packet(Packet, PacketRoute, IsFree, ReceivedTime) ->
+    EncodedPacket = encode_packet(Packet, PacketRoute, IsFree, ReceivedTime),
     gen_server:cast(?SERVER, {report_packet, EncodedPacket}).
 
 %% ------------------------------------------------------------------
@@ -160,10 +163,15 @@ terminate(_Reason, #state{current_packets = Packets}) ->
 %% ------------------------------------------------------------------
 
 -spec encode_packet(
-    Packet :: hpr_packet_up:packet(), PacketRoute :: hpr_route:route(), IsFree :: boolean()
+    Packet :: hpr_packet_up:packet(),
+    PacketRoute :: hpr_route:route(),
+    IsFree :: boolean(),
+    ReceivedTime :: non_neg_integer()
 ) -> binary().
-encode_packet(Packet, PacketRoute, IsFree) ->
-    EncodedPacket = hpr_packet_report:encode(hpr_packet_report:new(Packet, PacketRoute, IsFree)),
+encode_packet(Packet, PacketRoute, IsFree, ReceivedTime) ->
+    EncodedPacket = hpr_packet_report:encode(
+        hpr_packet_report:new(Packet, PacketRoute, IsFree, ReceivedTime)
+    ),
     PacketSize = erlang:size(EncodedPacket),
     <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>.
 

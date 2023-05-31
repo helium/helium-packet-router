@@ -4,6 +4,7 @@
     init_per_testcase/2,
     end_per_testcase/2,
     join_packet_up/1,
+    join_payload/1,
     uplink_packet_up/1,
     wait_until/1, wait_until/3,
     match_map/2
@@ -108,22 +109,29 @@ end_per_testcase(_TestCase, Config) ->
     Opts :: map()
 ) -> hpr_packet_up:packet().
 join_packet_up(Opts0) ->
-    DevNonce = maps:get(dev_nonce, Opts0, crypto:strong_rand_bytes(2)),
-    AppKey = maps:get(app_key, Opts0, crypto:strong_rand_bytes(16)),
-    MType = ?JOIN_REQ,
-    MHDRRFU = 0,
-    Major = 0,
-    AppEUI = maps:get(app_eui, Opts0, 1),
-    DevEUI = maps:get(dev_eui, Opts0, 1),
-    JoinPayload0 =
-        <<MType:3, MHDRRFU:3, Major:2, AppEUI:64/integer-unsigned-little,
-            DevEUI:64/integer-unsigned-little, DevNonce:2/binary>>,
-    MIC = crypto:macN(cmac, aes_128_cbc, AppKey, JoinPayload0, 4),
-    JoinPayload1 = <<JoinPayload0/binary, MIC:4/binary>>,
+    JoinPayload1 = join_payload(Opts0),
     Opts1 = maps:put(payload, maps:get(payload, Opts0, JoinPayload1), Opts0),
     PacketUp = hpr_packet_up:test_new(Opts1),
     SigFun = maps:get(sig_fun, Opts0, fun(_) -> <<"signature">> end),
     hpr_packet_up:sign(PacketUp, SigFun).
+
+-spec join_payload(Opts :: map()) -> binary().
+join_payload(Opts) ->
+    MType = ?JOIN_REQ,
+    MHDRRFU = 0,
+    Major = 0,
+
+    DevNonce = maps:get(dev_nonce, Opts, crypto:strong_rand_bytes(2)),
+    AppKey = maps:get(app_key, Opts, crypto:strong_rand_bytes(16)),
+
+    AppEUI = maps:get(app_eui, Opts, 1),
+    DevEUI = maps:get(dev_eui, Opts, 1),
+
+    JoinPayload0 =
+        <<MType:3, MHDRRFU:3, Major:2, AppEUI:64/integer-unsigned-little,
+            DevEUI:64/integer-unsigned-little, DevNonce:2/binary>>,
+    MIC = crypto:macN(cmac, aes_128_cbc, AppKey, JoinPayload0, 4),
+    <<JoinPayload0/binary, MIC:4/binary>>.
 
 -spec uplink_packet_up(
     Opts :: map()

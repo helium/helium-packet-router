@@ -53,7 +53,7 @@ handle_packet(Packet) ->
                     ok;
                 {ok, Routes} ->
                     {Routed, IsFree} = maybe_deliver_packet_to_routes(Packet, Routes),
-                    ok = maybe_report_packet(Routes, Routed, IsFree, Packet),
+                    ok = maybe_report_packet(Routes, Routed, IsFree, Packet, Start),
                     N = erlang:length(Routes),
                     lager:debug(
                         [{routes, N}, {routed, Routed}],
@@ -261,15 +261,16 @@ deliver_packet(_OtherProtocol, _Packet, _Route) ->
     Routes :: [hpr_route:route()],
     Routed :: non_neg_integer(),
     IsFree :: boolean(),
-    Packet :: hpr_packet_up:packet()
+    Packet :: hpr_packet_up:packet(),
+    ReceivedTime :: non_neg_integer()
 ) -> ok.
-maybe_report_packet(_Routes, 0, _IsFree, _Packet) ->
+maybe_report_packet(_Routes, 0, _IsFree, _Packet, _ReceivedTime) ->
     lager:debug("not reporting packet");
-maybe_report_packet([Route | _] = Routes, Routed, IsFree, Packet) when Routed > 0 ->
+maybe_report_packet([Route | _] = Routes, Routed, IsFree, Packet, ReceivedTime) when Routed > 0 ->
     UniqueOUINetID = lists:usort([{hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]),
     case erlang:length(UniqueOUINetID) of
         1 ->
-            ok = hpr_packet_reporter:report_packet(Packet, Route, IsFree);
+            ok = hpr_packet_reporter:report_packet(Packet, Route, IsFree, ReceivedTime);
         _ ->
             lager:error("routed packet to non unique OUI/Net ID ~p", [
                 [{hpr_route:id(R), hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]
