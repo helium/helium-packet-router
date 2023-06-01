@@ -7,6 +7,12 @@
 -define(HPR_B58, hpr_b58).
 -define(HPR_SIG_FUN, hpr_sig_fun).
 
+-ifdef(TEST).
+-define(PMAP_TIMEOUT, timer:minutes(4)).
+-else.
+-define(PMAP_TIMEOUT, timer:seconds(1)).
+-endif.
+
 -export([
     gateway_name/1,
     gateway_mac/1,
@@ -17,7 +23,7 @@
     net_id_display/1,
     trace/2,
     stop_trace/1,
-    pmap/2, pmap/3,
+    pmap/2, pmap/4,
     %%
     load_key/1,
     pubkey_bin/0,
@@ -149,16 +155,16 @@ stop_trace(Data) ->
 
 pmap(F, L) ->
     Width = validation_width(),
-    pmap(F, L, Width).
+    pmap(F, L, Width, ?PMAP_TIMEOUT).
 
-pmap(F, L, Width) ->
+pmap(F, L, Width, ReceiveTimeout) ->
     Parent = self(),
     Len = erlang:length(L),
     Min = erlang:floor(Len / Width),
     Rem = Len rem Width,
     Lengths = lists:duplicate(Rem, Min + 1) ++ lists:duplicate(Width - Rem, Min),
     OL = partition_list(L, Lengths, []),
-    St = lists:foldl(
+    Count = lists:foldl(
         fun
             ([], N) ->
                 N;
@@ -167,21 +173,34 @@ pmap(F, L, Width) ->
                     fun() ->
                         Parent ! {pmap, N, lists:map(F, IL)}
                     end,
-                    [{fullsweep_after, 0}]
+                    [
+                        {fullsweep_after, 0},
+                        {monitor, [{tag, {'DOWN', N}}]}
+                    ]
                 ),
                 N + 1
         end,
         0,
         OL
     ),
-    L2 = [
-        receive
-            {pmap, N, R} -> {N, R}
-        end
-     || _ <- lists:seq(1, St)
-    ],
+    L2 = pmap_rcv(ReceiveTimeout, [], Count),
     {_, L3} = lists:unzip(lists:keysort(1, L2)),
     lists:flatten(L3).
+
+pmap_rcv(_, Acc, 0) ->
+    lists:reverse(Acc);
+pmap_rcv(ReceiveTimeout, Acc, Left) ->
+    receive
+        {{'DOWN', _N}, _Ref, process, _Pid, normal} ->
+            pmap_rcv(ReceiveTimeout, Acc, Left);
+        {{'DOWN', N}, _Ref, process, _Pid, Info} ->
+            lager:error([{reason, Info}, {request_num, N}], "pmap went down unexpected"),
+            pmap_rcv(ReceiveTimeout, [{N, {'DOWN', Info}} | Acc], Left - 1);
+        {pmap, N, R} ->
+            pmap_rcv(ReceiveTimeout, [{N, R} | Acc], Left - 1)
+    after ReceiveTimeout ->
+        pmap_rcv(ReceiveTimeout, Acc, Left - 1)
+    end.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -246,6 +265,36 @@ get_device_traces(Data) ->
 %% ------------------------------------------------------------------
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+
+pmap_test_() ->
+    {timeout, 30, fun() ->
+        Input = lists:seq(1, 10),
+        Self = self(),
+        _ = spawn(fun() ->
+            Results = pmap(
+                fun
+                    (5) ->
+                        exit(i_ded);
+                    (N) ->
+                        timer:sleep(N * 100),
+                        N
+                end,
+                Input,
+                4,
+                timer:seconds(1)
+            ),
+            Self ! {done, Results}
+        end),
+
+        %% Don't wait forever
+        _Results =
+            receive
+                {done, R} -> R
+            after timer:seconds(20) -> pmap_timeout
+            end,
+        %% ?debugVal(Results),
+        ok
+    end}.
 
 trace_test() ->
     application:ensure_all_started(lager),
