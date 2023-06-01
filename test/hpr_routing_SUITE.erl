@@ -137,7 +137,7 @@ mic_check_test(_Config) ->
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
     %% TEST 3:  Good key but no routes
-    SKFNoRoutes = hpr_skf:test_new(#{
+    SKFNoRoutes = hpr_skf:new(#{
         route_id => "empty",
         devaddr => DevAddr,
         session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
@@ -203,7 +203,7 @@ mic_check_test(_Config) ->
     %% TEST 6:  Good key and route exist
     %% We leave old route inserted and do not delete good skf for next test
 
-    SKFGoodKeyAndRouteExitst = hpr_skf:test_new(#{
+    SKFGoodKeyAndRouteExitst = hpr_skf:new(#{
         route_id => RouteID,
         devaddr => DevAddr,
         session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),

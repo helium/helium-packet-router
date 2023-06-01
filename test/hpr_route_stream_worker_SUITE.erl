@@ -71,7 +71,7 @@ main_test(_Config) ->
     }),
     DevAddr1 = 16#00000001,
     SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SessionKeyFilter = hpr_skf:test_new(#{
+    SessionKeyFilter = hpr_skf:new(#{
         route_id => Route1ID,
         devaddr => DevAddr1,
         session_key => SessionKey1,
@@ -106,8 +106,9 @@ main_test(_Config) ->
     ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
-    ?assertEqual(
-        [{hpr_utils:hex_to_bin(SessionKey1), Route1ID, 1}], hpr_route_ets:lookup_skf(DevAddr1)
+    SK1 = hpr_utils:hex_to_bin(SessionKey1),
+    ?assertMatch(
+        [{SK1, Route1ID, 1, X}] when X > 0, hpr_route_ets:lookup_skf(DevAddr1)
     ),
 
     %% Delete EUI Pairs / DevAddr Ranges / SKF
@@ -174,8 +175,9 @@ main_test(_Config) ->
     ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
-    ?assertEqual(
-        [{hpr_utils:hex_to_bin(SessionKey1), Route1ID, 1}], hpr_route_ets:lookup_skf(DevAddr1)
+    SK1 = hpr_utils:hex_to_bin(SessionKey1),
+    ?assertMatch(
+        [{SK1, Route1ID, 1, X}] when X > 0, hpr_route_ets:lookup_skf(DevAddr1)
     ),
 
     %% Remove route should delete eveything

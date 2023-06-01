@@ -200,12 +200,11 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
         [] ->
             c_text("No SKF found");
         SKFs ->
-            MkRow = fun({Key, RouteID, MaxCopies}) ->
+            MkRow = fun({Key, RouteID}) ->
                 [
                     {" Route ID ", RouteID},
                     {" Session Key ", hpr_utils:bin_to_hex_string(Key)},
-                    {" DevAddr ", DevAddrString},
-                    {" MaxCopies ", MaxCopies}
+                    {" DevAddr ", DevAddrString}
                 ]
             end,
             c_table(lists:map(MkRow, SKFs))

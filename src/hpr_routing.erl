@@ -118,6 +118,7 @@ find_routes_for_uplink(#frfu{routes = Routes, no_skf_routes = NoSKFRoutes}, '$en
     {ok, lists:usort(Routes ++ [{R, 0} || R <- NoSKFRoutes])};
 find_routes_for_uplink(
     #frfu{
+        devaddr = DevAddr,
         payload = Payload,
         routes = Routes,
         dev_range_routes = DevRangeRoutes,
@@ -126,8 +127,8 @@ find_routes_for_uplink(
     {SKFs, Continuation}
 ) ->
     MicFilteredRoutes = lists:filtermap(
-        fun({Key, RouteID, SKFMaxCopies}) ->
-            case hpr_lorawan:key_matches_mic(Key, Payload) of
+        fun({SessionKey, RouteID, LastUsed, SKFMaxCopies}) ->
+            case hpr_lorawan:key_matches_mic(SessionKey, Payload) of
                 %% If failed we remove that entry
                 false ->
                     false;
@@ -136,14 +137,21 @@ find_routes_for_uplink(
                     case hpr_route_ets:lookup_route(RouteID) of
                         %% Note: this would mark packet as invalid_mic
                         %% but we are just missing the route
-                        [] -> false;
-                        Rs -> {true, [{R, SKFMaxCopies} || R <- Rs]}
+                        [] ->
+                            false;
+                        Rs ->
+                            OneHourAgo = erlang:system_time(millisecond) - timer:minutes(60),
+                            case LastUsed < OneHourAgo of
+                                true -> ok = hpr_route_ets:update_skf(DevAddr, SessionKey, RouteID);
+                                false -> ok
+                            end,
+                            {true, [{R, SKFMaxCopies} || R <- Rs]}
                     end
             end
         end,
         SKFs
     ),
-    SKFsRoutes = lists:usort([RouteID || {_Key, RouteID, _SKFMaxCopies} <- SKFs]),
+    SKFsRoutes = lists:usort([RouteID || {_Key, RouteID, _LastUsed, _SKFMaxCopies} <- SKFs]),
     NoSKFRoutes1 = lists:filtermap(
         fun(Route) ->
             RouteID = hpr_route:id(Route),
@@ -368,7 +376,7 @@ find_routes_for_uplink_single_route_success() ->
     ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
 
     SessionKey1 = crypto:strong_rand_bytes(16),
-    SKF1 = hpr_skf:test_new(#{
+    SKF1 = hpr_skf:new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey1),
@@ -405,7 +413,7 @@ find_routes_for_uplink_single_route_failed() ->
     ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
 
     SessionKey1 = crypto:strong_rand_bytes(16),
-    SKF1 = hpr_skf:test_new(#{
+    SKF1 = hpr_skf:new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey1),
@@ -464,7 +472,7 @@ find_routes_for_uplink_multi_route_success() ->
 
     %% Testing with only Route1 having a SKF
     SessionKey1 = crypto:strong_rand_bytes(16),
-    SKF1 = hpr_skf:test_new(#{
+    SKF1 = hpr_skf:new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey1),
@@ -479,7 +487,7 @@ find_routes_for_uplink_multi_route_success() ->
     ?assertEqual({ok, [{Route1, 1}, {Route2, 0}]}, find_routes_for_uplink(PacketUp)),
 
     %% Testing with both Routes having a good SKF
-    SKF2 = hpr_skf:test_new(#{
+    SKF2 = hpr_skf:new(#{
         route_id => RouteID2,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey1),
@@ -547,7 +555,7 @@ find_routes_for_uplink_multi_route_skf_success() ->
     lists:foreach(
         fun(RouteIndex) ->
             {RouteID, _Route} = lists:nth(RouteIndex, Routes),
-            SKF1 = hpr_skf:test_new(#{
+            SKF1 = hpr_skf:new(#{
                 route_id => RouteID,
                 devaddr => DevAddr1,
                 session_key => hpr_utils:bin_to_hex_string(SessionKey1),
@@ -559,7 +567,7 @@ find_routes_for_uplink_multi_route_skf_success() ->
             %% skfs, to get the ets to page.
             lists:foreach(
                 fun(_) ->
-                    SKF2 = hpr_skf:test_new(#{
+                    SKF2 = hpr_skf:new(#{
                         route_id => RouteID,
                         devaddr => DevAddr1,
                         session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
@@ -644,7 +652,7 @@ find_routes_for_uplink_multi_route_failed() ->
 
     %% Testing with only Route1 having a bad SKF and other no SKF
     SessionKey1 = crypto:strong_rand_bytes(16),
-    SKF1 = hpr_skf:test_new(#{
+    SKF1 = hpr_skf:new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey1),
@@ -660,7 +668,7 @@ find_routes_for_uplink_multi_route_failed() ->
 
     %% Testing with both Routes having a bad SKF
     SessionKey2 = crypto:strong_rand_bytes(16),
-    SKF2 = hpr_skf:test_new(#{
+    SKF2 = hpr_skf:new(#{
         route_id => RouteID2,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey2),
@@ -672,7 +680,7 @@ find_routes_for_uplink_multi_route_failed() ->
 
     %% Testing one good SKF and one bad SKF
     SessionKey3 = crypto:strong_rand_bytes(16),
-    SKF3 = hpr_skf:test_new(#{
+    SKF3 = hpr_skf:new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey3),

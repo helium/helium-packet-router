@@ -16,6 +16,7 @@
     lookup_devaddr_range/1,
 
     insert_skf/1,
+    update_skf/3,
     delete_skf/1,
     lookup_skf/1,
     select_skf/1,
@@ -47,8 +48,7 @@ init() ->
     ?ETS_SKFS = ets:new(?ETS_SKFS, [
         public,
         named_table,
-        bag,
-        {write_concurrency, true},
+        ordered_set,
         {read_concurrency, true}
     ]),
     ok.
@@ -191,14 +191,16 @@ lookup_devaddr_range(DevAddr) ->
 
 -spec insert_skf(SKF :: hpr_skf:skf()) -> ok.
 insert_skf(SKF) ->
-    RouteId = hpr_skf:route_id(SKF),
+    RouteID = hpr_skf:route_id(SKF),
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
+    Key = {erlang:system_time(millisecond), hpr_utils:hex_to_bin(SessionKey)},
     MaxCopies = hpr_skf:max_copies(SKF),
-    true = ets:insert(?ETS_SKFS, {DevAddr, {hpr_utils:hex_to_bin(SessionKey), RouteId, MaxCopies}}),
+    Value = {DevAddr, RouteID, MaxCopies},
+    true = ets:insert(?ETS_SKFS, {Key, Value}),
     lager:debug(
         [
-            {route_id, RouteId},
+            {route_id, RouteID},
             {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
             {session_key, SessionKey},
             {max_copies, MaxCopies}
@@ -207,37 +209,49 @@ insert_skf(SKF) ->
     ),
     ok.
 
+-spec update_skf(DevAddr :: non_neg_integer(), SessionKey :: binary(), RouteID :: string()) -> ok.
+update_skf(DevAddr, SessionKey, RouteID) ->
+    SKF = hpr_skf:new(#{
+        route_id => RouteID,
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey)
+    }),
+    ok = delete_skf(SKF),
+    ok = insert_skf(SKF),
+    ok.
+
 -spec delete_skf(SKF :: hpr_skf:skf()) -> ok.
 delete_skf(SKF) ->
-    RouteId = hpr_skf:route_id(SKF),
+    RouteID = hpr_skf:route_id(SKF),
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
     MaxCopies = hpr_skf:max_copies(SKF),
-    true = ets:delete_object(
-        ?ETS_SKFS, {DevAddr, {hpr_utils:hex_to_bin(SessionKey), RouteId, MaxCopies}}
-    ),
+    %% We ignore max copies here
+    MS = [{{{'_', hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, RouteID, '_'}}, [], [true]}],
+    Deleted = ets:select_delete(?ETS_SKFS, MS),
     lager:debug(
         [
-            {route_id, RouteId},
+            {route_id, RouteID},
             {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
             {session_key, SessionKey},
             {max_copies, MaxCopies}
         ],
-        "deleting SKF"
+        "deleted ~p SKF",
+        [Deleted]
     ),
     ok.
 
--spec lookup_skf(DevAddr :: non_neg_integer()) -> [{binary(), string(), non_neg_integer()}].
+-spec lookup_skf(DevAddr :: non_neg_integer()) ->
+    [{binary(), string(), non_neg_integer(), non_neg_integer()}].
 lookup_skf(DevAddr) ->
-    case ets:lookup(?ETS_SKFS, DevAddr) of
-        [] -> [];
-        SKFs -> [{Filter, RouteID, MaxCopies} || {_DevAddr, {Filter, RouteID, MaxCopies}} <- SKFs]
-    end.
+    MS = [{{{'$1', '$2'}, {DevAddr, '$3', '$4'}}, [], [{{'$2', '$3', '$4', '$1'}}]}],
+    ets:select(?ETS_SKFS, MS).
 
 -spec select_skf(DevAddr :: non_neg_integer() | ets:continuation()) ->
-    {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
+    {[{binary(), string(), non_neg_integer(), non_neg_integer()}], ets:continuation()}
+    | '$end_of_table'.
 select_skf(DevAddr) when is_integer(DevAddr) ->
-    MS = [{{DevAddr, {'$1', '$2', '$3'}}, [], [{{'$1', '$2', '$3'}}]}],
+    MS = [{{{'$1', '$2'}, {DevAddr, '$3', '$4'}}, [], [{{'$2', '$3', '$4', '$1'}}]}],
     ets:select(?ETS_SKFS, MS, 100);
 select_skf(Continuation) ->
     ets:select(Continuation).
@@ -274,7 +288,7 @@ devaddr_ranges_for_route(RouteID) ->
 
 -spec skfs_for_route(RouteID :: string()) -> list({non_neg_integer(), binary(), non_neg_integer()}).
 skfs_for_route(RouteID) ->
-    MS = [{{'$1', {'$2', RouteID, '$3'}}, [], [{{'$1', '$2', '$3'}}]}],
+    MS = [{{{'_', '$1'}, {'$2', RouteID, '$3'}}, [], [{{'$2', '$1', '$3'}}]}],
     ets:select(?ETS_SKFS, MS).
 
 %% ------------------------------------------------------------------
@@ -488,8 +502,15 @@ test_skf() ->
     ?assertEqual(ok, ?MODULE:insert_skf(SKF1)),
     ?assertEqual(ok, ?MODULE:insert_skf(SKF2)),
 
-    ?assertEqual([{hpr_utils:hex_to_bin(SessionKey1), RouteID1, 1}], ?MODULE:lookup_skf(DevAddr1)),
-    ?assertEqual([{hpr_utils:hex_to_bin(SessionKey2), RouteID2, 1}], ?MODULE:lookup_skf(DevAddr2)),
+    SK1 = hpr_utils:hex_to_bin(SessionKey1),
+    ?assertMatch([{SK1, RouteID1, 1, X}] when X > 0, ?MODULE:lookup_skf(DevAddr1)),
+    SK2 = hpr_utils:hex_to_bin(SessionKey2),
+    ?assertMatch([{SK2, RouteID2, 1, X}] when X > 0, ?MODULE:lookup_skf(DevAddr2)),
+
+    T1 = erlang:system_time(millisecond),
+    timer:sleep(2),
+    ?assertEqual(ok, ?MODULE:update_skf(DevAddr1, SK1, RouteID1)),
+    ?assertMatch([{SK1, RouteID1, 1, X}] when X > T1, ?MODULE:lookup_skf(DevAddr1)),
 
     ?assertEqual(ok, ?MODULE:delete_skf(SKF1)),
     ?assertEqual([], ?MODULE:lookup_skf(DevAddr1)),
@@ -528,8 +549,9 @@ test_select_skf() ->
         lists:seq(1, 200)
     ),
 
-    {A, Continuation} = ?MODULE:select_skf(DevAddr),
-    {B, '$end_of_table'} = ?MODULE:select_skf(Continuation),
+    {A, Continuation1} = ?MODULE:select_skf(DevAddr),
+    {B, Continuation2} = ?MODULE:select_skf(Continuation1),
+    '$end_of_table' = ?MODULE:select_skf(Continuation2),
 
     ?assertEqual(lists:usort(?MODULE:lookup_skf(DevAddr)), lists:usort(A ++ B)),
     ok.
@@ -608,8 +630,10 @@ test_delete_route() ->
     ?assertEqual(
         [{{StartAddr2, EndAddr2}, RouteID2}], ets:tab2list(?ETS_DEVADDR_RANGES)
     ),
-    ?assertEqual(
-        [{DevAddr2, {hpr_utils:hex_to_bin(SessionKey2), RouteID2, 1}}], ets:tab2list(?ETS_SKFS)
+    SK2 = hpr_utils:hex_to_bin(SessionKey2),
+    ?assertMatch(
+        [{{Timestamp, SK2}, {DevAddr2, RouteID2, 1}}] when Timestamp > 0,
+        ets:tab2list(?ETS_SKFS)
     ),
     ?assertEqual([{RouteID2, Route2}], ets:tab2list(?ETS_ROUTES)),
     ok.
