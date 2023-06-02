@@ -240,6 +240,13 @@ skf_max_copies_test(_Config) ->
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
     DevAddr = 16#00000001,
+    PacketUp = test_utils:uplink_packet_up(#{
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey,
+        devaddr => DevAddr,
+        gateway => Gateway,
+        sig_fun => SigFun
+    }),
 
     Route = hpr_route:test_new(#{
         id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
@@ -260,7 +267,7 @@ skf_max_copies_test(_Config) ->
     }),
     ?assertEqual(ok, hpr_route_ets:insert_devaddr_range(DevAddrRange)),
 
-    SKF = hpr_skf:test_new(#{
+    SKF = hpr_skf:new(#{
         route_id => RouteID,
         devaddr => DevAddr,
         session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),

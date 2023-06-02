@@ -10,6 +10,12 @@
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
+-ifdef(TEST).
+-define(SKF_UPDATE, timer:seconds(2)).
+-else.
+-define(SKF_UPDATE, timer:minutes(60)).
+-endif.
+
 -type hpr_routing_response() ::
     ok
     | {error, gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic}.
@@ -140,8 +146,8 @@ find_routes_for_uplink(
                         [] ->
                             false;
                         Rs ->
-                            OneHourAgo = erlang:system_time(millisecond) - timer:minutes(60),
-                            case LastUsed < OneHourAgo of
+                            Before = erlang:system_time(millisecond) - ?SKF_UPDATE,
+                            case LastUsed < Before of
                                 true -> ok = hpr_route_ets:update_skf(DevAddr, SessionKey, RouteID);
                                 false -> ok
                             end,
