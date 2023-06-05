@@ -73,7 +73,7 @@ handle_cast(Msg, State) ->
 
 handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
     lager:info("connecting"),
-    {_PubKey, SigFun} = persistent_term:get(?HPR_KEY),
+    SigFun = hpr_utils:sig_fun(),
     %% TODO: Region hardcoded from now until it is used on server side
     Req = hpr_http_roaming_register:new('US915'),
     SignedReq = hpr_http_roaming_register:sign(Req, SigFun),
@@ -158,16 +158,27 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
         {error, _} = Err ->
             lager:error("dowlink handle message error ~p", [Err]),
             {500, <<"An error occurred">>};
-        {join_accept, {PubKeyBin, PacketDown}} ->
+        {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, Endpoint}} ->
             lager:debug(
-                [{gateway, hpr_utils:gateway_name(PubKeyBin)}], "sending downlink [gateway: ~p]", [
-                    hpr_utils:gateway_name(PubKeyBin)
-                ]
+                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                "sending downlink"
             ),
             case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                 ok ->
+                    _ = hackney:post(
+                        Endpoint,
+                        [],
+                        jsx:encode(PRStartNotif),
+                        [with_body]
+                    ),
                     {200, <<"downlink sent: 1">>};
                 {error, not_found} ->
+                    _ = hackney:post(
+                        Endpoint,
+                        [],
+                        jsx:encode(PRStartNotif#{'Result' => #{'ResultCode' => <<"XmitFailed">>}}),
+                        [with_body]
+                    ),
                     {404, <<"Not Found">>}
             end;
         {downlink, PayloadResponse, {PubKeyBin, PacketDown}, {Endpoint, FlowType}} ->
@@ -193,17 +204,13 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                                         lager:debug(
                                             [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
                                             "async downlink response ~w, Endpoint: ~s",
-                                            [
-                                                Code, Endpoint
-                                            ]
+                                            [Code, Endpoint]
                                         );
                                     {error, Reason} ->
                                         lager:debug(
                                             [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
                                             "async downlink response ~s, Endpoint: ~s",
-                                            [
-                                                Reason, Endpoint
-                                            ]
+                                            [Reason, Endpoint]
                                         )
                                 end
                             end),

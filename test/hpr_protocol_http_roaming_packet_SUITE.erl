@@ -9,8 +9,6 @@
 -module(hpr_protocol_http_roaming_packet_SUITE).
 -author("jonathanruttenberg").
 
--define(TRANSACTION_ETS, hpr_http_roaming_transaction_ets).
-
 -export([
     all/0,
     init_per_testcase/2,
@@ -158,7 +156,8 @@ http_sync_uplink_join_test(_Config) ->
     } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-join-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -185,7 +184,7 @@ http_sync_uplink_join_test(_Config) ->
                         <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -209,6 +208,8 @@ http_sync_uplink_join_test(_Config) ->
                 <<"TransactionID">> => TransactionID,
                 <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
                 <<"ReceiverID">> => <<"0xC00053">>,
+                <<"SenderNSID">> => <<"test-join-receiver-id">>,
+                <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
                 <<"MessageType">> => <<"PRStartAns">>,
                 <<"Result">> => #{
                     <<"ResultCode">> => <<"Success">>
@@ -240,6 +241,18 @@ http_sync_uplink_join_test(_Config) ->
         ),
         ok
     end),
+
+    %% 5. Expect a PRStartNotif to the lns
+    {ok, _, _, _} = http_rcv(#{
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"MessageType">> => <<"PRStartNotif">>,
+        <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+        <<"ReceiverNSID">> => <<"test-join-receiver-id">>,
+        <<"SenderID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => hpr_utils:sender_nsid(),
+        <<"TransactionID">> => TransactionID,
+        <<"Result">> => #{<<"ResultCode">> => <<"Success">>}
+    }),
 
     ok.
 
@@ -346,7 +359,9 @@ http_async_uplink_join_test(_Config) ->
     end,
 
     %% 2. load Roamer into the config
-    join_test_route(DevEUI, AppEUI, async, <<"route1">>),
+    join_test_route(DevEUI, AppEUI, async, <<"route1">>, #{
+        auth_header => <<"expected auth header">>
+    }),
 
     %% 3. send packet
     {ok, PacketUp, GatewayTime} = SendPacketFun(),
@@ -354,13 +369,16 @@ http_async_uplink_join_test(_Config) ->
     PacketTime = hpr_packet_up:timestamp(PacketUp),
 
     %% 4. Roamer receive http uplink
-    {ok, #{
-        <<"TransactionID">> := TransactionID,
-        <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
-    }} = roamer_expect_uplink_data(
+    {ok,
+        #{
+            <<"TransactionID">> := TransactionID,
+            <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
+        },
+        Headers} = roamer_expect_uplink_data(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-join-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -389,7 +407,7 @@ http_async_uplink_join_test(_Config) ->
                         ),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -397,6 +415,7 @@ http_async_uplink_join_test(_Config) ->
             }
         }
     ),
+    ?assertEqual(<<"expected auth header">>, proplists:get_value(<<"Authorization">>, Headers)),
 
     ?assertMatch(
         {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, async},
@@ -412,6 +431,8 @@ http_async_uplink_join_test(_Config) ->
         <<"TransactionID">> => TransactionID,
         <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
         <<"ReceiverID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => <<"test-join-receiver-id">>,
+        <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
         <<"MessageType">> => <<"PRStartAns">>,
         <<"Result">> => #{
             <<"ResultCode">> => <<"Success">>
@@ -433,6 +454,18 @@ http_async_uplink_join_test(_Config) ->
         ?assertEqual('SF9BW125', hpr_packet_down:rx1_datarate(PacketDown)),
         ok
     end),
+
+    %% 9. Expect a PRStartNotif to the lns
+    {ok, _, _, _} = http_rcv(#{
+        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"MessageType">> => <<"PRStartNotif">>,
+        <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+        <<"ReceiverNSID">> => <<"test-join-receiver-id">>,
+        <<"SenderID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => hpr_utils:sender_nsid(),
+        <<"TransactionID">> => TransactionID,
+        <<"Result">> => #{<<"ResultCode">> => <<"Success">>}
+    }),
 
     ok.
 
@@ -484,6 +517,8 @@ http_async_downlink_test(_Config) ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"ReceiverID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => <<"downlink-test-body-sender-nsid">>,
+        <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
         <<"TransactionID">> => TransactionID,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -505,12 +540,14 @@ http_async_downlink_test(_Config) ->
     ok = roamer_expect_response(200),
 
     %% 6. roamer receives http downlink ack (xmitdata_ans)
-    {ok, _Data} = roamer_expect_uplink_data(#{
+    {ok, _Data, _Headers} = roamer_expect_uplink_data(#{
         <<"DLFreq1">> => DownlinkFreq,
         <<"MessageType">> => <<"XmitDataAns">>,
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"SenderID">> => <<"0xC00053">>,
+        <<"SenderNSID">> => hpr_utils:sender_nsid(),
+        <<"ReceiverNSID">> => <<"downlink-test-body-sender-nsid">>,
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
         <<"TransactionID">> => TransactionID
     }),
@@ -587,7 +624,8 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -612,7 +650,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
                         <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -669,7 +707,8 @@ http_uplink_packet_test(_Config) ->
     } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -693,7 +732,7 @@ http_uplink_packet_test(_Config) ->
                         <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
                         <<"DLAllowed">> => true,
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)
                         )
                     }
@@ -745,6 +784,8 @@ http_class_c_downlink_test(_Config) ->
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"ReceiverID">> => <<"0xC00053">>,
         <<"SenderID">> => ?NET_ID_ACTILITY_BIN,
+        <<"SenderNSID">> => <<"test-class-c-receiver-nsid">>,
+        <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
         <<"DLMetaData">> => #{
             <<"ClassMode">> => <<"C">>,
             <<"DLFreq2">> => DownlinkFreq,
@@ -770,6 +811,8 @@ http_class_c_downlink_test(_Config) ->
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"SenderID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"ReceiverID">> => <<"0xC00053">>,
+        <<"ReceiverNSID">> => hpr_utils:sender_nsid(),
+        <<"SenderNSID">> => <<"test-class-c-receiver-nsid">>,
         <<"TransactionID">> => TransactionID,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -788,12 +831,14 @@ http_class_c_downlink_test(_Config) ->
     ok = roamer_expect_response(200),
 
     %% 5. roamer receives http downlink ack (xmitdata_ans)
-    {ok, _Data} = roamer_expect_uplink_data(#{
+    {ok, _Data, _Headers} = roamer_expect_uplink_data(#{
         <<"DLFreq2">> => DownlinkFreq,
         <<"MessageType">> => <<"XmitDataAns">>,
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"ReceiverID">> => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         <<"SenderID">> => <<"0xC00053">>,
+        <<"ReceiverNSID">> => <<"test-class-c-receiver-nsid">>,
+        <<"SenderNSID">> => hpr_utils:sender_nsid(),
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>},
         <<"TransactionID">> => TransactionID
     }),
@@ -863,7 +908,8 @@ http_multiple_gateways_test(_Config) ->
     } =
         http_rcv(#{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -886,7 +932,7 @@ http_multiple_gateways_test(_Config) ->
                 <<"GWCnt">> => 2,
                 <<"GWInfo">> => [
                     #{
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin1)
                         ),
                         <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -895,7 +941,7 @@ http_multiple_gateways_test(_Config) ->
                         <<"DLAllowed">> => true
                     },
                     #{
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin2)
                         ),
                         <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -932,16 +978,22 @@ http_multiple_joins_same_dest_test(_Config) ->
         timestamp => GatewayTime
     }),
 
-    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ACTILITY, <<"route1">>),
-    join_test_route(DevEUI1, AppEUI1, sync, ?NET_ID_ORANGE, <<"route2">>),
+    join_test_route(DevEUI1, AppEUI1, sync, <<"route1">>, #{net_id => ?NET_ID_ACTILITY}),
+    join_test_route(DevEUI1, AppEUI1, sync, <<"route2">>, #{net_id => ?NET_ID_ORANGE}),
 
     ok = start_uplink_listener(#{port => 3002, callback_args => #{forward => self()}}),
 
     ok = hpr_routing:handle_packet(PacketUp),
 
-    {ok, #{<<"ReceiverID">> := ReceiverOne}, _, _} = http_rcv(),
+    HttpReceivePRStartReq = fun HTTPRECEIVEPRSTARTREQ() ->
+        case http_rcv() of
+            {ok, #{<<"MessageType">> := <<"PRStartReq">>} = Req, _, _} -> Req;
+            {ok, #{}, _, _} -> HTTPRECEIVEPRSTARTREQ()
+        end
+    end,
 
-    {ok, #{<<"ReceiverID">> := ReceiverTwo}, _, _} = http_rcv(),
+    #{<<"ReceiverID">> := ReceiverOne} = HttpReceivePRStartReq(),
+    #{<<"ReceiverID">> := ReceiverTwo} = HttpReceivePRStartReq(),
 
     ok = not_http_rcv(250),
 
@@ -987,7 +1039,8 @@ http_multiple_gateways_single_shot_test(_Config) ->
     MakeBaseExpect = fun(GatewayInfo) ->
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -1015,7 +1068,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
 
     {ok, _Data1, _, {200, _RespBody1}} = http_rcv(
         MakeBaseExpect(#{
-            <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+            <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                 hpr_utils:pubkeybin_to_mac(PubKeyBin1)
             ),
             <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -1027,7 +1080,7 @@ http_multiple_gateways_single_shot_test(_Config) ->
 
     {ok, _Data2, _, {200, _RespBody2}} = http_rcv(
         MakeBaseExpect(#{
-            <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+            <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                 hpr_utils:pubkeybin_to_mac(PubKeyBin2)
             ),
             <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -1137,7 +1190,8 @@ http_uplink_packet_late_test(_Config) ->
     } = http_rcv(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
-            <<"SenderNSID">> => fun erlang:is_binary/1,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
             <<"DedupWindowSize">> => fun erlang:is_integer/1,
             <<"TransactionID">> => fun erlang:is_number/1,
             <<"SenderID">> => <<"0xC00053">>,
@@ -1160,7 +1214,7 @@ http_uplink_packet_late_test(_Config) ->
                 <<"GWCnt">> => 1,
                 <<"GWInfo">> => [
                     #{
-                        <<"ID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin1)
                         ),
                         <<"RFRegion">> => erlang:atom_to_binary(Region),
@@ -1224,9 +1278,13 @@ http_auth_header_test(_Config) ->
     _ = SendPacketFun(),
 
     %% 2. Expect a PRStartReq to the lns
-    {ok, _, Request1, _} = http_rcv(),
+    {ok, #{<<"MessageType">> := <<"PRStartReq">>}, Request1, _} = http_rcv(),
     Headers1 = elli_request:headers(Request1),
     ?assertEqual(<<"Basic: testing">>, proplists:get_value(<<"Authorization">>, Headers1)),
+    %% 2.1 Expect PRStartNotif to the lns
+    {ok, #{<<"MessageType">> := <<"PRStartNotif">>}, Request10, _} = http_rcv(),
+    Headers10 = elli_request:headers(Request10),
+    ?assertEqual(<<"Basic: testing">>, proplists:get_value(<<"Authorization">>, Headers10)),
 
     %% ===================================================================
     %% Expect no auth header in the request
@@ -1241,9 +1299,13 @@ http_auth_header_test(_Config) ->
     _ = SendPacketFun(),
 
     %% 2. Expect a PRStartReq to the lns
-    {ok, _, Request2, _} = http_rcv(),
+    {ok, #{<<"MessageType">> := <<"PRStartReq">>}, Request2, _} = http_rcv(),
     Headers2 = elli_request:headers(Request2),
     ?assertEqual(undefined, proplists:get_value(<<"Authorization">>, Headers2)),
+    %% 2.1 Expect PRStartNotif to the lns
+    {ok, #{<<"MessageType">> := <<"PRStartNotif">>}, Request20, _} = http_rcv(),
+    Headers20 = elli_request:headers(Request20),
+    ?assertEqual(undefined, proplists:get_value(<<"Authorization">>, Headers20)),
 
     ok.
 
@@ -1252,12 +1314,12 @@ http_auth_header_test(_Config) ->
 %% ------------------------------------------------------------------
 
 join_test_route(DevEUI, AppEUI, FlowType, RouteID) ->
-    join_test_route(DevEUI, AppEUI, FlowType, ?NET_ID_ACTILITY, RouteID).
+    join_test_route(DevEUI, AppEUI, FlowType, RouteID, #{}).
 
-join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteID) ->
+join_test_route(DevEUI, AppEUI, FlowType, RouteID, Options) ->
     Route = hpr_route:test_new(#{
         id => RouteID,
-        net_id => NetId,
+        net_id => maps:get(net_id, Options, ?NET_ID_ACTILITY),
         oui => 0,
         server => #{
             host => "127.0.0.1",
@@ -1265,7 +1327,9 @@ join_test_route(DevEUI, AppEUI, FlowType, NetId, RouteID) ->
             protocol =>
                 {http_roaming, #{
                     flow_type => FlowType,
-                    path => "/uplink"
+                    path => "/uplink",
+                    receiver_nsid => "test-join-receiver-id",
+                    auth_header => maps:get(auth_header, Options, <<>>)
                 }}
         },
         max_copies => 2
@@ -1293,7 +1357,8 @@ uplink_test_route(InputMap) ->
                     flow_type => maps:get(flow_type, InputMap, sync),
                     dedupe_timeout => maps:get(dedupe_timeout, InputMap, 250),
                     path => "/uplink",
-                    auth_header => maps:get(auth_header, InputMap, null)
+                    auth_header => maps:get(auth_header, InputMap, null),
+                    receiver_nsid => "test-uplink-receiver-id"
                 }}
         },
         max_copies => 2
@@ -1348,6 +1413,8 @@ downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
         'ProtocolVersion' => <<"1.1">>,
         'SenderID' => hpr_http_roaming_utils:hexstring(?NET_ID_ACTILITY),
         'ReceiverID' => <<"0xC00053">>,
+        'SenderNSID' => <<"downlink-test-body-sender-nsid">>,
+        'ReceiverNSID' => hpr_utils:sender_nsid(),
         'TransactionID' => TransactionID,
         'MessageType' => <<"XmitDataReq">>,
         'PHYPayload' => hpr_http_roaming_utils:binary_to_hexstring(DownlinkPayload),
@@ -1443,39 +1510,47 @@ handle('POST', [<<"uplink">>], Req, Args) ->
                 maps:get(flow_type, Args, sync)
         end,
 
-    ok = message_type_from_uplink_ok(MessageType, FlowType),
-
-    ResponseBody =
-        case maps:get(response, Args, undefined) of
-            undefined ->
-                make_response_body(jsx:decode(Body));
-            Resp ->
-                ct:pal("Using canned response: ~p", [Resp]),
-                Resp
-        end,
-
-    case FlowType of
-        async ->
-            Response = {200, [], <<>>},
-            Forward ! {http_uplink_data, Body},
-            Forward ! {http_uplink_data_response, 200},
-            spawn(fun() ->
-                timer:sleep(250),
-                Res = hackney:post(
-                    <<"http://127.0.0.1:3003/downlink">>,
-                    [{<<"Host">>, <<"localhost">>}],
-                    jsx:encode(ResponseBody),
-                    [with_body]
-                ),
-                ct:pal("Downlink Res: ~p", [Res])
-            end),
-
-            Response;
-        sync ->
-            Response = {200, [], jsx:encode(ResponseBody)},
+    case message_type_from_uplink_ok(MessageType, FlowType) of
+        noop ->
+            ct:print("nothing to do for message type"),
+            Response = {200, [], jsx:encode(#{})},
             Forward ! {http_msg, Body, Req, Response},
+            Forward ! {http_uplink_data, Req},
+            Forward ! {http_uplink_data_response, 200},
+            Response;
+        ok ->
+            ResponseBody =
+                case maps:get(response, Args, undefined) of
+                    undefined ->
+                        make_response_body(jsx:decode(Body));
+                    Resp ->
+                        ct:pal("Using canned response: ~p", [Resp]),
+                        Resp
+                end,
 
-            Response
+            case FlowType of
+                async ->
+                    Response = {200, [], <<>>},
+                    Forward ! {http_uplink_data, Req},
+                    Forward ! {http_uplink_data_response, 200},
+                    spawn(fun() ->
+                        timer:sleep(250),
+                        Res = hackney:post(
+                            <<"http://127.0.0.1:3003/downlink">>,
+                            [{<<"Host">>, <<"localhost">>}],
+                            jsx:encode(ResponseBody),
+                            [with_body]
+                        ),
+                        ct:pal("Downlink Res: ~p", [Res])
+                    end),
+
+                    Response;
+                sync ->
+                    Response = {200, [], jsx:encode(ResponseBody)},
+                    Forward ! {http_msg, Body, Req, Response},
+
+                    Response
+            end
     end.
 
 handle_event(_Event, _Data, _Args) ->
@@ -1487,13 +1562,15 @@ handle_event(_Event, _Data, _Args) ->
 message_type_from_uplink(#{<<"MessageType">> := MessageType}) ->
     MessageType.
 
--spec message_type_from_uplink_ok(MessageType :: binary(), FlowType :: sync | async) -> ok.
+-spec message_type_from_uplink_ok(MessageType :: binary(), FlowType :: sync | async) -> ok | noop.
 message_type_from_uplink_ok(<<"XmitDataAns">>, sync) ->
     throw(bad_message_type);
 message_type_from_uplink_ok(<<"XmitDataAns">>, async) ->
-    ok;
+    noop;
 message_type_from_uplink_ok(<<"PRStartReq">>, _FlowType) ->
     ok;
+message_type_from_uplink_ok(<<"PRStartNotif">>, _FlowType) ->
+    noop;
 message_type_from_uplink_ok(_MessageType, _FlowType) ->
     throw(bad_message_type).
 
@@ -1508,6 +1585,8 @@ make_response_body(#{
     <<"MessageType">> := <<"PRStartReq">>,
     <<"ReceiverID">> := ReceiverID,
     <<"SenderID">> := SenderID,
+    <<"ReceiverNSID">> := ReceiverNSID,
+    <<"SenderNSID">> := SenderNSID,
     <<"TransactionID">> := TransactionID,
     <<"ULMetaData">> := #{
         <<"ULFreq">> := Freq,
@@ -1521,6 +1600,8 @@ make_response_body(#{
         'ProtocolVersion' => ProtocolVersion,
         'SenderID' => ReceiverID,
         'ReceiverID' => SenderID,
+        'SenderNSID' => ReceiverNSID,
+        'ReceiverNSID' => SenderNSID,
         'TransactionID' => TransactionID,
         'MessageType' => <<"PRStartAns">>,
         'Result' => #{'ResultCode' => <<"Success">>},
@@ -1539,20 +1620,40 @@ make_response_body(#{
 make_response_body(#{
     <<"ProtocolVersion">> := ProtocolVersion,
     <<"ReceiverID">> := ReceiverID,
-    <<"TransactionID">> := TransactionID
+    <<"ReceiverNSID">> := ReceiverNSID,
+    <<"SenderNSID">> := SenderNSID,
+    <<"TransactionID">> := TransactionID,
+    <<"ULMetaData">> := #{
+        <<"DevAddr">> := _
+    }
 }) ->
     %% Ack to regular uplink
     #{
         'ProtocolVersion' => ProtocolVersion,
         'SenderID' => ReceiverID,
         'ReceiverID' => <<"0xC00053">>,
+        'SenderNSID' => ReceiverNSID,
+        'ReceiverNSID' => SenderNSID,
         'TransactionID' => TransactionID,
         'MessageType' => <<"PRStartAns">>,
         'Result' => #{'ResultCode' => <<"Success">>},
         %% 11.3.1 Passive Roaming Start
         %% Step 6: stateless fNS operation
         'Lifetime' => 0
-    }.
+    };
+make_response_body(#{<<"MessageType">> := <<"PRStartReq">>} = PRStartReq) ->
+    ExpectedKeys = [
+        <<"ProtocolVersion">>,
+        <<"MessageType">>,
+        <<"ReceiverID">>,
+        <<"SenderID">>,
+        <<"ReceiverNSID">>,
+        <<"SenderNSID">>,
+        <<"TransactionID">>,
+        <<"ULMetaData">>
+    ],
+    MissingKeys = ExpectedKeys -- maps:keys(PRStartReq),
+    throw({pr_start_req_missing_keys, MissingKeys}).
 
 %% ------------------------------------------------------------------
 %% Helpers
@@ -1622,10 +1723,10 @@ not_http_rcv(Delay) ->
     end.
 
 roamer_expect_uplink_data(Expected) ->
-    {ok, Got} = roamer_expect_uplink_data(),
+    {ok, Got, Headers} = roamer_expect_uplink_data(),
     case test_utils:match_map(Expected, Got) of
         true ->
-            {ok, Got};
+            {ok, Got, Headers};
         {false, Reason} ->
             ct:pal("FAILED got: ~n~p~n expected: ~n~p", [Got, Expected]),
             ct:fail({roamer_expect_uplink_data, Reason})
@@ -1633,8 +1734,8 @@ roamer_expect_uplink_data(Expected) ->
 
 roamer_expect_uplink_data() ->
     receive
-        http_uplink_data -> ct:fail({http_uplink_data_err, no_payload});
-        {http_uplink_data, Payload} -> {ok, jsx:decode(Payload)}
+        {http_uplink_data, Request} ->
+            {ok, jsx:decode(elli_request:body(Request)), elli_request:headers(Request)}
     after 1000 -> ct:fail(http_uplink_data_timeout)
     end.
 

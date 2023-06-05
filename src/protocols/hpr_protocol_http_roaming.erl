@@ -62,10 +62,12 @@ protocol_from(Route) ->
             DT -> DT
         end,
     AuthHeader = hpr_route:http_auth_header(Route),
+    ReceiverNSID = hpr_route:http_receiver_nsid(Route),
 
     #http_protocol{
         flow_type = FlowType,
         endpoint = hpr_route:lns(Route),
         dedupe_timeout = DedupeTimeout,
-        auth_header = AuthHeader
+        auth_header = AuthHeader,
+        receiver_nsid = ReceiverNSID
     }.

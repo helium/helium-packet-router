@@ -1,5 +1,12 @@
 -module(hpr_utils).
 
+-include("hpr.hrl").
+
+-define(HPR_PUBKEY_BIN, hpr_pubkey_bin).
+-define(HPR_SENDER_NSID, hpr_sender_nsid).
+-define(HPR_B58, hpr_b58).
+-define(HPR_SIG_FUN, hpr_sig_fun).
+
 -export([
     gateway_name/1,
     gateway_mac/1,
@@ -10,10 +17,57 @@
     net_id_display/1,
     trace/2,
     stop_trace/1,
-    pmap/2, pmap/3
+    pmap/2, pmap/3,
+    %%
+    load_key/1,
+    pubkey_bin/0,
+    sig_fun/0,
+    sender_nsid/0,
+    b58/0
 ]).
 
 -type trace() :: gateway | devaddr | app_eui | dev_eui.
+
+-spec load_key(KeyFileName :: string()) -> ok.
+load_key(KeyFileName) ->
+    {PubKey, SigFun} =
+        Key =
+        case libp2p_crypto:load_keys(KeyFileName) of
+            {ok, #{secret := PrivKey, public := PubKey0}} ->
+                {PubKey0, libp2p_crypto:mk_sig_fun(PrivKey)};
+            {error, enoent} ->
+                KeyMap =
+                    #{secret := PrivKey, public := PubKey0} = libp2p_crypto:generate_keys(
+                        ed25519
+                    ),
+                ok = libp2p_crypto:save_keys(KeyMap, KeyFileName),
+                {PubKey0, libp2p_crypto:mk_sig_fun(PrivKey)}
+        end,
+
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
+    ok = persistent_term:put(?HPR_PUBKEY_BIN, PubKeyBin),
+    %% Keep as binary for http protocol jsx encoding/decoding
+    ok = persistent_term:put(?HPR_SENDER_NSID, erlang:list_to_binary(B58)),
+    ok = persistent_term:put(?HPR_B58, B58),
+    ok = persistent_term:put(?HPR_SIG_FUN, SigFun),
+    ok = persistent_term:put(?HPR_KEY, Key).
+
+-spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
+pubkey_bin() ->
+    persistent_term:get(?HPR_PUBKEY_BIN, undefined).
+
+-spec sig_fun() -> libp2p_crypto:sig_fun().
+sig_fun() ->
+    persistent_term:get(?HPR_SIG_FUN, undefined).
+
+-spec sender_nsid() -> string().
+sender_nsid() ->
+    persistent_term:get(?HPR_SENDER_NSID, undefined).
+
+-spec b58() -> binary().
+b58() ->
+    persistent_term:get(?HPR_B58, undefined).
 
 -spec gateway_name(PubKeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
 gateway_name(PubKeyBin) when is_binary(PubKeyBin) ->
