@@ -106,14 +106,15 @@ upload_test(_Config) ->
         nonce => 1,
         server => #{host => "example.com", port => 8080, protocol => undefined}
     }),
-    ExpectedPackets = lists:foldl(
-        fun(X, Acc) ->
+    ExpectedPackets = lists:map(
+        fun(X) ->
+            Time = erlang:system_time(millisecond),
             Packet = test_utils:uplink_packet_up(#{rssi => X}),
-            hpr_packet_reporter:report_packet(Packet, Route, false),
-            PacketReport = hpr_packet_report:new(Packet, Route),
-            [PacketReport | Acc]
+            hpr_packet_reporter:report_packet(
+                Packet, Route, false, Time
+            ),
+            hpr_packet_report:new(Packet, Route, false, Time)
         end,
-        [],
         lists:seq(1, N)
     ),
 
@@ -164,7 +165,7 @@ upload_test(_Config) ->
     %% Get file content and check that all packets are there
     {ok, #{<<"Body">> := Compressed}, _} = aws_s3:get_object(AWSClient, Bucket, FileName),
     ExtractedPackets = extract_packets(Compressed),
-    ?assertEqual(ExpectedPackets, ExtractedPackets),
+    ?assertEqual(lists:sort(ExpectedPackets), lists:sort(ExtractedPackets)),
 
     timer:sleep(100),
     ?assertNotEqual(

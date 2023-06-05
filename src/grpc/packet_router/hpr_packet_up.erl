@@ -200,7 +200,7 @@ md(PacketUp) ->
 -spec test_new(Opts :: map()) -> packet().
 test_new(Opts) ->
     #packet_router_packet_up_v1_pb{
-        payload = maps:get(payload, Opts, <<"payload">>),
+        payload = maps:get(payload, Opts, test_utils:join_payload(#{})),
         timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond)),
         rssi = maps:get(rssi, Opts, -40),
         frequency = maps:get(frequency, Opts, 904_300_000),
@@ -231,7 +231,7 @@ sign(Packet, SigFun) ->
 -include_lib("eunit/include/eunit.hrl").
 
 payload_test() ->
-    PacketUp = ?MODULE:test_new(#{}),
+    PacketUp = ?MODULE:test_new(#{payload => <<"payload">>}),
     ?assertEqual(<<"payload">>, payload(PacketUp)),
     ok.
 
