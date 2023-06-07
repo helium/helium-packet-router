@@ -196,7 +196,15 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
     <<DevAddr:32/integer-unsigned-little>> = hpr_utils:hex_to_bin(
         erlang:list_to_binary(DevAddrString)
     ),
-    case hpr_route_ets:lookup_skf(DevAddr) of
+    SKFS = lists:foldl(
+        fun({Route, ETS}, Acc) ->
+            RouteID = hpr_route:id(Route),
+            [{SK, RouteID, T} || {SK, T} <- hpr_route_ets:lookup_skf(ETS, DevAddr)] ++ Acc
+        end,
+        [],
+        hpr_route_ets:lookup_devaddr_range(DevAddr)
+    ),
+    case SKFS of
         [] ->
             c_text("No SKF found");
         SKFs ->

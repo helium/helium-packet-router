@@ -101,14 +101,16 @@ main_test(_Config) ->
     ),
 
     %% Check that we can query route via config
-    ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertMatch(
+        [{Route1, X}] when is_reference(X), hpr_route_ets:lookup_devaddr_range(16#00000005)
+    ),
     ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
     ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
-        [{SK1, Route1ID, 1, X}] when X > 0, hpr_route_ets:lookup_skf(DevAddr1)
+        [{SK1, X}] when X < 0, hpr_route_ets:lookup_skf(DevAddr1)
     ),
 
     %% Delete EUI Pairs / DevAddr Ranges / SKF
@@ -170,14 +172,16 @@ main_test(_Config) ->
                 1 =:= ets:info(hpr_route_skfs_ets, size)
         end
     ),
-    ?assertEqual([Route1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertMatch(
+        [{Route1, X}] when is_reference(X), hpr_route_ets:lookup_devaddr_range(16#00000005)
+    ),
     ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
     ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
-        [{SK1, Route1ID, 1, X}] when X > 0, hpr_route_ets:lookup_skf(DevAddr1)
+        [{SK1, X}] when X < 0, hpr_route_ets:lookup_skf(DevAddr1)
     ),
 
     %% Remove route should delete eveything
