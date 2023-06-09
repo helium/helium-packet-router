@@ -136,41 +136,8 @@ mic_check_test(_Config) ->
     %% TEST 2:  No SFK for devaddr
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
-    %% TEST 3:  Good key but no routes
-    SKFNoRoutes = hpr_skf:new(#{
-        route_id => "empty",
-        devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
-        max_copies => 1
-    }),
-    hpr_route_ets:insert_skf(SKFNoRoutes),
-    ok = test_utils:wait_until(
-        fun() ->
-            1 =:= ets:info(hpr_route_skfs_ets, size)
-        end
-    ),
-
-    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
-
-    ok = hpr_route_ets:delete_skf(SKFNoRoutes),
-
-    %% TEST 4:  Bad key and no routes
+    %% TEST 3: Bad key and route exist
     BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SKFBadKeyNoRoute = hpr_skf:test_new(#{
-        route_id => "empty", devaddr => DevAddr, session_key => BadSessionKey, max_copies => 1
-    }),
-    hpr_route_ets:insert_skf(SKFBadKeyNoRoute),
-
-    ok = test_utils:wait_until(
-        fun() ->
-            1 =:= ets:info(hpr_route_skfs_ets, size)
-        end
-    ),
-    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
-
-    ok = hpr_route_ets:delete_skf(SKFBadKeyNoRoute),
-
-    %% TEST 5: Bad key and route exist
     Route = hpr_route:test_new(#{
         id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
         net_id => 0,
@@ -185,14 +152,24 @@ mic_check_test(_Config) ->
     RouteID = hpr_route:id(Route),
     ?assertEqual(ok, hpr_route_ets:insert_route(Route)),
 
-    SKFBadKeyAndRouteExitst = hpr_skf:test_new(#{
-        route_id => RouteID, devaddr => DevAddr, session_key => BadSessionKey, max_copies => 1
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID, start_addr => DevAddr, end_addr => 16#00000010
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange),
+
+    SKFBadKeyAndRouteExitst = hpr_skf:new(#{
+        route_id => RouteID, devaddr => DevAddr, session_key => BadSessionKey
     }),
     hpr_route_ets:insert_skf(SKFBadKeyAndRouteExitst),
 
     ok = test_utils:wait_until(
         fun() ->
-            1 =:= ets:info(hpr_route_skfs_ets, size)
+            case hpr_route_ets:lookup_route(RouteID) of
+                [{_, ETS}] ->
+                    1 =:= ets:info(ETS, size);
+                _ ->
+                    false
+            end
         end
     ),
 
@@ -200,7 +177,7 @@ mic_check_test(_Config) ->
 
     ok = hpr_route_ets:delete_skf(SKFBadKeyAndRouteExitst),
 
-    %% TEST 6:  Good key and route exist
+    %% TEST 4: Good key and route exist
     %% We leave old route inserted and do not delete good skf for next test
 
     SKFGoodKeyAndRouteExitst = hpr_skf:new(#{
@@ -213,20 +190,35 @@ mic_check_test(_Config) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            1 =:= ets:info(hpr_route_skfs_ets, size)
+            case hpr_route_ets:lookup_route(RouteID) of
+                [{_, ETS}] ->
+                    1 =:= ets:info(ETS, size);
+                _ ->
+                    false
+            end
         end
     ),
 
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
-    %% TEST 7:  Good key and route exist
+    %% TEST 5:  Good key and route exist
     %% Adding a bad key to make sure it still works
 
-    hpr_route_ets:insert_skf(SKFBadKeyNoRoute),
+    SKFBadKey = hpr_skf:new(#{
+        route_id => RouteID,
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16))
+    }),
+    hpr_route_ets:insert_skf(SKFBadKey),
 
     ok = test_utils:wait_until(
         fun() ->
-            2 =:= ets:info(hpr_route_skfs_ets, size)
+            case hpr_route_ets:lookup_route(RouteID) of
+                [{_, ETS}] ->
+                    2 =:= ets:info(ETS, size);
+                _ ->
+                    false
+            end
         end
     ),
 
