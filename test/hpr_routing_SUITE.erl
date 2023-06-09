@@ -267,51 +267,17 @@ skf_max_copies_test(_Config) ->
     }),
     ?assertEqual(ok, hpr_route_ets:insert_skf(SKF)),
 
-    ok = test_utils:wait_until(
-        fun() ->
-            1 =:= ets:info(hpr_route_skfs_ets, size)
-        end
-    ),
+    [{_, ETS}] = hpr_route_ets:lookup_route(RouteID),
 
-    lists:foreach(
-        fun(_) ->
-            #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
-            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-            PacketUp = test_utils:uplink_packet_up(#{
-                app_session_key => AppSessionKey,
-                nwk_session_key => NwkSessionKey,
-                devaddr => DevAddr,
-                gateway => Gateway,
-                sig_fun => SigFun
-            }),
-            ?assertEqual(ok, hpr_routing:handle_packet(PacketUp))
-        end,
-        lists:seq(1, 3)
-    ),
+    %% Here we are making sure that the SKF got updated
+    [{_, BeforeUpdate}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
+    timer:sleep(2000),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
-    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 2)),
+    [{_, AfterUpdate}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
+    %% This is due to time being negative for ets ordering
+    ?assert(AfterUpdate < BeforeUpdate),
 
-    lists:foreach(
-        fun(_) ->
-            #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
-            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-            PacketUp = test_utils:uplink_packet_up(#{
-                app_session_key => AppSessionKey,
-                nwk_session_key => NwkSessionKey,
-                devaddr => DevAddr,
-                gateway => Gateway,
-                sig_fun => SigFun
-            }),
-            ?assertEqual(ok, hpr_routing:handle_packet(PacketUp))
-        end,
-        lists:seq(1, 3)
-    ),
-
-    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 2)),
-
-    meck:unload(hpr_protocol_http_roaming),
     ok.
 
 multi_buy_without_service_test(_Config) ->

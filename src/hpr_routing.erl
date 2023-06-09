@@ -107,7 +107,12 @@ find_routes_for_uplink(_Packet, _DevAddr, [], [], undefined) ->
     {error, invalid_mic};
 find_routes_for_uplink(_Packet, _DevAddr, [], EmptyRoutes, undefined) ->
     {ok, EmptyRoutes};
-find_routes_for_uplink(_Packet, _DevAddr, [], EmptyRoutes, {Route, _}) ->
+find_routes_for_uplink(_Packet, DevAddr, [], EmptyRoutes, {Route, LastUsed, SessionKey}) ->
+    LastHour = erlang:system_time(millisecond) - ?SKF_UPDATE,
+    case LastUsed < LastHour of
+        true -> hpr_route_ets:update_skf(DevAddr, SessionKey, hpr_route:id(Route));
+        false -> ok
+    end,
     {ok, [Route | EmptyRoutes]};
 find_routes_for_uplink(Packet, DevAddr, [{Route, SKFETS} | Routes], EmptyRoutes, SelectedRoute) ->
     case check_route_skfs(Packet, DevAddr, SKFETS) of
@@ -116,19 +121,23 @@ find_routes_for_uplink(Packet, DevAddr, [{Route, SKFETS} | Routes], EmptyRoutes,
             find_routes_for_uplink(Packet, DevAddr, Routes, [Route | EmptyRoutes], SelectedRoute);
         false ->
             find_routes_for_uplink(Packet, DevAddr, Routes, EmptyRoutes, SelectedRoute);
-        {ok, LastUsed} ->
+        {ok, LastUsed, SessionKey} ->
             case SelectedRoute of
                 undefined ->
-                    find_routes_for_uplink(Packet, DevAddr, Routes, EmptyRoutes, {Route, LastUsed});
-                {_, T} when LastUsed > T ->
-                    find_routes_for_uplink(Packet, DevAddr, Routes, EmptyRoutes, {Route, LastUsed});
+                    find_routes_for_uplink(
+                        Packet, DevAddr, Routes, EmptyRoutes, {Route, LastUsed, SessionKey}
+                    );
+                {_, T, _} when LastUsed > T ->
+                    find_routes_for_uplink(
+                        Packet, DevAddr, Routes, EmptyRoutes, {Route, LastUsed, SessionKey}
+                    );
                 _ ->
                     find_routes_for_uplink(Packet, DevAddr, Routes, EmptyRoutes, SelectedRoute)
             end
     end.
 
 -spec check_route_skfs(Packet :: hpr_packet_up:packet(), DevAddr :: non_neg_integer(), ets:table()) ->
-    empty | false | {ok, non_neg_integer()}.
+    empty | false | {ok, non_neg_integer(), binary()}.
 check_route_skfs(Packet, DevAddr, SKFETS) ->
     case hpr_route_ets:select_skf(SKFETS, DevAddr) of
         '$end_of_table' ->
@@ -137,24 +146,25 @@ check_route_skfs(Packet, DevAddr, SKFETS) ->
             Payload = hpr_packet_up:payload(Packet),
             case check_route_skfs(Payload, Continuation) of
                 false -> false;
-                {ok, _} = OK -> OK
+                {ok, _LastUsed, _SessionKey} = OK -> OK
             end
     end.
 
 -spec check_route_skfs(
     Payload :: binary(), '$end_of_table' | {[{binary(), integer()}], ets:continuation()}
-) -> false | {ok, non_neg_integer()}.
+) -> false | {ok, non_neg_integer(), binary()}.
 check_route_skfs(_Payload, '$end_of_table') ->
     false;
 check_route_skfs(Payload, {SKFs, Continuation}) ->
     case check_skfs(Payload, SKFs) of
         false ->
             check_route_skfs(Payload, hpr_route_ets:select_skf(Continuation));
-        {ok, _LastUsed} = OK ->
+        {ok, _LastUsed, _SessionKey} = OK ->
             OK
     end.
 
--spec check_skfs(Payload :: binary(), [{binary(), integer()}]) -> false | {ok, non_neg_integer()}.
+-spec check_skfs(Payload :: binary(), [{binary(), integer()}]) ->
+    false | {ok, non_neg_integer(), binary()}.
 check_skfs(_Payload, []) ->
     false;
 check_skfs(Payload, [{SessionKey, LastUsed} | SKFs]) ->
@@ -162,8 +172,7 @@ check_skfs(Payload, [{SessionKey, LastUsed} | SKFs]) ->
         false ->
             check_skfs(Payload, SKFs);
         true ->
-            %% TODO: do update here if time more than 1h
-            {ok, LastUsed * -1}
+            {ok, LastUsed * -1, SessionKey}
     end.
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
