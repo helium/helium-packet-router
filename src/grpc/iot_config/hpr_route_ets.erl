@@ -61,6 +61,7 @@ insert_route(Route) ->
                     public,
                     ordered_set,
                     {read_concurrency, true},
+                    {write_concurrency, true},
                     {heir, erlang:whereis(?SKF_HEIR), RouteID}
                 ])
         end,

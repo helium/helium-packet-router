@@ -7,6 +7,14 @@
     handle_packet/1
 ]).
 
+-ifdef(TEST).
+
+-export([
+    find_routes/2
+]).
+
+-endif.
+
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
@@ -110,7 +118,7 @@ find_routes_for_uplink(_Packet, _DevAddr, [], EmptyRoutes, undefined) ->
 find_routes_for_uplink(_Packet, DevAddr, [], EmptyRoutes, {Route, LastUsed, SessionKey}) ->
     LastHour = erlang:system_time(millisecond) - ?SKF_UPDATE,
     case LastUsed < LastHour of
-        true -> hpr_route_ets:update_skf(DevAddr, SessionKey, hpr_route:id(Route));
+        true -> erlang:spawn(hpr_route_ets, update_skf, [DevAddr, SessionKey, hpr_route:id(Route)]);
         false -> ok
     end,
     {ok, [Route | EmptyRoutes]};

@@ -21,7 +21,8 @@
     active_locked_route_test/1,
     success_test/1,
     no_routes_test/1,
-    maybe_report_packet_test/1
+    maybe_report_packet_test/1,
+    find_route_load_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -46,7 +47,8 @@ all() ->
         active_locked_route_test,
         success_test,
         no_routes_test,
-        maybe_report_packet_test
+        maybe_report_packet_test,
+        find_route_load_test
     ].
 
 %%--------------------------------------------------------------------
@@ -1009,6 +1011,157 @@ maybe_report_packet_test(_Config) ->
     meck:unload(hpr_protocol_router),
     ?assert(meck:validate(hpr_packet_reporter)),
     meck:unload(hpr_packet_reporter),
+    ok.
+
+find_route_load_test(_Config) ->
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+    DevAddr = 16#00000001,
+    PacketUp = test_utils:uplink_packet_up(#{
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey,
+        devaddr => DevAddr,
+        gateway => Gateway,
+        sig_fun => SigFun
+    }),
+    PacketType = hpr_packet_up:type(PacketUp),
+
+    Route1ID = "route_1",
+    Route1 = hpr_route:test_new(#{
+        id => Route1ID,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1,
+        active => true,
+        locked => false
+    }),
+    ok = hpr_route_ets:insert_route(Route1),
+
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
+
+    SKF1 = hpr_skf:new(#{
+        route_id => Route1ID,
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+    }),
+    hpr_route_ets:insert_skf(SKF1),
+
+    {Time1, Result1} = timer:tc(hpr_routing, find_routes, [PacketType, PacketUp]),
+    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Time1, Result1}]),
+
+    [{_, SKFETS1}] = hpr_route_ets:lookup_route(Route1ID),
+
+    timer:sleep(2000),
+    Now = erlang:system_time(millisecond),
+    lists:foreach(
+        fun(_) ->
+            erlang:spawn(
+                fun() ->
+                    TempSKF = hpr_skf:new(#{
+                        route_id => Route1ID,
+                        devaddr => DevAddr,
+                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16))
+                    }),
+                    hpr_route_ets:insert_skf(TempSKF)
+                end
+            )
+        end,
+        lists:seq(1, 9999)
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            case 10000 =:= ets:info(SKFETS1, size) of
+                true ->
+                    Then = erlang:system_time(millisecond),
+                    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, Then - Now]),
+                    true;
+                _ ->
+                    false
+            end
+        end
+    ),
+
+    {Time2, Result2} = timer:tc(hpr_routing, find_routes, [PacketType, PacketUp]),
+    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Time2, Result2}]),
+
+    timer:sleep(1000),
+
+    {Time3, Result3} = timer:tc(hpr_routing, find_routes, [PacketType, PacketUp]),
+    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Time3, Result3}]),
+
+    Route2ID = "route_2",
+    Route2 = hpr_route:test_new(#{
+        id => Route2ID,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 1,
+        active => true,
+        locked => false
+    }),
+    ok = hpr_route_ets:insert_route(Route2),
+
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => Route2ID, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange2),
+
+    SKF2 = hpr_skf:new(#{
+        route_id => Route2ID,
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+    }),
+    hpr_route_ets:insert_skf(SKF2),
+
+    [{_, SKFETS2}] = hpr_route_ets:lookup_route(Route2ID),
+    timer:sleep(10),
+    lists:foreach(
+        fun(_) ->
+            erlang:spawn(
+                fun() ->
+                    TempSKF = hpr_skf:new(#{
+                        route_id => Route2ID,
+                        devaddr => DevAddr,
+                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16))
+                    }),
+                    hpr_route_ets:insert_skf(TempSKF)
+                end
+            )
+        end,
+        lists:seq(1, 9999)
+    ),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            10000 =:= ets:info(SKFETS2, size)
+        end
+    ),
+
+    {Time4, Result4} = timer:tc(hpr_routing, find_routes, [PacketType, PacketUp]),
+    ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Time4, Result4}]),
+
+    ct:pal("[~p:~p:~p] MARKER ~p~n", [
+        ?MODULE, ?FUNCTION_NAME, ?LINE, hpr_route_ets:lookup_devaddr_range(DevAddr)
+    ]),
+
+    % ?assert(false),
     ok.
 
 %% ===================================================================
