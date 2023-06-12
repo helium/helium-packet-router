@@ -93,12 +93,19 @@ main_test(_Config) ->
     %% Let time to process new routes
     ok = test_utils:wait_until(
         fun() ->
-            1 =:= ets:info(hpr_routes_ets, size) andalso
-                1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
-                1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                1 =:= ets:info(hpr_route_skfs_ets, size)
+            case hpr_route_ets:lookup_route(Route1ID) of
+                [{_, ETS}] ->
+                    1 =:= ets:info(hpr_routes_ets, size) andalso
+                        1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
+                        1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
+                        1 =:= ets:info(ETS, size);
+                _ ->
+                    false
+            end
         end
     ),
+
+    [{_, SKFETS1}] = hpr_route_ets:lookup_route(Route1ID),
 
     %% Check that we can query route via config
     ?assertMatch(
@@ -110,7 +117,7 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
-        [{SK1, X}] when X < 0, hpr_route_ets:lookup_skf(DevAddr1)
+        [{SK1, X}] when X < 0, hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)
     ),
 
     %% Delete EUI Pairs / DevAddr Ranges / SKF
@@ -148,11 +155,11 @@ main_test(_Config) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            0 =:= ets:info(hpr_route_skfs_ets, size)
+            0 =:= ets:info(SKFETS1, size)
         end
     ),
 
-    ?assertEqual([], hpr_route_ets:lookup_skf(DevAddr1)),
+    ?assertEqual([], hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)),
 
     %% Add back euis, ranges and skf to test full route delete
     ok = hpr_test_iot_config_service_route:stream_resp(
@@ -166,10 +173,15 @@ main_test(_Config) ->
     ),
     ok = test_utils:wait_until(
         fun() ->
-            1 =:= ets:info(hpr_routes_ets, size) andalso
-                1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
-                1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                1 =:= ets:info(hpr_route_skfs_ets, size)
+            case hpr_route_ets:lookup_route(Route1ID) of
+                [{_, ETS}] ->
+                    1 =:= ets:info(hpr_routes_ets, size) andalso
+                        1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
+                        1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
+                        1 =:= ets:info(ETS, size);
+                _ ->
+                    false
+            end
         end
     ),
     ?assertMatch(
@@ -181,7 +193,7 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
-        [{SK1, X}] when X < 0, hpr_route_ets:lookup_skf(DevAddr1)
+        [{SK1, X}] when X < 0, hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)
     ),
 
     %% Remove route should delete eveything
@@ -194,7 +206,7 @@ main_test(_Config) ->
             0 =:= ets:info(hpr_routes_ets, size) andalso
                 0 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
                 0 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                0 =:= ets:info(hpr_route_skfs_ets, size)
+                undefined =:= ets:info(SKFETS1)
         end
     ),
 
@@ -203,6 +215,5 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
-    ?assertEqual([], hpr_route_ets:lookup_skf(DevAddr1)),
 
     ok.
