@@ -101,7 +101,7 @@ find_routes_for_uplink(Packet) ->
     DevAddr :: non_neg_integer(),
     [{hpr_route:route(), ets:table()}],
     [hpr_route:route()],
-    undefined | {hpr_route:route(), non_neg_integer()}
+    undefined | {Route :: hpr_route:route(), LastUsed :: non_neg_integer(), SessionKey :: binary()}
 ) -> {ok, [hpr_route:route()]} | {error, invalid_mic}.
 find_routes_for_uplink(_Packet, _DevAddr, [], [], undefined) ->
     {error, invalid_mic};
