@@ -1,7 +1,7 @@
 [
     {hpr, [
         {key, "/var/data/hpr.key"},
-        {http_roaming_downlink_port, 8090},
+        {http_roaming_sender_nsid, <<"${HPR_ROAMING_SENDER_NSID}">>},
         {no_routes, [{"${HPR_PP_HOST_1}", 8080}, {"${HPR_PP_HOST_2}", 8080}]},
         {packet_reporter, #{
             aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
@@ -23,7 +23,7 @@
             transport => "${HPR_MULTI_BUY_SERVICE_TRANSPORT}",
             host => "${HPR_MULTI_BUY_SERVICE_HOST}",
             port => "${HPR_MULTI_BUY_SERVICE_PORT}"
-        }}
+        }},
     ]},
     {aws_credentials, [
         {credential_providers, [aws_credentials_env, aws_credentials_ec2]}

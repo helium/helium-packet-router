@@ -47,8 +47,15 @@ load_key(KeyFileName) ->
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
     ok = persistent_term:put(?HPR_PUBKEY_BIN, PubKeyBin),
+
     %% Keep as binary for http protocol jsx encoding/decoding
-    ok = persistent_term:put(?HPR_SENDER_NSID, erlang:list_to_binary(B58)),
+    SenderNSID =
+        case application:get_env(hpr, http_roaming_sender_nsid, erlang:list_to_binary(B58)) of
+            <<"">> -> erlang:list_to_binary(B58);
+            Val -> Val
+        end,
+    ok = persistent_term:put(?HPR_SENDER_NSID, SenderNSID),
+
     ok = persistent_term:put(?HPR_B58, B58),
     ok = persistent_term:put(?HPR_SIG_FUN, SigFun),
     ok = persistent_term:put(?HPR_KEY, Key).
