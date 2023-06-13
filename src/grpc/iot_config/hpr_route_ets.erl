@@ -48,6 +48,7 @@ init() ->
         public,
         named_table,
         bag,
+        {write_concurrency, true},
         {read_concurrency, true}
     ]),
     ok.
@@ -73,7 +74,7 @@ delete_route(Route) ->
     DevAddrEntries = ets:select_delete(?ETS_DEVADDR_RANGES, MS1),
     MS2 = [{{'_', RouteID}, [], [true]}],
     EUISEntries = ets:select_delete(?ETS_EUI_PAIRS, MS2),
-    MS3 = [{{'_', {'_', RouteID}}, [], [true]}],
+    MS3 = [{{'_', {'_', RouteID, '_'}}, [], [true]}],
     SKFsEntries = ets:select_delete(?ETS_SKFS, MS3),
     true = ets:delete(?ETS_ROUTES, RouteID),
     lager:info("deleted ~w DevAddr Entries, ~w EUIS Entries, ~w SKFs Entries for ~s", [
@@ -193,12 +194,14 @@ insert_skf(SKF) ->
     RouteId = hpr_skf:route_id(SKF),
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
-    true = ets:insert(?ETS_SKFS, {DevAddr, {hpr_utils:hex_to_bin(SessionKey), RouteId}}),
+    MaxCopies = hpr_skf:max_copies(SKF),
+    true = ets:insert(?ETS_SKFS, {DevAddr, {hpr_utils:hex_to_bin(SessionKey), RouteId, MaxCopies}}),
     lager:debug(
         [
             {route_id, RouteId},
             {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
-            {session_key, SessionKey}
+            {session_key, SessionKey},
+            {max_copies, MaxCopies}
         ],
         "inserting SKF"
     ),
@@ -209,28 +212,32 @@ delete_skf(SKF) ->
     RouteId = hpr_skf:route_id(SKF),
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
-    true = ets:delete_object(?ETS_SKFS, {DevAddr, {hpr_utils:hex_to_bin(SessionKey), RouteId}}),
+    MaxCopies = hpr_skf:max_copies(SKF),
+    true = ets:delete_object(
+        ?ETS_SKFS, {DevAddr, {hpr_utils:hex_to_bin(SessionKey), RouteId, MaxCopies}}
+    ),
     lager:debug(
         [
             {route_id, RouteId},
             {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
-            {session_key, SessionKey}
+            {session_key, SessionKey},
+            {max_copies, MaxCopies}
         ],
         "deleting SKF"
     ),
     ok.
 
--spec lookup_skf(DevAddr :: non_neg_integer()) -> [{binary(), string()}].
+-spec lookup_skf(DevAddr :: non_neg_integer()) -> [{binary(), string(), non_neg_integer()}].
 lookup_skf(DevAddr) ->
     case ets:lookup(?ETS_SKFS, DevAddr) of
         [] -> [];
-        SKFs -> [{Filter, RouteID} || {_DevAddr, {Filter, RouteID}} <- SKFs]
+        SKFs -> [{Filter, RouteID, MaxCopies} || {_DevAddr, {Filter, RouteID, MaxCopies}} <- SKFs]
     end.
 
 -spec select_skf(DevAddr :: non_neg_integer() | ets:continuation()) ->
-    {[{binary(), string()}], ets:continuation()} | '$end_of_table'.
+    {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
 select_skf(DevAddr) when is_integer(DevAddr) ->
-    MS = [{{DevAddr, {'$1', '$2'}}, [], [{{'$1', '$2'}}]}],
+    MS = [{{DevAddr, {'$1', '$2', '$3'}}, [], [{{'$1', '$2', '$3'}}]}],
     ets:select(?ETS_SKFS, MS, 100);
 select_skf(Continuation) ->
     ets:select(Continuation).
@@ -265,9 +272,9 @@ devaddr_ranges_for_route(RouteID) ->
     MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS_DEVADDR_RANGES, MS).
 
--spec skfs_for_route(RouteID :: string()) -> list({non_neg_integer(), binary()}).
+-spec skfs_for_route(RouteID :: string()) -> list({non_neg_integer(), binary(), non_neg_integer()}).
 skfs_for_route(RouteID) ->
-    MS = [{{'$1', {'$2', RouteID}}, [], [{{'$1', '$2'}}]}],
+    MS = [{{'$1', {'$2', RouteID, '$3'}}, [], [{{'$1', '$2', '$3'}}]}],
     ets:select(?ETS_SKFS, MS).
 
 %% ------------------------------------------------------------------
@@ -468,12 +475,12 @@ test_skf() ->
     DevAddr1 = 16#00000001,
     SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF1 = hpr_skf:test_new(#{
-        route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey1
+        route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey1, max_copies => 1
     }),
     DevAddr2 = 16#00000002,
     SessionKey2 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF2 = hpr_skf:test_new(#{
-        route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2
+        route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2, max_copies => 1
     }),
 
     ?assertEqual(ok, ?MODULE:insert_route(Route1)),
@@ -481,8 +488,8 @@ test_skf() ->
     ?assertEqual(ok, ?MODULE:insert_skf(SKF1)),
     ?assertEqual(ok, ?MODULE:insert_skf(SKF2)),
 
-    ?assertEqual([{hpr_utils:hex_to_bin(SessionKey1), RouteID1}], ?MODULE:lookup_skf(DevAddr1)),
-    ?assertEqual([{hpr_utils:hex_to_bin(SessionKey2), RouteID2}], ?MODULE:lookup_skf(DevAddr2)),
+    ?assertEqual([{hpr_utils:hex_to_bin(SessionKey1), RouteID1, 1}], ?MODULE:lookup_skf(DevAddr1)),
+    ?assertEqual([{hpr_utils:hex_to_bin(SessionKey2), RouteID2, 1}], ?MODULE:lookup_skf(DevAddr2)),
 
     ?assertEqual(ok, ?MODULE:delete_skf(SKF1)),
     ?assertEqual([], ?MODULE:lookup_skf(DevAddr1)),
@@ -514,7 +521,7 @@ test_select_skf() ->
         fun(_) ->
             SessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
             SKF = hpr_skf:test_new(#{
-                route_id => RouteID1, devaddr => DevAddr, session_key => SessionKey
+                route_id => RouteID1, devaddr => DevAddr, session_key => SessionKey, max_copies => 1
             }),
             ?assertEqual(ok, ?MODULE:insert_skf(SKF))
         end,
@@ -547,7 +554,7 @@ test_delete_route() ->
     DevAddr1 = 16#00000001,
     SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF1 = hpr_skf:test_new(#{
-        route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey1
+        route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey1, max_copies => 1
     }),
 
     Route2 = hpr_route:test_new(#{
@@ -578,7 +585,7 @@ test_delete_route() ->
     DevAddr2 = 16#00000010,
     SessionKey2 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF2 = hpr_skf:test_new(#{
-        route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2
+        route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2, max_copies => 1
     }),
 
     ?assertEqual(ok, ?MODULE:insert_route(Route1)),
@@ -602,7 +609,7 @@ test_delete_route() ->
         [{{StartAddr2, EndAddr2}, RouteID2}], ets:tab2list(?ETS_DEVADDR_RANGES)
     ),
     ?assertEqual(
-        [{DevAddr2, {hpr_utils:hex_to_bin(SessionKey2), RouteID2}}], ets:tab2list(?ETS_SKFS)
+        [{DevAddr2, {hpr_utils:hex_to_bin(SessionKey2), RouteID2, 1}}], ets:tab2list(?ETS_SKFS)
     ),
     ?assertEqual([{RouteID2, Route2}], ets:tab2list(?ETS_ROUTES)),
     ok.
@@ -627,7 +634,7 @@ test_delete_all() ->
     DevAddr = 16#00000001,
     SessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF = hpr_skf:test_new(#{
-        route_id => RouteID, devaddr => DevAddr, session_key => SessionKey
+        route_id => RouteID, devaddr => DevAddr, session_key => SessionKey, max_copies => 1
     }),
 
     ?assertEqual(ok, ?MODULE:insert_route(Route)),
