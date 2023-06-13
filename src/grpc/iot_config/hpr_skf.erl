@@ -5,7 +5,8 @@
 -export([
     route_id/1,
     devaddr/1,
-    session_key/1
+    session_key/1,
+    max_copies/1
 ]).
 
 -ifdef(TEST).
@@ -30,6 +31,10 @@ devaddr(SessionKeyFilter) ->
 session_key(SessionKeyFilter) ->
     SessionKeyFilter#iot_config_skf_v1_pb.session_key.
 
+-spec max_copies(SessionKeyFilter :: skf()) -> non_neg_integer().
+max_copies(SessionKeyFilter) ->
+    SessionKeyFilter#iot_config_skf_v1_pb.max_copies.
+
 %% ------------------------------------------------------------------
 %% Tests Functions
 %% ------------------------------------------------------------------
@@ -40,7 +45,8 @@ test_new(SessionKeyFilterMap) when erlang:is_map(SessionKeyFilterMap) ->
     #iot_config_skf_v1_pb{
         route_id = maps:get(route_id, SessionKeyFilterMap),
         devaddr = maps:get(devaddr, SessionKeyFilterMap),
-        session_key = maps:get(session_key, SessionKeyFilterMap)
+        session_key = maps:get(session_key, SessionKeyFilterMap),
+        max_copies = maps:get(max_copies, SessionKeyFilterMap)
     }.
 
 -endif.
@@ -67,6 +73,12 @@ devaddr_test() ->
 session_key_test() ->
     ?assertEqual(
         <<>>, ?MODULE:session_key(#iot_config_skf_v1_pb{session_key = <<>>})
+    ),
+    ok.
+
+max_copies_test() ->
+    ?assertEqual(
+        1, ?MODULE:max_copies(#iot_config_skf_v1_pb{max_copies = 1})
     ),
     ok.
 

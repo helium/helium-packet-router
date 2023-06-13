@@ -133,9 +133,9 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
             hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
         ])
     end,
-    FormatSKF = fun({DevAddr, SKF}) ->
-        io_lib:format("  - (~s, ~s)~n", [
-            hpr_utils:int_to_hex_string(DevAddr), hpr_utils:bin_to_hex_string(SKF)
+    FormatSKF = fun({DevAddr, SKF, MaxCopies}) ->
+        io_lib:format("  - (~s, ~s, ~w)~n", [
+            hpr_utils:int_to_hex_string(DevAddr), hpr_utils:bin_to_hex_string(SKF), MaxCopies
         ])
     end,
 
@@ -160,7 +160,7 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
             end,
 
         SKFs = hpr_route_ets:skfs_for_route(RouteID),
-        SKFHeader = io_lib:format("- SKF (DevAddr, SKF) :: ~p~n", [erlang:length(SKFs)]),
+        SKFHeader = io_lib:format("- SKF (DevAddr, SKF, MaxCopies) :: ~p~n", [erlang:length(SKFs)]),
         SKFInfo =
             case maps:is_key(display_euis, Options) of
                 false ->
@@ -200,11 +200,12 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
         [] ->
             c_text("No SKF found");
         SKFs ->
-            MkRow = fun({Key, RouteID}) ->
+            MkRow = fun({Key, RouteID, MaxCopies}) ->
                 [
                     {" Route ID ", RouteID},
                     {" Session Key ", hpr_utils:bin_to_hex_string(Key)},
-                    {" DevAddr ", DevAddrString}
+                    {" DevAddr ", DevAddrString},
+                    {" MaxCopies ", MaxCopies}
                 ]
             end,
             c_table(lists:map(MkRow, SKFs))

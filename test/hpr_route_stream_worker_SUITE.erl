@@ -61,7 +61,7 @@ main_test(_Config) ->
             port => 8080,
             protocol => {packet_router, #{}}
         },
-        max_copies => 1
+        max_copies => 10
     }),
     EUIPair1 = hpr_eui_pair:test_new(#{
         route_id => Route1ID, app_eui => 1, dev_eui => 0
@@ -74,7 +74,8 @@ main_test(_Config) ->
     SessionKeyFilter = hpr_skf:test_new(#{
         route_id => Route1ID,
         devaddr => DevAddr1,
-        session_key => SessionKey1
+        session_key => SessionKey1,
+        max_copies => 1
     }),
     ok = hpr_test_iot_config_service_route:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}})
@@ -106,7 +107,7 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     ?assertEqual(
-        [{hpr_utils:hex_to_bin(SessionKey1), Route1ID}], hpr_route_ets:lookup_skf(DevAddr1)
+        [{hpr_utils:hex_to_bin(SessionKey1), Route1ID, 1}], hpr_route_ets:lookup_skf(DevAddr1)
     ),
 
     %% Delete EUI Pairs / DevAddr Ranges / SKF
@@ -174,7 +175,7 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     ?assertEqual(
-        [{hpr_utils:hex_to_bin(SessionKey1), Route1ID}], hpr_route_ets:lookup_skf(DevAddr1)
+        [{hpr_utils:hex_to_bin(SessionKey1), Route1ID, 1}], hpr_route_ets:lookup_skf(DevAddr1)
     ),
 
     %% Remove route should delete eveything

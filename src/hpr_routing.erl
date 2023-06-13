@@ -53,7 +53,9 @@ handle_packet(Packet) ->
                     ok;
                 {ok, Routes} ->
                     {Routed, IsFree} = maybe_deliver_packet_to_routes(Packet, Routes),
-                    ok = maybe_report_packet(Routes, Routed, IsFree, Packet, Start),
+                    ok = maybe_report_packet(
+                        [R || {R, _} <- Routes], Routed, IsFree, Packet, Start
+                    ),
                     N = erlang:length(Routes),
                     lager:debug(
                         [{routes, N}, {routed, Routed}],
@@ -70,33 +72,29 @@ handle_packet(Packet) ->
 %% ------------------------------------------------------------------
 
 -spec find_routes(hpr_packet_up:type(), Packet :: hpr_packet_up:packet()) ->
-    {ok, [hpr_route:route()]} | {error, invalid_mic}.
+    {ok, [{hpr_route:route(), non_neg_integer()}]} | {error, invalid_mic}.
 find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
-    {ok, hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI)};
+    Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
+    {ok, [{R, 0} || R <- Routes]};
 find_routes({uplink, _}, Packet) ->
-    case application:get_env(?APP, skf_enabled, true) of
-        true ->
-            find_routes_for_uplink(Packet);
-        false ->
-            {uplink, {_Type, DevAddr}} = hpr_packet_up:type(Packet),
-            {ok, hpr_route_ets:lookup_devaddr_range(DevAddr)}
-    end.
+    find_routes_for_uplink(Packet).
 
 -record(frfu, {
     devaddr :: non_neg_integer(),
     payload :: binary(),
-    routes :: [hpr_route:route()],
+    routes :: [{hpr_route:route(), non_neg_integer()}],
     dev_range_routes :: [hpr_route:route()],
     no_skf_routes :: [hpr_route:route()]
 }).
 
 -spec find_routes_for_uplink(Packet :: hpr_packet_up:packet()) ->
-    {ok, [hpr_route:route()]} | {error, invalid_mic}.
+    {ok, [{hpr_route:route(), non_neg_integer()}]} | {error, invalid_mic}.
 find_routes_for_uplink(Packet) ->
     {uplink, {_Type, DevAddr}} = hpr_packet_up:type(Packet),
     case hpr_route_ets:select_skf(DevAddr) of
         '$end_of_table' ->
-            {ok, hpr_route_ets:lookup_devaddr_range(DevAddr)};
+            Routes = hpr_route_ets:lookup_devaddr_range(DevAddr),
+            {ok, [{R, 0} || R <- Routes]};
         Any ->
             Payload = hpr_packet_up:payload(Packet),
             find_routes_for_uplink(
@@ -111,10 +109,13 @@ find_routes_for_uplink(Packet) ->
             )
     end.
 
+-spec find_routes_for_uplink(
+    #frfu{}, {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'
+) -> {ok, [{hpr_route:route(), non_neg_integer()}]} | {error, invalid_mic}.
 find_routes_for_uplink(#frfu{routes = [], no_skf_routes = []}, '$end_of_table') ->
     {error, invalid_mic};
 find_routes_for_uplink(#frfu{routes = Routes, no_skf_routes = NoSKFRoutes}, '$end_of_table') ->
-    {ok, lists:usort(Routes ++ NoSKFRoutes)};
+    {ok, lists:usort(Routes ++ [{R, 0} || R <- NoSKFRoutes])};
 find_routes_for_uplink(
     #frfu{
         payload = Payload,
@@ -125,7 +126,7 @@ find_routes_for_uplink(
     {SKFs, Continuation}
 ) ->
     MicFilteredRoutes = lists:filtermap(
-        fun({Key, RouteID}) ->
+        fun({Key, RouteID, SKFMaxCopies}) ->
             case hpr_lorawan:key_matches_mic(Key, Payload) of
                 %% If failed we remove that entry
                 false ->
@@ -136,13 +137,13 @@ find_routes_for_uplink(
                         %% Note: this would mark packet as invalid_mic
                         %% but we are just missing the route
                         [] -> false;
-                        Rs -> {true, Rs}
+                        Rs -> {true, [{R, SKFMaxCopies} || R <- Rs]}
                     end
             end
         end,
         SKFs
     ),
-    SKFsRoutes = lists:usort([RouteID || {_Key, RouteID} <- SKFs]),
+    SKFsRoutes = lists:usort([RouteID || {_Key, RouteID, _SKFMaxCopies} <- SKFs]),
     NoSKFRoutes1 = lists:filtermap(
         fun(Route) ->
             RouteID = hpr_route:id(Route),
@@ -178,20 +179,20 @@ maybe_deliver_no_routes(Packet) ->
 
 -spec maybe_deliver_packet_to_routes(
     Packet :: hpr_packet_up:packet(),
-    Routes :: [hpr_route:route()]
+    Routes :: [{hpr_route:route(), non_neg_integer()}]
 ) -> {non_neg_integer(), boolean()}.
 maybe_deliver_packet_to_routes(Packet, Routes) ->
     case erlang:length(Routes) of
         1 ->
-            [Route] = Routes,
-            case maybe_deliver_packet_to_route(Packet, Route) of
+            [{Route, SKFMaxCopies}] = Routes,
+            case maybe_deliver_packet_to_route(Packet, Route, SKFMaxCopies) of
                 {ok, IsFree} -> {1, IsFree};
                 {error, _} -> {0, false}
             end;
         X when X > 1 ->
             MaybeDelivered = hpr_utils:pmap(
-                fun(Route) ->
-                    maybe_deliver_packet_to_route(Packet, Route)
+                fun({Route, SKFMaxCopies}) ->
+                    maybe_deliver_packet_to_route(Packet, Route, SKFMaxCopies)
                 end,
                 Routes
             ),
@@ -211,9 +212,10 @@ maybe_deliver_packet_to_routes(Packet, Routes) ->
 
 -spec maybe_deliver_packet_to_route(
     Packet :: hpr_packet_up:packet(),
-    Routes :: hpr_route:route()
+    Routes :: hpr_route:route(),
+    SKFMaxCopies :: non_neg_integer()
 ) -> {ok, boolean()} | {error, any()}.
-maybe_deliver_packet_to_route(Packet, Route) ->
+maybe_deliver_packet_to_route(Packet, Route, SKFMaxCopies) ->
     RouteMD = hpr_route:md(Route),
     case hpr_route:active(Route) andalso hpr_route:locked(Route) == false of
         false ->
@@ -225,7 +227,12 @@ maybe_deliver_packet_to_route(Packet, Route) ->
             Key = crypto:hash(sha256, <<
                 (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
             >>),
-            case hpr_multi_buy:update_counter(Key, hpr_route:max_copies(Route)) of
+            MaxCopies =
+                case SKFMaxCopies of
+                    0 -> hpr_route:max_copies(Route);
+                    _ -> SKFMaxCopies
+                end,
+            case hpr_multi_buy:update_counter(Key, MaxCopies) of
                 {error, Reason} = Error ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
                     Error;
@@ -348,7 +355,7 @@ find_routes_for_uplink_single_route_success() ->
             port => 80,
             protocol => {gwmp, #{mapping => []}}
         },
-        max_copies => 1,
+        max_copies => 10,
         active => true,
         locked => false
     }),
@@ -364,13 +371,14 @@ find_routes_for_uplink_single_route_success() ->
     SKF1 = hpr_skf:test_new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1),
+        max_copies => 1
     }),
     ok = hpr_route_ets:insert_skf(SKF1),
 
     PacketUp = test_utils:uplink_packet_up(#{devaddr => DevAddr1, nwk_session_key => SessionKey1}),
 
-    ?assertEqual({ok, [Route1]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route1, 1}]}, find_routes_for_uplink(PacketUp)),
     ok.
 
 find_routes_for_uplink_single_route_failed() ->
@@ -384,7 +392,7 @@ find_routes_for_uplink_single_route_failed() ->
             port => 80,
             protocol => {gwmp, #{mapping => []}}
         },
-        max_copies => 1,
+        max_copies => 10,
         active => true,
         locked => false
     }),
@@ -400,7 +408,8 @@ find_routes_for_uplink_single_route_failed() ->
     SKF1 = hpr_skf:test_new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1),
+        max_copies => 1
     }),
     ok = hpr_route_ets:insert_skf(SKF1),
 
@@ -422,7 +431,7 @@ find_routes_for_uplink_multi_route_success() ->
             port => 80,
             protocol => {gwmp, #{mapping => []}}
         },
-        max_copies => 1,
+        max_copies => 10,
         active => true,
         locked => false
     }),
@@ -436,7 +445,7 @@ find_routes_for_uplink_multi_route_success() ->
             port => 80,
             protocol => {gwmp, #{mapping => []}}
         },
-        max_copies => 1,
+        max_copies => 20,
         active => true,
         locked => false
     }),
@@ -458,7 +467,8 @@ find_routes_for_uplink_multi_route_success() ->
     SKF1 = hpr_skf:test_new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1),
+        max_copies => 1
     }),
     ok = hpr_route_ets:insert_skf(SKF1),
 
@@ -466,23 +476,24 @@ find_routes_for_uplink_multi_route_success() ->
         devaddr => DevAddr1, nwk_session_key => SessionKey1
     }),
 
-    ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route1, 1}, {Route2, 0}]}, find_routes_for_uplink(PacketUp)),
 
     %% Testing with both Routes having a good SKF
     SKF2 = hpr_skf:test_new(#{
         route_id => RouteID2,
         devaddr => DevAddr1,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1),
+        max_copies => 2
     }),
     ok = hpr_route_ets:insert_skf(SKF2),
 
-    ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route1, 1}, {Route2, 2}]}, find_routes_for_uplink(PacketUp)),
 
     %% No SKF at all
     ok = hpr_route_ets:delete_skf(SKF1),
     ok = hpr_route_ets:delete_skf(SKF2),
 
-    ?assertEqual({ok, [Route1, Route2]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route1, 0}, {Route2, 0}]}, find_routes_for_uplink(PacketUp)),
 
     ok.
 
@@ -539,7 +550,8 @@ find_routes_for_uplink_multi_route_skf_success() ->
             SKF1 = hpr_skf:test_new(#{
                 route_id => RouteID,
                 devaddr => DevAddr1,
-                session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+                session_key => hpr_utils:bin_to_hex_string(SessionKey1),
+                max_copies => 2
             }),
             ok = hpr_route_ets:insert_skf(SKF1),
 
@@ -550,7 +562,8 @@ find_routes_for_uplink_multi_route_skf_success() ->
                     SKF2 = hpr_skf:test_new(#{
                         route_id => RouteID,
                         devaddr => DevAddr1,
-                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16))
+                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+                        max_copies => 3
                     }),
                     ok = hpr_route_ets:insert_skf(SKF2)
                 end,
@@ -573,7 +586,7 @@ find_routes_for_uplink_multi_route_skf_success() ->
     %% - 30, 40, 200 - SKF only
 
     {ok, Found0} = find_routes_for_uplink(PacketUp),
-    RouteIDs = lists:usort([erlang:list_to_binary(hpr_route:id(Route)) || Route <- Found0]),
+    RouteIDs = lists:usort([erlang:list_to_binary(hpr_route:id(Route)) || {Route, _} <- Found0]),
 
     ?assertEqual(
         lists:usort([
@@ -598,7 +611,7 @@ find_routes_for_uplink_multi_route_failed() ->
             port => 80,
             protocol => {gwmp, #{mapping => []}}
         },
-        max_copies => 1,
+        max_copies => 10,
         active => true,
         locked => false
     }),
@@ -613,7 +626,7 @@ find_routes_for_uplink_multi_route_failed() ->
             port => 80,
             protocol => {gwmp, #{mapping => []}}
         },
-        max_copies => 1,
+        max_copies => 10,
         active => true,
         locked => false
     }),
@@ -634,7 +647,8 @@ find_routes_for_uplink_multi_route_failed() ->
     SKF1 = hpr_skf:test_new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey1)
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1),
+        max_copies => 1
     }),
     ok = hpr_route_ets:insert_skf(SKF1),
 
@@ -642,14 +656,15 @@ find_routes_for_uplink_multi_route_failed() ->
         devaddr => DevAddr1, nwk_session_key => crypto:strong_rand_bytes(16)
     }),
 
-    ?assertEqual({ok, [Route2]}, find_routes_for_uplink(PacketUp1)),
+    ?assertEqual({ok, [{Route2, 0}]}, find_routes_for_uplink(PacketUp1)),
 
     %% Testing with both Routes having a bad SKF
     SessionKey2 = crypto:strong_rand_bytes(16),
     SKF2 = hpr_skf:test_new(#{
         route_id => RouteID2,
         devaddr => DevAddr1,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey2)
+        session_key => hpr_utils:bin_to_hex_string(SessionKey2),
+        max_copies => 2
     }),
     ok = hpr_route_ets:insert_skf(SKF2),
 
@@ -660,13 +675,14 @@ find_routes_for_uplink_multi_route_failed() ->
     SKF3 = hpr_skf:test_new(#{
         route_id => RouteID1,
         devaddr => DevAddr1,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey3)
+        session_key => hpr_utils:bin_to_hex_string(SessionKey3),
+        max_copies => 3
     }),
     ok = hpr_route_ets:insert_skf(SKF3),
 
     PacketUp2 = test_utils:uplink_packet_up(#{devaddr => DevAddr1, nwk_session_key => SessionKey3}),
 
-    ?assertEqual({ok, [Route1]}, find_routes_for_uplink(PacketUp2)),
+    ?assertEqual({ok, [{Route1, 3}]}, find_routes_for_uplink(PacketUp2)),
 
     ok.
 

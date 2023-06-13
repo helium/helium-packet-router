@@ -138,7 +138,8 @@ mic_check_test(_Config) ->
     SKFNoRoutes = hpr_skf:test_new(#{
         route_id => "empty",
         devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
+        max_copies => 1
     }),
     hpr_route_ets:insert_skf(SKFNoRoutes),
     ok = test_utils:wait_until(
@@ -154,7 +155,7 @@ mic_check_test(_Config) ->
     %% TEST 4:  Bad key and no routes
     BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKFBadKeyNoRoute = hpr_skf:test_new(#{
-        route_id => "empty", devaddr => DevAddr, session_key => BadSessionKey
+        route_id => "empty", devaddr => DevAddr, session_key => BadSessionKey, max_copies => 1
     }),
     hpr_route_ets:insert_skf(SKFBadKeyNoRoute),
 
@@ -177,13 +178,13 @@ mic_check_test(_Config) ->
             port => 80,
             protocol => {http_roaming, #{}}
         },
-        max_copies => 1
+        max_copies => 10
     }),
     RouteID = hpr_route:id(Route),
     ?assertEqual(ok, hpr_route_ets:insert_route(Route)),
 
     SKFBadKeyAndRouteExitst = hpr_skf:test_new(#{
-        route_id => RouteID, devaddr => DevAddr, session_key => BadSessionKey
+        route_id => RouteID, devaddr => DevAddr, session_key => BadSessionKey, max_copies => 1
     }),
     hpr_route_ets:insert_skf(SKFBadKeyAndRouteExitst),
 
@@ -203,7 +204,8 @@ mic_check_test(_Config) ->
     SKFGoodKeyAndRouteExitst = hpr_skf:test_new(#{
         route_id => RouteID,
         devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
+        max_copies => 1
     }),
     hpr_route_ets:insert_skf(SKFGoodKeyAndRouteExitst),
 
