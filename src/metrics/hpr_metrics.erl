@@ -14,6 +14,7 @@
     packet_down/1,
     observe_packet_report/2,
     observe_multi_buy/2,
+    observe_find_routes/1,
     observe_grpc_connection/2
 ]).
 
@@ -93,6 +94,16 @@ observe_multi_buy({Status, _}, Time) ->
         ?METRICS_MULTI_BUY_GET_HISTOGRAM,
         [Status],
         Time
+    ).
+
+-spec observe_find_routes(
+    Start :: non_neg_integer()
+) -> ok.
+observe_find_routes(Start) ->
+    prometheus_histogram:observe(
+        ?METRICS_FIND_ROUTES_HISTOGRAM,
+        [],
+        erlang:system_time(millisecond) - Start
     ).
 
 -spec observe_grpc_connection(

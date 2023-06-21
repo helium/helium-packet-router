@@ -91,7 +91,10 @@ find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
     Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
     {ok, [{R, 0} || R <- Routes]};
 find_routes({uplink, _}, Packet) ->
-    find_routes_for_uplink(Packet).
+    Start = erlang:system_time(millisecond),
+    Results = find_routes_for_uplink(Packet),
+    ok = hpr_metrics:observe_find_routes(Start),
+    Results.
 
 -spec find_routes_for_uplink(Packet :: hpr_packet_up:packet()) ->
     {ok, [{hpr_route:route(), non_neg_integer()}]} | {error, invalid_mic}.
