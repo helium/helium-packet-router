@@ -16,7 +16,7 @@
     lookup_devaddr_range/1,
 
     insert_skf/1,
-    update_skf/3,
+    update_skf/4,
     delete_skf/1,
     lookup_skf/2,
     select_skf/1, select_skf/2,
@@ -222,16 +222,18 @@ insert_skf(SKF) ->
         [{_, SKFETS}] ->
             DevAddr = hpr_skf:devaddr(SKF),
             SessionKey = hpr_skf:session_key(SKF),
+            MaxCopies = hpr_skf:max_copies(SKF),
             %% This is negative to make newest time on top
             Now = erlang:system_time(millisecond) * -1,
             true = ets:insert(SKFETS, {
-                {Now, hpr_utils:hex_to_bin(SessionKey)}, DevAddr
+                {Now, hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, MaxCopies}
             }),
             lager:debug(
                 [
                     {route_id, RouteID},
                     {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
-                    {session_key, SessionKey}
+                    {session_key, SessionKey},
+                    {max_copies, MaxCopies}
                 ],
                 "inserting SKF"
             );
@@ -242,12 +244,18 @@ insert_skf(SKF) ->
     end,
     ok.
 
--spec update_skf(DevAddr :: non_neg_integer(), SessionKey :: binary(), RouteID :: string()) -> ok.
-update_skf(DevAddr, SessionKey, RouteID) ->
+-spec update_skf(
+    DevAddr :: non_neg_integer(),
+    SessionKey :: binary(),
+    RouteID :: string(),
+    MaxCopies :: non_neg_integer()
+) -> ok.
+update_skf(DevAddr, SessionKey, RouteID, MaxCopies) ->
     SKF = hpr_skf:new(#{
         route_id => RouteID,
         devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey)
+        session_key => hpr_utils:bin_to_hex_string(SessionKey),
+        max_copies => MaxCopies
     }),
     ok = delete_skf(SKF),
     ok = insert_skf(SKF),
@@ -260,13 +268,16 @@ delete_skf(SKF) ->
         [{_, SKFETS}] ->
             DevAddr = hpr_skf:devaddr(SKF),
             SessionKey = hpr_skf:session_key(SKF),
-            MS = [{{{'_', hpr_utils:hex_to_bin(SessionKey)}, DevAddr}, [], [true]}],
+            MaxCopies = hpr_skf:max_copies(SKF),
+            %% Here we ignore max_copies
+            MS = [{{{'_', hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, '_'}}, [], [true]}],
             Deleted = ets:select_delete(SKFETS, MS),
             lager:debug(
                 [
                     {route_id, RouteID},
                     {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
-                    {session_key, SessionKey}
+                    {session_key, SessionKey},
+                    {max_copies, MaxCopies}
                 ],
                 "deleted ~p SKF",
                 [Deleted]
@@ -279,9 +290,9 @@ delete_skf(SKF) ->
     ok.
 
 -spec lookup_skf(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
-    [{binary(), integer()}].
+    [{binary(), integer(), non_neg_integer()}].
 lookup_skf(ETS, DevAddr) ->
-    MS = [{{{'$1', '$2'}, DevAddr}, [], [{{'$2', '$1'}}]}],
+    MS = [{{{'$1', '$2'}, {DevAddr, '$3'}}, [], [{{'$2', '$1', '$3'}}]}],
     ets:select(ETS, MS).
 
 -spec select_skf(Continuation :: ets:continuation()) ->
@@ -290,9 +301,9 @@ select_skf(Continuation) ->
     ets:select(Continuation).
 
 -spec select_skf(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
-    {[{binary(), integer()}], ets:continuation()} | '$end_of_table'.
+    {[{binary(), integer(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
 select_skf(ETS, DevAddr) ->
-    MS = [{{{'$1', '$2'}, DevAddr}, [], [{{'$2', '$1'}}]}],
+    MS = [{{{'$1', '$2'}, {DevAddr, '$3'}}, [], [{{'$2', '$1', '$3'}}]}],
     ets:select(ETS, MS, 100).
 
 -spec delete_all() -> ok.
@@ -330,7 +341,8 @@ devaddr_ranges_for_route(RouteID) ->
     MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS_DEVADDR_RANGES, MS).
 
--spec skfs_for_route(RouteID :: string()) -> [{{integer(), binary()}, non_neg_integer()}].
+-spec skfs_for_route(RouteID :: string()) ->
+    [{{integer(), binary()}, {non_neg_integer(), non_neg_integer()}}].
 skfs_for_route(RouteID) ->
     case ?MODULE:lookup_route(RouteID) of
         [{_, SKFETS}] ->
@@ -554,7 +566,7 @@ test_skf() ->
             port => 80,
             protocol => {http_roaming, #{}}
         },
-        max_copies => 1
+        max_copies => 10
     }),
     Route2 = hpr_route:test_new(#{
         id => "12345678a-3dce-4106-8980-d34007ab689b",
@@ -565,7 +577,7 @@ test_skf() ->
             port => 80,
             protocol => {http_roaming, #{}}
         },
-        max_copies => 1
+        max_copies => 20
     }),
     RouteID1 = hpr_route:id(Route1),
     RouteID2 = hpr_route:id(Route2),
@@ -579,13 +591,13 @@ test_skf() ->
 
     DevAddr1 = 16#00000001,
     SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SKF1 = hpr_skf:test_new(#{
+    SKF1 = hpr_skf:new(#{
         route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey1, max_copies => 1
     }),
     DevAddr2 = 16#00000010,
     SessionKey2 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SKF2 = hpr_skf:test_new(#{
-        route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2, max_copies => 1
+    SKF2 = hpr_skf:new(#{
+        route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2, max_copies => 2
     }),
 
     ?assertEqual(ok, ?MODULE:insert_route(Route1)),
@@ -599,24 +611,24 @@ test_skf() ->
     [{Route2, SKFETS2}] = ?MODULE:lookup_devaddr_range(DevAddr2),
 
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
-    ?assertMatch([{SK1, X}] when X < 0, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertMatch([{SK1, X, 1}] when X < 0, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
     SK2 = hpr_utils:hex_to_bin(SessionKey2),
-    ?assertMatch([{SK2, X}] when X < 0, ?MODULE:lookup_skf(SKFETS2, DevAddr2)),
+    ?assertMatch([{SK2, X, 2}] when X < 0, ?MODULE:lookup_skf(SKFETS2, DevAddr2)),
 
     T1 = erlang:system_time(millisecond) * -1,
     timer:sleep(2),
-    ?assertEqual(ok, ?MODULE:update_skf(DevAddr1, SK1, RouteID1)),
-    ?assertMatch([{SK1, X}] when X < T1, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertEqual(ok, ?MODULE:update_skf(DevAddr1, SK1, RouteID1, 11)),
+    ?assertMatch([{SK1, X, 11}] when X < T1, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
 
     SessionKey3 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF3 = hpr_skf:new(#{
-        route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3
+        route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3, max_copies => 3
     }),
     timer:sleep(1),
     ?assertEqual(ok, ?MODULE:insert_skf(SKF3)),
 
     SK3 = hpr_utils:hex_to_bin(SessionKey3),
-    ?assertMatch([{SK3, X}, {SK1, Y}] when X < Y, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertMatch([{SK3, X, 3}, {SK1, Y, 11}] when X < Y, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
 
     ?assertEqual(ok, ?MODULE:delete_skf(SKF1)),
     ?assertEqual(ok, ?MODULE:delete_skf(SKF3)),
@@ -654,7 +666,7 @@ test_select_skf() ->
         fun(_) ->
             SessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
             SKF = hpr_skf:new(#{
-                route_id => RouteID, devaddr => DevAddr, session_key => SessionKey
+                route_id => RouteID, devaddr => DevAddr, session_key => SessionKey, max_copies => 1
             }),
             ?assertEqual(ok, ?MODULE:insert_skf(SKF))
         end,
@@ -688,7 +700,7 @@ test_delete_route() ->
     }),
     DevAddr1 = 16#00000001,
     SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SKF1 = hpr_skf:test_new(#{
+    SKF1 = hpr_skf:new(#{
         route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey1, max_copies => 1
     }),
 
@@ -719,7 +731,7 @@ test_delete_route() ->
     }),
     DevAddr2 = 16#00000010,
     SessionKey2 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SKF2 = hpr_skf:test_new(#{
+    SKF2 = hpr_skf:new(#{
         route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2, max_copies => 1
     }),
 
@@ -771,7 +783,7 @@ test_delete_all() ->
     }),
     DevAddr = 16#00000001,
     SessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SKF = hpr_skf:test_new(#{
+    SKF = hpr_skf:new(#{
         route_id => RouteID, devaddr => DevAddr, session_key => SessionKey, max_copies => 1
     }),
 

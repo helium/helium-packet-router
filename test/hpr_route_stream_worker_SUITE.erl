@@ -117,7 +117,7 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
-        [{SK1, X}] when X < 0, hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)
+        [{SK1, X, 1}] when X < 0, hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)
     ),
 
     %% Delete EUI Pairs / DevAddr Ranges / SKF
@@ -193,7 +193,7 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
-        [{SK1, X}] when X < 0, hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)
+        [{SK1, X, 1}] when X < 0, hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)
     ),
 
     %% Remove route should delete eveything

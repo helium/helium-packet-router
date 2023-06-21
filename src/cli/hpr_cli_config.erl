@@ -133,9 +133,12 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
             hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
         ])
     end,
-    FormatSKF = fun({DevAddr, SKF, MaxCopies}) ->
-        io_lib:format("  - (~s, ~s, ~w)~n", [
-            hpr_utils:int_to_hex_string(DevAddr), hpr_utils:bin_to_hex_string(SKF), MaxCopies
+    FormatSKF = fun({{Timestamp, SKF}, {DevAddr, MaxCopies}}) ->
+        io_lib:format("  - (~s, ~s, ~w, ~w)~n", [
+            hpr_utils:int_to_hex_string(DevAddr),
+            hpr_utils:bin_to_hex_string(SKF),
+            MaxCopies,
+            Timestamp * -1
         ])
     end,
 
@@ -160,7 +163,9 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
             end,
 
         SKFs = hpr_route_ets:skfs_for_route(RouteID),
-        SKFHeader = io_lib:format("- SKF (DevAddr, SKF, MaxCopies) :: ~p~n", [erlang:length(SKFs)]),
+        SKFHeader = io_lib:format("- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [
+            erlang:length(SKFs)
+        ]),
         SKFInfo =
             case maps:is_key(display_euis, Options) of
                 false ->
@@ -199,7 +204,10 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
     SKFS = lists:foldl(
         fun({Route, ETS}, Acc) ->
             RouteID = hpr_route:id(Route),
-            [{SK, RouteID, T} || {SK, T} <- hpr_route_ets:lookup_skf(ETS, DevAddr)] ++ Acc
+            [
+                {SK, RouteID, LastUsed * -1, MaxCopies}
+             || {SK, LastUsed, MaxCopies} <- hpr_route_ets:lookup_skf(ETS, DevAddr)
+            ] ++ Acc
         end,
         [],
         hpr_route_ets:lookup_devaddr_range(DevAddr)
@@ -208,10 +216,12 @@ config_skf(["config", "skf", DevAddrString], [], []) ->
         [] ->
             c_text("No SKF found");
         SKFs ->
-            MkRow = fun({Key, RouteID}) ->
+            MkRow = fun({SK, RouteID, LastUsed, MaxCopies}) ->
                 [
                     {" Route ID ", RouteID},
-                    {" Session Key ", hpr_utils:bin_to_hex_string(Key)},
+                    {" Session Key ", hpr_utils:bin_to_hex_string(SK)},
+                    {" Last Used ", LastUsed},
+                    {" Max Copies ", MaxCopies},
                     {" DevAddr ", DevAddrString}
                 ]
             end,

@@ -15,6 +15,7 @@
     invalid_packet_type_test/1,
     bad_signature_test/1,
     mic_check_test/1,
+    skf_update_test/1,
     skf_max_copies_test/1,
     multi_buy_without_service_test/1,
     multi_buy_with_service_test/1,
@@ -41,6 +42,7 @@ all() ->
         invalid_packet_type_test,
         bad_signature_test,
         mic_check_test,
+        skf_update_test,
         skf_max_copies_test,
         multi_buy_without_service_test,
         multi_buy_with_service_test,
@@ -139,7 +141,6 @@ mic_check_test(_Config) ->
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
     %% TEST 3: Bad key and route exist
-    BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     Route = hpr_route:test_new(#{
         id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
         net_id => 0,
@@ -159,8 +160,12 @@ mic_check_test(_Config) ->
     }),
     ok = hpr_route_ets:insert_devaddr_range(DevAddrRange),
 
+    BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKFBadKeyAndRouteExitst = hpr_skf:new(#{
-        route_id => RouteID, devaddr => DevAddr, session_key => BadSessionKey
+        route_id => RouteID,
+        devaddr => DevAddr,
+        session_key => BadSessionKey,
+        max_copies => 1
     }),
     hpr_route_ets:insert_skf(SKFBadKeyAndRouteExitst),
 
@@ -209,7 +214,8 @@ mic_check_test(_Config) ->
     SKFBadKey = hpr_skf:new(#{
         route_id => RouteID,
         devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16))
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
     }),
     hpr_route_ets:insert_skf(SKFBadKey),
 
@@ -228,8 +234,10 @@ mic_check_test(_Config) ->
 
     ok.
 
-skf_max_copies_test(_Config) ->
-    meck:new(hpr_protocol_http_roaming, [passthrough]),
+skf_update_test(_Config) ->
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
@@ -272,14 +280,100 @@ skf_max_copies_test(_Config) ->
     [{_, ETS}] = hpr_route_ets:lookup_route(RouteID),
 
     %% Here we are making sure that the SKF got updated
-    [{_, BeforeUpdate}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
+    [{_, BeforeUpdate, 3}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
     timer:sleep(2000),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
 
-    [{_, AfterUpdate}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
+    [{_, AfterUpdate, 3}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
     %% This is due to time being negative for ets ordering
     ?assert(AfterUpdate < BeforeUpdate),
 
+    ok.
+
+skf_max_copies_test(_Config) ->
+    meck:new(hpr_protocol_http_roaming, [passthrough]),
+
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+    DevAddr = 16#00000001,
+
+    Route = hpr_route:test_new(#{
+        id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "lns1.testdomain.com",
+            port => 80,
+            protocol => {http_roaming, #{}}
+        },
+        max_copies => 1
+    }),
+    RouteID = hpr_route:id(Route),
+    ?assertEqual(ok, hpr_route_ets:insert_route(Route)),
+
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+    }),
+    ?assertEqual(ok, hpr_route_ets:insert_devaddr_range(DevAddrRange)),
+
+    SKF = hpr_skf:new(#{
+        route_id => RouteID,
+        devaddr => DevAddr,
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
+        max_copies => 3
+    }),
+    ?assertEqual(ok, hpr_route_ets:insert_skf(SKF)),
+
+    ok = test_utils:wait_until(
+        fun() ->
+            case hpr_route_ets:lookup_route(RouteID) of
+                [{_, ETS}] ->
+                    1 =:= ets:info(ETS, size);
+                _ ->
+                    false
+            end
+        end
+    ),
+
+    lists:foreach(
+        fun(_) ->
+            #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+            PacketUp = test_utils:uplink_packet_up(#{
+                app_session_key => AppSessionKey,
+                nwk_session_key => NwkSessionKey,
+                devaddr => DevAddr,
+                gateway => Gateway,
+                sig_fun => SigFun
+            }),
+            ?assertEqual(ok, hpr_routing:handle_packet(PacketUp))
+        end,
+        lists:seq(1, 3)
+    ),
+
+    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 2)),
+
+    lists:foreach(
+        fun(_) ->
+            #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+            PacketUp = test_utils:uplink_packet_up(#{
+                app_session_key => AppSessionKey,
+                nwk_session_key => NwkSessionKey,
+                devaddr => DevAddr,
+                gateway => Gateway,
+                sig_fun => SigFun
+            }),
+            ?assertEqual(ok, hpr_routing:handle_packet(PacketUp))
+        end,
+        lists:seq(1, 3)
+    ),
+
+    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 2)),
+
+    meck:unload(hpr_protocol_http_roaming),
     ok.
 
 multi_buy_without_service_test(_Config) ->
@@ -1054,7 +1148,8 @@ find_route_load_test(_Config) ->
     SKF1 = hpr_skf:new(#{
         route_id => Route1ID,
         devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
+        max_copies => 1
     }),
     hpr_route_ets:insert_skf(SKF1),
 
@@ -1072,7 +1167,8 @@ find_route_load_test(_Config) ->
                     TempSKF = hpr_skf:new(#{
                         route_id => Route1ID,
                         devaddr => DevAddr,
-                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16))
+                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+                        max_copies => 1
                     }),
                     hpr_route_ets:insert_skf(TempSKF)
                 end
@@ -1126,7 +1222,8 @@ find_route_load_test(_Config) ->
     SKF2 = hpr_skf:new(#{
         route_id => Route2ID,
         devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey)
+        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
+        max_copies => 1
     }),
     hpr_route_ets:insert_skf(SKF2),
 
@@ -1139,7 +1236,8 @@ find_route_load_test(_Config) ->
                     TempSKF = hpr_skf:new(#{
                         route_id => Route2ID,
                         devaddr => DevAddr,
-                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16))
+                        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+                        max_copies => 1
                     }),
                     hpr_route_ets:insert_skf(TempSKF)
                 end
