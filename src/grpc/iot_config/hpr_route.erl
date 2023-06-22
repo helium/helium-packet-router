@@ -9,7 +9,8 @@
     server/1,
     max_copies/1,
     active/1,
-    locked/1
+    locked/1,
+    ignore_empty_skf/1
 ]).
 
 -export([
@@ -74,6 +75,10 @@ active(Route) ->
 locked(Route) ->
     Route#iot_config_route_v1_pb.locked.
 
+-spec ignore_empty_skf(Route :: route()) -> boolean().
+ignore_empty_skf(Route) ->
+    Route#iot_config_route_v1_pb.ignore_empty_skf.
+
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->
     Server = ?MODULE:server(Route),
@@ -111,7 +116,8 @@ md(Route) ->
         {net_id, hpr_utils:int_to_hex_string(hpr_route:net_id(Route))},
         {lns, erlang:binary_to_list(hpr_route:lns(Route))},
         {active, ?MODULE:active(Route)},
-        {locked, ?MODULE:locked(Route)}
+        {locked, ?MODULE:locked(Route)},
+        {ignore_empty_skf, ?MODULE:ignore_empty_skf(Route)}
     ].
 
 -spec is_valid_record(route()) -> boolean().
@@ -133,7 +139,8 @@ new_packet_router(Host, Port) ->
         },
         max_copies = 999,
         active = true,
-        locked = false
+        locked = false,
+        ignore_empty_skf = false
     }.
 
 -spec host(Server :: server()) -> string().
@@ -211,7 +218,8 @@ test_new(RouteMap) ->
         server = mk_server(maps:get(server, RouteMap)),
         max_copies = maps:get(max_copies, RouteMap),
         active = maps:get(active, RouteMap, true),
-        locked = maps:get(locked, RouteMap, false)
+        locked = maps:get(locked, RouteMap, false),
+        ignore_empty_skf = maps:get(ignore_empty_skf, RouteMap, false)
     }.
 
 -spec mk_server(map()) -> #iot_config_server_v1_pb{}.
@@ -273,7 +281,8 @@ test_new_test() ->
         },
         max_copies = 1,
         active = true,
-        locked = false
+        locked = false,
+        ignore_empty_skf = false
     },
     ?assertEqual(
         Route,
@@ -288,7 +297,8 @@ test_new_test() ->
             },
             max_copies => 1,
             active => true,
-            locked => false
+            locked => false,
+            ignore_empty_skf => false
         })
     ),
     ok.
@@ -332,6 +342,11 @@ active_test() ->
 locked_test() ->
     Route = test_route(),
     ?assertEqual(false, ?MODULE:locked(Route)),
+    ok.
+
+ignore_empty_skf_test() ->
+    Route = test_route(),
+    ?assertEqual(false, ?MODULE:ignore_empty_skf(Route)),
     ok.
 
 region_lns_test() ->
@@ -400,7 +415,8 @@ test_route() ->
         },
         max_copies => 1,
         active => true,
-        locked => false
+        locked => false,
+        ignore_empty_skf => false
     }).
 
 -endif.

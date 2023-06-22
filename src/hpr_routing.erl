@@ -140,8 +140,14 @@ find_routes_for_uplink(
 find_routes_for_uplink(Packet, DevAddr, [{Route, SKFETS} | Routes], EmptyRoutes, SelectedRoute) ->
     case check_route_skfs(Packet, DevAddr, SKFETS) of
         empty ->
-            %% TODO: New flag here
-            find_routes_for_uplink(Packet, DevAddr, Routes, [Route | EmptyRoutes], SelectedRoute);
+            case hpr_route:ignore_empty_skf(Route) of
+                true ->
+                    find_routes_for_uplink(Packet, DevAddr, Routes, EmptyRoutes, SelectedRoute);
+                false ->
+                    find_routes_for_uplink(
+                        Packet, DevAddr, Routes, [Route | EmptyRoutes], SelectedRoute
+                    )
+            end;
         false ->
             find_routes_for_uplink(Packet, DevAddr, Routes, EmptyRoutes, SelectedRoute);
         {ok, SessionKey, LastUsed, SKFMaxCopies} ->
@@ -368,7 +374,8 @@ all_test_() ->
         ?_test(find_routes_for_uplink_single_route_success()),
         ?_test(find_routes_for_uplink_single_route_failed()),
         ?_test(find_routes_for_uplink_multi_route_success()),
-        ?_test(find_routes_for_uplink_multi_route_failed())
+        ?_test(find_routes_for_uplink_multi_route_failed()),
+        ?_test(find_routes_for_uplink_ignore_empty_skf())
     ]}.
 
 foreach_setup() ->
@@ -631,6 +638,85 @@ find_routes_for_uplink_multi_route_failed() ->
     PacketUp2 = test_utils:uplink_packet_up(#{devaddr => DevAddr1, nwk_session_key => SessionKey3}),
 
     ?assertEqual({ok, [{Route1, 3}]}, find_routes_for_uplink(PacketUp2)),
+
+    ok.
+
+find_routes_for_uplink_ignore_empty_skf() ->
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 10,
+        active => true,
+        locked => false
+    }),
+    RouteID2 = "route_id_2",
+    Route2 = hpr_route:test_new(#{
+        id => RouteID2,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {gwmp, #{mapping => []}}
+        },
+        max_copies => 20,
+        active => true,
+        locked => false,
+        ignore_empty_skf => true
+    }),
+    ok = hpr_route_ets:insert_route(Route1),
+    ok = hpr_route_ets:insert_route(Route2),
+
+    DevAddr1 = 16#00000001,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID1, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID2, start_addr => 16#00000000, end_addr => 16#00000002
+    }),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange2),
+
+    %% Testing with only Route1 having a SKF and Route2  with ignore_empty_skf => true
+    SessionKey1 = crypto:strong_rand_bytes(16),
+    SKF1 = hpr_skf:new(#{
+        route_id => RouteID1,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1),
+        max_copies => 1
+    }),
+    ok = hpr_route_ets:insert_skf(SKF1),
+
+    PacketUp = test_utils:uplink_packet_up(#{
+        devaddr => DevAddr1, nwk_session_key => SessionKey1
+    }),
+
+    ?assertEqual({ok, [{Route1, 1}]}, find_routes_for_uplink(PacketUp)),
+
+    %% Testing with both Routes having a good SKF the latest one only should be picked
+    SKF2 = hpr_skf:new(#{
+        route_id => RouteID2,
+        devaddr => DevAddr1,
+        session_key => hpr_utils:bin_to_hex_string(SessionKey1),
+        max_copies => 2
+    }),
+    timer:sleep(1),
+    ok = hpr_route_ets:insert_skf(SKF2),
+
+    ?assertEqual({ok, [{Route2, 2}]}, find_routes_for_uplink(PacketUp)),
+
+    %% No SKF at all
+    ok = hpr_route_ets:delete_skf(SKF1),
+    ok = hpr_route_ets:delete_skf(SKF2),
+
+    ?assertEqual({ok, [{Route1, 0}]}, find_routes_for_uplink(PacketUp)),
 
     ok.
 
