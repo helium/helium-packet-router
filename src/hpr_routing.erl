@@ -4,16 +4,9 @@
 
 -export([
     init/0,
-    handle_packet/1
-]).
-
--ifdef(TEST).
-
--export([
+    handle_packet/1,
     find_routes/2
 ]).
-
--endif.
 
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
@@ -55,7 +48,7 @@ handle_packet(Packet) ->
             Error;
         ok ->
             ok = hpr_packet_up:md(Packet),
-            case find_routes(PacketType, Packet) of
+            case ?MODULE:find_routes(PacketType, Packet) of
                 {error, _Reason} = Error ->
                     lager:debug("failed to find routes: ~p", [_Reason]),
                     hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
@@ -81,25 +74,24 @@ handle_packet(Packet) ->
             end
     end.
 
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
-
 -spec find_routes(hpr_packet_up:type(), Packet :: hpr_packet_up:packet()) ->
     {ok, [{hpr_route:route(), non_neg_integer()}]} | {error, invalid_mic}.
 find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
     Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
     {ok, [{R, 0} || R <- Routes]};
-find_routes({uplink, _}, Packet) ->
+find_routes({uplink, {_Type, DevAddr}}, Packet) ->
     Start = erlang:system_time(millisecond),
-    Results = find_routes_for_uplink(Packet),
+    Results = find_routes_for_uplink(Packet, DevAddr),
     ok = hpr_metrics:observe_find_routes(Start),
     Results.
 
--spec find_routes_for_uplink(Packet :: hpr_packet_up:packet()) ->
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
+-spec find_routes_for_uplink(Packet :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
     {ok, [{hpr_route:route(), non_neg_integer()}]} | {error, invalid_mic}.
-find_routes_for_uplink(Packet) ->
-    {uplink, {_Type, DevAddr}} = hpr_packet_up:type(Packet),
+find_routes_for_uplink(Packet, DevAddr) ->
     case hpr_route_ets:lookup_devaddr_range(DevAddr) of
         [] ->
             {ok, []};
@@ -397,8 +389,9 @@ foreach_cleanup(ok) ->
     ok.
 
 find_routes_for_uplink_no_skf() ->
-    PacketUp = test_utils:uplink_packet_up(#{}),
-    ?assertEqual({ok, []}, find_routes_for_uplink(PacketUp)),
+    DevAddr1 = 16#00000001,
+    PacketUp = test_utils:uplink_packet_up(#{devaddr => DevAddr1}),
+    ?assertEqual({ok, []}, find_routes_for_uplink(PacketUp, DevAddr1)),
     ok.
 
 find_routes_for_uplink_single_route_success() ->
@@ -435,7 +428,7 @@ find_routes_for_uplink_single_route_success() ->
 
     PacketUp = test_utils:uplink_packet_up(#{devaddr => DevAddr1, nwk_session_key => SessionKey1}),
 
-    ?assertEqual({ok, [{Route1, 1}]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route1, 1}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
     ok.
 
 find_routes_for_uplink_single_route_failed() ->
@@ -474,7 +467,7 @@ find_routes_for_uplink_single_route_failed() ->
         devaddr => DevAddr1, nwk_session_key => crypto:strong_rand_bytes(16)
     }),
 
-    ?assertEqual({error, invalid_mic}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({error, invalid_mic}, find_routes_for_uplink(PacketUp, DevAddr1)),
     ok.
 
 find_routes_for_uplink_multi_route_success() ->
@@ -533,7 +526,7 @@ find_routes_for_uplink_multi_route_success() ->
         devaddr => DevAddr1, nwk_session_key => SessionKey1
     }),
 
-    ?assertEqual({ok, [{Route1, 1}, {Route2, 0}]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route1, 1}, {Route2, 0}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
 
     %% Testing with both Routes having a good SKF the latest one only should be picked
     SKF2 = hpr_skf:new(#{
@@ -545,13 +538,13 @@ find_routes_for_uplink_multi_route_success() ->
     timer:sleep(1),
     ok = hpr_route_ets:insert_skf(SKF2),
 
-    ?assertEqual({ok, [{Route2, 2}]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route2, 2}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
 
     %% No SKF at all
     ok = hpr_route_ets:delete_skf(SKF1),
     ok = hpr_route_ets:delete_skf(SKF2),
 
-    ?assertEqual({ok, [{Route2, 0}, {Route1, 0}]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route2, 0}, {Route1, 0}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
 
     ok.
 
@@ -611,7 +604,7 @@ find_routes_for_uplink_multi_route_failed() ->
         devaddr => DevAddr1, nwk_session_key => crypto:strong_rand_bytes(16)
     }),
 
-    ?assertEqual({ok, [{Route2, 0}]}, find_routes_for_uplink(PacketUp1)),
+    ?assertEqual({ok, [{Route2, 0}]}, find_routes_for_uplink(PacketUp1, DevAddr1)),
 
     %% Testing with both Routes having a bad SKF
     SessionKey2 = crypto:strong_rand_bytes(16),
@@ -623,7 +616,7 @@ find_routes_for_uplink_multi_route_failed() ->
     }),
     ok = hpr_route_ets:insert_skf(SKF2),
 
-    ?assertEqual({error, invalid_mic}, find_routes_for_uplink(PacketUp1)),
+    ?assertEqual({error, invalid_mic}, find_routes_for_uplink(PacketUp1, DevAddr1)),
 
     %% Testing one good SKF and one bad SKF
     SessionKey3 = crypto:strong_rand_bytes(16),
@@ -637,7 +630,7 @@ find_routes_for_uplink_multi_route_failed() ->
 
     PacketUp2 = test_utils:uplink_packet_up(#{devaddr => DevAddr1, nwk_session_key => SessionKey3}),
 
-    ?assertEqual({ok, [{Route1, 3}]}, find_routes_for_uplink(PacketUp2)),
+    ?assertEqual({ok, [{Route1, 3}]}, find_routes_for_uplink(PacketUp2, DevAddr1)),
 
     ok.
 
@@ -698,7 +691,7 @@ find_routes_for_uplink_ignore_empty_skf() ->
         devaddr => DevAddr1, nwk_session_key => SessionKey1
     }),
 
-    ?assertEqual({ok, [{Route1, 1}]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route1, 1}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
 
     %% Testing with both Routes having a good SKF the latest one only should be picked
     SKF2 = hpr_skf:new(#{
@@ -710,13 +703,13 @@ find_routes_for_uplink_ignore_empty_skf() ->
     timer:sleep(1),
     ok = hpr_route_ets:insert_skf(SKF2),
 
-    ?assertEqual({ok, [{Route2, 2}]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route2, 2}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
 
     %% No SKF at all
     ok = hpr_route_ets:delete_skf(SKF1),
     ok = hpr_route_ets:delete_skf(SKF2),
 
-    ?assertEqual({ok, [{Route1, 0}]}, find_routes_for_uplink(PacketUp)),
+    ?assertEqual({ok, [{Route1, 0}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
 
     ok.
 

@@ -84,7 +84,7 @@ delete_route(Route) ->
     MS1 = [{{'_', RouteID}, [], [true]}],
     DevAddrEntries = ets:select_delete(?ETS_DEVADDR_RANGES, MS1),
     MS2 = [{{'_', RouteID}, [], [true]}],
-    EUISEntries = ets:select_delete(?ETS_EUI_PAIRS, MS2),
+    EUIsEntries = ets:select_delete(?ETS_EUI_PAIRS, MS2),
     case ?MODULE:lookup_route(RouteID) of
         [{_, SKFETS}] ->
             ets:delete(SKFETS);
@@ -94,9 +94,10 @@ delete_route(Route) ->
             ])
     end,
     true = ets:delete(?ETS_ROUTES, RouteID),
-    lager:info("deleted ~w DevAddr Entries, ~w EUIS Entries for ~s", [
-        DevAddrEntries, EUISEntries, RouteID
-    ]),
+    lager:info(
+        [{devaddr, DevAddrEntries}, {euis, EUIsEntries}, {route_id, RouteID}],
+        "route deleted"
+    ),
     ok.
 
 -spec lookup_route(ID :: string()) -> [{hpr_route:route(), ets:table()}].
