@@ -290,7 +290,7 @@ delete_skf(SKF) ->
     ok.
 
 -spec lookup_skf(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
-    [{binary(), integer(), non_neg_integer()}].
+    [{SessionKey :: binary(), Timestamp :: integer(), MaxCopies :: non_neg_integer()}].
 lookup_skf(ETS, DevAddr) ->
     MS = [{{{'$1', '$2'}, {DevAddr, '$3'}}, [], [{{'$2', '$1', '$3'}}]}],
     ets:select(ETS, MS).
