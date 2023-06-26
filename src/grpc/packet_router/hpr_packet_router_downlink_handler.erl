@@ -63,10 +63,9 @@ handle_eos(#state{started = Started, gateway = Gateway, lns = LNS} = State) ->
 %% ------------------------------------------------------------------
 
 -spec state_to_md(state()) -> list().
-state_to_md(#state{conn_pid = ConnectionPid, stream_id = StreamId, gateway = Gateway, lns = LNS}) ->
+state_to_md(#state{stream_id = StreamId, gateway = Gateway, lns = LNS}) ->
     GatewayName = hpr_utils:gateway_name(Gateway),
     [
-        {conn_pid, ConnectionPid},
         {stream_id, StreamId},
         {gateway, GatewayName},
         {lns, erlang:binary_to_list(LNS)}

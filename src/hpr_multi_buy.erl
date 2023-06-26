@@ -91,11 +91,14 @@ scheduled_cleanup(Duration) ->
 request(Key) ->
     {Time, Result} = timer:tc(fun() ->
         Req = #multi_buy_inc_req_v1_pb{key = hpr_utils:bin_to_hex_string(Key)},
-        case helium_multi_buy_multi_buy_client:inc(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
+        try helium_multi_buy_multi_buy_client:inc(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
             {ok, #multi_buy_inc_res_v1_pb{count = Count}, _} ->
                 {ok, Count};
             _Any ->
                 {error, _Any}
+        catch
+            exit:{timeout, _Error} -> {error, timeout};
+            Any -> {error, Any}
         end
     end),
     hpr_metrics:observe_multi_buy(Result, Time),
