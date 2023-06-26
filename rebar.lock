@@ -59,7 +59,7 @@
  {<<"hackney">>,{pkg,<<"hackney">>,<<"1.17.0">>},0},
  {<<"helium_proto">>,
   {git,"https://github.com/helium/proto.git",
-       {ref,"9be040ef7baa0e9bf4998867100de689ad1ac21e"}},
+       {ref,"c10a73fc89d895f439bc82efbbc8cd11ed880546"}},
   0},
  {<<"hpack">>,
   {git,"https://github.com/novalabsxyz/hpack.git",
