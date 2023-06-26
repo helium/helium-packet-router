@@ -86,7 +86,37 @@ Notes:
 
 #### Session Key Filters
 
-TODO
+[What is a LoRaWan Network Session Key?](https://www.thethingsnetwork.org/docs/lorawan/security/)
+
+A (Session Key Filter)[https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L412] (SKF) allows HPR to verify individual packets without being able to decode the data. SKFs ensure that the packet are getting sent to the right LNS as well as charging the right account.
+
+SKFs are usually kept up to date programatically by the LNS but [here](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L705) is the API used to update them.
+
+
+Note: each SKF as a `max_copies` field wich is the same concept as viewed previsouly in [Route](#route) but within SKF, it allows to set it on a per device basis instead of the entire Route. A SKF `max_copies` setting will always override the Route `max_copies`.
+
+## Multi Buy
+
+`Multi buy` or `max_copies` is maximum number of copies bought by HPR. Ex: if an uplink is seen by multiple hotspots, how many copies of that packet will be purchased. It can bet set a 2 level as seen previously either [Route](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L129) or [SKF](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L417).
+
+A Multi Buy Service (MBS) is used as a distributed counter to make sure the proper number of copies is purchased. This is due to the fact that hotspots in close proximity might be connected to different HPRs in the cluster.
+
+Note: If the MBS goes down, HPR will mark the packets as `free` to avoid charging users more than it should. This will also not reward hotspots.
+
+```mermaid
+flowchart LR
+    subgraph Sub Region
+        HPR1(HPR 1)
+        HPR2(HPR 2)
+        HPR3(HPR 3)
+        HPR4(HPR 4)
+        MBS1(Multi Buy Service)
+    end
+    HPR1 <--> MBS1
+    HPR2 <--> MBS1
+    HPR3 <--> MBS1
+    HPR4 <--> MBS1
+```
 
 [^1]: A Geo DNS load balancer is a tool that uses the location of the hotspot to direct their requests to the best server or data center. It combines DNS and load balancing to optimize traffic distribution based on geography, reducing latency and improving user experience.
 
