@@ -4,19 +4,19 @@ This document describes the routing mechanism implemented post [HIP 70](https://
 
 ## Basics
 
-1. Each hotspot connects to a global Geo DNS Load Balancer [^1] (LB). The LB then redirect each Hotspot to a cluster of Helium Packet Router (HPR) in its own region. Ex: if a Hotspot is in San Francisco it will get round-robin[^2] to the North America Cluster, if another is in Paris France, it will get round-robin to the EU cluster. *Note that each region may have a different number of servers to accomodate for load.*
+1. Each hotspot connects to a global Geo DNS Load Balancer [^1] (LB). The LB then redirects each Hotspot to a cluster of Helium Packet Routers (HPR) in its own region. Ex: If a Hotspot is in San Francisco it will get round-robin[^2] to the North America Cluster, if another is in Paris France, it will get round-robin to the EU cluster. *Note that each region may have a different number of servers to accomodate for load.*
 2. Each HPR gets its routing information from [Config Service](https://github.com/helium/oracles/tree/main/iot_config) (see [Routing Configuration](#routing-configuration)).
 3. Data is then routed to appropriate LoRaWan Network Server (LNS)[^3].
 
 ```mermaid
 flowchart LR
     subgraph USA
-        H1(Hotpost 1)
+        H1(Hotspot 1)
         HPRUS(HPRs US)
     end
     subgraph EU
-        H2(Hotpost 2)
-        H3(Hotpost 3)
+        H2(Hotspot 2)
+        H3(Hotspot 3)
         HPREU(HPRs EU)
         HPREU(HPRs EU)
         
@@ -32,9 +32,9 @@ flowchart LR
     H1 --> LB
     H2 --> LB
     H3 --> LB
-    LB -->|Hotpost 1| HPRUS
-    LB -->|Hotpost 2| HPREU
-    LB -->|Hotpost 3| HPREU
+    LB -->|Hotspot 1| HPRUS
+    LB -->|Hotspot 2| HPREU
+    LB -->|Hotspot 3| HPREU
     HPRUS --> LNSs
     HPREU --> LNSs
     HPRUS <--> CS
@@ -43,13 +43,13 @@ flowchart LR
 
 ## Configuration
 
-All of the devices routing information is contained in the [Config Service](https://github.com/helium/oracles/tree/main/iot_config) (CS). The CS can be interacted via [CLI](https://github.com/helium/helium-config-service-cli) or directly using the [Proto APIs](https://github.com/helium/proto/blob/master/src/service/iot_config.proto).
+All of the device routing information is contained in the [Config Service](https://github.com/helium/oracles/tree/main/iot_config) (CS). The CS can be interacted via [CLI](https://github.com/helium/helium-config-service-cli) or directly using the [Proto APIs](https://github.com/helium/proto/blob/master/src/service/iot_config.proto).
 
 ### OUI
 
 At the top of it all is the [Org (or OUI)](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L46) which defines a few things, like the `owner` and `payer` keys [(see here)](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L46).
 
-Uppon request, an OUI is [created](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L650) and assigned by the fundation. You can, at this point, purchase [Device Addresses or DevAddrs](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L27). If you would like to roam on the Helium network and already have your own [LoRaWan Net ID](https://www.thethingsnetwork.org/docs/lorawan/prefix-assignments/) [see here](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L652).
+Upon request, an OUI is [created](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L650) and assigned by the fundation. You can, at this point, purchase [Device Addresses or DevAddrs](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L27). If you would like to roam on the Helium network and already have your own [LoRaWan Net ID](https://www.thethingsnetwork.org/docs/lorawan/prefix-assignments/) [see here](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L652).
 
 ### Route
 
@@ -72,19 +72,20 @@ Routes tells each HPR exactly where to send data packets. To [create](https://gi
 
 Device EUI and App EUI (aka EUIs) can be managed via the [update_euis service](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L686). These are usually handled by the LNS. *Helium's Router/Console already supports it and Chirpstack work is in progress.*
 
-**Note: any LNS or other entities that need to modify Routes or other need to be allowed to do so via the [delegate keys](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L53). Each service in the proto file should [list the permission](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L641). This allows for programtic update without need for OUI owner to do everything manually.**
+**Note: Any LNS or other entities that need to modify Routes or associated information need to be allowed to do so via the [delegate keys](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L53). Each service in the proto file should [list the permission](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L641). This allows for programatic update without need for OUI owner to do everything manually.**
 
 #### Uplinks / DevAddr Ranges
 
-A [DevAddr Range]([start_addr](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L59)) is a is a combination of `start_addr` and an `end_addr` that allow Routes to be confined to a specific range. Fox example, if my OUI is contained from `16#00000001` to `16#0000000A`, I could create 2 Routes:
-1. Route 1: `16#00000001` to `16#00000005`
-2. Route 2 : `16#00000006` to `16#0000000A`
+A [DevAddr Range]([start_addr](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L59)) is a combination of `start_addr` and an `end_addr` that allows Routes to be confined to a specific range. Fox example, if my OUI is contained from `16#00000000` to `16#0000000A`, I could create 2 Routes:
+1. Route 1: `16#00000000` to `16#00000005`
+2. Route 2: `16#00000006` to `16#0000000A`
    
 Notes:
+- DevAddr ranges are inclusive on both sides.
 - DevAddr ranges can overlap.
 - If no range is set, by default, the Route will be set to the entire range of the OUI.
 
-**It is  recommended to set a DevAddr Range and to avoid overlaping (even if allowed) as this will slow down data delivery to the LNSs.**
+**It is  recommended to set a DevAddr Range and to avoid overlapping (even if allowed) as this will slow down data delivery to the LNSs.**
 
 #### Session Key Filters
 
@@ -95,13 +96,13 @@ A [Session Key Filter](https://github.com/helium/proto/blob/master/src/service/i
 SKFs are usually kept up to date programatically by the LNS ([API](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L705)).
 
 
-Note: each SKF as a `max_copies` field wich is the same concept as viewed previsouly in [Route](#route) but within SKF, it allows to set it per device instead of the entire Route. A SKF `max_copies` setting will always override the Route `max_copies`.
+Note: Each SKF has a `max_copies` field which is the same concept as viewed previously in [Route](#route) but is device specific. SKF `max_copies` takes precendent over a Route's `max_copies`. However, setting a SKF `max_copies` to `0` will cause that device to use the Route's `max_copies` settings. If you are trying to not route packets for a device, the SKF for that device should be removed entirely.
 
 ## Multi Buy
 
-`Multi buy` or `max_copies` is maximum number of copies, seen by different hotspots, can be bought by HPR. It can bet set a 2 level as seen previously either [Route](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L129) or [SKF](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L417).
+`Multi buy` or `max_copies` is the maximum number of copies, seen by different hotspots, that can be bought by HPR. It can be set at 2 levels as seen previously, either [Route](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L129) or [SKF](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L417).
 
-*A Multi Buy Service (MBS) is used as a distributed counter to make sure the proper number of copies is purchased. This service exists due to the fact that, hotspots taht are in close proximity might be connected to different HPRs in the cluster.*
+*A Multi Buy Service (MBS) is used as a distributed counter to make sure the proper number of copies is purchased. This service exists due to the fact that, hotspots that are in close proximity might be connected to different HPRs in the cluster.*
 
 Note: If the MBS goes down, HPR will mark the packets as `free` to avoid charging users more than it should. This will also not reward hotspots.
 
