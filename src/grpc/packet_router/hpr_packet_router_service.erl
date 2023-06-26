@@ -102,7 +102,7 @@ register(PubKeyBin) ->
     case ?MODULE:locate(PubKeyBin) of
         {error, not_found} ->
             true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
-            lager:info("register"),
+            lager:debug("register"),
             ok;
         {ok, Self} ->
             lager:info("nothing to do, already registered"),
