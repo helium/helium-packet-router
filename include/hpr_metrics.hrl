@@ -15,6 +15,7 @@
 -define(METRICS_SKFS_GAUGE, "hpr_skfs_gauge").
 -define(METRICS_PACKET_REPORT_HISTOGRAM, "hpr_packet_report_histogram").
 -define(METRICS_MULTI_BUY_GET_HISTOGRAM, "hpr_multi_buy_get_histogram").
+-define(METRICS_FIND_ROUTES_HISTOGRAM, "hpr_find_routes_histogram").
 -define(METRICS_VM_ETS_MEMORY, "hpr_vm_ets_memory").
 -define(METRICS_VM_PROC_Q, "hpr_vm_process_queue").
 
@@ -29,8 +30,9 @@
     {?METRICS_ROUTES_GAUGE, prometheus_gauge, [], "Number of Routes"},
     {?METRICS_EUI_PAIRS_GAUGE, prometheus_gauge, [], "Number of EUI Pairs"},
     {?METRICS_SKFS_GAUGE, prometheus_gauge, [], "Number of SKFs"},
-    {?METRICS_VM_ETS_MEMORY, prometheus_gauge, [name], "HPR ets memory"},
-    {?METRICS_VM_PROC_Q, prometheus_gauge, [name], "Process queue"},
     {?METRICS_PACKET_REPORT_HISTOGRAM, prometheus_histogram, [status], "Packet Reports"},
-    {?METRICS_MULTI_BUY_GET_HISTOGRAM, prometheus_histogram, [status], "Multi Buy Service Get"}
+    {?METRICS_MULTI_BUY_GET_HISTOGRAM, prometheus_histogram, [status], "Multi Buy Service Get"},
+    {?METRICS_FIND_ROUTES_HISTOGRAM, prometheus_histogram, [], "Find Routes"},
+    {?METRICS_VM_ETS_MEMORY, prometheus_gauge, [name], "HPR ets memory"},
+    {?METRICS_VM_PROC_Q, prometheus_gauge, [name], "Process queue"}
 ]).
