@@ -19,6 +19,7 @@
     skf_max_copies_test/1,
     multi_buy_without_service_test/1,
     multi_buy_with_service_test/1,
+    multi_buy_requests_test/1,
     active_locked_route_test/1,
     success_test/1,
     no_routes_test/1,
@@ -46,6 +47,7 @@ all() ->
         skf_max_copies_test,
         multi_buy_without_service_test,
         multi_buy_with_service_test,
+        multi_buy_requests_test,
         active_locked_route_test,
         success_test,
         no_routes_test,
@@ -666,13 +668,132 @@ multi_buy_with_service_test(_Config) ->
     ?assertNot(IsFree1),
     ?assertNot(IsFree2),
     ?assertNot(IsFree3),
-    %% We sent 2 packets fnt 1 and 2 but nothing should be in ets
-    ?assertEqual(0, ets:info(hpr_multi_buy_ets, size)),
+    %% We sent 2 packets fnt 1 and 2
+    ?assertEqual(2, ets:info(hpr_multi_buy_ets, size)),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
     ?assert(meck:validate(hpr_packet_reporter)),
     meck:unload(hpr_packet_reporter),
+    ok.
+
+multi_buy_requests_test(_Config) ->
+    ETS = ets:new(multi_buy_requests_test, [
+        public,
+        set,
+        {write_concurrency, true}
+    ]),
+
+    meck:new(helium_multi_buy_multi_buy_client, [passthrough]),
+
+    %% By adding +2 here we simulate other servers also incrementing
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(#multi_buy_inc_req_v1_pb{key = Key}, _) ->
+        Count = ets:update_counter(
+            ETS, Key, {2, 2}, {default, 0}
+        ),
+        {ok, #multi_buy_inc_res_v1_pb{count = Count}, []}
+    end),
+
+    MaxCopies = 3,
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => MaxCopies
+    }),
+    DevAddrRange =
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        }),
+    ok = hpr_route_ets:insert_route(Route),
+    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange),
+
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+
+    Keys = lists:map(
+        fun(_) ->
+            #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+            {libp2p_crypto:pubkey_to_bin(PubKey), libp2p_crypto:mk_sig_fun(PrivKey)}
+        end,
+        lists:seq(1, 10)
+    ),
+
+    Packets1 = lists:map(
+        fun({Gateway, SigFun}) ->
+            test_utils:uplink_packet_up(#{
+                gateway => Gateway,
+                sig_fun => SigFun,
+                devaddr => DevAddr,
+                fcnt => 1,
+                app_session_key => AppSessionKey,
+                nwk_session_key => NwkSessionKey
+            })
+        end,
+        Keys
+    ),
+
+    lists:foreach(
+        fun(Packet) ->
+            erlang:spawn(hpr_routing, handle_packet, [Packet])
+        end,
+        Packets1
+    ),
+
+    % We should max make 3 requests
+    ok = test_utils:wait_until(
+        fun() ->
+            3 == meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2)
+        end
+    ),
+
+    Key = key,
+    meck:reset(helium_multi_buy_multi_buy_client),
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(_, _) ->
+        Count = ets:update_counter(
+            ETS, Key, {2, 1}, {default, 0}
+        ),
+        {ok, #multi_buy_inc_res_v1_pb{count = Count}, []}
+    end),
+
+    Packets2 = lists:map(
+        fun({Gateway, SigFun}) ->
+            test_utils:uplink_packet_up(#{
+                gateway => Gateway,
+                sig_fun => SigFun,
+                devaddr => DevAddr,
+                fcnt => 2,
+                app_session_key => AppSessionKey,
+                nwk_session_key => NwkSessionKey
+            })
+        end,
+        Keys
+    ),
+
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(1, Packets2))),
+    %% We update counter (from another LNS)
+    ?assertEqual(2, ets:update_counter(ETS, Key, {2, 1}, {default, 0})),
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(2, Packets2))),
+    %% We update counter (from another LNS)
+    ?assertEqual(4, ets:update_counter(ETS, Key, {2, 1}, {default, 0})),
+    %% This should be the last time we make anothe request to get latest count
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(3, Packets2))),
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(4, Packets2))),
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(5, Packets2))),
+
+    ?assertEqual(3, meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2)),
+
+    ?assert(meck:validate(helium_multi_buy_multi_buy_client)),
+    meck:unload(helium_multi_buy_multi_buy_client),
+    ets:delete(ETS),
     ok.
 
 active_locked_route_test(_Config) ->

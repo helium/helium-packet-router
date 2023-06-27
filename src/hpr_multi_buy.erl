@@ -12,7 +12,7 @@
 -define(ETS, hpr_multi_buy_ets).
 -define(MULTIBUY, multi_buy).
 -define(MAX_TOO_LOW, multi_buy_max_too_low).
--define(CLEANUP_TIME, timer:hours(1)).
+-define(CLEANUP_TIME, timer:minutes(30)).
 
 -spec init() -> ok.
 init() ->
@@ -32,38 +32,30 @@ init() ->
 update_counter(_Key, Max) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
 update_counter(Key, Max) ->
-    case application:get_env(hpr, multi_buy_enabled, true) of
-        false ->
-            case
-                ets:update_counter(
-                    ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
-                )
-            of
-                C when C > Max ->
-                    {error, ?MULTIBUY};
-                _C ->
-                    {ok, false}
-            end;
-        true ->
+    case
+        ets:update_counter(
+            ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
+        )
+    of
+        LocalCounter when LocalCounter > Max ->
+            {error, ?MULTIBUY};
+        LocalCounter ->
             case request(Key) of
-                {ok, C} when C > Max ->
+                {ok, ServiceCounter} when ServiceCounter > Max ->
+                    ets:update_counter(
+                        ?ETS,
+                        Key,
+                        {2, Max - LocalCounter + 1},
+                        {default, 0, erlang:system_time(millisecond)}
+                    ),
                     {error, ?MULTIBUY};
-                {ok, _C} ->
+                {ok, _ServiceCounter} ->
                     {ok, false};
                 {error, Reason} ->
                     lager:error("failed to get a counter for ~s: ~p", [
                         hpr_utils:bin_to_hex_string(Key), Reason
                     ]),
-                    case
-                        ets:update_counter(
-                            ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
-                        )
-                    of
-                        C when C > Max ->
-                            {error, ?MULTIBUY};
-                        _C ->
-                            {ok, true}
-                    end
+                    {ok, true}
             end
     end.
 
