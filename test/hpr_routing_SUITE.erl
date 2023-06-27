@@ -617,13 +617,20 @@ multi_buy_with_service_test(_Config) ->
     ok.
 
 multi_buy_requests_test(_Config) ->
+    ETS = ets:new(multi_buy_requests_test, [
+        public,
+        set,
+        {write_concurrency, true}
+    ]),
+
     meck:new(helium_multi_buy_multi_buy_client, [passthrough]),
 
     %% By adding +2 here we simulate other servers also incrementing
-    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(_, _) ->
-        Count = persistent_term:get(helium_multi_buy_multi_buy_client_inc_count, 0),
-        ok = persistent_term:put(helium_multi_buy_multi_buy_client_inc_count, Count + 2),
-        {ok, #multi_buy_inc_res_v1_pb{count = Count + 2}, []}
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(#multi_buy_inc_req_v1_pb{key = Key}, _) ->
+        Count = ets:update_counter(
+            ETS, Key, {2, 2}, {default, 0}
+        ),
+        {ok, #multi_buy_inc_res_v1_pb{count = Count}, []}
     end),
 
     MaxCopies = 3,
@@ -659,7 +666,7 @@ multi_buy_requests_test(_Config) ->
         lists:seq(1, 10)
     ),
 
-    Packets = lists:map(
+    Packets1 = lists:map(
         fun({Gateway, SigFun}) ->
             test_utils:uplink_packet_up(#{
                 gateway => Gateway,
@@ -677,7 +684,7 @@ multi_buy_requests_test(_Config) ->
         fun(Packet) ->
             erlang:spawn(hpr_routing, handle_packet, [Packet])
         end,
-        Packets
+        Packets1
     ),
 
     % We should max make 3 requests
@@ -687,8 +694,45 @@ multi_buy_requests_test(_Config) ->
         end
     ),
 
+    Key = key,
+    meck:reset(helium_multi_buy_multi_buy_client),
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(_, _) ->
+        Count = ets:update_counter(
+            ETS, Key, {2, 1}, {default, 0}
+        ),
+        {ok, #multi_buy_inc_res_v1_pb{count = Count}, []}
+    end),
+
+    Packets2 = lists:map(
+        fun({Gateway, SigFun}) ->
+            test_utils:uplink_packet_up(#{
+                gateway => Gateway,
+                sig_fun => SigFun,
+                devaddr => DevAddr,
+                fcnt => 2,
+                app_session_key => AppSessionKey,
+                nwk_session_key => NwkSessionKey
+            })
+        end,
+        Keys
+    ),
+
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(1, Packets2))),
+    %% We update counter (from another LNS)
+    ?assertEqual(2, ets:update_counter(ETS, Key, {2, 1}, {default, 0})),
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(2, Packets2))),
+    %% We update counter (from another LNS)
+    ?assertEqual(4, ets:update_counter(ETS, Key, {2, 1}, {default, 0})),
+    %% This should be the last time we make anothe request to get latest count
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(3, Packets2))),
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(4, Packets2))),
+    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(5, Packets2))),
+
+    ?assertEqual(3, meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2)),
+
     ?assert(meck:validate(helium_multi_buy_multi_buy_client)),
     meck:unload(helium_multi_buy_multi_buy_client),
+    ets:delete(ETS),
     ok.
 
 active_locked_route_test(_Config) ->
