@@ -29,7 +29,8 @@
         recon,
         observer_cli,
         gproc,
-        backoff
+        backoff,
+        poolboy
     ]},
     {env, []},
     {modules, []},
