@@ -97,13 +97,13 @@ observe_multi_buy({Status, _}, Time) ->
     ).
 
 -spec observe_find_routes(
-    Start :: non_neg_integer()
+    Time :: non_neg_integer()
 ) -> ok.
-observe_find_routes(Start) ->
+observe_find_routes(Time) ->
     prometheus_histogram:observe(
         ?METRICS_FIND_ROUTES_HISTOGRAM,
         [],
-        erlang:system_time(millisecond) - Start
+        Time
     ).
 
 -spec observe_grpc_connection(
@@ -214,12 +214,17 @@ record_eui_pairs() ->
 
 -spec record_skfs() -> ok.
 record_skfs() ->
-    case ets:info(hpr_route_skfs_ets, size) of
-        undefined ->
-            _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], 0);
-        N ->
-            _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], N)
-    end,
+    Count = lists:foldl(
+        fun({_RouteID, {_Route, SKFETS}}, Acc) ->
+            case ets:info(SKFETS, size) of
+                undefined -> Acc;
+                N -> N + Acc
+            end
+        end,
+        0,
+        ets:tab2list(hpr_routes_ets)
+    ),
+    _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], Count),
     ok.
 
 -spec record_grpc_connections() -> ok.
