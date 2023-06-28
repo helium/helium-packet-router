@@ -3,18 +3,22 @@
 -include("../autogen/packet_router_pb.hrl").
 
 -export([
-    rx1_frequency/1,
-    rx2_frequency/1,
-    window/1,
     payload/1,
     rx1_timestamp/1,
+    rx1_frequency/1,
     rx1_datarate/1,
+    rx2_frequency/1,
     rx2_datarate/1,
+    gateway/1,
     is_immediate/1,
-    window/3,
-    new_imme_downlink/3,
-    new_downlink/4,
-    new_downlink/5
+    window/1,
+    window/3
+]).
+
+-export([
+    new_imme_downlink/4,
+    new_downlink/5,
+    new_downlink/6
 ]).
 
 -type packet() :: packet_router_pb:packet_router_packet_down_v1_pb().
@@ -25,16 +29,6 @@
     downlink_packet/0
 ]).
 
--spec rx1_frequency(PacketDown :: packet()) ->
-    Frequency :: non_neg_integer() | undefined.
-rx1_frequency(PacketDown) ->
-    PacketDown#packet_router_packet_down_v1_pb.rx1#window_v1_pb.frequency.
-
--spec rx2_frequency(PacketDown :: packet()) ->
-    Frequency :: non_neg_integer() | undefined.
-rx2_frequency(PacketDown) ->
-    PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.frequency.
-
 -spec payload(PacketDown :: packet()) -> iodata() | undefined.
 payload(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.payload.
@@ -43,13 +37,27 @@ payload(PacketDown) ->
 rx1_timestamp(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx1#window_v1_pb.timestamp.
 
+-spec rx1_frequency(PacketDown :: packet()) ->
+    Frequency :: non_neg_integer() | undefined.
+rx1_frequency(PacketDown) ->
+    PacketDown#packet_router_packet_down_v1_pb.rx1#window_v1_pb.frequency.
+
 -spec rx1_datarate(PacketDown :: packet()) -> atom() | integer() | undefined.
 rx1_datarate(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx1#window_v1_pb.datarate.
 
+-spec rx2_frequency(PacketDown :: packet()) ->
+    Frequency :: non_neg_integer() | undefined.
+rx2_frequency(PacketDown) ->
+    PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.frequency.
+
 -spec rx2_datarate(PacketDown :: packet()) -> atom() | integer() | undefined.
 rx2_datarate(PacketDown) ->
     PacketDown#packet_router_packet_down_v1_pb.rx2#window_v1_pb.datarate.
+
+-spec gateway(PacketDown :: packet()) -> iodata() | undefined.
+gateway(PacketDown) ->
+    PacketDown#packet_router_packet_down_v1_pb.gateway.
 
 -spec is_immediate(PacketDown :: packet()) -> boolean().
 is_immediate(PacketDown) ->
@@ -87,9 +95,10 @@ window(TS, FrequencyHz, DataRate) ->
 -spec new_imme_downlink(
     Payload :: binary(),
     FrequencyHz :: non_neg_integer(),
-    DataRate :: atom() | number()
+    DataRate :: atom() | number(),
+    Gateway :: binary()
 ) -> downlink_packet().
-new_imme_downlink(Payload, FrequencyHz, DataRate) ->
+new_imme_downlink(Payload, FrequencyHz, DataRate, Gateway) ->
     #packet_router_packet_down_v1_pb{
         payload = Payload,
         rx1 = #window_v1_pb{
@@ -98,30 +107,34 @@ new_imme_downlink(Payload, FrequencyHz, DataRate) ->
             datarate = DataRate,
             immediate = true
         },
-        rx2 = undefined
+        rx2 = undefined,
+        gateway = Gateway
     }.
 
 -spec new_downlink(
     Payload :: binary(),
     Timestamp :: non_neg_integer(),
     Frequency :: atom() | number(),
-    DataRate :: atom() | integer()
+    DataRate :: atom() | integer(),
+    Gateway :: binary()
 ) -> downlink_packet().
-new_downlink(Payload, Timestamp, FrequencyHz, DataRate) ->
-    new_downlink(Payload, Timestamp, FrequencyHz, DataRate, undefined).
+new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Gateway) ->
+    new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Gateway, undefined).
 
 -spec new_downlink(
     Payload :: binary(),
     Timestamp :: non_neg_integer(),
     Frequency :: atom() | number(),
     DataRate :: atom() | integer(),
+    Gateway :: binary(),
     Rx2 :: packet_router_pb:window_v1_pb() | undefined
 ) -> downlink_packet().
-new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
+new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Gateway, Rx2) ->
     #packet_router_packet_down_v1_pb{
         payload = Payload,
         rx1 = window(Timestamp, FrequencyHz, DataRate),
-        rx2 = window(Rx2)
+        rx2 = window(Rx2),
+        gateway = Gateway
     }.
 
 %% ------------------------------------------------------------------
@@ -136,20 +149,7 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
 -define(FAKE_FREQUENCY, 2).
 -define(FAKE_DATARATE, 'SF12BW125').
 -define(FAKE_PAYLOAD, <<"fake payload">>).
-
-window_test() ->
-    ?assertEqual(undefined, window(undefined)),
-    ?assertEqual(#window_v1_pb{}, window(#{})),
-    ?assertEqual(ok, packet_router_pb:verify_msg(window(fake_window()), window_v1_pb)),
-    ?assertEqual(ok, packet_router_pb:verify_msg(window(#{}), window_v1_pb)).
-
-rx1_frequency_test() ->
-    PacketDown = fake_downlink(),
-    ?assertEqual(?FAKE_FREQUENCY, rx1_frequency(PacketDown)).
-
-rx2_frequency_test() ->
-    PacketDown = fake_downlink(),
-    ?assertEqual(?FAKE_FREQUENCY, rx2_frequency(PacketDown)).
+-define(FAKE_GATEWAY, <<"fake gateway">>).
 
 payload_test() ->
     PacketDown = fake_downlink(),
@@ -159,13 +159,31 @@ rx1_timestamp_test() ->
     PacketDown = fake_downlink(),
     ?assertEqual(?FAKE_TIMESTAMP, rx1_timestamp(PacketDown)).
 
+rx1_frequency_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_FREQUENCY, rx1_frequency(PacketDown)).
+
 rx1_datarate_test() ->
     PacketDown = fake_downlink(),
     ?assertEqual(?FAKE_DATARATE, rx1_datarate(PacketDown)).
 
+rx2_frequency_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_FREQUENCY, rx2_frequency(PacketDown)).
+
 rx2_datarate_test() ->
     PacketDown = fake_downlink(),
     ?assertEqual(?FAKE_DATARATE, rx2_datarate(PacketDown)).
+
+gateway_test() ->
+    PacketDown = fake_downlink(),
+    ?assertEqual(?FAKE_GATEWAY, gateway(PacketDown)).
+
+window_test() ->
+    ?assertEqual(undefined, window(undefined)),
+    ?assertEqual(#window_v1_pb{}, window(#{})),
+    ?assertEqual(ok, packet_router_pb:verify_msg(window(fake_window()), window_v1_pb)),
+    ?assertEqual(ok, packet_router_pb:verify_msg(window(#{}), window_v1_pb)).
 
 new_downlink_test() ->
     PacketDown = new_downlink(
@@ -173,6 +191,7 @@ new_downlink_test() ->
         ?FAKE_TIMESTAMP,
         ?FAKE_FREQUENCY,
         ?FAKE_DATARATE,
+        ?FAKE_GATEWAY,
         window(fake_window())
     ),
     ?assertEqual(
@@ -187,7 +206,8 @@ new_downlink_test() ->
                 timestamp = ?FAKE_TIMESTAMP,
                 frequency = ?FAKE_FREQUENCY,
                 datarate = ?FAKE_DATARATE
-            }
+            },
+            gateway = ?FAKE_GATEWAY
         },
         PacketDown
     ).
@@ -202,7 +222,7 @@ encoding_test() ->
                 <<32, 120, 27, 32, 121, 54, 203, 110, 31, 45, 232, 6, 197, 16, 15, 132, 203, 12,
                     255, 166, 46, 81, 160, 71, 139, 27, 16, 13, 91, 244, 192, 244, 69>>,
                 {window_v1_pb, 3188801119, 9.257e8, 'SF10BW500', false},
-                {window_v1_pb, 3189801119, 9.233e8, 'SF12BW500', false}}
+                {window_v1_pb, 3189801119, 9.233e8, 'SF12BW500', false}, <<"gateway">>}
         )
     ).
 
@@ -225,6 +245,7 @@ fake_downlink() ->
         ?FAKE_TIMESTAMP,
         ?FAKE_FREQUENCY,
         ?FAKE_DATARATE,
+        ?FAKE_GATEWAY,
         window(fake_window())
     ).
 
