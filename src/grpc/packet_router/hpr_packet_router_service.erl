@@ -33,18 +33,13 @@ route(eos, StreamState) ->
 route(EnvUp, StreamState) ->
     try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
-            PubKeyBin = hpr_packet_up:gateway(PacketUp),
-            case ?MODULE:locate(PubKeyBin) of
-                {ok, _} ->
-                    _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp], [
-                        link,
-                        {fullsweep_after, 0}
-                    ]),
-                    {ok, StreamState};
-                {error, not_found} ->
-                    lager:warning("not accepting packet from unregistered"),
-                    {ok, StreamState}
-            end;
+            _ = erlang:spawn_opt(
+                hpr_routing,
+                handle_packet,
+                [PacketUp],
+                [link, {fullsweep_after, 0}]
+            ),
+            {ok, StreamState};
         {register, Reg} ->
             PubKeyBin = hpr_register:gateway(Reg),
             lager:md([{gateway, hpr_utils:gateway_name(PubKeyBin)}]),
@@ -113,7 +108,7 @@ register(PubKeyBin) ->
         {error, not_found} ->
             true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
             lager:debug("register"),
-            hpr_protocol_router:register(PubKeyBin),
+            hpr_protocol_router:register(PubKeyBin, Self),
             ok;
         {ok, Self} ->
             lager:info("nothing to do, already registered"),
