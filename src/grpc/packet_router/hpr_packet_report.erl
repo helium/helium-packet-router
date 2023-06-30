@@ -251,7 +251,7 @@ new_test() ->
             payload_hash => PHash,
             payload_size => PSize
         }),
-        ?MODULE:new(TestPacket, TestRoute)
+        ?MODULE:new(TestPacket, TestRoute, false, Now)
     ).
 
 -endif.
