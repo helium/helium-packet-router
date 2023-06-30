@@ -10,7 +10,8 @@
     init/0,
     send/2,
     get_stream/3,
-    remove_stream/2
+    remove_stream/2,
+    register/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -41,7 +42,7 @@
 -define(CLEANUP_TIME, timer:seconds(30)).
 -endif.
 
--record(state, {}).
+-record(state, {waiting_cleanups :: map()}).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -97,13 +98,17 @@ remove_stream(Gateway, LNS) ->
             ok
     end.
 
+-spec register(PubKeyBin :: binary()) -> ok.
+register(PubKeyBin) ->
+    gen_server:cast(?MODULE, {register, PubKeyBin}).
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
 init(_Args) ->
-    lager:info("~p started", [?MODULE]),
-    {ok, #state{}}.
+    lager:debug("~p started", [?MODULE]),
+    {ok, #state{waiting_cleanups = #{}}}.
 
 -spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
 handle_call(Msg, _From, State) ->
@@ -112,19 +117,42 @@ handle_call(Msg, _From, State) ->
 
 handle_cast({monitor, Gateway, LNS, Pid}, State) ->
     _ = erlang:monitor(process, Pid, [{tag, {'DOWN', Gateway, LNS}}]),
-    lager:debug("monitoring gateway stream ~p", [Pid]),
+    Name = hpr_utils:gateway_name(Gateway),
+    lager:debug("monitoring gateway stream ~s ~p", [Name, Pid]),
     {noreply, State};
+handle_cast({register, PubKeyBin}, #state{waiting_cleanups = WaitingCleanups0} = State) ->
+    WaitingCleanups1 =
+        case maps:take(PubKeyBin, WaitingCleanups0) of
+            error ->
+                WaitingCleanups0;
+            {CleanupTimerRef, NewMap} ->
+                TimeLeft = erlang:cancel_timer(CleanupTimerRef),
+                lager:info(
+                    [{time_left_ms, TimeLeft}],
+                    "gw registered while waiting to take down streams"
+                ),
+                NewMap
+        end,
+    {noreply, State#state{waiting_cleanups = WaitingCleanups1}};
 handle_cast(_Msg, State) ->
     lager:warning("unknown cast ~p", [_Msg]),
     {noreply, State}.
 
 handle_info(
     {{'DOWN', Gateway, LNS}, _Monitor, process, _Pid, _ExitReason},
-    #state{} = State
+    #state{waiting_cleanups = WaitingCleanups} = State
 ) ->
-    lager:debug("gateway stream ~p went down: ~p waiting ~wms", [_Pid, _ExitReason, ?CLEANUP_TIME]),
-    ok = maybe_trigger_cleanup(Gateway, LNS),
-    {noreply, State};
+    Name = hpr_utils:gateway_name(Gateway),
+    lager:debug("gateway ~s stream ~p went down: ~p waiting ~wms", [
+        Name, _Pid, _ExitReason, ?CLEANUP_TIME
+    ]),
+    CleanupTimer = erlang:send_after(?CLEANUP_TIME, self(), {remove_stream, Gateway}),
+    {noreply, State#state{waiting_cleanups = WaitingCleanups#{Gateway => CleanupTimer}}};
+handle_info({remove_stream, Gateway}, #state{waiting_cleanups = WaitingCleanups} = State) ->
+    Name = hpr_utils:gateway_name(Gateway),
+    lager:debug([{gateway, Name}], "removing streams"),
+    ?MODULE:remove_stream(Gateway),
+    {noreply, State#state{waiting_cleanups = maps:without([Gateway], WaitingCleanups)}};
 handle_info(_Msg, State) ->
     lager:warning("unknown info ~p", [_Msg]),
     {noreply, State}.
@@ -135,6 +163,52 @@ terminate(_Reason, _State = #state{}) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+-spec maybe_trigger_monitor(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
+maybe_trigger_monitor(Gateway, LNS) ->
+    Name = hpr_utils:gateway_name(Gateway),
+    lager:debug("~p :: ~p", [?FUNCTION_NAME, Name]),
+    erlang:spawn(fun() ->
+        case hpr_packet_router_service:locate(Gateway) of
+            {ok, Pid} ->
+                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS, Pid});
+            {error, _Reason} ->
+                lager:debug(
+                    "failed to monitor gateway (~s) stream for lns (~s) ~p",
+                    [
+                        hpr_utils:gateway_name(Gateway), LNS, _Reason
+                    ]
+                ),
+                %% Instead of doing a remove_stream, we trigger a maybe cleaup, we dont kill
+                %% the stream to Router right away so if a downlink comes back and
+                %% the gateway reconnected we can still send that downlink
+                ok = maybe_trigger_cleanup(Gateway, LNS)
+        end
+    end),
+    ok.
+
+-spec maybe_trigger_cleanup(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> pid().
+maybe_trigger_cleanup(Gateway, LNS) ->
+    Name = hpr_utils:gateway_name(Gateway),
+    lager:debug("~p :: ~p", [?FUNCTION_NAME, Name]),
+    erlang:spawn(fun() ->
+        timer:sleep(10000),
+        lager:debug("checking for ~p in ~pms", [Name, 20000]),
+        timer:sleep(10000),
+        lager:debug("checking for ~p in ~pms", [Name, 10000]),
+        timer:sleep(10000),
+        lager:debug("checking for ~p now", [Name]),
+        case hpr_packet_router_service:locate(Gateway) of
+            {error, _Reason} ->
+                lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
+                ?MODULE:remove_stream(Gateway, LNS);
+            {ok, NewPid} ->
+                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS, NewPid}),
+                lager:debug("monitoring new gateway stream ~p", [NewPid])
+        end
+    end).
+%% ,
+%% ok.
 
 -spec get_stream(
     Gateway :: libp2p_crypto:pubkey_bin(),
@@ -245,6 +319,7 @@ connect(LNS, Server) ->
     case grpcbox_channel:pick(LNS, stream) of
         %% No connection, lets try to connect
         {error, _} ->
+            lager:debug("connecting for the first time: ~p", [LNS]),
             Host = hpr_route:host(Server),
             Port = hpr_route:port(Server),
             case
@@ -259,42 +334,6 @@ connect(LNS, Server) ->
         {ok, {_Conn, _Interceptor}} ->
             ok
     end.
-
--spec maybe_trigger_monitor(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
-maybe_trigger_monitor(Gateway, LNS) ->
-    erlang:spawn(fun() ->
-        case hpr_packet_router_service:locate(Gateway) of
-            {ok, Pid} ->
-                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS, Pid});
-            {error, _Reason} ->
-                lager:debug(
-                    "failed to monitor gateway (~s) stream for lns (~s) ~p",
-                    [
-                        hpr_utils:gateway_name(Gateway), LNS, _Reason
-                    ]
-                ),
-                %% Instead of doing a remove_stream, we trigger a maybe cleaup, we dont kill
-                %% the stream to Router right away so if a downlink comes back and
-                %% the gateway reconnected we can still send that downlink
-                ok = maybe_trigger_cleanup(Gateway, LNS)
-        end
-    end),
-    ok.
-
--spec maybe_trigger_cleanup(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
-maybe_trigger_cleanup(Gateway, LNS) ->
-    erlang:spawn(fun() ->
-        timer:sleep(?CLEANUP_TIME),
-        case hpr_packet_router_service:locate(Gateway) of
-            {error, _Reason} ->
-                lager:debug("connot find a gateway stream: ~p, shutting down", [_Reason]),
-                ?MODULE:remove_stream(Gateway, LNS);
-            {ok, NewPid} ->
-                ok = gen_server:cast(?MODULE, {monitor, Gateway, LNS, NewPid}),
-                lager:debug("monitoring new gateway stream ~p", [NewPid])
-        end
-    end),
-    ok.
 
 %% ------------------------------------------------------------------
 %% Tests Functions
