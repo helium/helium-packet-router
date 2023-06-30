@@ -33,12 +33,7 @@ route(eos, StreamState) ->
 route(EnvUp, StreamState) ->
     try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
-            _ = erlang:spawn_opt(
-                hpr_routing,
-                handle_packet,
-                [PacketUp],
-                [link, {fullsweep_after, 0}]
-            ),
+            _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp], [{fullsweep_after, 0}]),
             {ok, StreamState};
         {register, Reg} ->
             PubKeyBin = hpr_register:gateway(Reg),
