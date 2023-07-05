@@ -174,7 +174,9 @@ http_sync_uplink_join_test(_Config) ->
                 ),
                 <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
                 <<"RFRegion">> => erlang:atom_to_binary(Region),
-                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime),
+                <<"RecvTime">> => formatted_timestamp_within_one_second(
+                    hpr_http_roaming_utils:format_time(GatewayTime)
+                ),
 
                 <<"FNSULToken">> => fun erlang:is_binary/1,
                 <<"GWCnt">> => 1,
@@ -395,7 +397,9 @@ http_async_uplink_join_test(_Config) ->
                 ),
                 <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
                 <<"RFRegion">> => erlang:atom_to_binary(Region),
-                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime),
+                <<"RecvTime">> => formatted_timestamp_within_one_second(
+                    hpr_http_roaming_utils:format_time(GatewayTime)
+                ),
 
                 <<"FNSULToken">> => fun erlang:is_binary/1,
                 <<"GWCnt">> => 1,
@@ -640,7 +644,9 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
                 ),
                 <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
                 <<"RFRegion">> => erlang:atom_to_binary(Region),
-                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime),
+                <<"RecvTime">> => formatted_timestamp_within_one_second(
+                    hpr_http_roaming_utils:format_time(GatewayTime)
+                ),
 
                 <<"FNSULToken">> => fun erlang:is_binary/1,
                 <<"GWCnt">> => 1,
@@ -723,7 +729,10 @@ http_uplink_packet_test(_Config) ->
                 ),
                 <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
                 <<"RFRegion">> => erlang:atom_to_binary(Region),
-                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime),
+                <<"RecvTime">> => formatted_timestamp_within_one_second(
+                    hpr_http_roaming_utils:format_time(GatewayTime)
+                ),
+
                 <<"FNSULToken">> => fun erlang:is_binary/1,
                 <<"GWCnt">> => 1,
                 <<"GWInfo">> => [
@@ -926,7 +935,9 @@ http_multiple_gateways_test(_Config) ->
                 ),
                 <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp1),
                 <<"RFRegion">> => erlang:atom_to_binary(Region),
-                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime1),
+                <<"RecvTime">> => formatted_timestamp_within_one_second(
+                    hpr_http_roaming_utils:format_time(GatewayTime1)
+                ),
 
                 <<"FNSULToken">> => fun erlang:is_binary/1,
                 <<"GWCnt">> => 2,
@@ -1057,7 +1068,9 @@ http_multiple_gateways_single_shot_test(_Config) ->
                 ),
                 <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp1),
                 <<"RFRegion">> => erlang:atom_to_binary(Region),
-                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime1),
+                <<"RecvTime">> => formatted_timestamp_within_one_second(
+                    hpr_http_roaming_utils:format_time(GatewayTime1)
+                ),
 
                 <<"FNSULToken">> => fun erlang:is_binary/1,
                 <<"GWCnt">> => 1,
@@ -1208,7 +1221,9 @@ http_uplink_packet_late_test(_Config) ->
                 ),
                 <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp1),
                 <<"RFRegion">> => erlang:atom_to_binary(Region),
-                <<"RecvTime">> => hpr_http_roaming_utils:format_time(GatewayTime1),
+                <<"RecvTime">> => formatted_timestamp_within_one_second(
+                    hpr_http_roaming_utils:format_time(GatewayTime1)
+                ),
 
                 <<"FNSULToken">> => fun erlang:is_binary/1,
                 <<"GWCnt">> => 1,
@@ -1773,4 +1788,22 @@ roamer_expect_response(Code) ->
         {http_downlink_data_response, OtherCode} ->
             ct:fail({http_downlink_data_response_err, [{expected, Code}, {got, OtherCode}]})
     after 1000 -> ct:fail(http_downlink_data_200_response_timeout)
+    end.
+
+%% RecvTime is the time the server receives the packet by second granularity.
+%% The time from when the packet was constructed in a test to when it's
+%% processed may cross the second barrier, leading to inconsistent tests.
+%% Downlinks are not calculated from that timestamp, so we want to make sure
+%% they're at least within a second of each other.
+-spec formatted_timestamp_within_one_second(string()) -> fun((string()) -> boolean()).
+formatted_timestamp_within_one_second(Expected) ->
+    fun(Incoming) ->
+        case Expected == Incoming of
+            true ->
+                true;
+            false ->
+                {{_, _, _}, {_, _, Sec1}} = iso8601:parse(Expected),
+                {{_, _, _}, {_, _, Sec2}} = iso8601:parse(Incoming),
+                erlang:abs(Sec1 - Sec2) =< 1
+        end
     end.
