@@ -63,10 +63,10 @@ start_link(Args) ->
 -spec handle_packet(
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
-    GatewayTime :: hpr_http_roaming:gateway_time()
+    ReceivedTime :: hpr_http_roaming:received_timee()
 ) -> ok | {error, any()}.
-handle_packet(Pid, PacketUp, GatewayTime) ->
-    gen_server:cast(Pid, {handle_packet, PacketUp, GatewayTime}).
+handle_packet(Pid, PacketUp, ReceivedTime) ->
+    gen_server:cast(Pid, {handle_packet, PacketUp, ReceivedTime}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -98,18 +98,18 @@ handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(
-    {handle_packet, PacketUp, GatewayTime},
+    {handle_packet, PacketUp, ReceiveTime},
     #state{send_data_timer = 0, shutdown_timer_ref = ShutdownTimerRef0} = State
 ) ->
     ok = hpr_packet_up:md(PacketUp),
     {ok, StateWithPacket} = do_handle_packet(
-        PacketUp, GatewayTime, State
+        PacketUp, ReceiveTime, State
     ),
     ok = send_data(StateWithPacket),
     {ok, ShutdownTimerRef1} = maybe_schedule_shutdown(ShutdownTimerRef0),
     {noreply, State#state{shutdown_timer_ref = ShutdownTimerRef1}};
 handle_cast(
-    {handle_packet, PacketUp, GatewayTime},
+    {handle_packet, PacketUp, ReceiveTime},
     #state{
         should_shutdown = false,
         send_data_timer = Timeout,
@@ -117,7 +117,7 @@ handle_cast(
     } = State0
 ) ->
     ok = hpr_packet_up:md(PacketUp),
-    {ok, State1} = do_handle_packet(PacketUp, GatewayTime, State0),
+    {ok, State1} = do_handle_packet(PacketUp, ReceiveTime, State0),
     {ok, TimerRef1} = maybe_schedule_send_data(Timeout, TimerRef0),
     {noreply, State1#state{send_data_timer_ref = TimerRef1}};
 handle_cast(
@@ -173,15 +173,15 @@ next_transaction_id() ->
 
 -spec do_handle_packet(
     PacketUp :: hpr_packet_up:packet(),
-    GatewayTime :: hpr_http_roaming:gateway_time(),
+    ReceiveTime :: hpr_http_roaming:received_timee(),
     State :: #state{}
 ) -> {ok, #state{}}.
 do_handle_packet(
-    PacketUp, GatewayTime, #state{packets = Packets} = State
+    PacketUp, ReceiveTime, #state{packets = Packets} = State
 ) ->
     State1 = State#state{
         packets = [
-            hpr_http_roaming:new_packet(PacketUp, GatewayTime) | Packets
+            hpr_http_roaming:new_packet(PacketUp, ReceiveTime) | Packets
         ]
     },
     {ok, State1}.

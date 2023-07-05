@@ -45,7 +45,7 @@
 -type xmitdata_ans() :: map().
 
 -type netid_num() :: non_neg_integer().
--type gateway_time() :: non_neg_integer().
+-type received_time() :: non_neg_integer().
 
 -type downlink() :: {
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
@@ -62,7 +62,7 @@
 
 -record(packet, {
     packet_up :: hpr_packet_up:packet(),
-    gateway_time :: gateway_time()
+    received_time :: received_time()
 }).
 -type packet() :: #packet{}.
 
@@ -71,7 +71,7 @@
 -export_type([
     netid_num/0,
     packet/0,
-    gateway_time/0,
+    received_time/0,
     downlink/0,
     downlink_packet/0
 ]).
@@ -82,12 +82,12 @@
 
 -spec new_packet(
     PacketUp :: hpr_packet_up:packet(),
-    GatewayTime :: gateway_time()
+    ReceivedTime :: received_time()
 ) -> #packet{}.
-new_packet(PacketUp, GatewayTime) ->
+new_packet(PacketUp, ReceivedTime) ->
     #packet{
         packet_up = PacketUp,
-        gateway_time = GatewayTime
+        received_time = ReceivedTime
     }.
 
 -spec make_uplink_payload(
@@ -110,7 +110,7 @@ make_uplink_payload(
 ) ->
     #packet{
         packet_up = PacketUp,
-        gateway_time = GatewayTime
+        received_time = ReceivedTime
     } = select_best(Uplinks),
     Payload = hpr_packet_up:payload(PacketUp),
     PacketTime = hpr_packet_up:timestamp(PacketUp),
@@ -141,7 +141,7 @@ make_uplink_payload(
             RoutingKey => RoutingValue,
             'DataRate' => hpr_lorawan:datarate_to_index(Region, DataRate),
             'ULFreq' => Frequency,
-            'RecvTime' => hpr_http_roaming_utils:format_time(GatewayTime),
+            'RecvTime' => hpr_http_roaming_utils:format_time(ReceivedTime),
             'RFRegion' => Region,
             'FNSULToken' => Token,
             'GWCnt' => erlang:length(Uplinks),
