@@ -16,12 +16,9 @@ start(_StartType, _StartArgs) ->
             Error;
         OK ->
             hpr_cli_registry:register_cli(),
-            {ok, _} = application:ensure_all_started(grpcbox),
             OK
     end.
 
 stop(_State) ->
     lager:info("stopping app"),
-    %% TODO: This hangs indefinitely in ct tests, unsure why
-    %% _ = catch application:stop(grpcbox),
     ok.
