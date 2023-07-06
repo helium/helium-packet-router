@@ -80,9 +80,8 @@ find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
     Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
     {ok, [{R, 0} || R <- Routes]};
 find_routes({uplink, {_Type, DevAddr}}, Packet) ->
-    Start = erlang:system_time(millisecond),
-    Results = find_routes_for_uplink(Packet, DevAddr),
-    ok = hpr_metrics:observe_find_routes(Start),
+    {Time, Results} = timer:tc(fun() -> find_routes_for_uplink(Packet, DevAddr) end),
+    ok = hpr_metrics:observe_find_routes(Time),
     Results.
 
 %% ------------------------------------------------------------------
