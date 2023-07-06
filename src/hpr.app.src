@@ -15,7 +15,9 @@
         aws,
         throttle,
         helium_proto,
+        grpcbox,
         clique,
+        erlang_lorawan,
         libp2p_crypto,
         erl_angry_purple_tiger,
         jsx,
@@ -29,7 +31,7 @@
         gproc,
         backoff
     ]},
-    {included_applications, [grpcbox, erlang_lorawan]},
+    {included_applications, []},
     {env, []},
     {modules, []},
     {licenses, ["Apache 2.0"]},
