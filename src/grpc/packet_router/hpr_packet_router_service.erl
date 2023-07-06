@@ -103,6 +103,7 @@ register(PubKeyBin) ->
         {error, not_found} ->
             true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
             lager:debug("register"),
+            hpr_protocol_router:register(PubKeyBin, Self),
             ok;
         {ok, Self} ->
             lager:info("nothing to do, already registered"),

@@ -31,6 +31,7 @@
         gproc,
         backoff
     ]},
+    {included_applications, [grpcbox, erlang_lorawan]},
     {env, []},
     {modules, []},
     {licenses, ["Apache 2.0"]},
