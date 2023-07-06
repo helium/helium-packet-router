@@ -53,7 +53,9 @@ start_link(Args) ->
 
 -spec init() -> ok.
 init() ->
-    ?STREAM_ETS = ets:new(?STREAM_ETS, [public, named_table, set, {read_concurrency, true}]),
+    ?STREAM_ETS = ets:new(?STREAM_ETS, [
+        public, named_table, set, {read_concurrency, true}, {write_concurrency, true}
+    ]),
     ok.
 
 -spec send(
