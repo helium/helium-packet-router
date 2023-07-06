@@ -1,5 +1,7 @@
 # Helium Packet Router
 
+## [Routing](docs/routing.md)
+
 ## Releases
 As releases are tagged on github, debian packages will be automatically built
 and uploaded to a [repo here][1].

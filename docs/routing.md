@@ -53,7 +53,7 @@ Upon request, an OUI is [created](https://github.com/helium/proto/blob/master/sr
 
 ### Route
 
-Routes tells each HPR exactly where to send data packets. To [create](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L671) a [Route](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L120) we recommend using the [Helium Config Service CLI](https://github.com/helium/helium-config-service-cli).
+Routes tells each HPR exactly where to send data packets. To [create](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L673) a [Route](https://github.com/helium/proto/blob/master/src/service/iot_config.proto#L120) we recommend using the [Helium Config Service CLI](https://github.com/helium/helium-config-service-cli).
 
 1. You will need to set your `net_id`, it should match the one assigned to you when you OUI was created.
 2. Set its `oui`.
