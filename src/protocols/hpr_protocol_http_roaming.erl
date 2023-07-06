@@ -35,10 +35,8 @@ send(PacketUp, Route) ->
             ),
             {error, worker_not_started};
         {ok, WorkerPid} ->
-            GatewayTime = hpr_packet_up:timestamp(PacketUp),
-            hpr_http_roaming_worker:handle_packet(
-                WorkerPid, PacketUp, GatewayTime
-            ),
+            RecvTime = erlang:system_time(millisecond),
+            hpr_http_roaming_worker:handle_packet(WorkerPid, PacketUp, RecvTime),
             ok
     end.
 
