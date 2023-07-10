@@ -117,6 +117,8 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
     %% - EUI Count :: 2  (AppEUI, DevEUI)
     %% --- (010203040506070809, 010203040506070809)
     %% --- (0A0B0C0D0E0F0G0102, 0A0B0C0D0E0F0G0102)
+    %% - SKF (DevAddr, SKF, MaxCopies, Timestamp) :: 1
+    %% --- (00000007, 91919193DA7B33923FFBE34078000010, 2, 1689030396950)
 
     Header = io_lib:format("OUI ~p~n", [OUI]),
     Spacer = io_lib:format("========================================================~n", []),
@@ -167,7 +169,7 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
             erlang:length(SKFs)
         ]),
         SKFInfo =
-            case maps:is_key(display_euis, Options) of
+            case maps:is_key(display_skfs, Options) of
                 false ->
                     [SKFHeader];
                 true ->
