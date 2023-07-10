@@ -185,22 +185,23 @@ handle_message(#{<<"MessageType">> := MT} = M) ->
 
 -spec handle_prstart_ans(prstart_ans()) ->
     ok | {join_accept, downlink(), pr_start_notif()} | {error, any()}.
-handle_prstart_ans(#{
-    <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
-    <<"MessageType">> := <<"PRStartAns">>,
-    <<"SenderID">> := ReceiverID,
-    <<"SenderNSID">> := ReceiverNSID,
-    <<"TransactionID">> := TransactionID,
+handle_prstart_ans(
+    #{
+        <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
+        <<"MessageType">> := <<"PRStartAns">>,
+        <<"SenderID">> := ReceiverID,
+        <<"TransactionID">> := TransactionID,
 
-    <<"PHYPayload">> := Payload,
-    <<"DevEUI">> := _DevEUI,
+        <<"PHYPayload">> := Payload,
+        <<"DevEUI">> := _DevEUI,
 
-    <<"DLMetaData">> := #{
-        <<"DLFreq1">> := FrequencyMhz,
-        <<"DataRate1">> := DR,
-        <<"FNSULToken">> := Token
-    } = DLMeta
-}) ->
+        <<"DLMetaData">> := #{
+            <<"DLFreq1">> := FrequencyMhz,
+            <<"DataRate1">> := DR,
+            <<"FNSULToken">> := Token
+        } = DLMeta
+    } = PRStart
+) ->
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
@@ -212,34 +213,44 @@ handle_prstart_ans(#{
                 hpr_lorawan:index_to_datarate(Region, DR),
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
             ),
-            PRStartNotif = #{
+            PRStartNotif0 = #{
                 'ProtocolVersion' => <<"1.1">>,
                 'SenderID' => <<"0xC00053">>,
                 'ReceiverID' => ReceiverID,
                 'TransactionID' => TransactionID,
                 'MessageType' => <<"PRStartNotif">>,
-                'SenderNSID' => hpr_utils:sender_nsid(),
-                'ReceiverNSID' => ReceiverNSID,
                 'Result' => #{'ResultCode' => <<"Success">>}
             },
-            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif, DestURL}}
+            PRStartNotif1 =
+                case maps:get(<<"SenderNSID">>, PRStart, undefined) of
+                    undefined ->
+                        PRStartNotif0;
+                    ReceiverNSID ->
+                        PRStartNotif0#{
+                            'SenderNSID' => hpr_utils:sender_nsid(),
+                            'ReceiverNSID' => ReceiverNSID
+                        }
+                end,
+
+            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif1, DestURL}}
     end;
-handle_prstart_ans(#{
-    <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
-    <<"MessageType">> := <<"PRStartAns">>,
-    <<"SenderID">> := ReceiverID,
-    <<"SenderNSID">> := ReceiverNSID,
-    <<"TransactionID">> := TransactionID,
+handle_prstart_ans(
+    #{
+        <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
+        <<"MessageType">> := <<"PRStartAns">>,
+        <<"SenderID">> := ReceiverID,
+        <<"TransactionID">> := TransactionID,
 
-    <<"PHYPayload">> := Payload,
-    <<"DevEUI">> := _DevEUI,
+        <<"PHYPayload">> := Payload,
+        <<"DevEUI">> := _DevEUI,
 
-    <<"DLMetaData">> := #{
-        <<"DLFreq2">> := FrequencyMhz,
-        <<"DataRate2">> := DR,
-        <<"FNSULToken">> := Token
-    }
-}) ->
+        <<"DLMetaData">> := #{
+            <<"DLFreq2">> := FrequencyMhz,
+            <<"DataRate2">> := DR,
+            <<"FNSULToken">> := Token
+        }
+    } = PRStart
+) ->
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
@@ -252,16 +263,24 @@ handle_prstart_ans(#{
                 DataRate,
                 undefined
             ),
-            PRStartNotif = #{
+            PRStartNotif0 = #{
                 'ProtocolVersion' => <<"1.1">>,
                 'SenderID' => <<"0xC00053">>,
                 'ReceiverID' => ReceiverID,
                 'TransactionID' => TransactionID,
                 'MessageType' => <<"PRStartNotif">>,
-                'SenderNSID' => hpr_utils:sender_nsid(),
-                'ReceiverNSID' => ReceiverNSID,
                 'Result' => #{'ResultCode' => <<"Success">>}
             },
+            PRStartNotif1 =
+                case maps:get(<<"SenderNSID">>, PRStart, undefined) of
+                    undefined ->
+                        PRStartNotif0;
+                    ReceiverNSID ->
+                        PRStartNotif0#{
+                            'SenderNSID' => hpr_utils:sender_nsid(),
+                            'ReceiverNSID' => ReceiverNSID
+                        }
+                end,
             {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif, DestURL}}
     end;
 handle_prstart_ans(#{
