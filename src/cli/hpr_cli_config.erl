@@ -88,9 +88,9 @@ config_list(["config", "ls"], [], []) ->
             {" Protocol ", hpr_route:protocol_type(Server)},
             {" Max Copies ", hpr_route:max_copies(Route)},
             {" Addr Ranges Cnt ",
-                erlang:length(hpr_route_ets:devaddr_ranges_for_route(hpr_route:id(Route)))},
-            {" EUIs Cnt ", erlang:length(hpr_route_ets:eui_pairs_for_route(hpr_route:id(Route)))},
-            {" SKFs Cnt ", erlang:length(hpr_route_ets:skfs_for_route(hpr_route:id(Route)))},
+                hpr_route_ets:devaddr_ranges_count_for_route(hpr_route:id(Route))},
+            {" EUIs Cnt ", hpr_route_ets:eui_pairs_count_for_route(hpr_route:id(Route))},
+            {" SKFs Cnt ", hpr_route_ets:skfs_count_for_route(hpr_route:id(Route))},
             {" Route ID ", hpr_route:id(Route)}
         ]
     end,
@@ -154,25 +154,35 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
         ),
         DevAddrInfo = [DevAddrHeader | DevAddrRanges],
 
-        EUIs = hpr_route_ets:eui_pairs_for_route(RouteID),
-        EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [erlang:length(EUIs)]),
         EUIInfo =
             case maps:is_key(display_euis, Options) of
                 false ->
+                    Count = hpr_route_ets:eui_pairs_count_for_route(RouteID),
+                    EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [Count]),
                     [EUIHeader];
                 true ->
+                    EUIs = hpr_route_ets:eui_pairs_for_route(RouteID),
+                    EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [
+                        erlang:length(EUIs)
+                    ]),
                     [EUIHeader | lists:map(FormatEUI, EUIs)]
             end,
 
-        SKFs = hpr_route_ets:skfs_for_route(RouteID),
-        SKFHeader = io_lib:format("- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [
-            erlang:length(SKFs)
-        ]),
         SKFInfo =
             case maps:is_key(display_skfs, Options) of
                 false ->
+                    SKFsCount = hpr_route_ets:skfs_count_for_route(RouteID),
+                    SKFHeader = io_lib:format(
+                        "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [SKFsCount]
+                    ),
                     [SKFHeader];
                 true ->
+                    SKFs = hpr_route_ets:skfs_for_route(RouteID),
+                    SKFHeader = io_lib:format(
+                        "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [
+                            erlang:length(SKFs)
+                        ]
+                    ),
                     [SKFHeader | lists:map(FormatSKF, SKFs)]
             end,
 

@@ -29,8 +29,11 @@
     all_routes/0,
     oui_routes/1,
     eui_pairs_for_route/1,
+    eui_pairs_count_for_route/1,
     devaddr_ranges_for_route/1,
-    skfs_for_route/1
+    devaddr_ranges_count_for_route/1,
+    skfs_for_route/1,
+    skfs_count_for_route/1
 ]).
 
 -define(ETS_ROUTES, hpr_routes_ets).
@@ -337,10 +340,20 @@ eui_pairs_for_route(RouteID) ->
     MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS_EUI_PAIRS, MS).
 
+-spec eui_pairs_count_for_route(RouteID :: string()) -> non_neg_integer().
+eui_pairs_count_for_route(RouteID) ->
+    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    ets:select_count(?ETS_EUI_PAIRS, MS).
+
 -spec devaddr_ranges_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 devaddr_ranges_for_route(RouteID) ->
     MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS_DEVADDR_RANGES, MS).
+
+-spec devaddr_ranges_count_for_route(RouteID :: string()) -> non_neg_integer().
+devaddr_ranges_count_for_route(RouteID) ->
+    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    ets:select_count(?ETS_DEVADDR_RANGES, MS).
 
 -spec skfs_for_route(RouteID :: string()) ->
     [{{integer(), binary()}, {non_neg_integer(), non_neg_integer()}}].
@@ -350,6 +363,15 @@ skfs_for_route(RouteID) ->
             ets:tab2list(SKFETS);
         _Other ->
             []
+    end.
+
+-spec skfs_count_for_route(RouteID :: string()) -> non_neg_integer().
+skfs_count_for_route(RouteID) ->
+    case ?MODULE:lookup_route(RouteID) of
+        [{_, SKFETS}] ->
+            ets:info(SKFETS, size);
+        _Other ->
+            0
     end.
 
 %% ------------------------------------------------------------------
