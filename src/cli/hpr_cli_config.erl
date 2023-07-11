@@ -40,7 +40,7 @@ config_usage() ->
             "config route <route_id>                     - Info for route\n",
             "    [--display_euis] default: false (EUIs not included)\n",
             "    [--display_skfs] default: false (SKFs not included)\n",
-            "config skf <devaddr>                        - List all Session Key Filters for Devaddr\n",
+            "config skf <DevAddr/Session Key>            - List all Session Key Filters for Devaddr or Session Key\n",
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
         ]
     ].
@@ -86,7 +86,8 @@ config_cmd() ->
 
 config_list(["config", "ls"], [], []) ->
     Routes = lists:sort(
-        fun(R1, R2) -> hpr_route:oui(R1) < hpr_route:oui(R2) end, hpr_route_ets:all_routes()
+        fun(R1, R2) -> hpr_route:oui(R1) < hpr_route:oui(R2) end,
+        hpr_route_ets:all_routes()
     ),
     %% | OUI | Net ID | Protocol     | Max Copies | Addr Range Cnt | EUI Cnt | Route ID                             |
     %% |-----+--------+--------------+------------+----------------+---------+--------------------------------------|
@@ -331,38 +332,64 @@ config_route(["config", "route", RouteID], [], Flags) ->
 config_route(_, _, _) ->
     usage.
 
-config_skf(["config", "skf", DevAddrString], [], []) ->
-    <<DevAddr:32/integer-unsigned-little>> = hpr_utils:hex_to_bin(
-        erlang:list_to_binary(DevAddrString)
-    ),
-    SKFS = lists:foldl(
-        fun({Route, ETS}, Acc) ->
-            RouteID = hpr_route:id(Route),
-            [
-                {SK, RouteID, LastUsed * -1, MaxCopies}
-             || {SK, LastUsed, MaxCopies} <- hpr_route_ets:lookup_skf(ETS, DevAddr)
-            ] ++ Acc
+config_skf(["config", "skf", DevAddrOrSKF], [], []) ->
+    SKFS =
+        case hpr_utils:hex_to_bin(erlang:list_to_binary(DevAddrOrSKF)) of
+            <<DevAddr:32/integer-unsigned-little>> ->
+                lists:foldl(
+                    fun({Route, ETS}, Acc) ->
+                        RouteID = hpr_route:id(Route),
+                        [
+                            {DevAddr, SK, RouteID, LastUsed * -1, MaxCopies}
+                         || {SK, LastUsed, MaxCopies} <- hpr_route_ets:lookup_skf(ETS, DevAddr)
+                        ] ++ Acc
+                    end,
+                    [],
+                    hpr_route_ets:lookup_devaddr_range(DevAddr)
+                );
+            SKF ->
+                Routes = hpr_route_ets:all_routes(),
+                find_skf(SKF, Routes, [])
         end,
-        [],
-        hpr_route_ets:lookup_devaddr_range(DevAddr)
-    ),
     case SKFS of
         [] ->
-            c_text("No SKF found");
+            c_text("No SKF found for ~p", [DevAddrOrSKF]);
         SKFs ->
-            MkRow = fun({SK, RouteID, LastUsed, MaxCopies}) ->
+            MkRow = fun({DevAddr, SK, RouteID, LastUsed, MaxCopies}) ->
                 [
                     {" Route ID ", RouteID},
                     {" Session Key ", hpr_utils:bin_to_hex_string(SK)},
                     {" Last Used ", LastUsed},
                     {" Max Copies ", MaxCopies},
-                    {" DevAddr ", DevAddrString}
+                    {" DevAddr ", hpr_utils:int_to_hex_string(DevAddr)}
                 ]
             end,
             c_table(lists:map(MkRow, SKFs))
     end;
 config_skf(_, _, _) ->
     usage.
+
+find_skf(_SKToFind, [], Acc) ->
+    Acc;
+find_skf(SKToFind, [Route | Routes], Acc0) ->
+    RouteID = hpr_route:id(Route),
+    case hpr_route_ets:skfs_for_route(RouteID) of
+        [] ->
+            find_skf(SKToFind, Routes, Acc0);
+        SKFs ->
+            Acc1 = lists:filtermap(
+                fun({{LastUsed, SK}, {DevAddr, MaxCopies}}) ->
+                    case SK =:= SKToFind of
+                        true ->
+                            {true, {DevAddr, SK, RouteID, LastUsed * -1, MaxCopies}};
+                        false ->
+                            false
+                    end
+                end,
+                SKFs
+            ),
+            find_skf(SKToFind, Routes, Acc0 ++ Acc1)
+    end.
 
 config_eui(["config", "eui"], [], Flags) ->
     case maps:from_list(Flags) of
@@ -413,3 +440,6 @@ c_list(L) -> [clique_status:list(L)].
 
 -spec c_text(string()) -> clique_status:status().
 c_text(T) -> [clique_status:text([T])].
+
+-spec c_text(string(), list(term())) -> clique_status:status().
+c_text(F, Args) -> c_text(io_lib:format(F, Args)).
