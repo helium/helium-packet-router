@@ -76,6 +76,9 @@ insert_route(Route) ->
         {oui, hpr_route:oui(Route)},
         {protocol, hpr_route:protocol_type(Server)},
         {max_copies, hpr_route:max_copies(Route)},
+        {active, hpr_route:active(Route)},
+        {locked, hpr_route:locked(Route)},
+        {ignore_empty_skf, hpr_route:ignore_empty_skf(Route)},
         {skf_ets, SKFETS}
     ],
     lager:info(RouteFields, "inserting route"),

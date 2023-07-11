@@ -40,6 +40,8 @@ config_usage() ->
             "config route <route_id>                     - Info for route\n",
             "    [--display_euis] default: false (EUIs not included)\n",
             "    [--display_skfs] default: false (SKFs not included)\n",
+            "config route activate <route_id>            - Activate route\n",
+            "config route deactivate <route_id>          - Deactivate route\n",
             "config skf <DevAddr/Session Key>            - List all Session Key Filters for Devaddr or Session Key\n",
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
         ]
@@ -65,6 +67,18 @@ config_cmd() ->
                 {display_skfs, [{longname, "display_skfs"}, {datatype, boolean}]}
             ],
             fun config_route/3
+        ],
+        [
+            ["config", "route", "activate", '*'],
+            [],
+            [],
+            fun config_route_activate/3
+        ],
+        [
+            ["config", "route", "deactivate", '*'],
+            [],
+            [],
+            fun config_route_deactivate/3
         ],
         [["config", "skf", '*'], [], [], fun config_skf/3],
         [
@@ -330,6 +344,30 @@ config_route(["config", "route", RouteID], [], Flags) ->
         )
     );
 config_route(_, _, _) ->
+    usage.
+
+config_route_activate(["config", "route", "activate", RouteID], [], _Flags) ->
+    case hpr_route_ets:lookup_route(RouteID) of
+        [] ->
+            c_text("Route ~s not found", [RouteID]);
+        [{Route0, _}] ->
+            Route1 = hpr_route:active(true, Route0),
+            ok = hpr_route_ets:insert_route(Route1),
+            c_text("Route ~s activated", [RouteID])
+    end;
+config_route_activate(_, _, _) ->
+    usage.
+
+config_route_deactivate(["config", "route", "deactivate", RouteID], [], _Flags) ->
+    case hpr_route_ets:lookup_route(RouteID) of
+        [] ->
+            c_text("Route ~s not found", [RouteID]);
+        [{Route0, _}] ->
+            Route1 = hpr_route:active(false, Route0),
+            ok = hpr_route_ets:insert_route(Route1),
+            c_text("Route ~s deactivated", [RouteID])
+    end;
+config_route_deactivate(_, _, _) ->
     usage.
 
 config_skf(["config", "skf", DevAddrOrSKF], [], []) ->

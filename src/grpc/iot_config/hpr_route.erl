@@ -8,7 +8,7 @@
     oui/1,
     server/1,
     max_copies/1,
-    active/1,
+    active/1, active/2,
     locked/1,
     ignore_empty_skf/1
 ]).
@@ -70,6 +70,10 @@ max_copies(Route) ->
 -spec active(Route :: route()) -> boolean().
 active(Route) ->
     Route#iot_config_route_v1_pb.active.
+
+-spec active(Active :: boolean(), Route :: route()) -> route().
+active(Active, Route) ->
+    Route#iot_config_route_v1_pb{active = Active}.
 
 -spec locked(Route :: route()) -> boolean().
 locked(Route) ->
@@ -337,6 +341,8 @@ max_copies_test() ->
 active_test() ->
     Route = test_route(),
     ?assertEqual(true, ?MODULE:active(Route)),
+    ?assertEqual(true, ?MODULE:active(?MODULE:active(true, Route))),
+    ?assertEqual(false, ?MODULE:active(?MODULE:active(false, Route))),
     ok.
 
 locked_test() ->
