@@ -151,14 +151,28 @@ handle_cast(_Msg, State) ->
 
 handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = SigFun} = State) ->
     lager:debug("connecting"),
-    {ok, Stream} = helium_packet_router_packet_client:route(),
-    Reg = hpr_register:test_new(PubKeyBin),
-    SignedReg = hpr_register:sign(Reg, SigFun),
-    EnvUp = hpr_envelope_up:new(SignedReg),
-    ok = grpcbox_client:send(Stream, EnvUp),
-    Pid ! {?MODULE, self(), {?REGISTER, EnvUp}},
-    lager:debug("connected and registered"),
-    {noreply, State#state{stream = Stream}};
+    case
+        grpcbox_client:connect(PubKeyBin, [{http, "localhost", 8080, []}], #{
+            sync_start => true
+        })
+    of
+        {error, Reason} = Error ->
+            Pid ! {?MODULE, self(), Error},
+            {stop, Reason, State};
+        % {ok, _Conn, _} -> ok;
+        % {ok, _Conn} -> ok
+        _ ->
+            {ok, Stream} = helium_packet_router_packet_client:route(#{
+                channel => PubKeyBin
+            }),
+            Reg = hpr_register:test_new(PubKeyBin),
+            SignedReg = hpr_register:sign(Reg, SigFun),
+            EnvUp = hpr_envelope_up:new(SignedReg),
+            ok = grpcbox_client:send(Stream, EnvUp),
+            Pid ! {?MODULE, self(), {?REGISTER, EnvUp}},
+            lager:debug("connected and registered"),
+            {noreply, State#state{stream = Stream}}
+    end;
 %% GRPC stream callbacks
 handle_info({data, _StreamID, Data}, #state{forward = Pid} = State) ->
     lager:debug("got data ~p", [Data]),
@@ -178,8 +192,9 @@ handle_info(_Msg, State) ->
     lager:debug("unknown info ~p", [_Msg]),
     {noreply, State}.
 
-terminate(_Reason, #state{forward = Pid, stream = Stream}) ->
+terminate(_Reason, #state{forward = Pid, pubkey_bin = PubKeyBin, stream = Stream}) ->
     ok = grpcbox_client:close_send(Stream),
+    ok = grpcbox_channel:stop(PubKeyBin),
     Pid ! {?MODULE, self(), {terminate, Stream}},
     lager:debug("terminate ~p", [_Reason]),
     ok.
