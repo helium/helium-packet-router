@@ -269,10 +269,19 @@ gateway_disconnect_test(_Config) ->
     application:set_env(
         hpr,
         test_packet_router_service_route,
-        fun(Env, StreamState) ->
-            {packet, Packet} = hpr_envelope_up:data(Env),
-            Self ! {packet_up, Packet},
-            StreamState
+        fun(EnvUp, StreamState) ->
+            try hpr_envelope_up:data(EnvUp) of
+                {packet, PacketUp} ->
+                    Self ! {packet_up, PacketUp},
+                    {ok, StreamState};
+                {register, Reg} ->
+                    lager:notice("got register ~p", [Reg]),
+                    {ok, StreamState}
+            catch
+                _E:_R ->
+                    lager:error("failed to hpr_envelope_up:data ~p", [_R]),
+                    {ok, StreamState}
+            end
         end
     ),
 
