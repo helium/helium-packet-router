@@ -15,7 +15,12 @@ init(RPC, StreamState) ->
     F(RPC, StreamState).
 
 -spec route(hpr_envelope_up:envelope(), grpcbox_stream:t()) ->
-    {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+    ok
+    | {ok, grpcbox_stream:t()}
+    | {ok, packet_router_pb:envelope_down_v1_pb(), grpcbox_stream:t()}
+    | {stop, grpcbox_stream:t()}
+    | {stop, packet_router_pb:envelope_down_v1_pb(), grpcbox_stream:t()}
+    | grpcbox_stream:grpc_error_response().
 route(Env, StreamState) ->
     % ct:pal("TEST: route: ~p, MARKER ~p", [Env, self()]),
     F = application:get_env(hpr, test_packet_router_service_route, fun(_, S) -> {ok, S} end),

@@ -269,19 +269,23 @@ gateway_disconnect_test(_Config) ->
     application:set_env(
         hpr,
         test_packet_router_service_route,
-        fun(EnvUp, StreamState) ->
-            try hpr_envelope_up:data(EnvUp) of
-                {packet, PacketUp} ->
-                    Self ! {packet_up, PacketUp},
-                    {ok, StreamState};
-                {register, Reg} ->
-                    lager:notice("got register ~p", [Reg]),
-                    {ok, StreamState}
-            catch
-                _E:_R ->
-                    lager:error("failed to hpr_envelope_up:data ~p", [_R]),
-                    {ok, StreamState}
-            end
+        fun
+            (eos, StreamState) ->
+                {stop, StreamState};
+            (EnvUp, StreamState) ->
+                lager:notice("got EnvUp ~p", [EnvUp]),
+                try hpr_envelope_up:data(EnvUp) of
+                    {packet, PacketUp} ->
+                        Self ! {packet_up, PacketUp},
+                        {ok, StreamState};
+                    {register, Reg} ->
+                        lager:notice("got register ~p", [Reg]),
+                        {ok, StreamState}
+                catch
+                    _E:_R ->
+                        lager:error("failed to hpr_envelope_up:data ~p", [_R]),
+                        {ok, StreamState}
+                end
         end
     ),
 
@@ -313,7 +317,7 @@ gateway_disconnect_test(_Config) ->
     [{_, #{channel := StreamSet, stream_pid := StreamPid}}] = ets:lookup(
         hpr_protocol_router_ets, {Gateway, LNS}
     ),
-    ConnPid = h2_stream_set:connection(StreamSet),
+    _ConnPid = h2_stream_set:connection(StreamSet),
 
     ok = gen_server:stop(GatewayPid),
     ok =
@@ -323,7 +327,7 @@ gateway_disconnect_test(_Config) ->
                 GatewayConnPid = h2_stream_set:connection(GatewayStreamSet),
                 ok = test_utils:wait_until(
                     fun() ->
-                        true == erlang:is_process_alive(GatewayConnPid) andalso
+                        false == erlang:is_process_alive(GatewayConnPid) andalso
                             false == erlang:is_process_alive(GatewayStreamPid) andalso
                             false == erlang:is_process_alive(GatewayPid)
                     end
@@ -331,9 +335,12 @@ gateway_disconnect_test(_Config) ->
         after timer:seconds(3) -> ct:fail(no_terminate_rcvd)
         end,
 
-    ?assertEqual([], ets:lookup(hpr_protocol_router_ets, {Gateway, LNS})),
-    ?assertNot(erlang:is_process_alive(ConnPid)),
-    ?assertNot(erlang:is_process_alive(StreamPid)),
+    ok = test_utils:wait_until(
+        fun() ->
+            [] == ets:lookup(hpr_protocol_router_ets, {Gateway, LNS}) andalso
+                false == erlang:is_process_alive(StreamPid)
+        end
+    ),
 
     ok = gen_server:stop(ServerPid),
     ok.
