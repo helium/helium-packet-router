@@ -83,6 +83,24 @@ get_stream(Gateway, LNS, Server) ->
     Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
     get_stream(Gateway, LNS, Server, Backoff).
 
+-spec remove_stream(Gateway :: libp2p_crypto:pubkey_bin()) -> ok.
+remove_stream(Gateway) ->
+    %% ets:fun2ms(fun({{1337, _}, _}=X) -> X end),
+    %% ets:select(hpr_protocol_router_ets, [{{{GW, '_'}, '_'}, [], ['$_']}]),
+    StreamEntries = ets:select(?STREAM_ETS, [{{{Gateway, '_'}, '_'}, [], ['$_']}]),
+    lists:foreach(
+        fun
+            ({Key, {?CONNECTING, _Pid}}) ->
+                true = ets:delete(?STREAM_ETS, Key),
+                lager:debug("delete connecting pid");
+            ({Key, Stream}) ->
+                grpcbox_client:close_send(Stream),
+                true = ets:delete(?STREAM_ETS, Key),
+                lager:debug("closed stream")
+        end,
+        StreamEntries
+    ).
+
 -spec remove_stream(Gateway :: libp2p_crypto:pubkey_bin(), LNS :: binary()) -> ok.
 remove_stream(Gateway, LNS) ->
     case ets:lookup(?STREAM_ETS, ?KEY(Gateway, LNS)) of
@@ -99,19 +117,6 @@ remove_stream(Gateway, LNS) ->
             lager:debug("did not close stream"),
             ok
     end.
-
--spec remove_stream(Gateway :: libp2p_crypto:pubkey_bin()) -> ok.
-remove_stream(Gateway) ->
-    %% ets:fun2ms(fun({{1337, _}, _}=X) -> X end),
-    %% ets:select(hpr_protocol_router_ets, [{{{GW, '_'}, '_'}, [], ['$_']}]),
-    StreamEntries = ets:select(?STREAM_ETS, [{{{Gateway, '_'}, '_'}, [], ['$_']}]),
-    lists:foreach(
-        fun({Key, Stream}) ->
-            grpcbox_client:close_send(Stream),
-            true = ets:delete(?STREAM_ETS, Key)
-        end,
-        StreamEntries
-    ).
 
 -spec register(PubKeyBin :: binary(), Pid :: pid()) -> ok.
 register(PubKeyBin, Pid) ->
@@ -141,8 +146,9 @@ handle_cast({register, PubKeyBin, Pid}, #state{waiting_cleanups = WaitingCleanup
                 WaitingCleanups0;
             {CleanupTimerRef, NewMap} ->
                 TimeLeft = erlang:cancel_timer(CleanupTimerRef),
-                lager:info(
-                    [{time_left_ms, TimeLeft}],
+                Name = hpr_utils:gateway_name(PubKeyBin),
+                lager:debug(
+                    [{gateway, Name}, {time_left_ms, TimeLeft}, {stream, Pid}],
                     "gw registered while waiting to take down streams"
                 ),
                 NewMap
@@ -158,9 +164,11 @@ handle_info(
     #state{waiting_cleanups = WaitingCleanups} = State
 ) ->
     Name = hpr_utils:gateway_name(Gateway),
-    lager:debug("gateway ~s stream ~p went down: ~p waiting ~wms", [
-        Name, _Pid, _ExitReason, ?CLEANUP_TIME
-    ]),
+    lager:debug(
+        [{gateway, Name}, {stream, _Pid}],
+        "stream went down: ~p waiting ~wms",
+        [_ExitReason, ?CLEANUP_TIME]
+    ),
     CleanupTimer = erlang:send_after(?CLEANUP_TIME, self(), {remove_stream, Gateway}),
     {noreply, State#state{waiting_cleanups = WaitingCleanups#{Gateway => CleanupTimer}}};
 handle_info({remove_stream, Gateway}, #state{waiting_cleanups = WaitingCleanups} = State) ->
@@ -188,7 +196,7 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
     {Delay, BackoffFailed} = backoff:fail(Backoff0),
 
     Self = self(),
-    NewLock = {?KEY(Gateway, LNS), {?CONNECTING, Self}},
+    ConnectingLock = {?KEY(Gateway, LNS), {?CONNECTING, Self}},
 
     CreateStream = fun() ->
         case create_stream(Gateway, LNS, Server) of
@@ -197,7 +205,7 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                 Error;
             {ok, Stream} = OK ->
                 1 = ets:select_replace(?STREAM_ETS, [
-                    {NewLock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
+                    {ConnectingLock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
                 ]),
                 OK
         end
@@ -217,7 +225,7 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                     case
                         ets:select_replace(
                             ?STREAM_ETS,
-                            [{OldLock, [], [{const, NewLock}]}]
+                            [{OldLock, [], [{const, ConnectingLock}]}]
                         )
                     of
                         %% we grabbed the lock, proceed by reconnecting
@@ -239,7 +247,7 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                     get_stream(Gateway, LNS, Server, BackoffFailed)
             end;
         [] ->
-            case ets:insert_new(?STREAM_ETS, NewLock) of
+            case ets:insert_new(?STREAM_ETS, ConnectingLock) of
                 %% some process already got the lock we will wait
                 false ->
                     timer:sleep(Delay),
