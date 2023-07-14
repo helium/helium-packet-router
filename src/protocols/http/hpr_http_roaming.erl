@@ -281,7 +281,7 @@ handle_prstart_ans(
                             'ReceiverNSID' => ReceiverNSID
                         }
                 end,
-            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif, DestURL}}
+            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif1, DestURL}}
     end;
 handle_prstart_ans(#{
     <<"MessageType">> := <<"PRStartAns">>,
