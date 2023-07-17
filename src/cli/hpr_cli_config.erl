@@ -238,7 +238,7 @@ config_oui_list(_, _, _) ->
 
 config_route(["config", "route", RouteID], [], Flags) ->
     Options = maps:from_list(Flags),
-    Routes = hpr_route_ets:lookup_route(RouteID),
+    Routes = [R || {R, _} <- hpr_route_ets:lookup_route(RouteID)],
 
     %% ========================================================
     %% - ID :: 48088786-5465-4115-92de-5214a88e9a75
