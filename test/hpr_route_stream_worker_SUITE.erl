@@ -94,25 +94,24 @@ main_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(Route1ID) of
-                [{_, ETS}] ->
+                [RouteETS] ->
                     1 =:= ets:info(hpr_routes_ets, size) andalso
                         1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
                         1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                        1 =:= ets:info(ETS, size);
+                        1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
                 _ ->
                     false
             end
         end
     ),
 
-    [{_, SKFETS1}] = hpr_route_ets:lookup_route(Route1ID),
+    [RouteETS1] = hpr_route_ets:lookup_route(Route1ID),
+    SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
     %% Check that we can query route via config
-    ?assertMatch(
-        [{Route1, X}] when is_reference(X), hpr_route_ets:lookup_devaddr_range(16#00000005)
-    ),
-    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
-    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
+    ?assertMatch([RouteETS1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([RouteETS1], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([RouteETS1], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
@@ -174,21 +173,19 @@ main_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(Route1ID) of
-                [{_, ETS}] ->
+                [RouteETS] ->
                     1 =:= ets:info(hpr_routes_ets, size) andalso
                         1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
                         1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                        1 =:= ets:info(ETS, size);
+                        1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
                 _ ->
                     false
             end
         end
     ),
-    ?assertMatch(
-        [{Route1, X}] when is_reference(X), hpr_route_ets:lookup_devaddr_range(16#00000005)
-    ),
-    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 12)),
-    ?assertEqual([Route1], hpr_route_ets:lookup_eui_pair(1, 100)),
+    ?assertMatch([RouteETS1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([RouteETS1], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([RouteETS1], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),

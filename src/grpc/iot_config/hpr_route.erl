@@ -37,6 +37,7 @@
 -endif.
 
 -type route() :: #iot_config_route_v1_pb{}.
+-type id() :: string().
 -type server() :: #iot_config_server_v1_pb{}.
 -type protocol() ::
     {packet_router, #iot_config_protocol_packet_router_v1_pb{}}
@@ -45,9 +46,9 @@
     | undefined.
 -type protocol_type() :: packet_router | gwmp | http_roaming | undefined.
 
--export_type([route/0, server/0, protocol/0]).
+-export_type([id/0, route/0, server/0, protocol/0]).
 
--spec id(Route :: route()) -> string().
+-spec id(Route :: route()) -> id().
 id(Route) ->
     Route#iot_config_route_v1_pb.id.
 

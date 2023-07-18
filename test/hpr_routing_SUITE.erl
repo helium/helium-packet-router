@@ -174,7 +174,8 @@ mic_check_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(RouteID) of
-                [{_, ETS}] ->
+                [RouteETS] ->
+                    ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
                 _ ->
                     false
@@ -200,7 +201,8 @@ mic_check_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(RouteID) of
-                [{_, ETS}] ->
+                [RouteETS] ->
+                    ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
                 _ ->
                     false
@@ -224,7 +226,8 @@ mic_check_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(RouteID) of
-                [{_, ETS}] ->
+                [RouteETS] ->
+                    ETS = hpr_route_ets:skf_ets(RouteETS),
                     2 =:= ets:info(ETS, size);
                 _ ->
                     false
@@ -279,7 +282,8 @@ skf_update_test(_Config) ->
     }),
     ?assertEqual(ok, hpr_route_ets:insert_skf(SKF)),
 
-    [{_, ETS}] = hpr_route_ets:lookup_route(RouteID),
+    [RouteETS] = hpr_route_ets:lookup_route(RouteID),
+    ETS = hpr_route_ets:skf_ets(RouteETS),
 
     %% Here we are making sure that the SKF got updated
     [{_, BeforeUpdate, 3}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
@@ -329,7 +333,8 @@ skf_max_copies_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(RouteID) of
-                [{_, ETS}] ->
+                [RouteETS] ->
+                    ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
                 _ ->
                     false
@@ -1277,7 +1282,8 @@ find_route_load_test(_Config) ->
     {Time1, Result1} = timer:tc(hpr_routing, find_routes, [PacketType, PacketUp]),
     ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Time1, Result1}]),
 
-    [{_, SKFETS1}] = hpr_route_ets:lookup_route(Route1ID),
+    [RouteETS1] = hpr_route_ets:lookup_route(Route1ID),
+    SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
     timer:sleep(2000),
     Now = erlang:system_time(millisecond),
@@ -1348,7 +1354,8 @@ find_route_load_test(_Config) ->
     }),
     hpr_route_ets:insert_skf(SKF2),
 
-    [{_, SKFETS2}] = hpr_route_ets:lookup_route(Route2ID),
+    [RouteETS2] = hpr_route_ets:lookup_route(Route2ID),
+    SKFETS2 = hpr_route_ets:skf_ets(RouteETS2),
     timer:sleep(10),
     lists:foreach(
         fun(_) ->
