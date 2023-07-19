@@ -690,7 +690,6 @@ multi_buy_requests_test(_Config) ->
     ]),
 
     meck:new(helium_multi_buy_multi_buy_client, [passthrough]),
-
     %% By adding +2 here we simulate other servers also incrementing
     meck:expect(helium_multi_buy_multi_buy_client, inc, fun(#multi_buy_inc_req_v1_pb{key = Key}, _) ->
         Count = ets:update_counter(
@@ -698,6 +697,9 @@ multi_buy_requests_test(_Config) ->
         ),
         {ok, #multi_buy_inc_res_v1_pb{count = Count}, []}
     end),
+
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
 
     MaxCopies = 3,
     DevAddr = 16#00000000,
@@ -798,6 +800,7 @@ multi_buy_requests_test(_Config) ->
 
     ?assert(meck:validate(helium_multi_buy_multi_buy_client)),
     meck:unload(helium_multi_buy_multi_buy_client),
+    meck:unload(hpr_protocol_router),
     ets:delete(ETS),
     ok.
 
