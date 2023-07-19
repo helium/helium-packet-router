@@ -270,12 +270,24 @@ maybe_deliver_packet_to_routes(Packet, RoutesETS) ->
 maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies) ->
     Route = hpr_route_ets:route(RouteETS),
     RouteMD = hpr_route:md(Route),
-    %% TODO: Add check for backoff
-    case hpr_route:active(Route) andalso hpr_route:locked(Route) == false of
-        false ->
-            lager:debug(RouteMD, "not sending, route locked or inactive"),
+    BackoffTimestamp =
+        case hpr_route_ets:backoff(RouteETS) of
+            undefined -> 0;
+            {T, _} -> T
+        end,
+    Now = erlang:system_time(millisecond),
+
+    case {hpr_route:active(Route), hpr_route:locked(Route), BackoffTimestamp} of
+        {_, true, _} ->
+            lager:debug(RouteMD, "not sending, route locked"),
+            {error, locked};
+        {false, _, _} ->
+            lager:debug(RouteMD, "not sending, route inactive"),
             {error, inactive};
-        true ->
+        {_, _, Timestamp} when Timestamp > Now ->
+            lager:debug(RouteMD, "not sending, route in cooldown, back in ~wms", [Timestamp - Now]),
+            {error, in_cooldown};
+        {true, false, _} ->
             Server = hpr_route:server(Route),
             Protocol = hpr_route:protocol(Server),
             Key = crypto:hash(sha256, <<
@@ -291,12 +303,15 @@ maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies) ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
                     Error;
                 {ok, IsFree} ->
+                    RouteID = hpr_route:id(Route),
                     case deliver_packet(Protocol, Packet, Route) of
                         {error, Reason} = Error ->
                             lager:warning(RouteMD, "error ~p", [Reason]),
+                            ok = hpr_route_ets:inc_backoff(RouteID),
                             Error;
                         ok ->
                             lager:debug(RouteMD, "delivered"),
+                            ok = hpr_route_ets:reset_backoff(RouteID),
                             {Type, _} = hpr_packet_up:type(Packet),
                             ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
                             {ok, IsFree}
@@ -379,15 +394,21 @@ all_test_() ->
         ?_test(find_routes_for_uplink_single_route_failed()),
         ?_test(find_routes_for_uplink_multi_route_success()),
         ?_test(find_routes_for_uplink_multi_route_failed()),
-        ?_test(find_routes_for_uplink_ignore_empty_skf())
+        ?_test(find_routes_for_uplink_ignore_empty_skf()),
+        ?_test(maybe_deliver_packet_to_route_locked()),
+        ?_test(maybe_deliver_packet_to_route_inactive()),
+        ?_test(maybe_deliver_packet_to_route_in_cooldown()),
+        ?_test(maybe_deliver_packet_to_route_multi_buy())
     ]}.
 
 foreach_setup() ->
     true = erlang:register(hpr_sup, self()),
-    hpr_route_ets:init(),
+    ok = hpr_route_ets:init(),
+    ok = hpr_multi_buy:init(),
     ok.
 
 foreach_cleanup(ok) ->
+    true = ets:delete(hpr_multi_buy_ets),
     true = ets:delete(hpr_route_devaddr_ranges_ets),
     true = ets:delete(hpr_route_eui_pairs_ets),
     lists:foreach(
@@ -749,6 +770,150 @@ find_routes_for_uplink_ignore_empty_skf() ->
 
     ?assertEqual({ok, [{RouteETS1, 0}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
 
+    ok.
+
+maybe_deliver_packet_to_route_locked() ->
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10,
+        active => true,
+        locked => true
+    }),
+    ok = hpr_route_ets:insert_route(Route1),
+
+    PacketUp = test_utils:uplink_packet_up(#{}),
+    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+
+    ?assertEqual(
+        {error, locked}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+    ),
+
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
+    meck:unload(hpr_protocol_router),
+    ok.
+
+maybe_deliver_packet_to_route_inactive() ->
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10,
+        active => false,
+        locked => false
+    }),
+    ok = hpr_route_ets:insert_route(Route1),
+
+    PacketUp = test_utils:uplink_packet_up(#{}),
+    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+
+    ?assertEqual(
+        {error, inactive}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+    ),
+
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
+    meck:unload(hpr_protocol_router),
+    ok.
+
+maybe_deliver_packet_to_route_in_cooldown() ->
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10,
+        active => true,
+        locked => false
+    }),
+    ok = hpr_route_ets:insert_route(Route1),
+
+    PacketUp = test_utils:uplink_packet_up(#{}),
+    ok = hpr_route_ets:inc_backoff(RouteID1),
+    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+
+    ?assertEqual(
+        {error, in_cooldown}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+    ),
+
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
+    meck:unload(hpr_protocol_router),
+    ok.
+
+maybe_deliver_packet_to_route_multi_buy() ->
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
+    meck:expect(hpr_metrics, packet_up_per_oui, fun(_, _) -> ok end),
+
+    RouteID1 = "route_id_1",
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 1,
+        oui => 10,
+        server => #{
+            host => "lsn.lora.com",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 3,
+        active => true,
+        locked => false
+    }),
+    ok = hpr_route_ets:insert_route(Route1),
+
+    PacketUp = test_utils:uplink_packet_up(#{}),
+
+    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    %% Packet 1 accepted using SKF Multi buy 1 (counter 1)
+    ?assertEqual(
+        {ok, true}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+    ),
+    %% Packet 2 refused using SKF Multi buy 1 (counter 2)
+    ?assertEqual(
+        {error, multi_buy}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+    ),
+
+    %% Packet 3 accepted using route multi buy 3 (counter 3)
+    ?assertEqual(
+        {ok, true}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 0)
+    ),
+    %% Packet 4 refused using route multi buy 3 (counter 4)
+    ?assertEqual(
+        {error, multi_buy}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 0)
+    ),
+
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
+    meck:unload(hpr_protocol_router),
+    meck:unload(hpr_metrics),
     ok.
 
 -endif.

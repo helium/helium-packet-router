@@ -7,6 +7,8 @@
     skf_ets/1,
     backoff/1,
     update_backoff/2,
+    inc_backoff/1,
+    reset_backoff/1,
 
     insert_route/1, insert_route/2, insert_route/3,
     delete_route/1,
@@ -85,6 +87,32 @@ skf_ets(RouteETS) ->
 -spec backoff(RouteETS :: route()) -> backoff().
 backoff(RouteETS) ->
     RouteETS#hpr_route_ets.backoff.
+
+-spec inc_backoff(RouteID :: hpr_route:id()) -> ok.
+inc_backoff(RouteID) ->
+    Now = erlang:system_time(millisecond),
+    case ?MODULE:lookup_route(RouteID) of
+        [#hpr_route_ets{backoff = undefined}] ->
+            Backoff = backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX),
+            Delay = backoff:get(Backoff),
+            ?MODULE:update_backoff(RouteID, {Now + Delay, Backoff});
+        [#hpr_route_ets{backoff = {_, Backoff0}}] ->
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            ?MODULE:update_backoff(RouteID, {Now + Delay, Backoff1});
+        _Other ->
+            ok
+    end.
+
+-spec reset_backoff(RouteID :: hpr_route:id()) -> ok.
+reset_backoff(RouteID) ->
+    case ?MODULE:lookup_route(RouteID) of
+        [#hpr_route_ets{backoff = undefined}] ->
+            ok;
+        [#hpr_route_ets{backoff = _}] ->
+            ?MODULE:update_backoff(RouteID, undefined);
+        _Other ->
+            ok
+    end.
 
 -spec update_backoff(RouteID :: hpr_route:id(), Backoff :: backoff()) -> ok.
 update_backoff(RouteID, Backoff) ->
