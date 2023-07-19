@@ -21,6 +21,7 @@
     multi_buy_with_service_test/1,
     multi_buy_requests_test/1,
     active_locked_route_test/1,
+    in_cooldown_route_test/1,
     success_test/1,
     no_routes_test/1,
     maybe_report_packet_test/1,
@@ -49,6 +50,7 @@ all() ->
         multi_buy_with_service_test,
         multi_buy_requests_test,
         active_locked_route_test,
+        in_cooldown_route_test,
         success_test,
         no_routes_test,
         maybe_report_packet_test,
@@ -903,6 +905,96 @@ active_locked_route_test(_Config) ->
     ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
 
     ?assertEqual([], meck:history(hpr_protocol_router)),
+
+    ?assert(meck:validate(hpr_protocol_router)),
+    meck:unload(hpr_protocol_router),
+    ok.
+
+in_cooldown_route_test(_Config) ->
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 999,
+        active => true,
+        locked => false
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+
+    AppSessionKey = crypto:strong_rand_bytes(16),
+    NwkSessionKey = crypto:strong_rand_bytes(16),
+
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
+    SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
+    Gateway1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+
+    PacketUp1 = test_utils:uplink_packet_up(#{
+        gateway => Gateway1,
+        sig_fun => SigFun1,
+        devaddr => DevAddr,
+        fcnt => 1,
+        app_session_key => AppSessionKey,
+        nwk_session_key => NwkSessionKey
+    }),
+
+    %% We setup protocol router to fail every call
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> {error, not_implemented} end),
+
+    %% We send first packet a call should be made to hpr_protocol_router
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 2)),
+    %% We send second packet NO call should be made to hpr_protocol_router as the route would be in cooldown
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 2)),
+
+    %% We wait the initial first timeout 1s
+    %% Send another packet and watch another call made to hpr_protocol_router
+    timer:sleep(1000),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
+
+    %% We send couple more packets and check that we still only 2 calls to hpr_protocol_router
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
+
+    %% We check the route and make sure that the backoff is setup properly
+    [RouteETS1] = hpr_route_ets:lookup_route(RouteID),
+    {Timestamp1, Backoff1} = hpr_route_ets:backoff(RouteETS1),
+    ?assert(Timestamp1 > erlang:system_time(millisecond)),
+    ?assertEqual(2000, backoff:get(Backoff1)),
+
+    %% Wait another time out (2s now) and reset hpr_protocol_router to return ok
+    timer:sleep(2000),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    %% Sending another packet should trigger a new call to hpr_protocol_router
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(3, meck:num_calls(hpr_protocol_router, send, 2)),
+
+    %% The route backoff should be back to undefined
+    [RouteETS2] = hpr_route_ets:lookup_route(RouteID),
+    ?assertEqual(undefined, hpr_route_ets:backoff(RouteETS2)),
 
     ?assert(meck:validate(hpr_protocol_router)),
     meck:unload(hpr_protocol_router),
