@@ -3,7 +3,14 @@
 -export([
     init/0,
 
-    insert_route/1,
+    route/1,
+    skf_ets/1,
+    backoff/1,
+    update_backoff/2,
+    inc_backoff/1,
+    reset_backoff/1,
+
+    insert_route/1, insert_route/2, insert_route/3,
     delete_route/1,
     lookup_route/1,
 
@@ -43,13 +50,73 @@
 
 -define(SKF_HEIR, hpr_sup).
 
+-define(BACKOFF_MIN, timer:seconds(1)).
+-define(BACKOFF_MAX, timer:minutes(15)).
+
+-record(hpr_route_ets, {
+    id :: hpr_route:id(),
+    route :: hpr_route:route(),
+    skf_ets :: ets:tid(),
+    backoff :: backoff()
+}).
+
+-type backoff() :: undefined | {non_neg_integer(), backoff:backoff()}.
+-type route() :: #hpr_route_ets{}.
+
+-export_type([route/0, backoff/0]).
+
 -spec init() -> ok.
 init() ->
+    ?ETS_ROUTES = ets:new(?ETS_ROUTES, [
+        public, named_table, set, {keypos, #hpr_route_ets.id}, {read_concurrency, true}
+    ]),
     ?ETS_DEVADDR_RANGES = ets:new(?ETS_DEVADDR_RANGES, [
         public, named_table, bag, {read_concurrency, true}
     ]),
     ?ETS_EUI_PAIRS = ets:new(?ETS_EUI_PAIRS, [public, named_table, bag, {read_concurrency, true}]),
-    ?ETS_ROUTES = ets:new(?ETS_ROUTES, [public, named_table, set, {read_concurrency, true}]),
+    ok.
+
+-spec route(RouteETS :: route()) -> hpr_route:route().
+route(RouteETS) ->
+    RouteETS#hpr_route_ets.route.
+
+-spec skf_ets(RouteETS :: route()) -> ets:table().
+skf_ets(RouteETS) ->
+    RouteETS#hpr_route_ets.skf_ets.
+
+-spec backoff(RouteETS :: route()) -> backoff().
+backoff(RouteETS) ->
+    RouteETS#hpr_route_ets.backoff.
+
+-spec inc_backoff(RouteID :: hpr_route:id()) -> ok.
+inc_backoff(RouteID) ->
+    Now = erlang:system_time(millisecond),
+    case ?MODULE:lookup_route(RouteID) of
+        [#hpr_route_ets{backoff = undefined}] ->
+            Backoff = backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX),
+            Delay = backoff:get(Backoff),
+            ?MODULE:update_backoff(RouteID, {Now + Delay, Backoff});
+        [#hpr_route_ets{backoff = {_, Backoff0}}] ->
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            ?MODULE:update_backoff(RouteID, {Now + Delay, Backoff1});
+        _Other ->
+            ok
+    end.
+
+-spec reset_backoff(RouteID :: hpr_route:id()) -> ok.
+reset_backoff(RouteID) ->
+    case ?MODULE:lookup_route(RouteID) of
+        [#hpr_route_ets{backoff = undefined}] ->
+            ok;
+        [#hpr_route_ets{backoff = _}] ->
+            ?MODULE:update_backoff(RouteID, undefined);
+        _Other ->
+            ok
+    end.
+
+-spec update_backoff(RouteID :: hpr_route:id(), Backoff :: backoff()) -> ok.
+update_backoff(RouteID, Backoff) ->
+    true = ets:update_element(?ETS_ROUTES, RouteID, {5, Backoff}),
     ok.
 
 -spec insert_route(Route :: hpr_route:route()) -> ok.
@@ -57,7 +124,7 @@ insert_route(Route) ->
     RouteID = hpr_route:id(Route),
     SKFETS =
         case ?MODULE:lookup_route(RouteID) of
-            [{_, ETS}] ->
+            [#hpr_route_ets{skf_ets = ETS}] ->
                 ETS;
             _Other ->
                 ets:new(?ETS_SKFS, [
@@ -68,7 +135,22 @@ insert_route(Route) ->
                     {heir, erlang:whereis(?SKF_HEIR), RouteID}
                 ])
         end,
-    true = ets:insert(?ETS_ROUTES, {RouteID, {Route, SKFETS}}),
+    ?MODULE:insert_route(Route, SKFETS).
+
+-spec insert_route(Route :: hpr_route:route(), SKFETS :: ets:table()) -> ok.
+insert_route(Route, SKFETS) ->
+    ?MODULE:insert_route(Route, SKFETS, undefined).
+
+-spec insert_route(Route :: hpr_route:route(), SKFETS :: ets:table(), Backoff :: backoff()) -> ok.
+insert_route(Route, SKFETS, Backoff) ->
+    RouteID = hpr_route:id(Route),
+    RouteETS = #hpr_route_ets{
+        id = RouteID,
+        route = Route,
+        skf_ets = SKFETS,
+        backoff = Backoff
+    },
+    true = ets:insert(?ETS_ROUTES, RouteETS),
     Server = hpr_route:server(Route),
     RouteFields = [
         {id, RouteID},
@@ -79,7 +161,8 @@ insert_route(Route) ->
         {active, hpr_route:active(Route)},
         {locked, hpr_route:locked(Route)},
         {ignore_empty_skf, hpr_route:ignore_empty_skf(Route)},
-        {skf_ets, SKFETS}
+        {skf_ets, SKFETS},
+        {backoff, Backoff}
     ],
     lager:info(RouteFields, "inserting route"),
     ok.
@@ -92,7 +175,7 @@ delete_route(Route) ->
     MS2 = [{{'_', RouteID}, [], [true]}],
     EUIsEntries = ets:select_delete(?ETS_EUI_PAIRS, MS2),
     case ?MODULE:lookup_route(RouteID) of
-        [{_, SKFETS}] ->
+        [#hpr_route_ets{skf_ets = SKFETS}] ->
             ets:delete(SKFETS);
         _Other ->
             lager:warning("failed to delete skf table ~p for ~s", [
@@ -106,10 +189,9 @@ delete_route(Route) ->
     ),
     ok.
 
--spec lookup_route(ID :: string()) -> [{hpr_route:route(), ets:table()}].
+-spec lookup_route(ID :: string()) -> [route()].
 lookup_route(ID) ->
-    Routes = ets:lookup(?ETS_ROUTES, ID),
-    [RouteAndETS || {_ID, RouteAndETS} <- Routes].
+    ets:lookup(?ETS_ROUTES, ID).
 
 -spec insert_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
 insert_eui_pair(EUIPair) ->
@@ -146,27 +228,20 @@ delete_eui_pair(EUIPair) ->
     ok.
 
 -spec lookup_eui_pair(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
-    [hpr_route:route()].
+    [route()].
 lookup_eui_pair(AppEUI, 0) ->
     EUIPairs = ets:lookup(?ETS_EUI_PAIRS, {AppEUI, 0}),
-    [
-        Route
-     || {Route, _SKFETS} <- lists:flatten([
-            ?MODULE:lookup_route(RouteID)
-         || {_, RouteID} <- EUIPairs
-        ])
-    ];
+    lists:flatten([
+        ?MODULE:lookup_route(RouteID)
+     || {_, RouteID} <- EUIPairs
+    ]);
 lookup_eui_pair(AppEUI, DevEUI) ->
     EUIPairs = ets:lookup(?ETS_EUI_PAIRS, {AppEUI, DevEUI}),
     lists:usort(
-        [
-            Route
-         || {Route, _SKFETS} <- lists:flatten([
-                ?MODULE:lookup_route(RouteID)
-             || {_, RouteID} <- EUIPairs
-            ])
-        ] ++
-            lookup_eui_pair(AppEUI, 0)
+        lists:flatten([
+            ?MODULE:lookup_route(RouteID)
+         || {_, RouteID} <- EUIPairs
+        ]) ++ lookup_eui_pair(AppEUI, 0)
     ).
 
 -spec insert_devaddr_range(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
@@ -203,7 +278,7 @@ delete_devaddr_range(DevAddrRange) ->
     ),
     ok.
 
--spec lookup_devaddr_range(DevAddr :: non_neg_integer()) -> [{hpr_route:route(), ets:table()}].
+-spec lookup_devaddr_range(DevAddr :: non_neg_integer()) -> [route()].
 lookup_devaddr_range(DevAddr) ->
     MS = [
         {
@@ -226,7 +301,7 @@ lookup_devaddr_range(DevAddr) ->
 insert_skf(SKF) ->
     RouteID = hpr_skf:route_id(SKF),
     case ?MODULE:lookup_route(RouteID) of
-        [{_, SKFETS}] ->
+        [#hpr_route_ets{skf_ets = SKFETS}] ->
             DevAddr = hpr_skf:devaddr(SKF),
             SessionKey = hpr_skf:session_key(SKF),
             MaxCopies = hpr_skf:max_copies(SKF),
@@ -272,7 +347,7 @@ update_skf(DevAddr, SessionKey, RouteID, MaxCopies) ->
 delete_skf(SKF) ->
     RouteID = hpr_skf:route_id(SKF),
     case ?MODULE:lookup_route(RouteID) of
-        [{_, SKFETS}] ->
+        [#hpr_route_ets{skf_ets = SKFETS}] ->
             DevAddr = hpr_skf:devaddr(SKF),
             SessionKey = hpr_skf:session_key(SKF),
             MaxCopies = hpr_skf:max_copies(SKF),
@@ -318,7 +393,7 @@ delete_all() ->
     ets:delete_all_objects(?ETS_DEVADDR_RANGES),
     ets:delete_all_objects(?ETS_EUI_PAIRS),
     lists:foreach(
-        fun({_, {_, SKFETS}}) ->
+        fun(#hpr_route_ets{skf_ets = SKFETS}) ->
             ets:delete(SKFETS)
         end,
         ets:tab2list(?ETS_ROUTES)
@@ -330,13 +405,16 @@ delete_all() ->
 %% CLI Functions
 %% ------------------------------------------------------------------
 
--spec all_routes() -> list(hpr_route:route()).
+-spec all_routes() -> list(route()).
 all_routes() ->
-    [Route || {_ID, {Route, _ETS}} <- ets:tab2list(?ETS_ROUTES)].
+    ets:tab2list(?ETS_ROUTES).
 
--spec oui_routes(OUI :: non_neg_integer()) -> list(hpr_route:route()).
+-spec oui_routes(OUI :: non_neg_integer()) -> list(route()).
 oui_routes(OUI) ->
-    [Route || {_ID, {Route, _}} <- ets:tab2list(?ETS_ROUTES), OUI == hpr_route:oui(Route)].
+    [
+        RouteETS
+     || RouteETS <- ets:tab2list(?ETS_ROUTES), OUI == hpr_route:oui(?MODULE:route(RouteETS))
+    ].
 
 -spec eui_pairs_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
 eui_pairs_for_route(RouteID) ->
@@ -345,7 +423,7 @@ eui_pairs_for_route(RouteID) ->
 
 -spec eui_pairs_count_for_route(RouteID :: string()) -> non_neg_integer().
 eui_pairs_count_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    MS = [{{'_', RouteID}, [], [true]}],
     ets:select_count(?ETS_EUI_PAIRS, MS).
 
 -spec devaddr_ranges_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
@@ -355,14 +433,14 @@ devaddr_ranges_for_route(RouteID) ->
 
 -spec devaddr_ranges_count_for_route(RouteID :: string()) -> non_neg_integer().
 devaddr_ranges_count_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    MS = [{{'_', RouteID}, [], [true]}],
     ets:select_count(?ETS_DEVADDR_RANGES, MS).
 
 -spec skfs_for_route(RouteID :: string()) ->
     [{{integer(), binary()}, {non_neg_integer(), non_neg_integer()}}].
 skfs_for_route(RouteID) ->
     case ?MODULE:lookup_route(RouteID) of
-        [{_, SKFETS}] ->
+        [#hpr_route_ets{skf_ets = SKFETS}] ->
             ets:tab2list(SKFETS);
         _Other ->
             []
@@ -371,7 +449,7 @@ skfs_for_route(RouteID) ->
 -spec skfs_count_for_route(RouteID :: string()) -> non_neg_integer().
 skfs_count_for_route(RouteID) ->
     case ?MODULE:lookup_route(RouteID) of
-        [{_, SKFETS}] ->
+        [#hpr_route_ets{skf_ets = SKFETS}] ->
             ets:info(SKFETS, size);
         _Other ->
             0
@@ -409,7 +487,7 @@ foreach_cleanup(ok) ->
     ets:delete(?ETS_DEVADDR_RANGES),
     ets:delete(?ETS_EUI_PAIRS),
     lists:foreach(
-        fun({_, {_, SKFETS}}) ->
+        fun(#hpr_route_ets{skf_ets = SKFETS}) ->
             ets:delete(SKFETS)
         end,
         ets:tab2list(?ETS_ROUTES)
@@ -419,7 +497,7 @@ foreach_cleanup(ok) ->
     ok.
 
 test_route() ->
-    Route = hpr_route:test_new(#{
+    Route0 = hpr_route:test_new(#{
         id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
         net_id => 0,
         oui => 1,
@@ -430,14 +508,17 @@ test_route() ->
         },
         max_copies => 1
     }),
-    RouteID = hpr_route:id(Route),
+    RouteID = hpr_route:id(Route0),
 
     %% Create
-    ?assertEqual(ok, ?MODULE:insert_route(Route)),
-    [{LookupRoute, SKFETS}] = ?MODULE:lookup_route(RouteID),
-    ?assertEqual(Route, LookupRoute),
-    ?assert(erlang:is_reference(SKFETS)),
-    ?assert(erlang:is_list(ets:info(SKFETS))),
+    ?assertEqual(ok, ?MODULE:insert_route(Route0)),
+    [RouteETS0] = ?MODULE:lookup_route(RouteID),
+    ?assertEqual(RouteID, RouteETS0#hpr_route_ets.id),
+    ?assertEqual(Route0, ?MODULE:route(RouteETS0)),
+    SKFETS0 = ?MODULE:skf_ets(RouteETS0),
+    ?assert(erlang:is_reference(SKFETS0)),
+    ?assert(erlang:is_list(ets:info(SKFETS0))),
+    ?assertEqual(undefined, ?MODULE:backoff(RouteETS0)),
 
     %% Update
     Route1 = hpr_route:test_new(#{
@@ -452,10 +533,19 @@ test_route() ->
         max_copies => 22
     }),
     ?assertEqual(ok, ?MODULE:insert_route(Route1)),
-    [{LookupRoute1, SKFETS1}] = ?MODULE:lookup_route(RouteID),
-    ?assertEqual(Route1, LookupRoute1),
+    [RouteETS1] = ?MODULE:lookup_route(RouteID),
+    ?assertEqual(RouteID, RouteETS1#hpr_route_ets.id),
+    ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
+    SKFETS1 = ?MODULE:skf_ets(RouteETS0),
     ?assert(erlang:is_reference(SKFETS1)),
     ?assert(erlang:is_list(ets:info(SKFETS1))),
+    ?assertEqual(SKFETS0, SKFETS1),
+    ?assertEqual(undefined, ?MODULE:backoff(RouteETS1)),
+
+    Backoff = {erlang:system_time(millisecond), backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX)},
+    ?assertEqual(ok, ?MODULE:update_backoff(RouteID, Backoff)),
+    [RouteETS2] = ?MODULE:lookup_route(RouteID),
+    ?assertEqual(Backoff, ?MODULE:backoff(RouteETS2)),
 
     %% Delete
     ?assertEqual(ok, ?MODULE:delete_route(Route1)),
@@ -499,16 +589,24 @@ test_eui_pair() ->
     ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair2)),
     ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair3)),
 
-    ?assertEqual([Route1], ?MODULE:lookup_eui_pair(1, 1)),
+    [RouteETS1] = ?MODULE:lookup_eui_pair(1, 1),
+    ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
     ?assertEqual([], ?MODULE:lookup_eui_pair(1, 2)),
-    ?assertEqual([Route1], ?MODULE:lookup_eui_pair(2, 1)),
-    ?assertEqual([Route1, Route2], ?MODULE:lookup_eui_pair(2, 2)),
+    [RouteETS2] = ?MODULE:lookup_eui_pair(2, 1),
+    ?assertEqual(Route1, ?MODULE:route(RouteETS2)),
+    [RouteETS3, RouteETS4] = ?MODULE:lookup_eui_pair(2, 2),
+
+    ?assertEqual(Route1, ?MODULE:route(RouteETS3)),
+    ?assertEqual(Route2, ?MODULE:route(RouteETS4)),
 
     EUIPair4 = hpr_eui_pair:test_new(#{route_id => RouteID1, app_eui => 1, dev_eui => 0}),
     ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair4)),
-    ?assertEqual([Route1], ?MODULE:lookup_eui_pair(1, 1)),
+    [RouteETS5] = ?MODULE:lookup_eui_pair(1, 1),
+    ?assertEqual(Route1, ?MODULE:route(RouteETS5)),
     ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair1)),
-    ?assertEqual([Route1], ?MODULE:lookup_eui_pair(1, 1)),
+    [RouteETS6] = ?MODULE:lookup_eui_pair(1, 1),
+
+    ?assertEqual(Route1, ?MODULE:route(RouteETS6)),
     ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair4)),
     ?assertEqual([], ?MODULE:lookup_eui_pair(1, 1)),
 
@@ -560,18 +658,22 @@ test_devaddr_range() ->
     ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange2)),
     ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange3)),
 
-    ?assertMatch([{Route1, X}] when is_reference(X), ?MODULE:lookup_devaddr_range(16#00000005)),
-    ?assertMatch([{Route2, X}] when is_reference(X), ?MODULE:lookup_devaddr_range(16#00000010)),
-    ?assertMatch([{Route2, X}] when is_reference(X), ?MODULE:lookup_devaddr_range(16#0000001A)),
-    ?assertMatch(
-        [{Route1, X}, {Route2, Y}] when is_reference(X) andalso is_reference(Y),
-        ?MODULE:lookup_devaddr_range(16#00000002)
-    ),
+    [RouteETS1] = ?MODULE:lookup_devaddr_range(16#00000005),
+    ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
+    [RouteETS2] = ?MODULE:lookup_devaddr_range(16#00000010),
+    ?assertEqual(Route2, ?MODULE:route(RouteETS2)),
+    [RouteETS3] = ?MODULE:lookup_devaddr_range(16#0000001A),
+    ?assertEqual(Route2, ?MODULE:route(RouteETS3)),
+    [RouteETS4, RouteETS5] = ?MODULE:lookup_devaddr_range(16#00000002),
+    ?assertEqual(Route1, ?MODULE:route(RouteETS4)),
+    ?assertEqual(Route2, ?MODULE:route(RouteETS5)),
+
     ?assertEqual(
         ok, ?MODULE:delete_devaddr_range(DevAddrRange1)
     ),
     ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000005)),
-    ?assertMatch([{Route2, X}] when is_reference(X), ?MODULE:lookup_devaddr_range(16#00000002)),
+    [RouteETS6] = ?MODULE:lookup_devaddr_range(16#00000002),
+    ?assertEqual(Route2, ?MODULE:route(RouteETS6)),
 
     ?assertEqual(ok, ?MODULE:delete_devaddr_range(DevAddrRange2)),
     ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000010)),
@@ -633,8 +735,10 @@ test_skf() ->
     ?assertEqual(ok, ?MODULE:insert_skf(SKF1)),
     ?assertEqual(ok, ?MODULE:insert_skf(SKF2)),
 
-    [{Route1, SKFETS1}] = ?MODULE:lookup_devaddr_range(DevAddr1),
-    [{Route2, SKFETS2}] = ?MODULE:lookup_devaddr_range(DevAddr2),
+    [RouteETS1] = ?MODULE:lookup_route(RouteID1),
+    [RouteETS2] = ?MODULE:lookup_route(RouteID2),
+    SKFETS1 = ?MODULE:skf_ets(RouteETS1),
+    SKFETS2 = ?MODULE:skf_ets(RouteETS2),
 
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch([{SK1, X, 1}] when X < 0, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
@@ -699,7 +803,9 @@ test_select_skf() ->
         lists:seq(1, 200)
     ),
 
-    [{Route, SKFETS}] = ?MODULE:lookup_devaddr_range(DevAddr),
+    [RouteETS] = ?MODULE:lookup_devaddr_range(DevAddr),
+    ?assertEqual(Route, ?MODULE:route(RouteETS)),
+    SKFETS = ?MODULE:skf_ets(RouteETS),
     {A, Continuation1} = ?MODULE:select_skf(SKFETS, DevAddr),
     {B, Continuation2} = ?MODULE:select_skf(Continuation1),
     '$end_of_table' = ?MODULE:select_skf(Continuation2),
@@ -774,9 +880,14 @@ test_delete_route() ->
     ?assertEqual(2, erlang:length(ets:tab2list(?ETS_DEVADDR_RANGES))),
     ?assertEqual(2, erlang:length(ets:tab2list(?ETS_ROUTES))),
 
-    [{Route1, SKFETS1}] = ?MODULE:lookup_devaddr_range(DevAddr1),
+    [RouteETS1] = ?MODULE:lookup_devaddr_range(DevAddr1),
+    ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
+    SKFETS1 = ?MODULE:skf_ets(RouteETS1),
     ?assertEqual(1, erlang:length(ets:tab2list(SKFETS1))),
-    [{Route2, SKFETS2}] = ?MODULE:lookup_devaddr_range(DevAddr2),
+
+    [RouteETS2] = ?MODULE:lookup_devaddr_range(DevAddr2),
+    ?assertEqual(Route2, ?MODULE:route(RouteETS2)),
+    SKFETS2 = ?MODULE:skf_ets(RouteETS2),
     ?assertEqual(1, erlang:length(ets:tab2list(SKFETS2))),
 
     ?assertEqual(ok, ?MODULE:delete_route(Route1)),
@@ -785,7 +896,7 @@ test_delete_route() ->
     ?assertEqual(
         [{{StartAddr2, EndAddr2}, RouteID2}], ets:tab2list(?ETS_DEVADDR_RANGES)
     ),
-    ?assertMatch([{RouteID2, {Route2, X}}] when is_reference(X), ets:tab2list(?ETS_ROUTES)),
+    ?assertEqual([RouteETS2], ets:tab2list(?ETS_ROUTES)),
     ?assert(erlang:is_list(ets:info(SKFETS2))),
     ?assertEqual(undefined, ets:info(SKFETS1)),
     ok.

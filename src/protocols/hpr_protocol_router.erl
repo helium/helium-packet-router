@@ -33,8 +33,10 @@
 -define(STREAM_ETS, hpr_protocol_router_ets).
 -define(KEY(Gateway, LNS), {Gateway, LNS}).
 -define(CONNECTING, connecting).
+-define(CONNECTING_FAILED, connecting_failed).
 -define(BACKOFF_MIN, 10).
--define(BACKOFF_MAX, timer:seconds(1)).
+-define(BACKOFF_MAX, timer:seconds(5)).
+-define(BACKOFF_RETRIES, 5).
 
 -ifdef(TEST).
 -define(CLEANUP_TIME, timer:seconds(1)).
@@ -80,8 +82,8 @@ send(PacketUp, Route) ->
     Server :: hpr_route:server()
 ) -> {ok, grpcbox_client:stream()} | {error, any()}.
 get_stream(Gateway, LNS, Server) ->
-    Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
-    get_stream(Gateway, LNS, Server, Backoff).
+    Backoff = backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX),
+    get_stream(Gateway, LNS, Server, Backoff, ?BACKOFF_RETRIES).
 
 -spec remove_stream(Gateway :: libp2p_crypto:pubkey_bin()) -> ok.
 remove_stream(Gateway) ->
@@ -190,9 +192,12 @@ terminate(_Reason, _State = #state{}) ->
     Gateway :: libp2p_crypto:pubkey_bin(),
     LNS :: binary(),
     Server :: hpr_route:server(),
-    Backoff :: backoff:backoff()
+    Backoff :: backoff:backoff(),
+    BackoffRetries :: non_neg_integer()
 ) -> {ok, grpcbox_client:stream()} | {error, any()}.
-get_stream(Gateway, LNS, Server, Backoff0) ->
+get_stream(_Gateway, _LNS, _Server, _Backoff0, 0) ->
+    {error, max_retries};
+get_stream(Gateway, LNS, Server, Backoff0, BackoffRetries) ->
     {Delay, BackoffFailed} = backoff:fail(Backoff0),
 
     Self = self(),
@@ -204,10 +209,17 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                 true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
                 Error;
             {ok, Stream} = OK ->
-                1 = ets:select_replace(?STREAM_ETS, [
-                    {ConnectingLock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
-                ]),
-                OK
+                case
+                    ets:select_replace(?STREAM_ETS, [
+                        {ConnectingLock, [], [{const, {?KEY(Gateway, LNS), Stream}}]}
+                    ])
+                of
+                    1 ->
+                        OK;
+                    0 ->
+                        ok = grpcbox_client:close_send(Stream),
+                        {error, missing_lock}
+                end
         end
     end,
 
@@ -220,7 +232,7 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                 %% Somebody else is trying to connect
                 true ->
                     timer:sleep(Delay),
-                    get_stream(Gateway, LNS, Server, BackoffFailed);
+                    get_stream(Gateway, LNS, Server, BackoffFailed, BackoffRetries - 1);
                 false ->
                     case
                         ets:select_replace(
@@ -233,7 +245,7 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                             CreateStream();
                         0 ->
                             timer:sleep(Delay),
-                            get_stream(Gateway, LNS, Server, BackoffFailed)
+                            get_stream(Gateway, LNS, Server, BackoffFailed, BackoffRetries - 1)
                     end
             end;
         [{_, #{channel := StreamSet, stream_pid := StreamPid} = Stream}] ->
@@ -244,14 +256,14 @@ get_stream(Gateway, LNS, Server, Backoff0) ->
                 %% Connection or Stream are not alive lets delete and try to get a new one
                 false ->
                     true = ets:delete(?STREAM_ETS, ?KEY(Gateway, LNS)),
-                    get_stream(Gateway, LNS, Server, BackoffFailed)
+                    get_stream(Gateway, LNS, Server, BackoffFailed, BackoffRetries - 1)
             end;
         [] ->
             case ets:insert_new(?STREAM_ETS, ConnectingLock) of
                 %% some process already got the lock we will wait
                 false ->
                     timer:sleep(Delay),
-                    get_stream(Gateway, LNS, Server, BackoffFailed);
+                    get_stream(Gateway, LNS, Server, BackoffFailed, BackoffRetries - 1);
                 true ->
                     CreateStream()
             end
