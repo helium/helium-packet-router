@@ -423,7 +423,7 @@ eui_pairs_for_route(RouteID) ->
 
 -spec eui_pairs_count_for_route(RouteID :: string()) -> non_neg_integer().
 eui_pairs_count_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    MS = [{{'_', RouteID}, [], [true]}],
     ets:select_count(?ETS_EUI_PAIRS, MS).
 
 -spec devaddr_ranges_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
