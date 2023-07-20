@@ -433,7 +433,7 @@ devaddr_ranges_for_route(RouteID) ->
 
 -spec devaddr_ranges_count_for_route(RouteID :: string()) -> non_neg_integer().
 devaddr_ranges_count_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [true]}],
+    MS = [{{'_', RouteID}, [], [true]}],
     ets:select_count(?ETS_DEVADDR_RANGES, MS).
 
 -spec skfs_for_route(RouteID :: string()) ->
