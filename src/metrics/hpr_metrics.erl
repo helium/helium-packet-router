@@ -215,8 +215,8 @@ record_eui_pairs() ->
 -spec record_skfs() -> ok.
 record_skfs() ->
     Count = lists:foldl(
-        fun({_RouteID, {_Route, SKFETS}}, Acc) ->
-            case ets:info(SKFETS, size) of
+        fun(RouteETS, Acc) ->
+            case ets:info(hpr_route_ets:skf_ets(RouteETS), size) of
                 undefined -> Acc;
                 N -> N + Acc
             end
