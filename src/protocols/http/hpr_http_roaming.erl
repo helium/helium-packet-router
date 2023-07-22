@@ -11,7 +11,7 @@
 
 %% Uplinking
 -export([
-    make_uplink_payload/7,
+    make_uplink_payload/6,
     select_best/1
 ]).
 
@@ -24,7 +24,7 @@
 
 %% Tokens
 -export([
-    make_uplink_token/5,
+    make_uplink_token/4,
     parse_uplink_token/1
 ]).
 
@@ -51,12 +51,10 @@
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     PacketDown :: hpr_packet_down:downlink_packet()
 }.
--type pr_start_notif() :: {PRStartNotif :: map(), Endpoint :: binary()}.
+-type pr_start_notif() :: {PRStartNotif :: map(), RouteID :: string()}.
 
 -type region() :: atom().
 -type token() :: binary().
--type dest_url() :: binary().
--type flow_type() :: sync | async.
 
 -define(TOKEN_SEP, <<"::">>).
 
@@ -95,8 +93,7 @@ new_packet(PacketUp, ReceivedTime) ->
     Uplinks :: list(packet()),
     TransactionID :: integer(),
     DedupWindowSize :: non_neg_integer(),
-    Destination :: binary(),
-    FlowType :: sync | async,
+    RouteID :: string(),
     ReceiverNSID :: binary()
 ) -> prstart_req().
 make_uplink_payload(
@@ -104,8 +101,7 @@ make_uplink_payload(
     Uplinks,
     TransactionID,
     DedupWindowSize,
-    Destination,
-    FlowType,
+    RouteID,
     ReceiverNSID
 ) ->
     #packet{
@@ -122,7 +118,7 @@ make_uplink_payload(
 
     {RoutingKey, RoutingValue} = routing_key_and_value(PacketUp),
 
-    Token = make_uplink_token(PubKeyBin, Region, PacketTime, Destination, FlowType),
+    Token = make_uplink_token(PubKeyBin, Region, PacketTime, RouteID),
 
     VersionBase = #{
         'ProtocolVersion' => <<"1.1">>,
@@ -167,7 +163,7 @@ routing_key_and_value(PacketUp) ->
 
 -spec handle_message(prstart_ans() | xmitdata_req()) ->
     ok
-    | {downlink, xmitdata_ans(), downlink(), {dest_url(), flow_type()}}
+    | {downlink, xmitdata_ans(), downlink(), RouteID :: string()}
     | {join_accept, downlink(), pr_start_notif()}
     | {error, any()}.
 handle_message(#{<<"MessageType">> := MT} = M) ->
@@ -205,7 +201,7 @@ handle_prstart_ans(
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, PubKeyBin, Region, PacketTime, DestURL, _} ->
+        {ok, PubKeyBin, Region, PacketTime, RouteID} ->
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 hpr_http_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
@@ -232,7 +228,7 @@ handle_prstart_ans(
                         }
                 end,
 
-            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif1, DestURL}}
+            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif1, RouteID}}
     end;
 handle_prstart_ans(
     #{
@@ -254,7 +250,7 @@ handle_prstart_ans(
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, PubKeyBin, Region, PacketTime, DestURL, _} ->
+        {ok, PubKeyBin, Region, PacketTime, RouteID} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
@@ -281,7 +277,7 @@ handle_prstart_ans(
                             'ReceiverNSID' => ReceiverNSID
                         }
                 end,
-            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif1, DestURL}}
+            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif1, RouteID}}
     end;
 handle_prstart_ans(#{
     <<"MessageType">> := <<"PRStartAns">>,
@@ -314,7 +310,7 @@ handle_prstart_ans(Res) ->
     throw({bad_response, Res}).
 
 -spec handle_xmitdata_req(xmitdata_req()) ->
-    {downlink, xmitdata_ans(), downlink(), {dest_url(), flow_type()}} | {error, any()}.
+    {downlink, xmitdata_ans(), downlink(), RouteID :: string()} | {error, any()}.
 %% Class A ==========================================
 handle_xmitdata_req(#{
     <<"MessageType">> := <<"XmitDataReq">>,
@@ -347,7 +343,7 @@ handle_xmitdata_req(#{
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, PubKeyBin, Region, PacketTime, DestURL, FlowType} ->
+        {ok, PubKeyBin, Region, PacketTime, RouteID} ->
             DataRate1 = hpr_lorawan:index_to_datarate(Region, DR1),
             Delay1 =
                 case Delay0 of
@@ -361,7 +357,7 @@ handle_xmitdata_req(#{
                 DataRate1,
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?RX2_DELAY)
             ),
-            {downlink, PayloadResponse, {PubKeyBin, DownlinkPacket}, {DestURL, FlowType}}
+            {downlink, PayloadResponse, {PubKeyBin, DownlinkPacket}, RouteID}
     end;
 %% Class C ==========================================
 handle_xmitdata_req(#{
@@ -394,7 +390,7 @@ handle_xmitdata_req(#{
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, PubKeyBin, Region, PacketTime, DestURL, FlowType} ->
+        {ok, PubKeyBin, Region, PacketTime, RouteID} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
             Delay1 =
                 case Delay0 of
@@ -420,7 +416,7 @@ handle_xmitdata_req(#{
                             undefined
                         )
                 end,
-            {downlink, PayloadResponse, {PubKeyBin, DownlinkPacket}, {DestURL, FlowType}}
+            {downlink, PayloadResponse, {PubKeyBin, DownlinkPacket}, RouteID}
     end.
 
 -spec rx2_from_dlmetadata(
@@ -457,33 +453,35 @@ rx2_from_dlmetadata(_, _, _, _) ->
 %% ------------------------------------------------------------------
 
 -spec make_uplink_token(
-    PubKeyBin :: libp2p_crypto:pubkey_bin(), region(), non_neg_integer(), binary(), atom()
+    PubKeyBin :: libp2p_crypto:pubkey_bin(),
+    Region :: region(),
+    PacketTime :: non_neg_integer(),
+    RouteID :: string()
 ) -> token().
-make_uplink_token(PubKeyBin, Region, PacketTime, DestURL, FlowType) ->
+make_uplink_token(PubKeyBin, Region, PacketTime, RouteID) ->
     Parts = [
         PubKeyBin,
         erlang:atom_to_binary(Region),
         erlang:integer_to_binary(PacketTime),
-        DestURL,
-        erlang:atom_to_binary(FlowType)
+        RouteID
     ],
     Token0 = lists:join(?TOKEN_SEP, Parts),
     Token1 = erlang:iolist_to_binary(Token0),
     hpr_http_roaming_utils:binary_to_hexstring(Token1).
 
 -spec parse_uplink_token(token()) ->
-    {ok, libp2p_crypto:pubkey_bin(), region(), non_neg_integer(), dest_url(), flow_type()}
+    {ok, libp2p_crypto:pubkey_bin(), region(), non_neg_integer(), RouteID :: string()}
     | {error, any()}.
 parse_uplink_token(<<"0x", Token/binary>>) ->
     parse_uplink_token(Token);
 parse_uplink_token(Token) ->
     Bin = binary:decode_hex(Token),
     case binary:split(Bin, ?TOKEN_SEP, [global]) of
-        [PubKeyBin, RegionBin, PacketTimeBin, DestURLBin, FlowTypeBin] ->
+        [PubKeyBin, RegionBin, PacketTimeBin, RouteIDBin] ->
             Region = erlang:binary_to_existing_atom(RegionBin),
             PacketTime = erlang:binary_to_integer(PacketTimeBin),
-            FlowType = erlang:binary_to_existing_atom(FlowTypeBin),
-            {ok, PubKeyBin, Region, PacketTime, DestURLBin, FlowType};
+            RouteID = erlang:binary_to_list(RouteIDBin),
+            {ok, PubKeyBin, Region, PacketTime, RouteID};
         _ ->
             {error, malformed_token}
     end.
@@ -549,8 +547,7 @@ class_c_downlink_test() ->
         PubKeyBin,
         'US915',
         erlang:system_time(millisecond),
-        <<"www.example.com">>,
-        sync
+        "route-id-1"
     ),
 
     Input = #{
@@ -586,8 +583,7 @@ chirpstack_join_accept_test() ->
         PubKeyBin,
         'US915',
         erlang:system_time(millisecond),
-        <<"www.example.com">>,
-        sync
+        "route-id-1"
     ),
 
     A = #{
@@ -635,8 +631,7 @@ rx1_timestamp_test() ->
         PubKeyBin,
         'US915',
         PacketTime,
-        <<"www.example.com">>,
-        sync
+        "route-id-1"
     ),
 
     MakeInput = fun(RXDelay) ->
@@ -695,8 +690,7 @@ rx1_downlink_test() ->
         PubKeyBin,
         'US915',
         erlang:system_time(millisecond),
-        <<"www.example.com">>,
-        sync
+        "route-id-1"
     ),
 
     Input = #{
@@ -750,8 +744,7 @@ rx2_downlink_test() ->
         PubKeyBin,
         'US915',
         erlang:system_time(millisecond),
-        <<"www.example.com">>,
-        sync
+        "route-id-1"
     ),
 
     Input = #{

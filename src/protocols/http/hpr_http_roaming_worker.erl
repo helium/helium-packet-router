@@ -41,6 +41,7 @@
 
 -record(state, {
     net_id :: hpr_http_roaming:netid_num(),
+    route_id :: string(),
     address :: address(),
     transaction_id :: integer(),
     packets = [] :: list(hpr_http_roaming:packet()),
@@ -74,6 +75,7 @@ handle_packet(Pid, PacketUp, ReceivedTime) ->
 init(Args) ->
     #{
         protocol := #http_protocol{
+            route_id = RouteID,
             endpoint = Address,
             flow_type = FlowType,
             dedupe_timeout = DedupeTimeout,
@@ -85,6 +87,7 @@ init(Args) ->
     lager:debug("~p init with ~p", [?MODULE, Args]),
     {ok, #state{
         net_id = NetID,
+        route_id = RouteID,
         address = Address,
         transaction_id = next_transaction_id(),
         send_data_timer = DedupeTimeout,
@@ -190,6 +193,7 @@ do_handle_packet(
 send_data(
     #state{
         net_id = NetID,
+        route_id = RouteID,
         address = Address,
         packets = Packets,
         transaction_id = TransactionID,
@@ -204,8 +208,7 @@ send_data(
         Packets,
         TransactionID,
         DedupWindow,
-        Address,
-        FlowType,
+        RouteID,
         ReceiverNSID
     ),
     Data1 = jsx:encode(Data),
@@ -232,31 +235,43 @@ send_data(
                                 {error, Err} ->
                                     lager:error("error handling response: ~p", [Err]),
                                     ok;
-                                {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, Endpoint}} ->
-                                    case
-                                        hpr_packet_router_service:send_packet_down(
-                                            PubKeyBin, PacketDown
-                                        )
-                                    of
-                                        ok ->
-                                            lager:debug("got join_accept"),
-                                            _ = hackney:post(
-                                                Endpoint,
-                                                Headers,
-                                                jsx:encode(PRStartNotif),
-                                                [with_body]
-                                            ),
-                                            ok;
-                                        {error, not_found} ->
-                                            _ = hackney:post(
-                                                Endpoint,
-                                                Headers,
-                                                jsx:encode(PRStartNotif#{
-                                                    'Result' => #{'ResultCode' => <<"XmitFailed">>}
-                                                }),
-                                                [with_body]
-                                            ),
-                                            ok
+                                {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, RouteID}} ->
+                                    case hpr_route_ets:lookup_route(RouteID) of
+                                        [] ->
+                                            lager:warning(
+                                                [{route_id, RouteID}],
+                                                "received downlink for non-existent route"
+                                            );
+                                        [RouteETS] ->
+                                            Route = hpr_route_ets:route(RouteETS),
+                                            Endpoint = hpr_route:lns(Route),
+                                            case
+                                                hpr_packet_router_service:send_packet_down(
+                                                    PubKeyBin, PacketDown
+                                                )
+                                            of
+                                                ok ->
+                                                    lager:debug("got join_accept"),
+                                                    _ = hackney:post(
+                                                        Endpoint,
+                                                        Headers,
+                                                        jsx:encode(PRStartNotif),
+                                                        [with_body]
+                                                    ),
+                                                    ok;
+                                                {error, not_found} ->
+                                                    _ = hackney:post(
+                                                        Endpoint,
+                                                        Headers,
+                                                        jsx:encode(PRStartNotif#{
+                                                            'Result' => #{
+                                                                'ResultCode' => <<"XmitFailed">>
+                                                            }
+                                                        }),
+                                                        [with_body]
+                                                    ),
+                                                    ok
+                                            end
                                     end;
                                 ok ->
                                     lager:debug("sent"),
