@@ -51,7 +51,7 @@
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     PacketDown :: hpr_packet_down:downlink_packet()
 }.
--type pr_start_notif() :: {PRStartNotif :: map(), RouteID :: string()}.
+-type pr_start_notif() :: {PRStartNotif :: map(), RouteID :: hpr_route:id()}.
 
 -type region() :: atom().
 -type token() :: binary().
@@ -93,7 +93,7 @@ new_packet(PacketUp, ReceivedTime) ->
     Uplinks :: list(packet()),
     TransactionID :: integer(),
     DedupWindowSize :: non_neg_integer(),
-    RouteID :: string(),
+    RouteID :: hpr_route:id(),
     ReceiverNSID :: binary()
 ) -> prstart_req().
 make_uplink_payload(
@@ -163,7 +163,7 @@ routing_key_and_value(PacketUp) ->
 
 -spec handle_message(prstart_ans() | xmitdata_req()) ->
     ok
-    | {downlink, xmitdata_ans(), downlink(), RouteID :: string()}
+    | {downlink, xmitdata_ans(), downlink(), RouteID :: hpr_route:id()}
     | {join_accept, downlink(), pr_start_notif()}
     | {error, any()}.
 handle_message(#{<<"MessageType">> := MT} = M) ->
@@ -310,7 +310,7 @@ handle_prstart_ans(Res) ->
     throw({bad_response, Res}).
 
 -spec handle_xmitdata_req(xmitdata_req()) ->
-    {downlink, xmitdata_ans(), downlink(), RouteID :: string()} | {error, any()}.
+    {downlink, xmitdata_ans(), downlink(), RouteID :: hpr_route:id()} | {error, any()}.
 %% Class A ==========================================
 handle_xmitdata_req(#{
     <<"MessageType">> := <<"XmitDataReq">>,
@@ -456,7 +456,7 @@ rx2_from_dlmetadata(_, _, _, _) ->
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     Region :: region(),
     PacketTime :: non_neg_integer(),
-    RouteID :: string()
+    RouteID :: hpr_route:id()
 ) -> token().
 make_uplink_token(PubKeyBin, Region, PacketTime, RouteID) ->
     Parts = [
@@ -470,7 +470,7 @@ make_uplink_token(PubKeyBin, Region, PacketTime, RouteID) ->
     hpr_http_roaming_utils:binary_to_hexstring(Token1).
 
 -spec parse_uplink_token(token()) ->
-    {ok, libp2p_crypto:pubkey_bin(), region(), non_neg_integer(), RouteID :: string()}
+    {ok, libp2p_crypto:pubkey_bin(), region(), non_neg_integer(), RouteID :: hpr_route:id()}
     | {error, any()}.
 parse_uplink_token(<<"0x", Token/binary>>) ->
     parse_uplink_token(Token);
