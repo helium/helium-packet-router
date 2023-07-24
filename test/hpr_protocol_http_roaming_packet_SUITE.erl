@@ -196,7 +196,7 @@ http_sync_uplink_join_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin, 'US915', PacketTime, "route1"},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -270,13 +270,7 @@ http_sync_downlink_test(_Config) ->
     DownlinkDatr = 'SF10BW125',
     TransactionID = 23,
 
-    Token = hpr_http_roaming:make_uplink_token(
-        PubKeyBin,
-        'US915',
-        DownlinkTimestamp,
-        <<"http://127.0.0.1:3002/uplink">>,
-        sync
-    ),
+    Token = hpr_http_roaming:make_uplink_token(PubKeyBin, 'US915', DownlinkTimestamp, "1"),
     RXDelay = 1,
 
     DownlinkBody = downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin),
@@ -422,7 +416,7 @@ http_async_uplink_join_test(_Config) ->
     ?assertEqual(<<"expected auth header">>, proplists:get_value(<<"Authorization">>, Headers)),
 
     ?assertMatch(
-        {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, async},
+        {ok, PubKeyBin, 'US915', PacketTime, "route1"},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -498,13 +492,7 @@ http_async_downlink_test(_Config) ->
     DownlinkFreq = 915.0,
     DownlinkDatr = 'SF10BW125',
 
-    Token = hpr_http_roaming:make_uplink_token(
-        PubKeyBin,
-        'US915',
-        DownlinkTimestamp,
-        <<"http://127.0.0.1:3002/uplink">>,
-        async
-    ),
+    Token = hpr_http_roaming:make_uplink_token(PubKeyBin, 'US915', DownlinkTimestamp, "1"),
     RXDelay = 1,
 
     DownlinkBody = downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin),
@@ -666,7 +654,7 @@ http_uplink_packet_no_roaming_agreement_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin, 'US915', PacketTime, "route1"},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -751,7 +739,7 @@ http_uplink_packet_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, PubKeyBin, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin, 'US915', PacketTime, "route1"},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -779,13 +767,7 @@ http_class_c_downlink_test(_Config) ->
     DownlinkFreq = 915.0,
     DownlinkDatr = 'SF10BW125',
 
-    Token = hpr_http_roaming:make_uplink_token(
-        PubKeyBin,
-        'US915',
-        DownlinkTimestamp,
-        <<"http://127.0.0.1:3002/uplink">>,
-        async
-    ),
+    Token = hpr_http_roaming:make_uplink_token(PubKeyBin, 'US915', DownlinkTimestamp, "1"),
     RXDelay = 0,
 
     DownlinkBody = #{
@@ -966,7 +948,7 @@ http_multiple_gateways_test(_Config) ->
 
     %% Gateway with better RSSI should be chosen
     ?assertMatch(
-        {ok, PubKeyBin1, 'US915', PacketTime1, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin1, 'US915', PacketTime1, "route1"},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -1243,7 +1225,7 @@ http_uplink_packet_late_test(_Config) ->
     ),
 
     ?assertMatch(
-        {ok, PubKeyBin1, 'US915', PacketTime, <<"127.0.0.1:3002/uplink">>, sync},
+        {ok, PubKeyBin1, 'US915', PacketTime, "route1"},
         hpr_http_roaming:parse_uplink_token(Token)
     ),
 
@@ -1331,7 +1313,12 @@ http_auth_header_test(_Config) ->
 join_test_route(DevEUI, AppEUI, FlowType, RouteID) ->
     join_test_route(DevEUI, AppEUI, FlowType, RouteID, #{}).
 
-join_test_route(DevEUI, AppEUI, FlowType, RouteID, Options) ->
+join_test_route(DevEUI, AppEUI, FlowType, RouteID0, Options) ->
+    RouteID =
+        case erlang:is_binary(RouteID0) of
+            true -> erlang:binary_to_list(RouteID0);
+            false -> RouteID0
+        end,
     Route = hpr_route:test_new(#{
         id => RouteID,
         net_id => maps:get(net_id, Options, ?NET_ID_ACTILITY),
@@ -1359,7 +1346,12 @@ uplink_test_route() ->
     uplink_test_route(#{id => "route1"}).
 
 uplink_test_route(InputMap) ->
-    RouteID = maps:get(id, InputMap, "route1"),
+    RouteID0 = maps:get(id, InputMap, "route1"),
+    RouteID =
+        case erlang:is_binary(RouteID0) of
+            true -> erlang:binary_to_list(RouteID0);
+            false -> RouteID0
+        end,
     Route = hpr_route:test_new(#{
         id => RouteID,
         net_id => maps:get(net_id, InputMap, ?NET_ID_ACTILITY),
@@ -1417,7 +1409,7 @@ downlink_test_route(FlowType) ->
         server => #{
             host => "127.0.0.1",
             port => 3002,
-            protocol => {http_roaming, #{flow_type => FlowType}}
+            protocol => {http_roaming, #{flow_type => FlowType, path => "/uplink"}}
         },
         max_copies => 1
     }),
@@ -1591,9 +1583,15 @@ message_type_from_uplink_ok(_MessageType, _FlowType) ->
 
 -spec flow_type_from(UplinkToken :: binary()) -> sync | async.
 flow_type_from(UplinkToken) ->
-    {ok, _PubKeyBin, _Region, _PacketTime, _DestURLBin, FlowType} =
+    {ok, _PubKeyBin, _Region, _PacketTime, RouteID} =
         hpr_http_roaming:parse_uplink_token(UplinkToken),
-    FlowType.
+    case hpr_route_ets:lookup_route(RouteID) of
+        [] ->
+            throw(could_not_find_route_from_token);
+        [RouteETS] ->
+            Route = hpr_route_ets:route(RouteETS),
+            hpr_route:http_roaming_flow_type(Route)
+    end.
 
 make_response_body(#{
     <<"ProtocolVersion">> := ProtocolVersion,

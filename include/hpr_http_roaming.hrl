@@ -9,6 +9,7 @@
 -author("jonathanruttenberg").
 
 -record(http_protocol, {
+    route_id :: hpr_route:id(),
     endpoint :: binary(),
     flow_type :: async | sync,
     dedupe_timeout :: non_neg_integer(),

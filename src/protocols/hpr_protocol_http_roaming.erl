@@ -63,6 +63,7 @@ protocol_from(Route) ->
     ReceiverNSID = hpr_route:http_receiver_nsid(Route),
 
     #http_protocol{
+        route_id = hpr_route:id(Route),
         flow_type = FlowType,
         endpoint = hpr_route:lns(Route),
         dedupe_timeout = DedupeTimeout,

@@ -158,63 +158,83 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
         {error, _} = Err ->
             lager:error("dowlink handle message error ~p", [Err]),
             {500, <<"An error occurred">>};
-        {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, Endpoint}} ->
-            lager:debug(
-                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                "sending downlink"
-            ),
-            case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
-                ok ->
-                    _ = hackney:post(
-                        Endpoint,
-                        [],
-                        jsx:encode(PRStartNotif),
-                        [with_body]
+        {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, RouteID}} ->
+            case hpr_route_ets:lookup_route(RouteID) of
+                [] ->
+                    lager:warning([{route_id, RouteID}], "join_accept for non-existent route");
+                [RouteETS] ->
+                    lager:debug(
+                        [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                        "sending downlink"
                     ),
-                    {200, <<"downlink sent: 1">>};
-                {error, not_found} ->
-                    _ = hackney:post(
-                        Endpoint,
-                        [],
-                        jsx:encode(PRStartNotif#{'Result' => #{'ResultCode' => <<"XmitFailed">>}}),
-                        [with_body]
-                    ),
-                    {404, <<"Not Found">>}
+                    Route = hpr_route_ets:route(RouteETS),
+                    Endpoint = hpr_route:lns(Route),
+                    %% TODO: Add auth
+                    case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
+                        ok ->
+                            _ = hackney:post(
+                                Endpoint,
+                                [],
+                                jsx:encode(PRStartNotif),
+                                [with_body]
+                            ),
+                            {200, <<"downlink sent: 1">>};
+                        {error, not_found} ->
+                            _ = hackney:post(
+                                Endpoint,
+                                [],
+                                jsx:encode(PRStartNotif#{
+                                    'Result' => #{'ResultCode' => <<"XmitFailed">>}
+                                }),
+                                [with_body]
+                            ),
+                            {404, <<"Not Found">>}
+                    end
             end;
-        {downlink, PayloadResponse, {PubKeyBin, PacketDown}, {Endpoint, FlowType}} ->
-            lager:debug(
-                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                "sending downlink"
-            ),
-            case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
-                {error, not_found} ->
-                    {404, <<"Not Found">>};
-                ok ->
-                    case FlowType of
-                        sync ->
-                            {200, jsx:encode(PayloadResponse)};
-                        async ->
-                            _ = erlang:spawn(fun() ->
-                                case
-                                    hackney:post(Endpoint, [], jsx:encode(PayloadResponse), [
-                                        with_body
-                                    ])
-                                of
-                                    {ok, Code, _, _} ->
-                                        lager:debug(
-                                            [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                                            "async downlink response ~w, Endpoint: ~s",
-                                            [Code, Endpoint]
-                                        );
-                                    {error, Reason} ->
-                                        lager:debug(
-                                            [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                                            "async downlink response ~s, Endpoint: ~s",
-                                            [Reason, Endpoint]
-                                        )
-                                end
-                            end),
-                            {200, <<"downlink sent: 2">>}
+        {downlink, PayloadResponse, {PubKeyBin, PacketDown}, RouteID} ->
+            case hpr_route_ets:lookup_route(RouteID) of
+                [] ->
+                    lager:warning([{route_id, RouteID}], "downlink for non-existent route");
+                [RouteETS] ->
+                    lager:debug(
+                        [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                        "sending downlink"
+                    ),
+                    Route = hpr_route_ets:route(RouteETS),
+                    Endpoint = hpr_route:lns(Route),
+                    FlowType = hpr_route:http_roaming_flow_type(Route),
+                    case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
+                        {error, not_found} ->
+                            {404, <<"Not Found">>};
+                        ok ->
+                            case FlowType of
+                                sync ->
+                                    {200, jsx:encode(PayloadResponse)};
+                                async ->
+                                    _ = erlang:spawn(fun() ->
+                                        case
+                                            hackney:post(
+                                                Endpoint, [], jsx:encode(PayloadResponse), [
+                                                    with_body
+                                                ]
+                                            )
+                                        of
+                                            {ok, Code, _, _} ->
+                                                lager:debug(
+                                                    [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                                                    "async downlink response ~w, Endpoint: ~s",
+                                                    [Code, Endpoint]
+                                                );
+                                            {error, Reason} ->
+                                                lager:debug(
+                                                    [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                                                    "async downlink response ~s, Endpoint: ~s",
+                                                    [Reason, Endpoint]
+                                                )
+                                        end
+                                    end),
+                                    {200, <<"downlink sent: 2">>}
+                            end
                     end
             end
     end.

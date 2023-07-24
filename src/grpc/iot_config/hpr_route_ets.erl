@@ -189,7 +189,7 @@ delete_route(Route) ->
     ),
     ok.
 
--spec lookup_route(ID :: string()) -> [route()].
+-spec lookup_route(ID :: hpr_route:id()) -> [route()].
 lookup_route(ID) ->
     ets:lookup(?ETS_ROUTES, ID).
 
@@ -329,7 +329,7 @@ insert_skf(SKF) ->
 -spec update_skf(
     DevAddr :: non_neg_integer(),
     SessionKey :: binary(),
-    RouteID :: string(),
+    RouteID :: hpr_route:id(),
     MaxCopies :: non_neg_integer()
 ) -> ok.
 update_skf(DevAddr, SessionKey, RouteID, MaxCopies) ->
@@ -416,27 +416,29 @@ oui_routes(OUI) ->
      || RouteETS <- ets:tab2list(?ETS_ROUTES), OUI == hpr_route:oui(?MODULE:route(RouteETS))
     ].
 
--spec eui_pairs_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
+-spec eui_pairs_for_route(RouteID :: hpr_route:id()) ->
+    list({non_neg_integer(), non_neg_integer()}).
 eui_pairs_for_route(RouteID) ->
     MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS_EUI_PAIRS, MS).
 
--spec eui_pairs_count_for_route(RouteID :: string()) -> non_neg_integer().
+-spec eui_pairs_count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
 eui_pairs_count_for_route(RouteID) ->
     MS = [{{'_', RouteID}, [], [true]}],
     ets:select_count(?ETS_EUI_PAIRS, MS).
 
--spec devaddr_ranges_for_route(RouteID :: string()) -> list({non_neg_integer(), non_neg_integer()}).
+-spec devaddr_ranges_for_route(RouteID :: hpr_route:id()) ->
+    list({non_neg_integer(), non_neg_integer()}).
 devaddr_ranges_for_route(RouteID) ->
     MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS_DEVADDR_RANGES, MS).
 
--spec devaddr_ranges_count_for_route(RouteID :: string()) -> non_neg_integer().
+-spec devaddr_ranges_count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
 devaddr_ranges_count_for_route(RouteID) ->
     MS = [{{'_', RouteID}, [], [true]}],
     ets:select_count(?ETS_DEVADDR_RANGES, MS).
 
--spec skfs_for_route(RouteID :: string()) ->
+-spec skfs_for_route(RouteID :: hpr_route:id()) ->
     [{{integer(), binary()}, {non_neg_integer(), non_neg_integer()}}].
 skfs_for_route(RouteID) ->
     case ?MODULE:lookup_route(RouteID) of
@@ -446,7 +448,7 @@ skfs_for_route(RouteID) ->
             []
     end.
 
--spec skfs_count_for_route(RouteID :: string()) -> non_neg_integer().
+-spec skfs_count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
 skfs_count_for_route(RouteID) ->
     case ?MODULE:lookup_route(RouteID) of
         [#hpr_route_ets{skf_ets = SKFETS}] ->
