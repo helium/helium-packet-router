@@ -189,7 +189,7 @@ delete_route(Route) ->
     ),
     ok.
 
--spec lookup_route(ID :: string()) -> [route()].
+-spec lookup_route(ID :: hpr_route:id()) -> [route()].
 lookup_route(ID) ->
     ets:lookup(?ETS_ROUTES, ID).
 
