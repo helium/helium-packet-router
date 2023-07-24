@@ -370,7 +370,7 @@ http_async_uplink_join_test(_Config) ->
             <<"TransactionID">> := TransactionID,
             <<"ULMetaData">> := #{<<"FNSULToken">> := Token}
         },
-        Headers} = roamer_expect_uplink_data(
+        Headers1} = roamer_expect_uplink_data(
         #{
             <<"ProtocolVersion">> => <<"1.1">>,
             <<"SenderNSID">> => hpr_utils:sender_nsid(),
@@ -413,7 +413,7 @@ http_async_uplink_join_test(_Config) ->
             }
         }
     ),
-    ?assertEqual(<<"expected auth header">>, proplists:get_value(<<"Authorization">>, Headers)),
+    ?assertEqual(<<"expected auth header">>, proplists:get_value(<<"Authorization">>, Headers1)),
 
     ?assertMatch(
         {ok, PubKeyBin, 'US915', PacketTime, "route1"},
@@ -454,7 +454,7 @@ http_async_uplink_join_test(_Config) ->
     end),
 
     %% 9. Expect a PRStartNotif to the lns
-    {ok, _, _, _} = http_rcv(#{
+    {ok, _Got, Headers2} = roamer_expect_uplink_data(#{
         <<"ProtocolVersion">> => <<"1.1">>,
         <<"MessageType">> => <<"PRStartNotif">>,
         <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
@@ -464,6 +464,8 @@ http_async_uplink_join_test(_Config) ->
         <<"TransactionID">> => TransactionID,
         <<"Result">> => #{<<"ResultCode">> => <<"Success">>}
     }),
+
+    ?assertEqual(<<"expected auth header">>, proplists:get_value(<<"Authorization">>, Headers2)),
 
     ok.
 

@@ -28,6 +28,10 @@
     parse_uplink_token/1
 ]).
 
+-export([
+    auth_headers/1
+]).
+
 -export([new_packet/2]).
 
 -define(NO_ROAMING_AGREEMENT, <<"NoRoamingAgreement">>).
@@ -484,6 +488,18 @@ parse_uplink_token(Token) ->
             {ok, PubKeyBin, Region, PacketTime, RouteID};
         _ ->
             {error, malformed_token}
+    end.
+
+-spec auth_headers(Route :: hpr_route:route()) -> proplists:proplist().
+auth_headers(Route) ->
+    case hpr_route:http_auth_header(Route) of
+        null ->
+            [{<<"Content-Type">>, <<"application/json">>}];
+        Auth ->
+            [
+                {<<"Content-Type">>, <<"application/json">>},
+                {<<"Authorization">>, Auth}
+            ]
     end.
 
 %% ------------------------------------------------------------------

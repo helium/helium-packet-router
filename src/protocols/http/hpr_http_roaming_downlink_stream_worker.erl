@@ -169,12 +169,13 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                     ),
                     Route = hpr_route_ets:route(RouteETS),
                     Endpoint = hpr_route:lns(Route),
-                    %% TODO: Add auth
+                    Headers = hpr_http_roaming:auth_headers(Route),
+
                     case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                         ok ->
                             _ = hackney:post(
                                 Endpoint,
-                                [],
+                                Headers,
                                 jsx:encode(PRStartNotif),
                                 [with_body]
                             ),
@@ -182,7 +183,7 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                         {error, not_found} ->
                             _ = hackney:post(
                                 Endpoint,
-                                [],
+                                Headers,
                                 jsx:encode(PRStartNotif#{
                                     'Result' => #{'ResultCode' => <<"XmitFailed">>}
                                 }),
@@ -203,6 +204,7 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                     Route = hpr_route_ets:route(RouteETS),
                     Endpoint = hpr_route:lns(Route),
                     FlowType = hpr_route:http_roaming_flow_type(Route),
+                    Headers = hpr_http_roaming:auth_headers(Route),
                     case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
                         {error, not_found} ->
                             {404, <<"Not Found">>};
@@ -214,9 +216,10 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                                     _ = erlang:spawn(fun() ->
                                         case
                                             hackney:post(
-                                                Endpoint, [], jsx:encode(PayloadResponse), [
-                                                    with_body
-                                                ]
+                                                Endpoint,
+                                                Headers,
+                                                jsx:encode(PayloadResponse),
+                                                [with_body]
                                             )
                                         of
                                             {ok, Code, _, _} ->
