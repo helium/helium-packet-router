@@ -7,4 +7,4 @@
 ## Up the number of processes allowed
 +P 2097151
 
--env ERL_FULLSWEEP_AFTER 20
+-env ERL_FULLSWEEP_AFTER 0
