@@ -37,6 +37,8 @@
 -define(BACKOFF_MIN, 10).
 -define(BACKOFF_MAX, timer:seconds(5)).
 -define(BACKOFF_RETRIES, 5).
+-define(CLEANUP, '__cleanup').
+-define(CLEANUP_TIMER, timer:minutes(10)).
 
 -ifdef(TEST).
 -define(CLEANUP_TIME, timer:seconds(1)).
@@ -130,6 +132,7 @@ register(PubKeyBin, Pid) ->
 
 init(_Args) ->
     lager:debug("~p started", [?MODULE]),
+    _ = schedule_cleanup(),
     {ok, #state{waiting_cleanups = #{}}}.
 
 -spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
@@ -161,6 +164,27 @@ handle_cast(_Msg, State) ->
     lager:warning("unknown cast ~p", [_Msg]),
     {noreply, State}.
 
+handle_info(?CLEANUP, State) ->
+    SizeBefore = ets:info(?STREAM_ETS, size),
+    %% ets:fun2ms(fun({_, M}=V) when is_map(M) -> V end).
+    MS = [{{'_', '$1'}, [{is_map, '$1'}], ['$_']}],
+    lists:foreach(
+        fun({{Gateway, _} = Key, Stream}) ->
+            case hpr_packet_router_service:locate(Gateway) of
+                {ok, _} ->
+                    ok;
+                {error, _} ->
+                    ok = grpcbox_client:close_send(Stream),
+                    true = ets:delete(?STREAM_ETS, Key),
+                    ok
+            end
+        end,
+        ets:select(?STREAM_ETS, MS)
+    ),
+    SizeAfter = ets:info(?STREAM_ETS, size),
+    lager:info("closed and removed ~w streams", [SizeBefore - SizeAfter]),
+    ok = schedule_cleanup(),
+    {noreply, State};
 handle_info(
     {{'DOWN', Gateway}, _Monitor, process, _Pid, _ExitReason},
     #state{waiting_cleanups = WaitingCleanups} = State
@@ -188,6 +212,12 @@ terminate(_Reason, _State = #state{}) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+-spec schedule_cleanup() -> ok.
+schedule_cleanup() ->
+    _ = erlang:send_after(?CLEANUP_TIMER, self(), ?CLEANUP),
+    ok.
+
 -spec get_stream(
     Gateway :: libp2p_crypto:pubkey_bin(),
     LNS :: binary(),
@@ -344,7 +374,8 @@ all_streams() ->
 all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         {"test_full", ?_test(test_full())},
-        {"test_cannot_locate_stream", ?_test(test_cannot_locate_stream())}
+        {"test_cannot_locate_stream", ?_test(test_cannot_locate_stream())},
+        {"test_cleanup", ?_test(test_cleanup())}
     ]}.
 
 foreach_setup() ->
@@ -421,6 +452,26 @@ test_full() ->
     ?assert(erlang:is_process_alive(erlang:whereis(?MODULE))),
 
     [P ! stop || P <- Pids],
+    ok.
+
+test_cleanup() ->
+    meck:expect(grpcbox_client, close_send, fun(_) -> ok end),
+    ?assertEqual(0, ets:info(?STREAM_ETS, size)),
+
+    Max = 10,
+    LNS = <<"LNS">>,
+    lists:foreach(
+        fun(_) ->
+            #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+            PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+            true = ets:insert(?STREAM_ETS, {?KEY(PubKeyBin, LNS), #{}})
+        end,
+        lists:seq(1, Max)
+    ),
+    ?assertEqual(10, ets:info(?STREAM_ETS, size)),
+    ?MODULE ! ?CLEANUP,
+    timer:sleep(10),
+    ?assertEqual(0, ets:info(?STREAM_ETS, size)),
     ok.
 
 %% We do not register a gateway to trigger cleanup
