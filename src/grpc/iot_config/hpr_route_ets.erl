@@ -409,7 +409,7 @@ delete_all() ->
 
 -spec all_routes() -> list(route()).
 all_routes() ->
-    ets:tab2list(?ETS_ROUTES).
+    [hpr_route_ets:route(R) || R <- ets:tab2list(?ETS_ROUTES)].
 
 -spec oui_routes(OUI :: non_neg_integer()) -> list(route()).
 oui_routes(OUI) ->
