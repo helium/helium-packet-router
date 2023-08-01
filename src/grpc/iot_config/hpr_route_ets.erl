@@ -34,6 +34,7 @@
 %% CLI exports
 -export([
     all_routes/0,
+    all_route_ets/0,
     oui_routes/1,
     eui_pairs_for_route/1,
     eui_pairs_count_for_route/1,
@@ -407,8 +408,12 @@ delete_all() ->
 %% CLI Functions
 %% ------------------------------------------------------------------
 
--spec all_routes() -> list(route()).
+-spec all_routes() -> list(hpr_route:route()).
 all_routes() ->
+    [hpr_route_ets:route(R) || R <- ets:tab2list(?ETS_ROUTES)].
+
+-spec all_route_ets() -> list(route()).
+all_route_ets() ->
     ets:tab2list(?ETS_ROUTES).
 
 -spec oui_routes(OUI :: non_neg_integer()) -> list(route()).
