@@ -305,6 +305,8 @@ find_skf(SKToFind, [RouteETS | RoutesETS], Acc0) ->
 config_eui(["config", "eui"], [], Flags) ->
     case maps:from_list(Flags) of
         #{app_eui := AppEUI, dev_eui := DevEUI} -> do_config_eui(AppEUI, DevEUI);
+        #{app_eui := AppEUI} -> do_single_eui(app_eui, AppEUI);
+        #{dev_eui := DevEUI} -> do_single_eui(dev_eui, DevEUI);
         _ -> usage
     end;
 config_eui(_, _, _) ->
@@ -339,6 +341,43 @@ do_config_eui(AppEUI, DevEUI) ->
     ),
 
     c_list(Spacer ++ Info ++ Routes).
+
+do_single_eui(app_eui, AppEUI) ->
+    EUINum = erlang:list_to_integer(AppEUI, 16),
+    Found = hpr_route_ets:lookup_app_eui(EUINum),
+
+    %% ======================================================
+    %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
+    %% - Count  :: 1 (AppEUI, DevEUI)
+    %%   -- (6081F9413229AD32, 0102030405060708)
+    %%
+
+    Spacer = [io_lib:format("========================================================~n", [])],
+    Info = [
+        io_lib:format("- App EUI :: ~p (~p)~n", [AppEUI, EUINum]),
+        io_lib:format("- Count   :: ~p (AppEUI, DevEUI)~n", [erlang:length(Found)])
+    ],
+
+    EUIsInfo = lists:map(fun format_eui/1, Found),
+    c_list(Spacer ++ Info ++ EUIsInfo);
+do_single_eui(dev_eui, DevEUI) ->
+    EUINum = erlang:list_to_integer(DevEUI, 16),
+    Found = hpr_route_ets:lookup_dev_eui(EUINum),
+
+    %% ======================================================
+    %% - Dev EUI :: 6081F9413229AD32 (6954113358046539058)
+    %% - Count  :: 1 (AppEUI, DevEUI)
+    %%   -- (0102030405060708, 6081F9413229AD32)
+    %%
+
+    Spacer = [io_lib:format("========================================================~n", [])],
+    Info = [
+        io_lib:format("- Dev EUI :: ~p (~p)~n", [DevEUI, EUINum]),
+        io_lib:format("- Count   :: ~p (AppEUI, DevEUI)~n", [erlang:length(Found)])
+    ],
+
+    EUIsInfo = lists:map(fun format_eui/1, Found),
+    c_list(Spacer ++ Info ++ EUIsInfo).
 
 %%--------------------------------------------------------------------
 %% Helpers

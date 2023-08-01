@@ -37,6 +37,8 @@
     oui_routes/1,
     eui_pairs_for_route/1,
     eui_pairs_count_for_route/1,
+    lookup_dev_eui/1,
+    lookup_app_eui/1,
     devaddr_ranges_for_route/1,
     devaddr_ranges_count_for_route/1,
     skfs_for_route/1,
@@ -416,8 +418,20 @@ oui_routes(OUI) ->
      || RouteETS <- ets:tab2list(?ETS_ROUTES), OUI == hpr_route:oui(?MODULE:route(RouteETS))
     ].
 
+-spec lookup_dev_eui(DevEUI :: non_neg_integer()) ->
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+lookup_dev_eui(DevEUI) ->
+    MS = [{{{'$1', DevEUI}, '_'}, [], [{{'$1', DevEUI}}]}],
+    ets:select(?ETS_EUI_PAIRS, MS).
+
+-spec lookup_app_eui(AppEUI :: non_neg_integer()) ->
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+lookup_app_eui(AppEUI) ->
+    MS = [{{{AppEUI, '$1'}, '_'}, [], [{{AppEUI, '$1'}}]}],
+    ets:select(?ETS_EUI_PAIRS, MS).
+
 -spec eui_pairs_for_route(RouteID :: hpr_route:id()) ->
-    list({non_neg_integer(), non_neg_integer()}).
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
 eui_pairs_for_route(RouteID) ->
     MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS_EUI_PAIRS, MS).
