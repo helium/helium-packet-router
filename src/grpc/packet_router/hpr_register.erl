@@ -6,6 +6,7 @@
     timestamp/1,
     gateway/1,
     signature/1,
+    session_capable/1,
     verify/1
 ]).
 
@@ -33,6 +34,10 @@ gateway(Reg) ->
 -spec signature(Reg :: register()) -> binary().
 signature(Reg) ->
     Reg#packet_router_register_v1_pb.signature.
+
+-spec session_capable(Reg :: register()) -> boolean().
+session_capable(Reg) ->
+    Reg#packet_router_register_v1_pb.session_capable.
 
 -spec verify(Reg :: register()) -> boolean().
 verify(Reg) ->
@@ -84,6 +89,7 @@ new_test() ->
     Reg = ?MODULE:test_new(<<"gateway">>),
     ?assertEqual(<<"gateway">>, Reg#packet_router_register_v1_pb.gateway),
     ?assert(erlang:is_integer(Reg#packet_router_register_v1_pb.timestamp)),
+    ?assertNot(Reg#packet_router_register_v1_pb.session_capable),
     ok.
 
 timestamp_test() ->
@@ -99,6 +105,11 @@ gateway_test() ->
 signature_test() ->
     Reg = ?MODULE:test_new(<<"gateway">>),
     ?assertEqual(<<>>, ?MODULE:signature(Reg)),
+    ok.
+
+session_capable_test() ->
+    Reg = ?MODULE:test_new(<<"gateway">>),
+    ?assertEqual(false, ?MODULE:session_capable(Reg)),
     ok.
 
 verify_test() ->

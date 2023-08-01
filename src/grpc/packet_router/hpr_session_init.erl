@@ -1,4 +1,4 @@
--module(hpr_session).
+-module(hpr_session_init).
 
 -include("../autogen/packet_router_pb.hrl").
 
@@ -21,29 +21,29 @@
 
 -type session() :: #packet_router_session_init_v1_pb{}.
 
--spec gateway(Ses :: session()) -> binary().
-gateway(Ses) ->
-    Ses#packet_router_session_init_v1_pb.gateway.
+-spec gateway(Session :: session()) -> binary().
+gateway(Session) ->
+    Session#packet_router_session_init_v1_pb.gateway.
 
--spec nonce(Ses :: session()) -> binary().
-nonce(Ses) ->
-    Ses#packet_router_session_init_v1_pb.nonce.
+-spec nonce(Session :: session()) -> binary().
+nonce(Session) ->
+    Session#packet_router_session_init_v1_pb.nonce.
 
--spec session_key(Ses :: session()) -> binary().
-session_key(Ses) ->
-    Ses#packet_router_session_init_v1_pb.session_key.
+-spec session_key(Session :: session()) -> binary().
+session_key(Session) ->
+    Session#packet_router_session_init_v1_pb.session_key.
 
--spec signature(Ses :: session()) -> binary().
-signature(Ses) ->
-    Ses#packet_router_session_init_v1_pb.signature.
+-spec signature(Session :: session()) -> binary().
+signature(Session) ->
+    Session#packet_router_session_init_v1_pb.signature.
 
--spec verify(Ses :: session()) -> boolean().
-verify(Ses) ->
+-spec verify(Session :: session()) -> boolean().
+verify(Session) ->
     try
-        BaseSes = Ses#packet_router_session_init_v1_pb{signature = <<>>},
+        BaseSes = Session#packet_router_session_init_v1_pb{signature = <<>>},
         EncodedSes = packet_router_pb:encode_msg(BaseSes),
-        Signature = ?MODULE:signature(Ses),
-        PubKeyBin = ?MODULE:gateway(Ses),
+        Signature = ?MODULE:signature(Session),
+        PubKeyBin = ?MODULE:gateway(Session),
         PubKey = libp2p_crypto:bin_to_pubkey(PubKeyBin),
         libp2p_crypto:verify(EncodedSes, Signature, PubKey)
     of
@@ -58,12 +58,12 @@ verify(Ses) ->
 %% ------------------------------------------------------------------
 -ifdef(TEST).
 
--spec test_new(Gateway :: binary(), SessionKey :: binary(), Nonce :: binary()) -> session().
-test_new(Gateway, SessionKey, Nonce) ->
+-spec test_new(Gateway :: binary(), Nonce :: binary(), SessionKey :: binary()) -> session().
+test_new(Gateway, Nonce, SessionKey) ->
     #packet_router_session_init_v1_pb{
         gateway = Gateway,
-        session_key = SessionKey,
-        nonce = Nonce
+        nonce = Nonce,
+        session_key = SessionKey
     }.
 
 -spec sign(Ses :: session(), SigFun :: fun()) -> session().
@@ -85,19 +85,19 @@ sign(Ses, SigFun) ->
 -include_lib("eunit/include/eunit.hrl").
 
 new_test() ->
-    Ses = ?MODULE:test_new(<<"gateway">>, <<"session_key">>, <<"nonce">>),
+    Ses = ?MODULE:test_new(<<"gateway">>, <<"nonce">>, <<"session_key">>),
     ?assertEqual(<<"gateway">>, Ses#packet_router_session_init_v1_pb.gateway),
     ?assertEqual(<<"session_key">>, Ses#packet_router_session_init_v1_pb.session_key),
     ?assertEqual(<<"nonce">>, Ses#packet_router_session_init_v1_pb.nonce),
     ok.
 
 gateway_test() ->
-    Ses = ?MODULE:test_new(<<"gateway">>, <<"session_key">>, <<"nonce">>),
+    Ses = ?MODULE:test_new(<<"gateway">>, <<"nonce">>, <<"session_key">>),
     ?assertEqual(<<"gateway">>, ?MODULE:gateway(Ses)),
     ok.
 
 signature_test() ->
-    Ses = ?MODULE:test_new(<<"gateway">>, <<"session_key">>, <<"nonce">>),
+    Ses = ?MODULE:test_new(<<"gateway">>, <<"nonce">>, <<"session_key">>),
     ?assertEqual(<<>>, ?MODULE:signature(Ses)),
     ok.
 
