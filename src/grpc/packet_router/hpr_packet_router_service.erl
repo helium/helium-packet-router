@@ -15,6 +15,8 @@
 ]).
 
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
+-define(SESSION_TIMER, timer:minutes(30)).
+-define(SESSION_RESET, session_reset).
 
 -record(handler_state, {
     started :: non_neg_integer(), nonce :: undefined | binary(), session_key :: undefined | binary()
@@ -62,6 +64,15 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
     lager:info("give_away registration to ~p", [NewPid]),
     gproc:give_away({n, l, ?REG_KEY(PubKeyBin)}, NewPid),
     StreamState;
+handle_info(?SESSION_RESET, StreamState0) ->
+    HandlerState0 = grpcbox_stream:stream_handler_state(StreamState0),
+    Nonce = crypto:strong_rand_bytes(32),
+    EnvDown = hpr_envelope_down:new(hpr_session_offer:new(Nonce)),
+    StreamState1 = grpcbox_stream:stream_handler_state(
+        StreamState0, HandlerState0#handler_state{nonce = Nonce}
+    ),
+    %% TODO: Do we reset the session key here?
+    grpcbox_stream:send(false, EnvDown, StreamState1);
 handle_info(_Msg, StreamState) ->
     StreamState.
 
@@ -178,9 +189,15 @@ handle_session_init(SessionInit, StreamState0) ->
                             session_key = hpr_session_init:session_key(SessionInit)
                         }
                     ),
+                    ok = schedule_session(),
                     {ok, StreamState1}
             end
     end.
+
+-spec schedule_session() -> ok.
+schedule_session() ->
+    _ = erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET),
+    ok.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
