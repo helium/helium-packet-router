@@ -132,13 +132,16 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
 
     %% OUI 4
     %% ========================================================
-    %% - ID :: 48088786-5465-4115-92de-5214a88e9a75
-    %% - Nonce :: 1
-    %% - Net ID :: C00053 (124781673)
+    %% - ID         :: 48088786-5465-4115-92de-5214a88e9a75
+    %% - Nonce      :: 1
+    %% - Net ID     :: C00053 (124781673)
     %% - Max Copies :: 1337
-    %% - Server :: Host:Port
-    %% - Protocol :: {gwmp, ...}
-    %% - Backoff  :: 0
+    %% - Server     :: Host:Port
+    %% - Protocol   :: {gwmp, ...}
+    %% - Backoff    :: 0
+    %% - Active     :: true
+    %% - Locked     :: false
+    %% - Ignore Empty SKF :: true
     %% - DevAddr Ranges
     %% --- Start -> End
     %% --- Start -> End
@@ -151,92 +154,15 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
     Header = io_lib:format("OUI ~p~n", [OUI]),
     Spacer = io_lib:format("========================================================~n", []),
 
-    DevAddrHeader = io_lib:format("- DevAddr Ranges~n", []),
-
-    FormatDevAddr = fun({S, E}) ->
-        io_lib:format("  - ~s -> ~s~n", [
-            hpr_utils:int_to_hex_string(S), hpr_utils:int_to_hex_string(E)
-        ])
-    end,
-    FormatEUI = fun({App, Dev}) ->
-        io_lib:format("  - (~s, ~s)~n", [
-            hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
-        ])
-    end,
-    FormatSKF = fun({{Timestamp, SKF}, {DevAddr, MaxCopies}}) ->
-        io_lib:format("  - (~s, ~s, ~w, ~w)~n", [
-            hpr_utils:int_to_hex_string(DevAddr),
-            hpr_utils:bin_to_hex_string(SKF),
-            MaxCopies,
-            Timestamp * -1
-        ])
-    end,
-
-    MkRow = fun(RouteETS) ->
-        Route = hpr_route_ets:route(RouteETS),
-        RouteID = hpr_route:id(Route),
-        NetID = hpr_route:net_id(Route),
-        Server = hpr_route:server(Route),
-
-        DevAddrRanges = lists:map(
-            FormatDevAddr, hpr_route_ets:devaddr_ranges_for_route(RouteID)
-        ),
-        DevAddrInfo = [DevAddrHeader | DevAddrRanges],
-
-        EUIInfo =
-            case maps:is_key(display_euis, Options) of
-                false ->
-                    Count = hpr_route_ets:eui_pairs_count_for_route(RouteID),
-                    EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [Count]),
-                    [EUIHeader];
-                true ->
-                    EUIs = hpr_route_ets:eui_pairs_for_route(RouteID),
-                    EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [
-                        erlang:length(EUIs)
-                    ]),
-                    [EUIHeader | lists:map(FormatEUI, EUIs)]
-            end,
-
-        SKFInfo =
-            case maps:is_key(display_skfs, Options) of
-                false ->
-                    SKFsCount = hpr_route_ets:skfs_count_for_route(RouteID),
-                    SKFHeader = io_lib:format(
-                        "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [SKFsCount]
-                    ),
-                    [SKFHeader];
-                true ->
-                    SKFs = hpr_route_ets:skfs_for_route(RouteID),
-                    SKFHeader = io_lib:format(
-                        "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [
-                            erlang:length(SKFs)
-                        ]
-                    ),
-                    [SKFHeader | lists:map(FormatSKF, SKFs)]
-            end,
-
-        Backoff =
-            case hpr_route_ets:backoff(RouteETS) of
-                undefined -> 0;
-                {Timestamp, _} -> Timestamp
-            end,
-
-        Info = [
-            io_lib:format("- ID         :: ~s~n", [RouteID]),
-            io_lib:format("- Net ID     :: ~s (~p)~n", [hpr_utils:net_id_display(NetID), NetID]),
-            io_lib:format("- Max Copies :: ~p~n", [hpr_route:max_copies(Route)]),
-            io_lib:format("- Server     :: ~s~n", [hpr_route:lns(Route)]),
-            io_lib:format("- Protocol   :: ~p~n", [hpr_route:protocol(Server)]),
-            io_lib:format("- Backoff    :: ~w~n", [Backoff])
-        ],
-
-        Info ++ DevAddrInfo ++ EUIInfo ++ SKFInfo
-    end,
+    DisplayOptions = #{
+        display_euis => maps:is_key(display_euis, Options),
+        display_skfs => maps:is_key(display_skfs, Options)
+    },
 
     c_list(
         lists:foldl(
             fun(RouteETS, Lines) ->
-                Lines ++ [Spacer | MkRow(RouteETS)]
+                Lines ++ [Spacer | mk_route_info(RouteETS, DisplayOptions)]
             end,
             [Header],
             RoutesETS
@@ -250,18 +176,20 @@ config_route(["config", "route", RouteID], [], Flags) ->
     RoutesETS = hpr_route_ets:lookup_route(RouteID),
 
     %% ========================================================
-    %% - ID :: 48088786-5465-4115-92de-5214a88e9a75
-    %% - OUI :: 1
-    %% - Nonce :: 1
-    %% - Net ID :: C00053 (124781673)
+    %% - ID         :: 48088786-5465-4115-92de-5214a88e9a75
+    %% - Nonce      :: 1
+    %% - Net ID     :: C00053 (124781673)
     %% - Max Copies :: 1337
-    %% - Server :: Host:Port
-    %% - Protocol :: {gwmp, ...}
-    %% - Backoff  :: 0
+    %% - Server     :: Host:Port
+    %% - Protocol   :: {gwmp, ...}
+    %% - Backoff    :: 0
+    %% - Active     :: true
+    %% - Locked     :: false
+    %% - Ignore Empty SKF :: true
     %% - DevAddr Ranges
     %% --- Start -> End
     %% --- Start -> End
-    %% - EUI (AppEUI, DevEUI) :: 2
+    %% - EUI Count (AppEUI, DevEUI) :: 2
     %% --- (010203040506070809, 010203040506070809)
     %% --- (0A0B0C0D0E0F0G0102, 0A0B0C0D0E0F0G0102)
     %% - SKF (DevAddr, SKF, MaxCopies, Timestamp) :: 1
@@ -269,92 +197,15 @@ config_route(["config", "route", RouteID], [], Flags) ->
 
     Spacer = io_lib:format("========================================================~n", []),
 
-    DevAddrHeader = io_lib:format("- DevAddr Ranges~n", []),
-
-    FormatDevAddr = fun({S, E}) ->
-        io_lib:format("  - ~s -> ~s~n", [
-            hpr_utils:int_to_hex_string(S), hpr_utils:int_to_hex_string(E)
-        ])
-    end,
-    FormatEUI = fun({App, Dev}) ->
-        io_lib:format("  - (~s, ~s)~n", [
-            hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
-        ])
-    end,
-    FormatSKF = fun({{Timestamp, SKF}, {DevAddr, MaxCopies}}) ->
-        io_lib:format("  - (~s, ~s, ~w, ~w)~n", [
-            hpr_utils:int_to_hex_string(DevAddr),
-            hpr_utils:bin_to_hex_string(SKF),
-            MaxCopies,
-            Timestamp * -1
-        ])
-    end,
-
-    MkRow = fun(RouteETS) ->
-        Route = hpr_route_ets:route(RouteETS),
-        RouteID = hpr_route:id(Route),
-        NetID = hpr_route:net_id(Route),
-        Server = hpr_route:server(Route),
-
-        DevAddrRanges = lists:map(
-            FormatDevAddr, hpr_route_ets:devaddr_ranges_for_route(RouteID)
-        ),
-        DevAddrInfo = [DevAddrHeader | DevAddrRanges],
-
-        EUIInfo =
-            case maps:is_key(display_euis, Options) of
-                false ->
-                    Count = hpr_route_ets:eui_pairs_count_for_route(RouteID),
-                    EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [Count]),
-                    [EUIHeader];
-                true ->
-                    EUIs = hpr_route_ets:eui_pairs_for_route(RouteID),
-                    EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [
-                        erlang:length(EUIs)
-                    ]),
-                    [EUIHeader | lists:map(FormatEUI, EUIs)]
-            end,
-
-        SKFInfo =
-            case maps:is_key(display_skfs, Options) of
-                false ->
-                    SKFsCount = hpr_route_ets:skfs_count_for_route(RouteID),
-                    SKFHeader = io_lib:format(
-                        "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [SKFsCount]
-                    ),
-                    [SKFHeader];
-                true ->
-                    SKFs = hpr_route_ets:skfs_for_route(RouteID),
-                    SKFHeader = io_lib:format(
-                        "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [
-                            erlang:length(SKFs)
-                        ]
-                    ),
-                    [SKFHeader | lists:map(FormatSKF, SKFs)]
-            end,
-
-        Backoff =
-            case hpr_route_ets:backoff(RouteETS) of
-                undefined -> 0;
-                {Timestamp, _} -> Timestamp
-            end,
-        Info = [
-            io_lib:format("- ID         :: ~s~n", [RouteID]),
-            io_lib:format("- OUI        :: ~w~n", [hpr_route:oui(Route)]),
-            io_lib:format("- Net ID     :: ~s (~p)~n", [hpr_utils:net_id_display(NetID), NetID]),
-            io_lib:format("- Max Copies :: ~p~n", [hpr_route:max_copies(Route)]),
-            io_lib:format("- Server     :: ~s~n", [hpr_route:lns(Route)]),
-            io_lib:format("- Protocol   :: ~p~n", [hpr_route:protocol(Server)]),
-            io_lib:format("- Backoff    :: ~w~n", [Backoff])
-        ],
-
-        Info ++ DevAddrInfo ++ EUIInfo ++ SKFInfo
-    end,
+    DisplayOptions = #{
+        display_euis => maps:is_key(display_euis, Options),
+        display_skfs => maps:is_key(display_skfs, Options)
+    },
 
     c_list(
         lists:foldl(
             fun(RouteETS, Lines) ->
-                Lines ++ [Spacer | MkRow(RouteETS)]
+                Lines ++ [Spacer | mk_route_info(RouteETS, DisplayOptions)]
             end,
             [],
             RoutesETS
@@ -504,3 +355,89 @@ c_text(T) -> [clique_status:text([T])].
 
 -spec c_text(string(), list(term())) -> clique_status:status().
 c_text(F, Args) -> c_text(io_lib:format(F, Args)).
+
+-spec mk_route_info(hpr_route_ets:route(), DisplayOptions :: map()) -> list(string()).
+mk_route_info(RouteETS, #{display_euis := DisplayEUIs, display_skfs := DisplaySKFs}) ->
+    Route = hpr_route_ets:route(RouteETS),
+    RouteID = hpr_route:id(Route),
+
+    DevAddrHeader = io_lib:format("- DevAddr Ranges~n", []),
+    DevAddrRanges = lists:map(
+        fun format_devaddr/1, hpr_route_ets:devaddr_ranges_for_route(RouteID)
+    ),
+    DevAddrInfo = [DevAddrHeader | DevAddrRanges],
+
+    EUIInfo =
+        case DisplayEUIs of
+            false ->
+                Count = hpr_route_ets:eui_pairs_count_for_route(RouteID),
+                EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [Count]),
+                [EUIHeader];
+            true ->
+                EUIs = hpr_route_ets:eui_pairs_for_route(RouteID),
+                EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [
+                    erlang:length(EUIs)
+                ]),
+                [EUIHeader | lists:map(fun format_eui/1, EUIs)]
+        end,
+
+    SKFInfo =
+        case DisplaySKFs of
+            false ->
+                SKFsCount = hpr_route_ets:skfs_count_for_route(RouteID),
+                SKFHeader = io_lib:format(
+                    "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [SKFsCount]
+                ),
+                [SKFHeader];
+            true ->
+                SKFs = hpr_route_ets:skfs_for_route(RouteID),
+                SKFHeader = io_lib:format(
+                    "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [
+                        erlang:length(SKFs)
+                    ]
+                ),
+                [SKFHeader | lists:map(fun format_skf/1, SKFs)]
+        end,
+
+    mk_top_level_route_info(RouteETS) ++ DevAddrInfo ++ EUIInfo ++ SKFInfo.
+
+-spec mk_top_level_route_info(hpr_route_ets:route()) -> list(string()).
+mk_top_level_route_info(RouteETS) ->
+    Route = hpr_route_ets:route(RouteETS),
+    RouteID = hpr_route:id(Route),
+    NetID = hpr_route:net_id(Route),
+    Server = hpr_route:server(Route),
+    Backoff =
+        case hpr_route_ets:backoff(RouteETS) of
+            undefined -> 0;
+            {Timestamp, _} -> Timestamp
+        end,
+    [
+        io_lib:format("- ID         :: ~s~n", [RouteID]),
+        io_lib:format("- Net ID     :: ~s (~p)~n", [hpr_utils:net_id_display(NetID), NetID]),
+        io_lib:format("- Max Copies :: ~p~n", [hpr_route:max_copies(Route)]),
+        io_lib:format("- Server     :: ~s~n", [hpr_route:lns(Route)]),
+        io_lib:format("- Protocol   :: ~p~n", [hpr_route:protocol(Server)]),
+        io_lib:format("- Backoff    :: ~w~n", [Backoff]),
+        io_lib:format("- Active     :: ~w~n", [hpr_route:active(Route)]),
+        io_lib:format("- Locked     :: ~w~n", [hpr_route:locked(Route)]),
+        io_lib:format("- Ignore Empty SKF :: ~w~n", [hpr_route:ignore_empty_skf(Route)])
+    ].
+
+format_devaddr({S, E}) ->
+    io_lib:format("  - ~s -> ~s~n", [
+        hpr_utils:int_to_hex_string(S), hpr_utils:int_to_hex_string(E)
+    ]).
+
+format_eui({App, Dev}) ->
+    io_lib:format("  - (~s, ~s)~n", [
+        hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
+    ]).
+
+format_skf({{Timestamp, SKF}, {DevAddr, MaxCopies}}) ->
+    io_lib:format("  - (~s, ~s, ~w, ~w)~n", [
+        hpr_utils:int_to_hex_string(DevAddr),
+        hpr_utils:bin_to_hex_string(SKF),
+        MaxCopies,
+        Timestamp * -1
+    ]).
