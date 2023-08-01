@@ -4,7 +4,7 @@
 
 -export([
     init/0,
-    handle_packet/1,
+    handle_packet/1, handle_packet/2,
     find_routes/2
 ]).
 
@@ -31,15 +31,20 @@ init() ->
 
 -spec handle_packet(Packet :: hpr_packet_up:packet()) -> hpr_routing_response().
 handle_packet(Packet) ->
+    handle_packet(Packet, undefined).
+
+-spec handle_packet(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
+    hpr_routing_response().
+handle_packet(Packet, SessionKey) ->
     Start = erlang:system_time(millisecond),
     lager:debug("received packet"),
     Checks = [
-        {fun packet_type_check/1, invalid_packet_type},
-        {fun hpr_packet_up:verify/1, bad_signature},
-        {fun throttle_check/1, gateway_limit_exceeded}
+        {fun packet_type_check/2, invalid_packet_type},
+        {fun packet_session_check/2, bad_signature},
+        {fun throttle_check/2, gateway_limit_exceeded}
     ],
     PacketType = hpr_packet_up:type(Packet),
-    case execute_checks(Packet, Checks) of
+    case execute_checks(Packet, SessionKey, Checks) of
         {error, _Reason} = Error ->
             Gateway = hpr_packet_up:gateway(Packet),
             GatewayName = hpr_utils:gateway_name(Gateway),
@@ -353,31 +358,42 @@ maybe_report_packet([Route | _] = Routes, Routed, IsFree, Packet, ReceivedTime) 
             ])
     end.
 
--spec throttle_check(Packet :: hpr_packet_up:packet()) -> boolean().
-throttle_check(Packet) ->
-    Gateway = hpr_packet_up:gateway(Packet),
-    case throttle:check(?GATEWAY_THROTTLE, Gateway) of
-        {limit_exceeded, _, _} -> false;
-        _ -> true
-    end.
-
--spec packet_type_check(Packet :: hpr_packet_up:packet()) -> boolean().
-packet_type_check(Packet) ->
+-spec packet_type_check(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
+    boolean().
+packet_type_check(Packet, _SessionKey) ->
     case hpr_packet_up:type(Packet) of
         {undefined, _} -> false;
         {join_req, _} -> true;
         {uplink, _} -> true
     end.
 
--spec execute_checks(Packet :: hpr_packet_up:packet(), [{fun(), any()}]) -> ok | {error, any()}.
-execute_checks(_Packet, []) ->
+-spec packet_session_check(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
+    boolean().
+packet_session_check(Packet, undefined) ->
+    hpr_packet_up:verify(Packet);
+packet_session_check(Packet, SessionKey) ->
+    hpr_packet_up:verify(Packet, SessionKey).
+
+-spec throttle_check(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
+    boolean().
+throttle_check(Packet, _SessionKey) ->
+    Gateway = hpr_packet_up:gateway(Packet),
+    case throttle:check(?GATEWAY_THROTTLE, Gateway) of
+        {limit_exceeded, _, _} -> false;
+        _ -> true
+    end.
+
+-spec execute_checks(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary(), [
+    {fun(), any()}
+]) -> ok | {error, any()}.
+execute_checks(_Packet, _SessionKey, []) ->
     ok;
-execute_checks(Packet, [{Fun, ErrorReason} | Rest]) ->
-    case Fun(Packet) of
+execute_checks(Packet, SessionKey, [{Fun, ErrorReason} | Rest]) ->
+    case Fun(Packet, SessionKey) of
         false ->
             {error, ErrorReason};
         true ->
-            execute_checks(Packet, Rest)
+            execute_checks(Packet, SessionKey, Rest)
     end.
 
 %% ------------------------------------------------------------------

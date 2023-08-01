@@ -53,7 +53,7 @@
 
 -type downlink() :: {
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
-    PacketDown :: hpr_packet_down:downlink_packet()
+    PacketDown :: hpr_packet_down:packet()
 }.
 -type pr_start_notif() :: {PRStartNotif :: map(), RouteID :: hpr_route:id()}.
 
@@ -68,14 +68,11 @@
 }).
 -type packet() :: #packet{}.
 
--type downlink_packet() :: hpr_packet_down:packet().
-
 -export_type([
     netid_num/0,
     packet/0,
     received_time/0,
-    downlink/0,
-    downlink_packet/0
+    downlink/0
 ]).
 
 %% ------------------------------------------------------------------

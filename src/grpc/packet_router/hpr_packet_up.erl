@@ -15,7 +15,7 @@
     gateway/1,
     signature/1,
     phash/1,
-    verify/1,
+    verify/1, verify/2,
     encode/1,
     decode/1,
     type/1,
@@ -102,6 +102,21 @@ verify(Packet) ->
         Signature = ?MODULE:signature(Packet),
         PubKeyBin = ?MODULE:gateway(Packet),
         PubKey = libp2p_crypto:bin_to_pubkey(PubKeyBin),
+        libp2p_crypto:verify(EncodedPacket, Signature, PubKey)
+    of
+        Bool -> Bool
+    catch
+        _E:_R ->
+            false
+    end.
+
+-spec verify(Packet :: packet(), SessionKey :: binary()) -> boolean().
+verify(Packet, SessionKey) ->
+    try
+        BasePacket = Packet#packet_router_packet_up_v1_pb{signature = <<>>},
+        EncodedPacket = ?MODULE:encode(BasePacket),
+        Signature = ?MODULE:signature(Packet),
+        PubKey = libp2p_crypto:bin_to_pubkey(SessionKey),
         libp2p_crypto:verify(EncodedPacket, Signature, PubKey)
     of
         Bool -> Bool
@@ -282,13 +297,19 @@ signature_test() ->
     ok.
 
 verify_test() ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
-    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-    PacketUp = ?MODULE:test_new(#{gateway => Gateway}),
-    SignedPacketUp = ?MODULE:sign(PacketUp, SigFun),
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
+    SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
+    Gateway1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+    PacketUp1 = ?MODULE:test_new(#{gateway => Gateway1}),
+    SignedPacketUp1 = ?MODULE:sign(PacketUp1, SigFun1),
 
-    ?assert(verify(SignedPacketUp)),
+    ?assert(verify(SignedPacketUp1)),
+
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ed25519),
+    SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
+    SessionKey = libp2p_crypto:pubkey_to_bin(PubKey2),
+    SignedPacketUp2 = ?MODULE:sign(PacketUp1, SigFun2),
+    ?assert(verify(SignedPacketUp2, SessionKey)),
     ok.
 
 encode_decode_test() ->

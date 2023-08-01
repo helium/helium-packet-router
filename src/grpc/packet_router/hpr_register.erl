@@ -61,10 +61,16 @@ verify(Reg) ->
 -ifdef(TEST).
 
 -spec test_new(Gateway :: binary()) -> register().
-test_new(Gateway) ->
+test_new(Gateway) when is_binary(Gateway) ->
     #packet_router_register_v1_pb{
         timestamp = erlang:system_time(millisecond),
         gateway = Gateway
+    };
+test_new(Map) when is_map(Map) ->
+    #packet_router_register_v1_pb{
+        timestamp = erlang:system_time(millisecond),
+        gateway = maps:get(gateway, Map),
+        session_capable = maps:get(session_capable, Map)
     }.
 
 -spec sign(Reg :: register(), SigFun :: fun()) -> register().

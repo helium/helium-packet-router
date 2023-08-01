@@ -17,12 +17,10 @@
     new_downlink/5
 ]).
 
--type packet() :: packet_router_pb:packet_router_packet_down_v1_pb().
--type downlink_packet() :: hpr_packet_down:packet().
+-type packet() :: #packet_router_packet_down_v1_pb{}.
 
 -export_type([
-    packet/0,
-    downlink_packet/0
+    packet/0
 ]).
 
 -spec rx1_frequency(PacketDown :: packet()) ->
@@ -88,7 +86,7 @@ window(TS, FrequencyHz, DataRate) ->
     Payload :: binary(),
     FrequencyHz :: non_neg_integer(),
     DataRate :: atom() | number()
-) -> downlink_packet().
+) -> packet().
 new_imme_downlink(Payload, FrequencyHz, DataRate) ->
     #packet_router_packet_down_v1_pb{
         payload = Payload,
@@ -106,7 +104,7 @@ new_imme_downlink(Payload, FrequencyHz, DataRate) ->
     Timestamp :: non_neg_integer(),
     Frequency :: atom() | number(),
     DataRate :: atom() | integer()
-) -> downlink_packet().
+) -> packet().
 new_downlink(Payload, Timestamp, FrequencyHz, DataRate) ->
     new_downlink(Payload, Timestamp, FrequencyHz, DataRate, undefined).
 
@@ -116,7 +114,7 @@ new_downlink(Payload, Timestamp, FrequencyHz, DataRate) ->
     Frequency :: atom() | number(),
     DataRate :: atom() | integer(),
     Rx2 :: packet_router_pb:window_v1_pb() | undefined
-) -> downlink_packet().
+) -> packet().
 new_downlink(Payload, Timestamp, FrequencyHz, DataRate, Rx2) ->
     #packet_router_packet_down_v1_pb{
         payload = Payload,
