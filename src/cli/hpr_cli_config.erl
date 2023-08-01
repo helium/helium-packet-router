@@ -258,8 +258,8 @@ config_skf(["config", "skf", DevAddrOrSKF], [], []) ->
                     hpr_route_ets:lookup_devaddr_range(DevAddr)
                 );
             SKF ->
-                Routes = hpr_route_ets:all_routes(),
-                find_skf(SKF, Routes, [])
+                RoutesETS = hpr_route_ets:all_route_ets(),
+                find_skf(SKF, RoutesETS, [])
         end,
     case SKFS of
         [] ->
