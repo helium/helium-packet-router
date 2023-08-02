@@ -190,13 +190,13 @@ handle_session_init(SessionInit, StreamState0) ->
                             session_key = hpr_session_init:session_key(SessionInit)
                         }
                     ),
-                    ok = schedule_session(),
+                    ok = schedule_session_reset(),
                     {ok, StreamState1}
             end
     end.
 
--spec schedule_session() -> ok.
-schedule_session() ->
+-spec schedule_session_reset() -> ok.
+schedule_session_reset() ->
     _ = erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET),
     ok.
 
