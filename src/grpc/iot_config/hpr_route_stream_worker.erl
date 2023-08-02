@@ -54,12 +54,14 @@
 -behaviour(gen_server).
 
 -include("hpr.hrl").
+-include("../autogen/iot_config_pb.hrl").
 
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/1
+    start_link/1,
+    refresh_route/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -99,6 +101,10 @@ start_link(Args) ->
         {local, ?SERVER}, ?SERVER, Args, []
     ).
 
+-spec refresh_route(hpr_route:id()) -> ok.
+refresh_route(RouteID) ->
+    gen_server:call(?MODULE, {refresh_route, RouteID}).
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
@@ -113,8 +119,40 @@ init(Args) ->
         stream_awaiting_data = false
     }}.
 
+handle_call({refresh_route, RouteID}, _From, State) ->
+    DevaddrResponse = refresh_devaddrs(RouteID),
+    EUIResponse = refresh_euis(RouteID),
+    SKFResponse = refresh_skfs(RouteID),
+
+    Reply =
+        case {DevaddrResponse, EUIResponse, SKFResponse} of
+            {ok, ok, ok} -> ok;
+            {Err, _, _} when element(1, Err) == error -> Err;
+            {_, Err, _} when element(1, Err) == error -> Err;
+            {_, _, Err} when element(1, Err) == error -> Err;
+            Other -> {error, {unexpected_response, Other}}
+        end,
+
+    {reply, Reply, State};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
+
+recv_from_stream(Stream) ->
+    do_recv_from_stream(init, Stream, []).
+
+do_recv_from_stream(init, Stream, Acc) ->
+    do_recv_from_stream(
+        grpcbox_client:recv_data(Stream, timer:seconds(2)),
+        Stream,
+        Acc
+    );
+do_recv_from_stream(stream_finished, _Stream, Acc) ->
+    Acc;
+do_recv_from_stream({error, _, _} = Err, _Stream, _Acc) ->
+    Err;
+do_recv_from_stream(Msg, _Stream, _Acc) ->
+    ct:print("got msg: ~p", [Msg]),
+    [].
 
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
@@ -238,3 +276,102 @@ process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
     hpr_route_ets:delete_devaddr_range(DevAddrRange);
 process_route_stream_res(remove, {skf, SKF}) ->
     hpr_route_ets:delete_skf(SKF).
+
+refresh_skfs(RouteID) ->
+    SKFReq = #iot_config_route_skf_list_req_v1_pb{
+        route_id = RouteID,
+        timestamp = erlang:system_time(millisecond),
+        signer = hpr_utils:pubkey_bin()
+    },
+    SigFun = hpr_utils:sig_fun(),
+    EncodedReq = iot_config_pb:encode_msg(SKFReq),
+    Signed = SKFReq#iot_config_route_skf_list_req_v1_pb{signature = SigFun(EncodedReq)},
+
+    case
+        helium_iot_config_route_client:list_skfs(
+            Signed,
+            #{channel => ?IOT_CONFIG_CHANNEL}
+        )
+    of
+        {ok, Stream} ->
+            case recv_from_stream(Stream) of
+                SKFs when erlang:is_list(SKFs) ->
+                    Previous = hpr_route_ets:replace_route_skfs(RouteID, SKFs),
+                    lager:info(
+                        [{previous, Previous}, {current, length(SKFs)}],
+                        "route refresh skfs"
+                    ),
+                    ok
+            end;
+        {error, _} = Err ->
+            lager:error([{route_id, RouteID}, Err], "failed to refresh route skfs"),
+            Err
+    end.
+
+refresh_euis(RouteID) ->
+    EUIReq = #iot_config_route_get_euis_req_v1_pb{
+        route_id = RouteID,
+        timestamp = erlang:system_time(millisecond),
+        signer = hpr_utils:pubkey_bin()
+    },
+    SigFun = hpr_utils:sig_fun(),
+    EncodedReq = iot_config_pb:encode_msg(EUIReq),
+    Signed = EUIReq#iot_config_route_get_euis_req_v1_pb{signature = SigFun(EncodedReq)},
+
+    case
+        helium_iot_config_route_client:get_euis(
+            Signed,
+            #{channel => ?IOT_CONFIG_CHANNEL}
+        )
+    of
+        {ok, Stream} ->
+            case recv_from_stream(Stream) of
+                EUIs when erlang:is_list(EUIs) ->
+                    Previous = hpr_route_ets:delete_route_euis(RouteID),
+                    lager:info(
+                        [{previous, Previous}, {current, length(EUIs)}],
+                        "route refresh euis"
+                    ),
+                    ok;
+                Err ->
+                    Err
+            end;
+        {error, _E} = Err ->
+            lager:error([{route_id, RouteID}, Err], "failed to refresh route euis"),
+            Err
+    end.
+
+refresh_devaddrs(RouteID) ->
+    DevaddrReq = #iot_config_route_get_devaddr_ranges_req_v1_pb{
+        route_id = RouteID,
+        timestamp = erlang:system_time(millisecond),
+        signer = hpr_utils:pubkey_bin()
+    },
+    SigFun = hpr_utils:sig_fun(),
+    EncodedReq = iot_config_pb:encode_msg(DevaddrReq),
+    Signed = DevaddrReq#iot_config_route_get_devaddr_ranges_req_v1_pb{
+        signature = SigFun(EncodedReq)
+    },
+
+    case
+        helium_iot_config_route_client:get_devaddr_ranges(
+            Signed,
+            #{channel => ?IOT_CONFIG_CHANNEL}
+        )
+    of
+        {ok, Stream} ->
+            case recv_from_stream(Stream) of
+                Devaddrs when erlang:is_list(Devaddrs) ->
+                    Previous = hpr_route_ets:delete_route_devaddrs(RouteID),
+                    lager:info(
+                        [{previous, Previous}, {current, length(Devaddrs)}],
+                        "route refresh devaddrs"
+                    ),
+                    ok;
+                Err ->
+                    Err
+            end;
+        {error, _E} = Err ->
+            lager:error([{route_id, RouteID}, Err], "failed to refresh route devaddrs"),
+            Err
+    end.

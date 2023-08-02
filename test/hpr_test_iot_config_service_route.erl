@@ -32,10 +32,15 @@
 ]).
 
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
-init(_RPC, StreamState) ->
-    Self = self(),
-    true = erlang:register(?MODULE, self()),
-    lager:notice("init ~p @ ~p", [?MODULE, Self]),
+init(RPC, StreamState) ->
+    case RPC of
+        stream ->
+            Self = self(),
+            true = erlang:register(?MODULE, self()),
+            lager:notice("init ~p @ ~p", [?MODULE, Self]);
+        _ ->
+            lager:notice("initialize stream for ~p", [RPC])
+    end,
     StreamState.
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
@@ -68,8 +73,28 @@ stream(RouteStreamReq, StreamState) ->
             {ok, StreamState}
     end.
 
-get_euis(_Msg, _Stream) ->
-    {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
+get_euis(GetEUIsReq, StreamState) ->
+    Encoded = iot_config_pb:encode_msg(GetEUIsReq#iot_config_route_get_euis_req_v1_pb{
+        signature = <<>>
+    }),
+    case
+        libp2p_crypto:verify(
+            Encoded,
+            GetEUIsReq#iot_config_route_get_euis_req_v1_pb.signature,
+            libp2p_crypto:bin_to_pubkey(GetEUIsReq#iot_config_route_get_euis_req_v1_pb.signer)
+        )
+    of
+        false ->
+            {grpc_error, {grpcbox_stream:code_to_status(7), <<"PERMISSION_DENIED">>}};
+        true ->
+            lists:foreach(
+                fun({Last, El}) -> grpcbox_stream:send(Last, El, StreamState) end,
+                hpr_utils:enumerate_last(application:get_env(hpr, test_route_get_euis, []))
+            ),
+            {stop, StreamState}
+    end.
+
+%% {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
 update_euis(_Msg, _Stream) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
@@ -77,8 +102,33 @@ update_euis(_Msg, _Stream) ->
 delete_euis(_Ctx, _Msg) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
-get_devaddr_ranges(_Msg, _Stream) ->
-    {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
+get_devaddr_ranges(RouteDevaddrReq, StreamState) ->
+    Encoded = iot_config_pb:encode_msg(
+        RouteDevaddrReq#iot_config_route_get_devaddr_ranges_req_v1_pb{signature = <<>>}
+    ),
+    case
+        libp2p_crypto:verify(
+            Encoded,
+            RouteDevaddrReq#iot_config_route_get_devaddr_ranges_req_v1_pb.signature,
+            libp2p_crypto:bin_to_pubkey(
+                RouteDevaddrReq#iot_config_route_get_devaddr_ranges_req_v1_pb.signer
+            )
+        )
+    of
+        false ->
+            {grpc_error, {grpcbox_stream:code_to_status(7), <<"PERMISSION_DENIED">>}};
+        true ->
+            %% send what we have and close the stream
+            lists:foreach(
+                fun({Last, El}) -> grpcbox_stream:send(Last, El, StreamState) end,
+                hpr_utils:enumerate_last(
+                    application:get_env(hpr, test_route_get_devaddr_ranges, [])
+                )
+            ),
+            {stop, StreamState}
+    end.
+
+%% {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
 update_devaddr_ranges(_Msg, _Stream) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
@@ -89,8 +139,28 @@ delete_devaddr_ranges(_Ctx, _Msg) ->
 get_skfs(_Ctx, _Msg) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
-list_skfs(_Ctx, _Msg) ->
-    {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
+list_skfs(RouteSKFReq, StreamState) ->
+    Encoded = iot_config_pb:encode_msg(RouteSKFReq#iot_config_route_skf_list_req_v1_pb{
+        signature = <<>>
+    }),
+    case
+        libp2p_crypto:verify(
+            Encoded,
+            RouteSKFReq#iot_config_route_skf_list_req_v1_pb.signature,
+            libp2p_crypto:bin_to_pubkey(RouteSKFReq#iot_config_route_skf_list_req_v1_pb.signer)
+        )
+    of
+        false ->
+            {grpc_error, {grpcbox_stream:code_to_status(7), <<"PERMISSION_DENIED">>}};
+        true ->
+            lists:foreach(
+                fun({Last, El}) -> grpcbox_stream:send(Last, El, StreamState) end,
+                hpr_utils:enumerate_last(application:get_env(hpr, test_route_list_skfs, []))
+            ),
+            {stop, StreamState}
+    end.
+
+%% {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
 update_skfs(_Ctx, _Msg) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.

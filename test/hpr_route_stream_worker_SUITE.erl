@@ -10,7 +10,8 @@
 ]).
 
 -export([
-    main_test/1
+    main_test/1,
+    refresh_route_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -25,7 +26,8 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        main_test
+        main_test,
+        refresh_route_test
     ].
 
 %%--------------------------------------------------------------------
@@ -212,5 +214,95 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
+
+    ok.
+
+refresh_route_test(_Config) ->
+
+    %% Create route and send them from server
+    Route1ID = "7d502f32-4d58-4746-965e-001",
+    Route1 = hpr_route:test_new(#{
+        id => Route1ID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "localhost",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10
+    }),
+    EUIPair1 = hpr_eui_pair:test_new(#{
+        route_id => Route1ID, app_eui => 1, dev_eui => 0
+    }),
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
+    DevAddr1 = 16#00000001,
+    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKeyFilter = hpr_skf:new(#{
+        route_id => Route1ID,
+        devaddr => DevAddr1,
+        session_key => SessionKey1,
+        max_copies => 1
+    }),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}})
+    ),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
+    ),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange1}})
+    ),
+    ok = hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {skf, SessionKeyFilter}})
+    ),
+
+    %% Let time to process new routes
+    ok = test_utils:wait_until(
+        fun() ->
+            case hpr_route_ets:lookup_route(Route1ID) of
+                [RouteETS] ->
+                    1 =:= ets:info(hpr_routes_ets, size) andalso
+                        1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
+                        1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
+                        1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
+                _ ->
+                    false
+            end
+        end
+    ),
+
+    [RouteETS1] = hpr_route_ets:lookup_route(Route1ID),
+    SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
+
+    %% Check that we can query route via config
+    ?assertMatch([RouteETS1], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([RouteETS1], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([RouteETS1], hpr_route_ets:lookup_eui_pair(1, 100)),
+    ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
+    SK1 = hpr_utils:hex_to_bin(SessionKey1),
+    ?assertMatch(
+        [{SK1, X, 1}] when X < 0, hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)
+    ),
+
+    %% ===================================================================
+    %% Initial route has been verified
+    %% -*magic wand*- things are different
+    %% refresh the route and everything should be gone.
+    ?assertEqual(ok, hpr_route_stream_worker:refresh_route("7d502f32-4d58-4746-965e-001")),
+
+    %% Everything was removed
+    [RouteETS2] = hpr_route_ets:lookup_route(Route1ID),
+    SKFETS2 = hpr_route_ets:skf_ets(RouteETS2),
+    ?assertMatch([], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
+    ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
+    ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
+    ?assertEqual([], hpr_route_ets:lookup_skf(SKFETS2, DevAddr1)),
+
 
     ok.
