@@ -40,6 +40,7 @@ config_usage() ->
             "config route <route_id>                     - Info for route\n",
             "    [--display_euis] default: false (EUIs not included)\n",
             "    [--display_skfs] default: false (SKFs not included)\n",
+            "config route refresh <route_id>             - Refresh route\n",
             "config route activate <route_id>            - Activate route\n",
             "config route deactivate <route_id>          - Deactivate route\n",
             "config skf <DevAddr/Session Key>            - List all Session Key Filters for Devaddr or Session Key\n",
@@ -67,6 +68,12 @@ config_cmd() ->
                 {display_skfs, [{longname, "display_skfs"}, {datatype, boolean}]}
             ],
             fun config_route/3
+        ],
+        [
+            ["config", "route", "refresh", '*'],
+            [],
+            [],
+            fun config_route_refresh/3
         ],
         [
             ["config", "route", "activate", '*'],
@@ -212,6 +219,14 @@ config_route(["config", "route", RouteID], [], Flags) ->
         )
     );
 config_route(_, _, _) ->
+    usage.
+
+config_route_refresh(["config", "route", "refresh", RouteID], [], _Flags) ->
+    case hpr_route_stream_worker:refresh_route(RouteID) of
+        ok -> c_text("Route ~s refreshed", [RouteID]);
+        Err -> c_text("Something went wrong:~n~p", [Err])
+    end;
+config_route_refresh(_, _, _) ->
     usage.
 
 config_route_activate(["config", "route", "activate", RouteID], [], _Flags) ->

@@ -94,8 +94,6 @@ get_euis(GetEUIsReq, StreamState) ->
             {stop, StreamState}
     end.
 
-%% {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
-
 update_euis(_Msg, _Stream) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
@@ -128,8 +126,6 @@ get_devaddr_ranges(RouteDevaddrReq, StreamState) ->
             {stop, StreamState}
     end.
 
-%% {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
-
 update_devaddr_ranges(_Msg, _Stream) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
@@ -159,8 +155,6 @@ list_skfs(RouteSKFReq, StreamState) ->
             ),
             {stop, StreamState}
     end.
-
-%% {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
 update_skfs(_Ctx, _Msg) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
