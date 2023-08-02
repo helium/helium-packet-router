@@ -137,23 +137,6 @@ handle_call({refresh_route, RouteID}, _From, State) ->
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
-recv_from_stream(Stream) ->
-    do_recv_from_stream(init, Stream, []).
-
-do_recv_from_stream(init, Stream, Acc) ->
-    do_recv_from_stream(
-        grpcbox_client:recv_data(Stream, timer:seconds(2)),
-        Stream,
-        Acc
-    );
-do_recv_from_stream(stream_finished, _Stream, Acc) ->
-    Acc;
-do_recv_from_stream({error, _, _} = Err, _Stream, _Acc) ->
-    Err;
-do_recv_from_stream(Msg, _Stream, _Acc) ->
-    ct:print("got msg: ~p", [Msg]),
-    [].
-
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
@@ -277,6 +260,7 @@ process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
 process_route_stream_res(remove, {skf, SKF}) ->
     hpr_route_ets:delete_skf(SKF).
 
+-spec refresh_skfs(hpr_route:id()) -> ok | {error, any()}.
 refresh_skfs(RouteID) ->
     SKFReq = #iot_config_route_skf_list_req_v1_pb{
         route_id = RouteID,
@@ -308,6 +292,7 @@ refresh_skfs(RouteID) ->
             Err
     end.
 
+-spec refresh_euis(hpr_route:id()) -> ok | {error, any()}.
 refresh_euis(RouteID) ->
     EUIReq = #iot_config_route_get_euis_req_v1_pb{
         route_id = RouteID,
@@ -327,7 +312,7 @@ refresh_euis(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 EUIs when erlang:is_list(EUIs) ->
-                    Previous = hpr_route_ets:delete_route_euis(RouteID),
+                    Previous = hpr_route_ets:replace_route_euis(RouteID, EUIs),
                     lager:info(
                         [{previous, Previous}, {current, length(EUIs)}],
                         "route refresh euis"
@@ -341,6 +326,7 @@ refresh_euis(RouteID) ->
             Err
     end.
 
+-spec refresh_devaddrs(hpr_route:id()) -> ok | {error, any()}.
 refresh_devaddrs(RouteID) ->
     DevaddrReq = #iot_config_route_get_devaddr_ranges_req_v1_pb{
         route_id = RouteID,
@@ -362,7 +348,7 @@ refresh_devaddrs(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 Devaddrs when erlang:is_list(Devaddrs) ->
-                    Previous = hpr_route_ets:delete_route_devaddrs(RouteID),
+                    Previous = hpr_route_ets:replace_route_devaddrs(RouteID, Devaddrs),
                     lager:info(
                         [{previous, Previous}, {current, length(Devaddrs)}],
                         "route refresh devaddrs"
@@ -375,3 +361,22 @@ refresh_devaddrs(RouteID) ->
             lager:error([{route_id, RouteID}, Err], "failed to refresh route devaddrs"),
             Err
     end.
+
+-spec recv_from_stream(grpcbox_client:stream()) -> list(T) when
+    T :: hpr_skf:skf() | hpr_eui_pair:eui_pair() | hpr_devaddr_range:devaddr_range().
+recv_from_stream(Stream) ->
+    do_recv_from_stream(init, Stream, []).
+
+do_recv_from_stream(init, Stream, Acc) ->
+    do_recv_from_stream(grpcbox_client:recv_data(Stream, timer:seconds(2)), Stream, Acc);
+do_recv_from_stream({ok, Data}, Stream, Acc) ->
+    do_recv_from_stream(grpcbox_client:recv_data(Stream, timer:seconds(2)), Stream, [Data | Acc]);
+do_recv_from_stream({error, _, _} = Err, _Stream, _Acc) ->
+    Err;
+do_recv_from_stream(timeout, _Stream, _Acc) ->
+    {error, recv_timeout};
+do_recv_from_stream(stream_finished, _Stream, Acc) ->
+    lists:reverse(Acc);
+do_recv_from_stream(Msg, _Stream, _Acc) ->
+    lager:warning("unhandled msg from stream: ~p", [Msg]),
+    {error, {unhandled_message, Msg}}.

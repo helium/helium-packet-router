@@ -34,7 +34,9 @@
 %% Route Stream helpers
 -export([
     delete_route_devaddrs/1,
+    replace_route_devaddrs/2,
     delete_route_euis/1,
+    replace_route_euis/2,
     delete_route_skfs/1,
     replace_route_skfs/2
 ]).
@@ -414,6 +416,24 @@ delete_route_skfs(RouteID) ->
             {error, Other}
     end.
 
+-spec replace_route_euis(
+    RouteID :: hpr_route:id(),
+    EUIs :: list(hpr_eui_pair:eui_pair())
+) -> non_neg_integer().
+replace_route_euis(RouteID, EUIs) ->
+    Removed = ?MODULE:delete_route_euis(RouteID),
+    lists:foreach(fun insert_eui_pair/1, EUIs),
+    Removed.
+
+-spec replace_route_devaddrs(
+    RouteID :: hpr_route:id(),
+    DevAddrRanges :: list(hpr_devaddr_range:devaddr_range())
+) -> non_neg_integer().
+replace_route_devaddrs(RouteID, DevAddrRanges) ->
+    Removed = ?MODULE:delete_route_devaddrs(RouteID),
+    lists:foreach(fun insert_devaddr_range/1, DevAddrRanges),
+    Removed.
+
 -spec replace_route_skfs(hpr_route:id(), list(hpr_skf:skf())) ->
     {ok, non_neg_integer()} | {error, any()}.
 replace_route_skfs(RouteID, NewSKFs) ->
@@ -435,7 +455,6 @@ replace_route_skfs(RouteID, NewSKFs) ->
         Other ->
             {error, Other}
     end.
-
 
 %% ------------------------------------------------------------------
 %% CLI Functions
@@ -532,7 +551,6 @@ do_insert_skf(RouteID, SKFETS, SKF) ->
         ],
         "inserting SKF"
     ).
-
 
 %% ------------------------------------------------------------------
 %% EUnit tests
