@@ -101,7 +101,7 @@ start_link(Args) ->
         {local, ?SERVER}, ?SERVER, Args, []
     ).
 
--spec refresh_route(hpr_route:id()) -> ok.
+-spec refresh_route(hpr_route:id()) -> ok | {error, any()}.
 refresh_route(RouteID) ->
     gen_server:call(?MODULE, {refresh_route, RouteID}).
 
@@ -362,7 +362,7 @@ refresh_devaddrs(RouteID) ->
             Err
     end.
 
--spec recv_from_stream(grpcbox_client:stream()) -> list(T) when
+-spec recv_from_stream(grpcbox_client:stream()) -> list(T) | {error, any()} when
     T :: hpr_skf:skf() | hpr_eui_pair:eui_pair() | hpr_devaddr_range:devaddr_range().
 recv_from_stream(Stream) ->
     do_recv_from_stream(init, Stream, []).
