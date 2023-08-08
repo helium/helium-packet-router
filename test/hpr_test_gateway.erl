@@ -39,7 +39,8 @@
     devaddr_ranges :: [hpr_devaddr_range:devaddr_range()],
     pubkey_bin :: libp2p_crypto:pubkey_bin(),
     sig_fun :: libp2p_crypto:sig_fun(),
-    stream :: grpcbox_client:stream()
+    stream :: grpcbox_client:stream(),
+    session_key :: undefined | {libp2p_crypto:pubkey_bin(), libp2p_crypto:sig_fun()}
 }).
 
 -type state() :: #state{}.
@@ -125,7 +126,8 @@ handle_cast(
         devaddr_ranges = DevAddrRanges,
         pubkey_bin = PubKeyBin,
         sig_fun = SigFun,
-        stream = Stream
+        stream = Stream,
+        session_key = undefined
     } =
         State
 ) ->
@@ -139,6 +141,33 @@ handle_cast(
         end,
     PacketUp = test_utils:uplink_packet_up(Args#{
         gateway => PubKeyBin, sig_fun => SigFun, devaddr => DevAddr
+    }),
+    EnvUp = hpr_envelope_up:new(PacketUp),
+    ok = grpcbox_client:send(Stream, EnvUp),
+    Pid ! {?MODULE, self(), {?SEND_PACKET, EnvUp}},
+    lager:debug("send_packet ~p", [EnvUp]),
+    {noreply, State};
+handle_cast(
+    {?SEND_PACKET, Args},
+    #state{
+        forward = Pid,
+        devaddr_ranges = DevAddrRanges,
+        pubkey_bin = Gateway,
+        stream = Stream,
+        session_key = {_SessionKey, SigFun}
+    } =
+        State
+) ->
+    DevAddr =
+        case maps:get(devaddr, Args, undefined) of
+            undefined ->
+                [DevAddrRange | _] = DevAddrRanges,
+                hpr_devaddr_range:start_addr(DevAddrRange);
+            DevAddr0 ->
+                DevAddr0
+        end,
+    PacketUp = test_utils:uplink_packet_up(Args#{
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
     EnvUp = hpr_envelope_up:new(PacketUp),
     ok = grpcbox_client:send(Stream, EnvUp),
@@ -165,7 +194,7 @@ handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = Si
             {ok, Stream} = helium_packet_router_packet_client:route(#{
                 channel => PubKeyBin
             }),
-            Reg = hpr_register:test_new(PubKeyBin),
+            Reg = hpr_register:test_new(#{gateway => PubKeyBin, session_capable => true}),
             SignedReg = hpr_register:sign(Reg, SigFun),
             EnvUp = hpr_envelope_up:new(SignedReg),
             ok = grpcbox_client:send(Stream, EnvUp),
@@ -174,10 +203,27 @@ handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = Si
             {noreply, State#state{stream = Stream}}
     end;
 %% GRPC stream callbacks
-handle_info({data, _StreamID, Data}, #state{forward = Pid} = State) ->
-    lager:debug("got data ~p", [Data]),
-    Pid ! {?MODULE, self(), {data, Data}},
-    {noreply, State};
+handle_info(
+    {data, _StreamID, EnvDown},
+    #state{forward = Pid, pubkey_bin = Gateway, sig_fun = SigFun, stream = Stream} = State
+) ->
+    lager:debug("got EnvDown ~p", [EnvDown]),
+    case hpr_envelope_down:data(EnvDown) of
+        {packet, _Packet} ->
+            Pid ! {?MODULE, self(), {data, EnvDown}},
+            {noreply, State};
+        {session_offer, SessionOffer} ->
+            Nonce = hpr_session_offer:nonce(SessionOffer),
+            #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ed25519),
+            SessionKey = libp2p_crypto:pubkey_to_bin(PubKey),
+            SessionInit = hpr_session_init:test_new(Gateway, Nonce, SessionKey),
+            SignedSessionInit = hpr_session_init:sign(SessionInit, SigFun),
+            EnvUp = hpr_envelope_up:new(SignedSessionInit),
+            ok = grpcbox_client:send(Stream, EnvUp),
+            Pid ! {?MODULE, self(), {session_init, EnvUp}},
+            lager:debug("session initialized"),
+            {noreply, State#state{session_key = {SessionKey, libp2p_crypto:mk_sig_fun(PrivKey)}}}
+    end;
 handle_info(
     {'DOWN', Ref, process, Pid, _Reason},
     #state{stream = #{stream_pid := Pid, monitor_ref := Ref}} = State

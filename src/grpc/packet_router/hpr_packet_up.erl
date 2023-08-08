@@ -15,11 +15,11 @@
     gateway/1,
     signature/1,
     phash/1,
-    verify/1,
+    verify/1, verify/2,
     encode/1,
     decode/1,
     type/1,
-    md/1
+    md/1, md/2
 ]).
 
 -ifdef(TEST).
@@ -110,6 +110,21 @@ verify(Packet) ->
             false
     end.
 
+-spec verify(Packet :: packet(), SessionKey :: binary()) -> boolean().
+verify(Packet, SessionKey) ->
+    try
+        BasePacket = Packet#packet_router_packet_up_v1_pb{signature = <<>>},
+        EncodedPacket = ?MODULE:encode(BasePacket),
+        Signature = ?MODULE:signature(Packet),
+        PubKey = libp2p_crypto:bin_to_pubkey(SessionKey),
+        libp2p_crypto:verify(EncodedPacket, Signature, PubKey)
+    of
+        Bool -> Bool
+    catch
+        _E:_R ->
+            false
+    end.
+
 -spec encode(Packet :: packet()) -> binary().
 encode(#packet_router_packet_up_v1_pb{} = Packet) ->
     packet_router_pb:encode_msg(Packet).
@@ -154,25 +169,48 @@ type(Packet) ->
 
 -spec md(PacketUp :: packet()) -> ok.
 md(PacketUp) ->
-    Gateway = ?MODULE:gateway(PacketUp),
-    GatewayName = hpr_utils:gateway_name(Gateway),
+    ?MODULE:md(PacketUp, #{}).
+
+-spec md(PacketUp :: packet(), Opts :: map()) -> ok.
+md(PacketUp, Opts) ->
+    PacketGateway = ?MODULE:gateway(PacketUp),
+    PacketGatewayName = hpr_utils:gateway_name(PacketGateway),
+    SessionKey =
+        case maps:get(session_key, Opts, undefined) of
+            undefined -> "undefined";
+            K -> libp2p_crypto:bin_to_b58(K)
+        end,
+    StreamGatewayName =
+        case maps:get(gateway, Opts, undefined) of
+            undefined -> "undefined";
+            G -> hpr_utils:gateway_name(G)
+        end,
     StreamPid =
-        case hpr_packet_router_service:locate(Gateway) of
-            {ok, Pid} -> Pid;
-            {error, _} -> undefined
+        case maps:get(stream_pid, Opts, undefined) of
+            undefined ->
+                case hpr_packet_router_service:locate(PacketGateway) of
+                    {ok, Pid} -> Pid;
+                    {error, _} -> "undefined"
+                end;
+            Pid ->
+                Pid
         end,
     case ?MODULE:type(PacketUp) of
         {undefined, FType} ->
             lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
+                {stream_pid, StreamPid},
+                {stream_gateway, StreamGatewayName},
+                {packet_gateway, PacketGatewayName},
+                {session_key, SessionKey},
                 {packet_type, FType},
                 {phash, hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp))}
             ]);
         {join_req, {AppEUI, DevEUI}} ->
             lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
+                {stream_pid, StreamPid},
+                {stream_gateway, StreamGatewayName},
+                {packet_gateway, PacketGatewayName},
+                {session_key, SessionKey},
                 {app_eui, hpr_utils:int_to_hex_string(AppEUI)},
                 {dev_eui, hpr_utils:int_to_hex_string(DevEUI)},
                 {app_eui_int, AppEUI},
@@ -182,8 +220,10 @@ md(PacketUp) ->
             ]);
         {uplink, {Type, DevAddr}} ->
             lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
+                {stream_pid, StreamPid},
+                {stream_gateway, StreamGatewayName},
+                {packet_gateway, PacketGatewayName},
+                {session_key, SessionKey},
                 {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
                 %% TODO: Add net id (warning they might not have one)
                 {devaddr_int, DevAddr},
@@ -282,13 +322,19 @@ signature_test() ->
     ok.
 
 verify_test() ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
-    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-    PacketUp = ?MODULE:test_new(#{gateway => Gateway}),
-    SignedPacketUp = ?MODULE:sign(PacketUp, SigFun),
+    #{secret := PrivKey1, public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
+    SigFun1 = libp2p_crypto:mk_sig_fun(PrivKey1),
+    Gateway1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+    PacketUp1 = ?MODULE:test_new(#{gateway => Gateway1}),
+    SignedPacketUp1 = ?MODULE:sign(PacketUp1, SigFun1),
 
-    ?assert(verify(SignedPacketUp)),
+    ?assert(verify(SignedPacketUp1)),
+
+    #{secret := PrivKey2, public := PubKey2} = libp2p_crypto:generate_keys(ed25519),
+    SigFun2 = libp2p_crypto:mk_sig_fun(PrivKey2),
+    SessionKey = libp2p_crypto:pubkey_to_bin(PubKey2),
+    SignedPacketUp2 = ?MODULE:sign(PacketUp1, SigFun2),
+    ?assert(verify(SignedPacketUp2, SessionKey)),
     ok.
 
 encode_decode_test() ->

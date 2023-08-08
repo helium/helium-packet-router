@@ -13,6 +13,7 @@
 -export([
     gateway_limit_exceeded_test/1,
     invalid_packet_type_test/1,
+    wrong_gateway_test/1,
     bad_signature_test/1,
     mic_check_test/1,
     skf_update_test/1,
@@ -42,6 +43,7 @@ all() ->
     [
         gateway_limit_exceeded_test,
         invalid_packet_type_test,
+        wrong_gateway_test,
         bad_signature_test,
         mic_check_test,
         skf_update_test,
@@ -87,7 +89,7 @@ gateway_limit_exceeded_test(_Config) ->
         fun(_) ->
             erlang:spawn(
                 fun() ->
-                    R = hpr_routing:handle_packet(JoinPacketUpValid),
+                    R = hpr_routing:handle_packet(JoinPacketUpValid, #{gateway => Gateway}),
                     Self ! {gateway_limit_exceeded_test, R}
                 end
             )
@@ -105,7 +107,23 @@ invalid_packet_type_test(_Config) ->
         gateway => Gateway, sig_fun => SigFun, payload => <<>>
     }),
     ?assertEqual(
-        {error, invalid_packet_type}, hpr_routing:handle_packet(JoinPacketUpInvalid)
+        {error, invalid_packet_type},
+        hpr_routing:handle_packet(JoinPacketUpInvalid, #{gateway => Gateway})
+    ),
+    ok.
+
+wrong_gateway_test(_Config) ->
+    #{public := PubKey1} = libp2p_crypto:generate_keys(ed25519),
+    Gateway1 = libp2p_crypto:pubkey_to_bin(PubKey1),
+
+    #{public := PubKey2} = libp2p_crypto:generate_keys(ed25519),
+    Gateway2 = libp2p_crypto:pubkey_to_bin(PubKey2),
+
+    JoinPacketBadSig = test_utils:join_packet_up(#{
+        gateway => Gateway1, sig_fun => fun(_) -> <<"bad_sig">> end
+    }),
+    ?assertEqual(
+        {error, wrong_gateway}, hpr_routing:handle_packet(JoinPacketBadSig, #{gateway => Gateway2})
     ),
     ok.
 
@@ -116,7 +134,9 @@ bad_signature_test(_Config) ->
     JoinPacketBadSig = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => fun(_) -> <<"bad_sig">> end
     }),
-    ?assertEqual({error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig)),
+    ?assertEqual(
+        {error, bad_signature}, hpr_routing:handle_packet(JoinPacketBadSig, #{gateway => Gateway})
+    ),
     ok.
 
 mic_check_test(_Config) ->
@@ -139,10 +159,10 @@ mic_check_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, #{gateway => Gateway})),
 
     %% TEST 2:  No SFK for devaddr
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp, #{gateway => Gateway})),
 
     %% TEST 3: Bad key and route exist
     Route = hpr_route:test_new(#{
@@ -185,7 +205,7 @@ mic_check_test(_Config) ->
         end
     ),
 
-    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual({error, invalid_mic}, hpr_routing:handle_packet(PacketUp, #{gateway => Gateway})),
 
     ok = hpr_route_ets:delete_skf(SKFBadKeyAndRouteExitst),
 
@@ -212,7 +232,7 @@ mic_check_test(_Config) ->
         end
     ),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp, #{gateway => Gateway})),
 
     %% TEST 5:  Good key and route exist
     %% Adding a bad key to make sure it still works
@@ -237,7 +257,7 @@ mic_check_test(_Config) ->
         end
     ),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp, #{gateway => Gateway})),
 
     ok.
 
@@ -290,7 +310,7 @@ skf_update_test(_Config) ->
     %% Here we are making sure that the SKF got updated
     [{_, BeforeUpdate, 3}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
     timer:sleep(2000),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp, #{gateway => Gateway})),
 
     [{_, AfterUpdate, 3}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
     %% This is due to time being negative for ets ordering
@@ -356,7 +376,7 @@ skf_max_copies_test(_Config) ->
                 gateway => Gateway,
                 sig_fun => SigFun
             }),
-            ?assertEqual(ok, hpr_routing:handle_packet(PacketUp))
+            ?assertEqual(ok, hpr_routing:handle_packet(PacketUp, #{gateway => Gateway}))
         end,
         lists:seq(1, 3)
     ),
@@ -375,7 +395,7 @@ skf_max_copies_test(_Config) ->
                 gateway => Gateway,
                 sig_fun => SigFun
             }),
-            ?assertEqual(ok, hpr_routing:handle_packet(PacketUp))
+            ?assertEqual(ok, hpr_routing:handle_packet(PacketUp, #{gateway => Gateway}))
         end,
         lists:seq(1, 3)
     ),
@@ -474,9 +494,9 @@ multi_buy_without_service_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway1})),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2, #{gateway => Gateway2})),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3, #{gateway => Gateway3})),
 
     Self = self(),
     Received1 =
@@ -505,7 +525,7 @@ multi_buy_without_service_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4, #{gateway => Gateway3})),
 
     Received3 =
         {Self,
@@ -621,9 +641,9 @@ multi_buy_with_service_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway1})),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2, #{gateway => Gateway2})),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3, #{gateway => Gateway3})),
 
     Self = self(),
     Received1 =
@@ -652,7 +672,7 @@ multi_buy_with_service_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4, #{gateway => Gateway3})),
 
     Received3 =
         {Self,
@@ -752,7 +772,12 @@ multi_buy_requests_test(_Config) ->
 
     lists:foreach(
         fun(Packet) ->
-            erlang:spawn(hpr_routing, handle_packet, [Packet])
+            erlang:spawn(hpr_routing, handle_packet, [
+                Packet,
+                #{
+                    gateway => hpr_packet_up:gateway(Packet)
+                }
+            ])
         end,
         Packets1
     ),
@@ -787,16 +812,41 @@ multi_buy_requests_test(_Config) ->
         Keys
     ),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(1, Packets2))),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(lists:nth(1, Packets2), #{
+            gateway => hpr_packet_up:gateway(lists:nth(1, Packets2))
+        })
+    ),
     %% We update counter (from another LNS)
     ?assertEqual(2, ets:update_counter(ETS, Key, {2, 1}, {default, 0})),
-    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(2, Packets2))),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(lists:nth(2, Packets2), #{
+            gateway => hpr_packet_up:gateway(lists:nth(2, Packets2))
+        })
+    ),
     %% We update counter (from another LNS)
     ?assertEqual(4, ets:update_counter(ETS, Key, {2, 1}, {default, 0})),
     %% This should be the last time we make anothe request to get latest count
-    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(3, Packets2))),
-    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(4, Packets2))),
-    ?assertEqual(ok, hpr_routing:handle_packet(lists:nth(5, Packets2))),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(lists:nth(3, Packets2), #{
+            gateway => hpr_packet_up:gateway(lists:nth(3, Packets2))
+        })
+    ),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(lists:nth(4, Packets2), #{
+            gateway => hpr_packet_up:gateway(lists:nth(4, Packets2))
+        })
+    ),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(lists:nth(5, Packets2), #{
+            gateway => hpr_packet_up:gateway(lists:nth(5, Packets2))
+        })
+    ),
 
     ?assertEqual(3, meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2)),
 
@@ -856,7 +906,7 @@ active_locked_route_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway1})),
 
     Self = self(),
     Received1 =
@@ -884,7 +934,7 @@ active_locked_route_test(_Config) ->
         locked => false
     }),
     ok = hpr_route_ets:insert_route(Route2),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway1})),
 
     ?assertEqual([], meck:history(hpr_protocol_router)),
 
@@ -902,7 +952,7 @@ active_locked_route_test(_Config) ->
         locked => true
     }),
     ok = hpr_route_ets:insert_route(Route3),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway1})),
 
     ?assertEqual([], meck:history(hpr_protocol_router)),
 
@@ -962,21 +1012,21 @@ in_cooldown_route_test(_Config) ->
     meck:expect(hpr_protocol_router, send, fun(_, _) -> {error, not_implemented} end),
 
     %% We send first packet a call should be made to hpr_protocol_router
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1, #{gateway => Gateway1})),
     ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 2)),
     %% We send second packet NO call should be made to hpr_protocol_router as the route would be in cooldown
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1, #{gateway => Gateway1})),
     ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 2)),
 
     %% We wait the initial first timeout 1s
     %% Send another packet and watch another call made to hpr_protocol_router
     timer:sleep(1000),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1, #{gateway => Gateway1})),
     ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
 
     %% We send couple more packets and check that we still only 2 calls to hpr_protocol_router
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1, #{gateway => Gateway1})),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1, #{gateway => Gateway1})),
     ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
 
     %% We check the route and make sure that the backoff is setup properly
@@ -989,7 +1039,7 @@ in_cooldown_route_test(_Config) ->
     timer:sleep(2000),
     meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
     %% Sending another packet should trigger a new call to hpr_protocol_router
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp1, #{gateway => Gateway1})),
     ?assertEqual(3, meck:num_calls(hpr_protocol_router, send, 2)),
 
     %% The route backoff should be back to undefined
@@ -1043,7 +1093,7 @@ success_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, #{gateway => Gateway})),
 
     Received1 =
         {Self,
@@ -1057,7 +1107,7 @@ success_test(_Config) ->
     UplinkPacketUp = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, #{gateway => Gateway})),
 
     Received2 =
         {Self,
@@ -1229,7 +1279,7 @@ maybe_report_packet_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid)),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, #{gateway => Gateway})),
 
     Received1 =
         {Self,
@@ -1243,7 +1293,7 @@ maybe_report_packet_test(_Config) ->
     UplinkPacketUp1 = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr, fcnt => 1
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway})),
 
     Received2 =
         {Self,
@@ -1288,7 +1338,7 @@ maybe_report_packet_test(_Config) ->
     UplinkPacketUp2 = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr, fcnt => 2
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2)),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2, #{gateway => Gateway})),
 
     CallExpected3 =
         {hpr_protocol_router, send, [

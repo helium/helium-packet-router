@@ -15,8 +15,16 @@
 ]).
 
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
+-define(SESSION_TIMER, timer:minutes(30)).
+-define(SESSION_RESET, session_reset).
 
--record(handler_state, {started :: non_neg_integer()}).
+-record(handler_state, {
+    started :: non_neg_integer(),
+    pubkey_bin :: undefined | binary(),
+    nonce :: undefined | binary(),
+    session_key :: undefined | binary(),
+    session_timer :: undefined | reference()
+}).
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_Rpc, StreamState) ->
@@ -24,32 +32,23 @@ init(_Rpc, StreamState) ->
     grpcbox_stream:stream_handler_state(StreamState, HandlerState).
 
 -spec route(hpr_envelope_up:envelope(), grpcbox_stream:t()) ->
-    {ok, grpcbox_stream:t()} | {stop, grpcbox_stream:t()}.
+    {ok, grpcbox_stream:t()}
+    | {ok, hpr_envelope_down:envelope(), grpcbox_stream:t()}
+    | {stop, grpcbox_stream:t()}.
 route(eos, StreamState) ->
     #handler_state{started = Started} = grpcbox_stream:stream_handler_state(StreamState),
     _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
     lager:debug("received eos for stream"),
     {stop, StreamState};
 route(EnvUp, StreamState) ->
+    lager:debug("got env up ~p", [EnvUp]),
     try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
-            _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp], [{fullsweep_after, 0}]),
-            {ok, StreamState};
+            handle_packet(PacketUp, StreamState);
         {register, Reg} ->
-            PubKeyBin = hpr_register:gateway(Reg),
-            lager:md([{gateway, hpr_utils:gateway_name(PubKeyBin)}]),
-            case hpr_register:verify(Reg) of
-                false ->
-                    lager:info("failed to verify"),
-                    #handler_state{started = Started} = grpcbox_stream:stream_handler_state(
-                        StreamState
-                    ),
-                    _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
-                    {stop, StreamState};
-                true ->
-                    ok = ?MODULE:register(PubKeyBin),
-                    {ok, StreamState}
-            end
+            handle_register(Reg, StreamState);
+        {session_init, SessionInit} ->
+            handle_session_init(SessionInit, StreamState)
     catch
         _E:_R ->
             lager:warning("reason  ~p", [_R]),
@@ -69,6 +68,9 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
     lager:info("give_away registration to ~p", [NewPid]),
     gproc:give_away({n, l, ?REG_KEY(PubKeyBin)}, NewPid),
     grpcbox_stream:send(true, hpr_envelope_down:new(undefined), StreamState);
+handle_info(?SESSION_RESET, StreamState0) ->
+    {EnvDown, StreamState1} = create_session_offer(StreamState0),
+    grpcbox_stream:send(false, EnvDown, StreamState1);
 handle_info(_Msg, StreamState) ->
     StreamState.
 
@@ -115,6 +117,106 @@ register(PubKeyBin) ->
     end.
 
 %% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+-spec handle_packet(PacketUp :: hpr_packet_up:packet(), StreamState0 :: grpcbox_stream:t()) ->
+    {ok, grpcbox_stream:t()}.
+handle_packet(PacketUp, StreamState) ->
+    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    Opts = #{
+        session_key => HandlerState#handler_state.session_key,
+        gateway => HandlerState#handler_state.pubkey_bin,
+        stream_pid => self()
+    },
+    _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp, Opts], [{fullsweep_after, 0}]),
+    {ok, StreamState}.
+
+-spec handle_register(Reg :: hpr_register:register(), StreamState0 :: grpcbox_stream:t()) ->
+    {ok, grpcbox_stream:t()}
+    | {ok, hpr_envelope_down:envelope(), grpcbox_stream:t()}
+    | {stop, grpcbox_stream:t()}.
+handle_register(Reg, StreamState0) ->
+    PubKeyBin = hpr_register:gateway(Reg),
+    lager:md([{gateway, hpr_utils:gateway_name(PubKeyBin)}]),
+    case hpr_register:verify(Reg) of
+        false ->
+            lager:warning("failed to verify register"),
+            #handler_state{started = Started} = grpcbox_stream:stream_handler_state(
+                StreamState0
+            ),
+            _ = hpr_metrics:observe_grpc_connection(?MODULE, Started),
+            {stop, StreamState0};
+        true ->
+            ok = ?MODULE:register(PubKeyBin),
+            HandlerState = grpcbox_stream:stream_handler_state(StreamState0),
+            StreamState1 = grpcbox_stream:stream_handler_state(
+                StreamState0, HandlerState#handler_state{pubkey_bin = PubKeyBin}
+            ),
+            case hpr_register:session_capable(Reg) of
+                true ->
+                    {EnvDown, StreamState2} = create_session_offer(StreamState1),
+                    {ok, EnvDown, StreamState2};
+                false ->
+                    {ok, StreamState1}
+            end
+    end.
+
+-spec handle_session_init(Reg :: hpr_session_init:init(), StreamState :: grpcbox_stream:t()) ->
+    {ok, grpcbox_stream:t()} | {stop, grpcbox_stream:t()}.
+handle_session_init(SessionInit, StreamState) ->
+    case hpr_session_init:verify(SessionInit) of
+        false ->
+            lager:warning("failed to verify session init"),
+            {stop, StreamState};
+        true ->
+            HandlerState0 = grpcbox_stream:stream_handler_state(StreamState),
+            Nonce = hpr_session_init:nonce(SessionInit),
+            SessionKey = hpr_session_init:session_key(SessionInit),
+            case Nonce == HandlerState0#handler_state.nonce of
+                false ->
+                    lager:warning("nonce did not match ~s vs ~s key=~s", [
+                        hpr_utils:bin_to_hex_string(Nonce),
+                        hpr_utils:bin_to_hex_string(HandlerState0#handler_state.nonce),
+                        libp2p_crypto:bin_to_b58(SessionKey)
+                    ]),
+                    {ok, StreamState};
+                true ->
+                    lager:debug("session init nonce=~s key=~s", [
+                        hpr_utils:bin_to_hex_string(Nonce),
+                        libp2p_crypto:bin_to_b58(SessionKey)
+                    ]),
+                    HandlerState1 = HandlerState0#handler_state{
+                        session_key = SessionKey,
+                        session_timer = schedule_session_reset(
+                            HandlerState0#handler_state.session_timer
+                        )
+                    },
+                    {ok, grpcbox_stream:stream_handler_state(StreamState, HandlerState1)}
+            end
+    end.
+
+-spec create_session_offer(StreamState0 :: grpcbox_stream:t()) ->
+    {hpr_envelope_down:envelope(), grpcbox_stream:t()}.
+create_session_offer(StreamState0) ->
+    HandlerState0 = grpcbox_stream:stream_handler_state(StreamState0),
+    Nonce = crypto:strong_rand_bytes(32),
+    EnvDown = hpr_envelope_down:new(hpr_session_offer:new(Nonce)),
+    StreamState1 = grpcbox_stream:stream_handler_state(
+        StreamState0, HandlerState0#handler_state{nonce = Nonce}
+    ),
+    lager:debug("session offer ~s", [
+        hpr_utils:bin_to_hex_string(Nonce)
+    ]),
+    {EnvDown, StreamState1}.
+
+-spec schedule_session_reset(OldTimer :: undefined | reference()) -> reference().
+schedule_session_reset(OldTimer) when is_reference(OldTimer) ->
+    _ = erlang:cancel_timer(OldTimer),
+    erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET);
+schedule_session_reset(_OldTimer) ->
+    erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET).
+
+%% ------------------------------------------------------------------
 %% EUnit tests
 %% ------------------------------------------------------------------
 -ifdef(TEST).
@@ -157,11 +259,14 @@ route_packet_test() ->
     meck:new(hpr_routing, [passthrough]),
     PacketUp = hpr_packet_up:test_new(#{}),
     EnvUp = hpr_envelope_up:new(PacketUp),
-    meck:expect(hpr_routing, handle_packet, [PacketUp], ok),
+    meck:expect(hpr_routing, handle_packet, [PacketUp, undefined], ok),
 
-    ?assertEqual({ok, stream_state}, ?MODULE:route(EnvUp, stream_state)),
+    StreamState = grpcbox_stream:stream_handler_state(
+        #state{}, #handler_state{}
+    ),
 
-    ?assertEqual(1, meck:num_calls(hpr_routing, handle_packet, 1)),
+    ?assertEqual({ok, StreamState}, ?MODULE:route(EnvUp, StreamState)),
+    ?assertEqual(1, meck:num_calls(hpr_routing, handle_packet, 2)),
 
     meck:unload(hpr_routing),
     ok.
