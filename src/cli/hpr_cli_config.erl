@@ -223,8 +223,33 @@ config_route(_, _, _) ->
 
 config_route_refresh(["config", "route", "refresh", RouteID], [], _Flags) ->
     case hpr_route_stream_worker:refresh_route(RouteID) of
-        ok -> c_text("Route ~s refreshed", [RouteID]);
-        Err -> c_text("Something went wrong:~n~p", [Err])
+        {ok, RefreshMap} ->
+            Table = [
+                [
+                    {" Type ", eui},
+                    {" Before ", maps:get(eui_before, RefreshMap)},
+                    {" After ", maps:get(eui_after, RefreshMap)},
+                    {" Removed ", maps:get(eui_removed, RefreshMap)},
+                    {" Added ", maps:get(eui_added, RefreshMap)}
+                ],
+                [
+                    {" Type ", skf},
+                    {" Before ", maps:get(skf_before, RefreshMap)},
+                    {" After ", maps:get(skf_after, RefreshMap)},
+                    {" Removed ", maps:get(skf_removed, RefreshMap)},
+                    {" Added ", maps:get(skf_added, RefreshMap)}
+                ],
+                [
+                    {" Type ", devaddr_range},
+                    {" Before ", maps:get(devaddr_before, RefreshMap)},
+                    {" After ", maps:get(devaddr_after, RefreshMap)},
+                    {" Removed ", maps:get(devaddr_removed, RefreshMap)},
+                    {" Added ", maps:get(devaddr_added, RefreshMap)}
+                ]
+            ],
+            c_table(Table);
+        Err ->
+            c_text("Something went wrong:~n~p", [Err])
     end;
 config_route_refresh(_, _, _) ->
     usage.
