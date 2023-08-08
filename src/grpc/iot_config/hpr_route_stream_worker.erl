@@ -82,6 +82,23 @@
 -endif.
 -define(BACKOFF_MAX, timer:minutes(5)).
 
+-type refresh_map() :: #{
+    eui_before := non_neg_integer(),
+    eui_after := non_neg_integer(),
+    eui_removed := non_neg_integer(),
+    eui_added := non_neg_integer(),
+    %%
+    skf_before := non_neg_integer(),
+    skf_after := non_neg_integer(),
+    skf_removed := non_neg_integer(),
+    skf_added := non_neg_integer(),
+    %%
+    devaddr_before := non_neg_integer(),
+    devaddr_after := non_neg_integer(),
+    devaddr_removed := non_neg_integer(),
+    devaddr_added := non_neg_integer()
+}.
+
 -record(state, {
     stream :: grpcbox_client:stream() | undefined,
     conn_backoff :: backoff:backoff(),
@@ -101,7 +118,7 @@ start_link(Args) ->
         {local, ?SERVER}, ?SERVER, Args, []
     ).
 
--spec refresh_route(hpr_route:id()) -> ok | {error, any()}.
+-spec refresh_route(hpr_route:id()) -> {ok, refresh_map()} | {error, any()}.
 refresh_route(RouteID) ->
     gen_server:call(?MODULE, {refresh_route, RouteID}).
 
@@ -126,11 +143,28 @@ handle_call({refresh_route, RouteID}, _From, State) ->
 
     Reply =
         case {DevaddrResponse, EUIResponse, SKFResponse} of
-            {ok, ok, ok} -> ok;
+            {{ok, {DBefore, DAfter}}, {ok, {EBefore, EAfter}}, {ok, {SBefore, SAfter}}} ->
+                {ok, #{
+                    eui_before => length(EBefore),
+                    eui_after => length(EAfter),
+                    eui_removed => length(EBefore -- EAfter),
+                    eui_added => length(EAfter -- EBefore),
+                    %%
+                    skf_before => length(SBefore),
+                    skf_after => length(SAfter),
+                    skf_removed => length(SBefore -- SAfter),
+                    skf_added => length(SAfter -- SBefore),
+                    %%
+                    devaddr_before => length(DBefore),
+                    devaddr_after => length(DAfter),
+                    devaddr_removed => length(DBefore -- DAfter),
+                    devaddr_added => length(DAfter -- DBefore)
+                }};
             {Err, _, _} when element(1, Err) == error -> Err;
             {_, Err, _} when element(1, Err) == error -> Err;
             {_, _, Err} when element(1, Err) == error -> Err;
-            Other -> {error, {unexpected_response, Other}}
+            Other ->
+                {error, {unexpected_response, Other}}
         end,
 
     {reply, Reply, State};
@@ -260,7 +294,8 @@ process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
 process_route_stream_res(remove, {skf, SKF}) ->
     hpr_route_ets:delete_skf(SKF).
 
--spec refresh_skfs(hpr_route:id()) -> ok | {error, any()}.
+-spec refresh_skfs(hpr_route:id()) ->
+    {ok, {Old :: list(hpr_skf:skf()), Current :: list(hpr_skf:skf())}} | {error, any()}.
 refresh_skfs(RouteID) ->
     SKFReq = #iot_config_route_skf_list_req_v1_pb{
         route_id = RouteID,
@@ -280,19 +315,22 @@ refresh_skfs(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 SKFs when erlang:is_list(SKFs) ->
-                    Previous = hpr_route_ets:replace_route_skfs(RouteID, SKFs),
+                    Previous = hpr_route_ets:skfs_for_route(RouteID),
+                    PreviousCnt = hpr_route_ets:replace_route_skfs(RouteID, SKFs),
                     lager:info(
-                        [{previous, Previous}, {current, length(SKFs)}],
+                        [{previous, PreviousCnt}, {current, length(SKFs)}],
                         "route refresh skfs"
                     ),
-                    ok
+                    {ok, {Previous, SKFs}}
             end;
         {error, _} = Err ->
             lager:error([{route_id, RouteID}, Err], "failed to refresh route skfs"),
             Err
     end.
 
--spec refresh_euis(hpr_route:id()) -> ok | {error, any()}.
+-spec refresh_euis(hpr_route:id()) ->
+    {ok, {Old :: list(hpr_eui_pair:eui_pair()), Current :: list(hpr_eui_pair:eui_pair())}}
+    | {error, any()}.
 refresh_euis(RouteID) ->
     EUIReq = #iot_config_route_get_euis_req_v1_pb{
         route_id = RouteID,
@@ -312,12 +350,14 @@ refresh_euis(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 EUIs when erlang:is_list(EUIs) ->
-                    Previous = hpr_route_ets:replace_route_euis(RouteID, EUIs),
+                    Previous = hpr_route_ets:eui_pairs_for_route(RouteID),
+                    PreviousCnt = hpr_route_ets:replace_route_euis(RouteID, EUIs),
                     lager:info(
-                        [{previous, Previous}, {current, length(EUIs)}],
+                        [{previous, PreviousCnt}, {current, length(EUIs)}],
                         "route refresh euis"
                     ),
-                    ok;
+                    EUIs0 = [{hpr_eui_pair:app_eui(EUI), hpr_eui_pair:dev_eui(EUI)} || EUI <- EUIs],
+                    {ok, {Previous, EUIs0}};
                 Err ->
                     Err
             end;
@@ -326,7 +366,12 @@ refresh_euis(RouteID) ->
             Err
     end.
 
--spec refresh_devaddrs(hpr_route:id()) -> ok | {error, any()}.
+-spec refresh_devaddrs(hpr_route:id()) ->
+    {ok, {
+        Old :: list(hpr_devaddr_range:devaddr_range()),
+        Current :: list(hpr_devaddr_range:devaddr_range())
+    }}
+    | {error, any()}.
 refresh_devaddrs(RouteID) ->
     DevaddrReq = #iot_config_route_get_devaddr_ranges_req_v1_pb{
         route_id = RouteID,
@@ -348,12 +393,17 @@ refresh_devaddrs(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 Devaddrs when erlang:is_list(Devaddrs) ->
-                    Previous = hpr_route_ets:replace_route_devaddrs(RouteID, Devaddrs),
+                    Previous = hpr_route_ets:devaddr_ranges_for_route(RouteID),
+                    PreviousCnt = hpr_route_ets:replace_route_devaddrs(RouteID, Devaddrs),
                     lager:info(
-                        [{previous, Previous}, {current, length(Devaddrs)}],
+                        [{previous, PreviousCnt}, {current, length(Devaddrs)}],
                         "route refresh devaddrs"
                     ),
-                    ok;
+                    Devaddrs1 = [
+                        {hpr_devaddr_range:start_addr(Range), hpr_devaddr_range:end_addr(Range)}
+                     || Range <- Devaddrs
+                    ],
+                    {ok, {Previous, Devaddrs1}};
                 Err ->
                     Err
             end;

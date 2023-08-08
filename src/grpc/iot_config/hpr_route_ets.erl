@@ -510,7 +510,10 @@ devaddr_ranges_count_for_route(RouteID) ->
     ets:select_count(?ETS_DEVADDR_RANGES, MS).
 
 -spec skfs_for_route(RouteID :: hpr_route:id()) ->
-    [{{integer(), binary()}, {non_neg_integer(), non_neg_integer()}}].
+    list({
+        Key :: {Timestamp :: integer(), SessionKey :: binary()},
+        Vals :: {Devaddr :: non_neg_integer(), MaxCopies :: non_neg_integer()}
+    }).
 skfs_for_route(RouteID) ->
     case ?MODULE:lookup_route(RouteID) of
         [#hpr_route_ets{skf_ets = SKFETS}] ->

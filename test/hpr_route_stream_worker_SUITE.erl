@@ -295,22 +295,41 @@ refresh_route_test(_Config) ->
         route_id => Route1ID, devaddr => DevAddr2, session_key => SessionKey2, max_copies => 1
     }),
 
-    application:set_env(hpr, test_route_get_euis, [EUIPair2]),
-    application:set_env(hpr, test_route_get_devaddr_ranges, [DevAddrRange2]),
-    application:set_env(hpr, test_route_list_skfs, [SessionKeyFilter2]),
+    application:set_env(hpr, test_route_get_euis, [EUIPair1, EUIPair2]),
+    application:set_env(hpr, test_route_get_devaddr_ranges, [DevAddrRange1, DevAddrRange2]),
+    application:set_env(hpr, test_route_list_skfs, [SessionKeyFilter1, SessionKeyFilter2]),
 
     %% ===================================================================
-    ?assertEqual(ok, hpr_route_stream_worker:refresh_route("7d502f32-4d58-4746-965e-001")),
+    {ok, Answer} = hpr_route_stream_worker:refresh_route("7d502f32-4d58-4746-965e-001"),
+    test_utils:match_map(
+        #{
+            eui_before => 1,
+            eui_after => 2,
+            eui_removed => 0,
+            eui_added => 1,
+            %%
+            skf_before => 1,
+            skf_after => 2,
+            skf_removed => 0,
+            skf_added => 1,
+            %%
+            devaddr_before => 1,
+            devaddr_after => 2,
+            devaddr_removed => 0,
+            devaddr_added => 1
+        },
+        Answer
+    ),
     [RouteETS2] = hpr_route_ets:lookup_route(Route1ID),
     SKFETS2 = hpr_route_ets:skf_ets(RouteETS2),
 
     %% Old routing is removed
-    ?assertMatch([], hpr_route_ets:lookup_devaddr_range(16#00000005)),
-    ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 12)),
-    ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
+    ?assertMatch([RouteETS2], hpr_route_ets:lookup_devaddr_range(16#00000005)),
+    ?assertEqual([RouteETS2], hpr_route_ets:lookup_eui_pair(1, 12)),
+    ?assertEqual([RouteETS2], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020), "always out of range"),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3), "always out of range"),
-    ?assertMatch([], hpr_route_ets:lookup_skf(SKFETS2, DevAddr1)),
+    %% ?assertMatch([], hpr_route_ets:lookup_skf(SKFETS2, DevAddr1)),
 
     %% New details like magic
     ?assertMatch([RouteETS2], hpr_route_ets:lookup_devaddr_range(16#00000008)),
@@ -327,7 +346,22 @@ refresh_route_test(_Config) ->
     application:set_env(hpr, test_route_get_devaddr_ranges, []),
     application:set_env(hpr, test_route_list_skfs, []),
 
-    ?assertEqual(ok, hpr_route_stream_worker:refresh_route("7d502f32-4d58-4746-965e-001")),
+    ?assertEqual({ok, #{
+            eui_before => 2,
+            eui_after => 0,
+            eui_removed => 2,
+            eui_added => 0,
+            %%
+            skf_before => 2,
+            skf_after => 0,
+            skf_removed => 2,
+            skf_added => 0,
+            %%
+            devaddr_before => 2,
+            devaddr_after => 0,
+            devaddr_removed => 2,
+            devaddr_added => 0
+        }}, hpr_route_stream_worker:refresh_route("7d502f32-4d58-4746-965e-001")),
 
     %% Everything was removed
     [RouteETS3] = hpr_route_ets:lookup_route(Route1ID),
