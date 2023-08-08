@@ -32,7 +32,7 @@
     b58/0
 ]).
 
--type trace() :: gateway | devaddr | app_eui | dev_eui.
+-type trace() :: packet_gateway | stream_gateway | devaddr | app_eui | dev_eui.
 
 -spec load_key(KeyFileName :: string()) -> ok.
 load_key(KeyFileName) ->

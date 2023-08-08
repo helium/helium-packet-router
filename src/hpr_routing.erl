@@ -29,47 +29,48 @@ init() ->
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     ok.
 
--spec handle_packet(Packet :: hpr_packet_up:packet()) -> hpr_routing_response().
-handle_packet(Packet) ->
-    handle_packet(Packet, undefined).
+-spec handle_packet(PacketUp :: hpr_packet_up:packet()) -> hpr_routing_response().
+handle_packet(PacketUp) ->
+    handle_packet(PacketUp, #{}).
 
--spec handle_packet(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
+-spec handle_packet(PacketUp :: hpr_packet_up:packet(), Opts :: map()) ->
     hpr_routing_response().
-handle_packet(Packet, SessionKey) ->
+handle_packet(PacketUp, Opts) ->
     Start = erlang:system_time(millisecond),
+    ok = hpr_packet_up:md(PacketUp, Opts),
     lager:debug("received packet"),
+    SessionKey = maps:get(session_key, Opts, undefined),
+    Gateway = maps:get(gateway, Opts, undefined),
     Checks = [
-        {fun packet_type_check/2, invalid_packet_type},
-        {fun packet_session_check/2, bad_signature},
-        {fun throttle_check/2, gateway_limit_exceeded}
+        {fun packet_type_check/1, [], invalid_packet_type},
+        {fun gateway_check/2, [Gateway], wrong_gateway},
+        {fun packet_session_check/2, [SessionKey], bad_signature},
+        {fun throttle_check/1, [], gateway_limit_exceeded}
     ],
-    PacketType = hpr_packet_up:type(Packet),
-    case execute_checks(Packet, SessionKey, Checks) of
+    PacketUpType = hpr_packet_up:type(PacketUp),
+    case execute_checks(PacketUp, Checks) of
         {error, _Reason} = Error ->
-            Gateway = hpr_packet_up:gateway(Packet),
-            GatewayName = hpr_utils:gateway_name(Gateway),
-            lager:debug([{gateway, GatewayName}], "packet failed verification: ~p", [_Reason]),
-            hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
+            lager:debug("packet failed verification: ~p", [_Reason]),
+            hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
             Error;
         ok ->
-            ok = hpr_packet_up:md(Packet),
-            case ?MODULE:find_routes(PacketType, Packet) of
+            case ?MODULE:find_routes(PacketUpType, PacketUp) of
                 {error, _Reason} = Error ->
                     lager:debug("failed to find routes: ~p", [_Reason]),
-                    hpr_metrics:observe_packet_up(PacketType, Error, 0, Start),
+                    hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
                     Error;
                 {ok, []} ->
                     lager:debug("no routes found"),
-                    ok = maybe_deliver_no_routes(Packet),
-                    hpr_metrics:observe_packet_up(PacketType, ok, 0, Start),
+                    ok = maybe_deliver_no_routes(PacketUp),
+                    hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
                     ok;
                 {ok, RoutesETS} ->
-                    {Routed, IsFree} = maybe_deliver_packet_to_routes(Packet, RoutesETS),
+                    {Routed, IsFree} = maybe_deliver_packet_to_routes(PacketUp, RoutesETS),
                     ok = maybe_report_packet(
                         [hpr_route_ets:route(RouteETS) || {RouteETS, _} <- RoutesETS],
                         Routed,
                         IsFree,
-                        Packet,
+                        PacketUp,
                         Start
                     ),
                     N = erlang:length(RoutesETS),
@@ -78,18 +79,18 @@ handle_packet(Packet, SessionKey) ->
                         "~w routes and delivered to ~w routes",
                         [N, Routed]
                     ),
-                    hpr_metrics:observe_packet_up(PacketType, ok, Routed, Start),
+                    hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Start),
                     ok
             end
     end.
 
--spec find_routes(hpr_packet_up:type(), Packet :: hpr_packet_up:packet()) ->
+-spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
     {ok, [{hpr_route_ets:route(), non_neg_integer()}]} | {error, invalid_mic}.
-find_routes({join_req, {AppEUI, DevEUI}}, _Packet) ->
+find_routes({join_req, {AppEUI, DevEUI}}, _PacketUp) ->
     Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
     {ok, [{R, 0} || R <- Routes]};
-find_routes({uplink, {_Type, DevAddr}}, Packet) ->
-    {Time, Results} = timer:tc(fun() -> find_routes_for_uplink(Packet, DevAddr) end),
+find_routes({uplink, {_Type, DevAddr}}, PacketUp) ->
+    {Time, Results} = timer:tc(fun() -> find_routes_for_uplink(PacketUp, DevAddr) end),
     ok = hpr_metrics:observe_find_routes(Time),
     Results.
 
@@ -97,18 +98,18 @@ find_routes({uplink, {_Type, DevAddr}}, Packet) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec find_routes_for_uplink(Packet :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
+-spec find_routes_for_uplink(PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
     {ok, [{hpr_route_ets:route(), non_neg_integer()}]} | {error, invalid_mic}.
-find_routes_for_uplink(Packet, DevAddr) ->
+find_routes_for_uplink(PacketUp, DevAddr) ->
     case hpr_route_ets:lookup_devaddr_range(DevAddr) of
         [] ->
             {ok, []};
         RoutesETS ->
-            find_routes_for_uplink(Packet, DevAddr, RoutesETS, [], undefined)
+            find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, [], undefined)
     end.
 
 -spec find_routes_for_uplink(
-    Packet :: hpr_packet_up:packet(),
+    PacketUp :: hpr_packet_up:packet(),
     DevAddr :: non_neg_integer(),
     [hpr_route_ets:route()],
     [hpr_route_ets:route()],
@@ -120,12 +121,12 @@ find_routes_for_uplink(Packet, DevAddr) ->
         SKFMaxCopies :: non_neg_integer()
     }
 ) -> {ok, [{hpr_route:route(), non_neg_integer()}]} | {error, invalid_mic}.
-find_routes_for_uplink(_Packet, _DevAddr, [], [], undefined) ->
+find_routes_for_uplink(_PacketUp, _DevAddr, [], [], undefined) ->
     {error, invalid_mic};
-find_routes_for_uplink(_Packet, _DevAddr, [], EmptyRoutes, undefined) ->
+find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, undefined) ->
     {ok, [{R, 0} || R <- EmptyRoutes]};
 find_routes_for_uplink(
-    _Packet, DevAddr, [], EmptyRoutes, {RouteETS, SessionKey, LastUsed, SKFMaxCopies}
+    _PacketUp, DevAddr, [], EmptyRoutes, {RouteETS, SessionKey, LastUsed, SKFMaxCopies}
 ) ->
     LastHour = erlang:system_time(millisecond) - ?SKF_UPDATE,
     case LastUsed < LastHour of
@@ -138,26 +139,28 @@ find_routes_for_uplink(
             ok
     end,
     {ok, [{RouteETS, SKFMaxCopies} | [{R, 0} || R <- EmptyRoutes]]};
-find_routes_for_uplink(Packet, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, SelectedRoute) ->
+find_routes_for_uplink(PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, SelectedRoute) ->
     Route = hpr_route_ets:route(RouteETS),
     SKFETS = hpr_route_ets:skf_ets(RouteETS),
-    case check_route_skfs(Packet, DevAddr, SKFETS) of
+    case check_route_skfs(PacketUp, DevAddr, SKFETS) of
         empty ->
             case hpr_route:ignore_empty_skf(Route) of
                 true ->
-                    find_routes_for_uplink(Packet, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute);
+                    find_routes_for_uplink(
+                        PacketUp, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute
+                    );
                 false ->
                     find_routes_for_uplink(
-                        Packet, DevAddr, RoutesETS, [RouteETS | EmptyRoutes], SelectedRoute
+                        PacketUp, DevAddr, RoutesETS, [RouteETS | EmptyRoutes], SelectedRoute
                     )
             end;
         false ->
-            find_routes_for_uplink(Packet, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute);
+            find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute);
         {ok, SessionKey, LastUsed, SKFMaxCopies} ->
             case SelectedRoute of
                 undefined ->
                     find_routes_for_uplink(
-                        Packet,
+                        PacketUp,
                         DevAddr,
                         RoutesETS,
                         EmptyRoutes,
@@ -165,25 +168,27 @@ find_routes_for_uplink(Packet, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, Sel
                     );
                 {_R, _S, L, _M} when LastUsed > L ->
                     find_routes_for_uplink(
-                        Packet,
+                        PacketUp,
                         DevAddr,
                         RoutesETS,
                         EmptyRoutes,
                         {RouteETS, SessionKey, LastUsed, SKFMaxCopies}
                     );
                 _ ->
-                    find_routes_for_uplink(Packet, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute)
+                    find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute)
             end
     end.
 
--spec check_route_skfs(Packet :: hpr_packet_up:packet(), DevAddr :: non_neg_integer(), ets:table()) ->
+-spec check_route_skfs(
+    PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer(), ets:table()
+) ->
     empty | false | {ok, binary(), non_neg_integer(), non_neg_integer()}.
-check_route_skfs(Packet, DevAddr, SKFETS) ->
+check_route_skfs(PacketUp, DevAddr, SKFETS) ->
     case hpr_route_ets:select_skf(SKFETS, DevAddr) of
         '$end_of_table' ->
             empty;
         Continuation ->
-            Payload = hpr_packet_up:payload(Packet),
+            Payload = hpr_packet_up:payload(PacketUp),
             case check_route_skfs(Payload, Continuation) of
                 false -> false;
                 {ok, _SessionKey, _LastUsed, _MaxCopies} = OK -> OK
@@ -217,7 +222,7 @@ check_skfs(Payload, [{SessionKey, LastUsed, MaxCopies} | SKFs]) ->
     end.
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
-maybe_deliver_no_routes(Packet) ->
+maybe_deliver_no_routes(PacketUp) ->
     case application:get_env(?APP, no_routes, []) of
         [] ->
             lager:debug("no routes not set");
@@ -228,28 +233,28 @@ maybe_deliver_no_routes(Packet) ->
             lists:foreach(
                 fun({Host, Port}) ->
                     Route = hpr_route:new_packet_router(Host, Port),
-                    hpr_protocol_router:send(Packet, Route)
+                    hpr_protocol_router:send(PacketUp, Route)
                 end,
                 HostsAndPorts
             )
     end.
 
 -spec maybe_deliver_packet_to_routes(
-    Packet :: hpr_packet_up:packet(),
+    PacketUp :: hpr_packet_up:packet(),
     RoutesETS :: [{hpr_route_ets:route(), non_neg_integer()}]
 ) -> {non_neg_integer(), boolean()}.
-maybe_deliver_packet_to_routes(Packet, RoutesETS) ->
+maybe_deliver_packet_to_routes(PacketUp, RoutesETS) ->
     case erlang:length(RoutesETS) of
         1 ->
             [{RouteETS, SKFMaxCopies}] = RoutesETS,
-            case maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies) of
+            case maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) of
                 {ok, IsFree} -> {1, IsFree};
                 {error, _} -> {0, false}
             end;
         X when X > 1 ->
             MaybeDelivered = hpr_utils:pmap(
                 fun({RouteETS, SKFMaxCopies}) ->
-                    maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies)
+                    maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies)
                 end,
                 RoutesETS
             ),
@@ -268,11 +273,11 @@ maybe_deliver_packet_to_routes(Packet, RoutesETS) ->
     end.
 
 -spec maybe_deliver_packet_to_route(
-    Packet :: hpr_packet_up:packet(),
+    PacketUp :: hpr_packet_up:packet(),
     RouteETS :: hpr_route_ets:route(),
     SKFMaxCopies :: non_neg_integer()
 ) -> {ok, boolean()} | {error, any()}.
-maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies) ->
+maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
     Route = hpr_route_ets:route(RouteETS),
     RouteMD = hpr_route:md(Route),
     BackoffTimestamp =
@@ -296,7 +301,7 @@ maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies) ->
             Server = hpr_route:server(Route),
             Protocol = hpr_route:protocol(Server),
             Key = crypto:hash(sha256, <<
-                (hpr_packet_up:phash(Packet))/binary, (hpr_route:lns(Route))/binary
+                (hpr_packet_up:phash(PacketUp))/binary, (hpr_route:lns(Route))/binary
             >>),
             MaxCopies =
                 case SKFMaxCopies of
@@ -309,7 +314,7 @@ maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies) ->
                     Error;
                 {ok, IsFree} ->
                     RouteID = hpr_route:id(Route),
-                    case deliver_packet(Protocol, Packet, Route) of
+                    case deliver_packet(Protocol, PacketUp, Route) of
                         {error, Reason} = Error ->
                             lager:warning(RouteMD, "error ~p", [Reason]),
                             ok = hpr_route_ets:inc_backoff(RouteID),
@@ -317,7 +322,7 @@ maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies) ->
                         ok ->
                             lager:debug(RouteMD, "delivered"),
                             ok = hpr_route_ets:reset_backoff(RouteID),
-                            {Type, _} = hpr_packet_up:type(Packet),
+                            {Type, _} = hpr_packet_up:type(PacketUp),
                             ok = hpr_metrics:packet_up_per_oui(Type, hpr_route:oui(Route)),
                             {ok, IsFree}
                     end
@@ -326,74 +331,78 @@ maybe_deliver_packet_to_route(Packet, RouteETS, SKFMaxCopies) ->
 
 -spec deliver_packet(
     hpr_route:protocol(),
-    Packet :: hpr_packet_up:packet(),
+    PacketUp :: hpr_packet_up:packet(),
     Route :: hpr_route:route()
 ) -> hpr_routing_response().
-deliver_packet({packet_router, _}, Packet, Route) ->
-    hpr_protocol_router:send(Packet, Route);
-deliver_packet({gwmp, _}, Packet, Route) ->
-    hpr_protocol_gwmp:send(Packet, Route);
-deliver_packet({http_roaming, _}, Packet, Route) ->
-    hpr_protocol_http_roaming:send(Packet, Route);
-deliver_packet(_OtherProtocol, _Packet, _Route) ->
+deliver_packet({packet_router, _}, PacketUp, Route) ->
+    hpr_protocol_router:send(PacketUp, Route);
+deliver_packet({gwmp, _}, PacketUp, Route) ->
+    hpr_protocol_gwmp:send(PacketUp, Route);
+deliver_packet({http_roaming, _}, PacketUp, Route) ->
+    hpr_protocol_http_roaming:send(PacketUp, Route);
+deliver_packet(_OtherProtocol, _PacketUp, _Route) ->
     lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
 
 -spec maybe_report_packet(
     Routes :: [hpr_route:route()],
     Routed :: non_neg_integer(),
     IsFree :: boolean(),
-    Packet :: hpr_packet_up:packet(),
+    PacketUp :: hpr_packet_up:packet(),
     ReceivedTime :: non_neg_integer()
 ) -> ok.
-maybe_report_packet(_Routes, 0, _IsFree, _Packet, _ReceivedTime) ->
+maybe_report_packet(_Routes, 0, _IsFree, _PacketUp, _ReceivedTime) ->
     lager:debug("not reporting packet");
-maybe_report_packet([Route | _] = Routes, Routed, IsFree, Packet, ReceivedTime) when Routed > 0 ->
+maybe_report_packet([Route | _] = Routes, Routed, IsFree, PacketUp, ReceivedTime) when Routed > 0 ->
     UniqueOUINetID = lists:usort([{hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]),
     case erlang:length(UniqueOUINetID) of
         1 ->
-            ok = hpr_packet_reporter:report_packet(Packet, Route, IsFree, ReceivedTime);
+            ok = hpr_packet_reporter:report_packet(PacketUp, Route, IsFree, ReceivedTime);
         _ ->
             lager:error("routed packet to non unique OUI/Net ID ~p", [
                 [{hpr_route:id(R), hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]
             ])
     end.
 
--spec packet_type_check(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
+-spec packet_type_check(PacketUp :: hpr_packet_up:packet()) ->
     boolean().
-packet_type_check(Packet, _SessionKey) ->
-    case hpr_packet_up:type(Packet) of
+packet_type_check(PacketUp) ->
+    case hpr_packet_up:type(PacketUp) of
         {undefined, _} -> false;
         {join_req, _} -> true;
         {uplink, _} -> true
     end.
 
--spec packet_session_check(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
+-spec gateway_check(PacketUp :: hpr_packet_up:packet(), Gateway :: binary() | undefined) ->
     boolean().
-packet_session_check(Packet, undefined) ->
-    hpr_packet_up:verify(Packet);
-packet_session_check(Packet, SessionKey) ->
-    hpr_packet_up:verify(Packet, SessionKey).
+gateway_check(PacketUp, Gateway) ->
+    hpr_packet_up:gateway(PacketUp) == Gateway.
 
--spec throttle_check(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
+-spec packet_session_check(PacketUp :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
     boolean().
-throttle_check(Packet, _SessionKey) ->
-    Gateway = hpr_packet_up:gateway(Packet),
+packet_session_check(PacketUp, undefined) ->
+    hpr_packet_up:verify(PacketUp);
+packet_session_check(PacketUp, SessionKey) ->
+    hpr_packet_up:verify(PacketUp, SessionKey).
+
+-spec throttle_check(PacketUp :: hpr_packet_up:packet()) ->
+    boolean().
+throttle_check(PacketUp) ->
+    Gateway = hpr_packet_up:gateway(PacketUp),
     case throttle:check(?GATEWAY_THROTTLE, Gateway) of
         {limit_exceeded, _, _} -> false;
         _ -> true
     end.
 
--spec execute_checks(Packet :: hpr_packet_up:packet(), SessionKey :: undefined | binary(), [
-    {fun(), any()}
-]) -> ok | {error, any()}.
-execute_checks(_Packet, _SessionKey, []) ->
+-spec execute_checks(PacketUp :: hpr_packet_up:packet(), [{fun(), list(any()), any()}]) ->
+    ok | {error, any()}.
+execute_checks(_PacketUp, []) ->
     ok;
-execute_checks(Packet, SessionKey, [{Fun, ErrorReason} | Rest]) ->
-    case Fun(Packet, SessionKey) of
+execute_checks(PacketUp, [{Fun, Args, ErrorReason} | Rest]) ->
+    case erlang:apply(Fun, [PacketUp | Args]) of
         false ->
             {error, ErrorReason};
         true ->
-            execute_checks(Packet, SessionKey, Rest)
+            execute_checks(PacketUp, Rest)
     end.
 
 %% ------------------------------------------------------------------

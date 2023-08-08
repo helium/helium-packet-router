@@ -51,7 +51,8 @@ trace_cmd() ->
     ].
 
 trace_gateway(["trace", "gateway", GatewayName], [], []) ->
-    FileName = hpr_utils:trace(gateway, GatewayName),
+    FileName = hpr_utils:trace(stream_gateway, GatewayName),
+    FileName = hpr_utils:trace(packet_gateway, GatewayName),
     c_text("Tracing gateway ~s in ~s", [GatewayName, FileName]);
 trace_gateway(_, _, _) ->
     usage.

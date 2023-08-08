@@ -45,8 +45,8 @@ end_per_testcase(TestCase, Config) ->
 
 session_test(_Config) ->
     meck:new(hpr_routing, [passthrough]),
-    meck:expect(hpr_routing, handle_packet, fun(Packet, SessionKey) ->
-        case SessionKey of
+    meck:expect(hpr_routing, handle_packet, fun(Packet, Opts) ->
+        case maps:get(session_key, Opts, undefined) of
             undefined ->
                 hpr_packet_up:verify(Packet);
             SessionKey ->
@@ -92,27 +92,47 @@ session_test(_Config) ->
         end
     ),
 
+    Gateway = hpr_test_gateway:pubkey_bin(GatewayPid),
+
     [
         {_Pid1,
             {hpr_routing, handle_packet, [
                 _PacketUp1,
-                SessionKey1
+                #{
+                    session_key := SessionKey1,
+                    gateway := Gateway1,
+                    stream_pid := Pid1
+                }
             ]},
             Verified1},
         {_Pid2,
             {hpr_routing, handle_packet, [
                 _PacketUp2,
-                SessionKey2
+                #{
+                    session_key := SessionKey2,
+                    gateway := Gateway2,
+                    stream_pid := Pid2
+                }
             ]},
             Verified2}
     ] = meck:history(hpr_routing),
+
     ?assertEqual(undefined, SessionKey1),
+    ?assertEqual(Gateway, Gateway1),
+    ?assert(erlang:is_pid(Pid1)),
+    ?assert(erlang:is_process_alive(Pid1)),
     ?assert(Verified1),
+
     ?assert(erlang:is_binary(SessionKey2)),
+    ?assertEqual(Gateway, Gateway2),
+    ?assert(erlang:is_pid(Pid2)),
+    ?assert(erlang:is_process_alive(Pid2)),
     ?assert(Verified2),
 
     ?assert(meck:validate(hpr_routing)),
     meck:unload(hpr_routing),
+
+    gen_server:stop(GatewayPid),
 
     ok.
 

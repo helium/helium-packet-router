@@ -19,7 +19,7 @@
     encode/1,
     decode/1,
     type/1,
-    md/1
+    md/1, md/2
 ]).
 
 -ifdef(TEST).
@@ -169,25 +169,48 @@ type(Packet) ->
 
 -spec md(PacketUp :: packet()) -> ok.
 md(PacketUp) ->
-    Gateway = ?MODULE:gateway(PacketUp),
-    GatewayName = hpr_utils:gateway_name(Gateway),
+    ?MODULE:md(PacketUp, #{}).
+
+-spec md(PacketUp :: packet(), Opts :: map()) -> ok.
+md(PacketUp, Opts) ->
+    PacketGateway = ?MODULE:gateway(PacketUp),
+    PacketGatewayName = hpr_utils:gateway_name(PacketGateway),
+    SessionKey =
+        case maps:get(session_key, Opts, undefined) of
+            undefined -> "undefined";
+            K -> libp2p_crypto:bin_to_b58(K)
+        end,
+    StreamGatewayName =
+        case maps:get(gateway, Opts, undefined) of
+            undefined -> "undefined";
+            G -> hpr_utils:gateway_name(G)
+        end,
     StreamPid =
-        case hpr_packet_router_service:locate(Gateway) of
-            {ok, Pid} -> Pid;
-            {error, _} -> undefined
+        case maps:get(stream_pid, Opts, undefined) of
+            undefined ->
+                case hpr_packet_router_service:locate(PacketGateway) of
+                    {ok, Pid} -> Pid;
+                    {error, _} -> "undefined"
+                end;
+            Pid ->
+                Pid
         end,
     case ?MODULE:type(PacketUp) of
         {undefined, FType} ->
             lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
+                {stream_pid, StreamPid},
+                {stream_gateway, StreamGatewayName},
+                {packet_gateway, PacketGatewayName},
+                {session_key, SessionKey},
                 {packet_type, FType},
                 {phash, hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp))}
             ]);
         {join_req, {AppEUI, DevEUI}} ->
             lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
+                {stream_pid, StreamPid},
+                {stream_gateway, StreamGatewayName},
+                {packet_gateway, PacketGatewayName},
+                {session_key, SessionKey},
                 {app_eui, hpr_utils:int_to_hex_string(AppEUI)},
                 {dev_eui, hpr_utils:int_to_hex_string(DevEUI)},
                 {app_eui_int, AppEUI},
@@ -197,8 +220,10 @@ md(PacketUp) ->
             ]);
         {uplink, {Type, DevAddr}} ->
             lager:md([
-                {stream, StreamPid},
-                {gateway, GatewayName},
+                {stream_pid, StreamPid},
+                {stream_gateway, StreamGatewayName},
+                {packet_gateway, PacketGatewayName},
+                {session_key, SessionKey},
                 {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
                 %% TODO: Add net id (warning they might not have one)
                 {devaddr_int, DevAddr},

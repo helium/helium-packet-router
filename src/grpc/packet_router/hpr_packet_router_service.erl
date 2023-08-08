@@ -19,7 +19,10 @@
 -define(SESSION_RESET, session_reset).
 
 -record(handler_state, {
-    started :: non_neg_integer(), nonce :: undefined | binary(), session_key :: undefined | binary()
+    started :: non_neg_integer(),
+    pubkey_bin :: undefined | binary(),
+    nonce :: undefined | binary(),
+    session_key :: undefined | binary()
 }).
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
@@ -116,27 +119,16 @@ register(PubKeyBin) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
--spec create_session_offer(StreamState0 :: grpcbox_stream:t()) ->
-    {hpr_envelope_down:envelope(), grpcbox_stream:t()}.
-create_session_offer(StreamState0) ->
-    HandlerState0 = grpcbox_stream:stream_handler_state(StreamState0),
-    Nonce = crypto:strong_rand_bytes(32),
-    EnvDown = hpr_envelope_down:new(hpr_session_offer:new(Nonce)),
-    StreamState1 = grpcbox_stream:stream_handler_state(
-        StreamState0, HandlerState0#handler_state{nonce = Nonce}
-    ),
-    lager:debug("session offer ~s", [
-        hpr_utils:bin_to_hex_string(Nonce)
-    ]),
-    %% TODO: Do we reset the session key here?
-    {EnvDown, StreamState1}.
-
 -spec handle_packet(PacketUp :: hpr_packet_up:packet(), StreamState0 :: grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()}.
 handle_packet(PacketUp, StreamState) ->
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    SessionKey = HandlerState#handler_state.session_key,
-    _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp, SessionKey], [{fullsweep_after, 0}]),
+    Opts = #{
+        session_key => HandlerState#handler_state.session_key,
+        gateway => HandlerState#handler_state.pubkey_bin,
+        stream_pid => self()
+    },
+    _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp, Opts], [{fullsweep_after, 0}]),
     {ok, StreamState}.
 
 -spec handle_register(Reg :: hpr_register:register(), StreamState0 :: grpcbox_stream:t()) ->
@@ -156,12 +148,16 @@ handle_register(Reg, StreamState0) ->
             {stop, StreamState0};
         true ->
             ok = ?MODULE:register(PubKeyBin),
+            HandlerState = grpcbox_stream:stream_handler_state(StreamState0),
+            StreamState1 = grpcbox_stream:stream_handler_state(
+                StreamState0, HandlerState#handler_state{pubkey_bin = PubKeyBin}
+            ),
             case hpr_register:session_capable(Reg) of
                 true ->
-                    {EnvDown, StreamState1} = create_session_offer(StreamState0),
-                    {ok, EnvDown, StreamState1};
+                    {EnvDown, StreamState2} = create_session_offer(StreamState1),
+                    {ok, EnvDown, StreamState2};
                 false ->
-                    {ok, StreamState0}
+                    {ok, StreamState1}
             end
     end.
 
@@ -182,8 +178,9 @@ handle_session_init(SessionInit, StreamState0) ->
                     ]),
                     {ok, StreamState0};
                 true ->
-                    lager:debug("session init ~s", [
-                        hpr_utils:bin_to_hex_string(hpr_session_init:nonce(SessionInit))
+                    lager:debug("session init nonce=~s key=~s", [
+                        hpr_utils:bin_to_hex_string(hpr_session_init:nonce(SessionInit)),
+                        libp2p_crypto:bin_to_b58(hpr_session_init:session_key(SessionInit))
                     ]),
                     StreamState1 = grpcbox_stream:stream_handler_state(
                         StreamState0, HandlerState0#handler_state{
@@ -194,6 +191,21 @@ handle_session_init(SessionInit, StreamState0) ->
                     {ok, StreamState1}
             end
     end.
+
+-spec create_session_offer(StreamState0 :: grpcbox_stream:t()) ->
+    {hpr_envelope_down:envelope(), grpcbox_stream:t()}.
+create_session_offer(StreamState0) ->
+    HandlerState0 = grpcbox_stream:stream_handler_state(StreamState0),
+    Nonce = crypto:strong_rand_bytes(32),
+    EnvDown = hpr_envelope_down:new(hpr_session_offer:new(Nonce)),
+    StreamState1 = grpcbox_stream:stream_handler_state(
+        StreamState0, HandlerState0#handler_state{nonce = Nonce}
+    ),
+    lager:debug("session offer ~s", [
+        hpr_utils:bin_to_hex_string(Nonce)
+    ]),
+    %% TODO: Do we reset the session key here?
+    {EnvDown, StreamState1}.
 
 -spec schedule_session_reset() -> ok.
 schedule_session_reset() ->
