@@ -67,7 +67,7 @@ handle_info({packet_down, PacketDown}, StreamState) ->
 handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
     lager:info("give_away registration to ~p", [NewPid]),
     gproc:give_away({n, l, ?REG_KEY(PubKeyBin)}, NewPid),
-    StreamState;
+    grpcbox_stream:send(true, hpr_envelope_down:new(undefined), StreamState);
 handle_info(?SESSION_RESET, StreamState0) ->
     {EnvDown, StreamState1} = create_session_offer(StreamState0),
     grpcbox_stream:send(false, EnvDown, StreamState1);

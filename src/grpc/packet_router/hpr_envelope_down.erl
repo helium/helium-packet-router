@@ -11,7 +11,9 @@
 
 -export_type([envelope/0]).
 
--spec new(hpr_packet_down:packet() | hpr_session_offer:offer()) -> envelope().
+-spec new(hpr_packet_down:packet() | hpr_session_offer:offer() | undefined) -> envelope().
+new(undefined) ->
+    #envelope_down_v1_pb{data = undefined};
 new(#packet_router_packet_down_v1_pb{} = Packet) ->
     #envelope_down_v1_pb{data = {packet, Packet}};
 new(#packet_router_session_offer_v1_pb{} = SessionOffer) ->
