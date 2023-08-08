@@ -11,7 +11,9 @@
 
 -export_type([envelope/0]).
 
--spec new(hpr_packet_down:packet()) -> envelope().
+-spec new(hpr_packet_down:packet() | undefined) -> envelope().
+new(undefined) ->
+    #envelope_down_v1_pb{data = undefined};
 new(#packet_router_packet_down_v1_pb{} = Packet) ->
     #envelope_down_v1_pb{data = {packet, Packet}}.
 
