@@ -4,7 +4,7 @@
 
 -export([
     init/0,
-    handle_packet/1, handle_packet/2,
+    handle_packet/2,
     find_routes/2
 ]).
 
@@ -28,10 +28,6 @@ init() ->
     GatewayRateLimit = application:get_env(?APP, gateway_rate_limit, ?DEFAULT_GATEWAY_THROTTLE),
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     ok.
-
--spec handle_packet(PacketUp :: hpr_packet_up:packet()) -> hpr_routing_response().
-handle_packet(PacketUp) ->
-    handle_packet(PacketUp, #{}).
 
 -spec handle_packet(PacketUp :: hpr_packet_up:packet(), Opts :: map()) ->
     hpr_routing_response().

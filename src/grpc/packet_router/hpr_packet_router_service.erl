@@ -70,7 +70,6 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
     StreamState;
 handle_info(?SESSION_RESET, StreamState0) ->
     {EnvDown, StreamState1} = create_session_offer(StreamState0),
-    %% TODO: Do we reset the session key here?
     grpcbox_stream:send(false, EnvDown, StreamState1);
 handle_info(_Msg, StreamState) ->
     StreamState.
@@ -208,7 +207,6 @@ create_session_offer(StreamState0) ->
     lager:debug("session offer ~s", [
         hpr_utils:bin_to_hex_string(Nonce)
     ]),
-    %% TODO: Do we reset the session key here?
     {EnvDown, StreamState1}.
 
 -spec schedule_session_reset(OldTimer :: undefined | reference()) -> reference().
