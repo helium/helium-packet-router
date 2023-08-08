@@ -24,6 +24,8 @@
     trace/2,
     stop_trace/1,
     pmap/2, pmap/4,
+    enumerate_0/1,
+    enumerate_last/1,
     %%
     load_key/1,
     pubkey_bin/0,
@@ -208,6 +210,15 @@ pmap_rcv(ReceiveTimeout, Acc, Left) ->
     after ReceiveTimeout ->
         pmap_rcv(ReceiveTimeout, Acc, Left - 1)
     end.
+
+-spec enumerate_0(list(T)) -> list({non_neg_integer(), T}).
+enumerate_0(L) ->
+    lists:zip(lists:seq(0, erlang:length(L) - 1), L).
+
+-spec enumerate_last(list(T)) -> list({Last :: boolean(), T}).
+enumerate_last(L) ->
+    Last = erlang:length(L),
+    [{Idx + 1 == Last, El} || {Idx, El} <- enumerate_0(L)].
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
