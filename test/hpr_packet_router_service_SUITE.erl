@@ -82,6 +82,7 @@ session_test(_Config) ->
 
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
 
+    %% Waiting session negotiation to complete
     timer:sleep(1000),
 
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
