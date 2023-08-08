@@ -22,7 +22,8 @@
     started :: non_neg_integer(),
     pubkey_bin :: undefined | binary(),
     nonce :: undefined | binary(),
-    session_key :: undefined | binary()
+    session_key :: undefined | binary(),
+    session_timer :: undefined | reference()
 }).
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
@@ -161,34 +162,37 @@ handle_register(Reg, StreamState0) ->
             end
     end.
 
--spec handle_session_init(Reg :: hpr_session_init:init(), StreamState0 :: grpcbox_stream:t()) ->
+-spec handle_session_init(Reg :: hpr_session_init:init(), StreamState :: grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | {stop, grpcbox_stream:t()}.
-handle_session_init(SessionInit, StreamState0) ->
+handle_session_init(SessionInit, StreamState) ->
     case hpr_session_init:verify(SessionInit) of
         false ->
             lager:warning("failed to verify session init"),
-            {stop, StreamState0};
+            {stop, StreamState};
         true ->
-            HandlerState0 = grpcbox_stream:stream_handler_state(StreamState0),
-            case hpr_session_init:nonce(SessionInit) == HandlerState0#handler_state.nonce of
+            HandlerState0 = grpcbox_stream:stream_handler_state(StreamState),
+            Nonce = hpr_session_init:nonce(SessionInit),
+            SessionKey = hpr_session_init:session_key(SessionInit),
+            case Nonce == HandlerState0#handler_state.nonce of
                 false ->
-                    lager:warning("nonce did not match ~s ~s", [
-                        hpr_utils:bin_to_hex_string(hpr_session_init:nonce(SessionInit)),
-                        hpr_utils:bin_to_hex_string(HandlerState0#handler_state.nonce)
+                    lager:warning("nonce did not match ~s vs ~s key=~s", [
+                        hpr_utils:bin_to_hex_string(Nonce),
+                        hpr_utils:bin_to_hex_string(HandlerState0#handler_state.nonce),
+                        libp2p_crypto:bin_to_b58(SessionKey)
                     ]),
-                    {ok, StreamState0};
+                    {ok, StreamState};
                 true ->
                     lager:debug("session init nonce=~s key=~s", [
-                        hpr_utils:bin_to_hex_string(hpr_session_init:nonce(SessionInit)),
-                        libp2p_crypto:bin_to_b58(hpr_session_init:session_key(SessionInit))
+                        hpr_utils:bin_to_hex_string(Nonce),
+                        libp2p_crypto:bin_to_b58(SessionKey)
                     ]),
-                    StreamState1 = grpcbox_stream:stream_handler_state(
-                        StreamState0, HandlerState0#handler_state{
-                            session_key = hpr_session_init:session_key(SessionInit)
-                        }
-                    ),
-                    ok = schedule_session_reset(),
-                    {ok, StreamState1}
+                    HandlerState1 = HandlerState0#handler_state{
+                        session_key = SessionKey,
+                        session_timer = schedule_session_reset(
+                            HandlerState0#handler_state.session_timer
+                        )
+                    },
+                    {ok, grpcbox_stream:stream_handler_state(StreamState, HandlerState1)}
             end
     end.
 
@@ -207,10 +211,12 @@ create_session_offer(StreamState0) ->
     %% TODO: Do we reset the session key here?
     {EnvDown, StreamState1}.
 
--spec schedule_session_reset() -> ok.
-schedule_session_reset() ->
-    _ = erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET),
-    ok.
+-spec schedule_session_reset(OldTimer :: undefined | reference()) -> reference().
+schedule_session_reset(OldTimer) when is_reference(OldTimer) ->
+    _ = erlang:cancel_timer(OldTimer),
+    erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET);
+schedule_session_reset(_OldTimer) ->
+    erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET).
 
 %% ------------------------------------------------------------------
 %% EUnit tests
