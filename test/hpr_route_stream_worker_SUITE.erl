@@ -346,7 +346,8 @@ refresh_route_test(_Config) ->
     application:set_env(hpr, test_route_get_devaddr_ranges, []),
     application:set_env(hpr, test_route_list_skfs, []),
 
-    ?assertEqual({ok, #{
+    ?assertEqual(
+        {ok, #{
             eui_before => 2,
             eui_after => 0,
             eui_removed => 2,
@@ -361,7 +362,9 @@ refresh_route_test(_Config) ->
             devaddr_after => 0,
             devaddr_removed => 2,
             devaddr_added => 0
-        }}, hpr_route_stream_worker:refresh_route("7d502f32-4d58-4746-965e-001")),
+        }},
+        hpr_route_stream_worker:refresh_route("7d502f32-4d58-4746-965e-001")
+    ),
 
     %% Everything was removed
     [RouteETS3] = hpr_route_ets:lookup_route(Route1ID),
