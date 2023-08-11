@@ -328,7 +328,6 @@ update_skf(DevAddr, SessionKey, RouteID, MaxCopies) ->
         session_key => hpr_utils:bin_to_hex_string(SessionKey),
         max_copies => MaxCopies
     }),
-    ok = delete_skf(SKF),
     ok = insert_skf(SKF),
     ok.
 
@@ -540,20 +539,36 @@ do_insert_skf(RouteID, SKFETS, SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
     MaxCopies = hpr_skf:max_copies(SKF),
+    MS = [{{{'_', hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, '_'}}, [], [true]}],
+    Deleted = ets:select_delete(SKFETS, MS),
     %% This is negative to make newest time on top
     Now = erlang:system_time(millisecond) * -1,
     true = ets:insert(SKFETS, {
         {Now, hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, MaxCopies}
     }),
-    lager:debug(
-        [
-            {route_id, RouteID},
-            {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
-            {session_key, SessionKey},
-            {max_copies, MaxCopies}
-        ],
-        "inserting SKF"
-    ).
+    case Deleted of
+        0 ->
+            lager:debug(
+                [
+                    {route_id, RouteID},
+                    {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
+                    {session_key, SessionKey},
+                    {max_copies, MaxCopies}
+                ],
+                "inserted SKF"
+            );
+        X ->
+            lager:debug(
+                [
+                    {route_id, RouteID},
+                    {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
+                    {session_key, SessionKey},
+                    {max_copies, MaxCopies}
+                ],
+                "updated SKF (~w)",
+                [X]
+            )
+    end.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
@@ -856,8 +871,15 @@ test_skf() ->
     SK3 = hpr_utils:hex_to_bin(SessionKey3),
     ?assertMatch([{SK3, X, 3}, {SK1, Y, 11}] when X < Y, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
 
+    SKF4 = hpr_skf:new(#{
+        route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3, max_copies => 10
+    }),
+    timer:sleep(1),
+    ?assertEqual(ok, ?MODULE:insert_skf(SKF4)),
+    ?assertMatch([{SK3, X, 10}, {SK1, Y, 11}] when X < Y, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+
     ?assertEqual(ok, ?MODULE:delete_skf(SKF1)),
-    ?assertEqual(ok, ?MODULE:delete_skf(SKF3)),
+    ?assertEqual(ok, ?MODULE:delete_skf(SKF4)),
     ?assertEqual([], ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
 
     ?assertEqual(ok, ?MODULE:delete_skf(SKF2)),
