@@ -137,7 +137,7 @@ handle_packet(PacketUp, StreamState) ->
     | {stop, grpcbox_stream:t()}.
 handle_register(Reg, StreamState0) ->
     PubKeyBin = hpr_register:gateway(Reg),
-    lager:md([{gateway, hpr_utils:gateway_name(PubKeyBin)}]),
+    lager:md([{stream_gateway, hpr_utils:gateway_name(PubKeyBin)}]),
     case hpr_register:verify(Reg) of
         false ->
             lager:warning("failed to verify register"),
