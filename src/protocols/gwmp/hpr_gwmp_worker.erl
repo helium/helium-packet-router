@@ -88,7 +88,7 @@ init(#{pubkeybin := PubKeyBin} = Args) ->
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
     lager:md([
-        {gateway, hpr_utils:gateway_name(PubKeyBin)},
+        {packet_gateway, hpr_utils:gateway_name(PubKeyBin)},
         {gateway_mac, hpr_utils:gateway_mac(PubKeyBin)},
         {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
     ]),
