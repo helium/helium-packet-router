@@ -11,6 +11,9 @@
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
+-define(PACKET_THROTTLE, hpr_packet_rate_limit).
+-define(DEFAULT_PACKET_THROTTLE, 1).
+
 -ifdef(TEST).
 -define(SKF_UPDATE, timer:seconds(2)).
 -else.
@@ -27,6 +30,8 @@
 init() ->
     GatewayRateLimit = application:get_env(?APP, gateway_rate_limit, ?DEFAULT_GATEWAY_THROTTLE),
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
+    PacketRateLimit = application:get_env(?APP, gateway_rate_limit, ?DEFAULT_PACKET_THROTTLE),
+    ok = throttle:setup(?PACKET_THROTTLE, PacketRateLimit, per_second),
     ok.
 
 -spec handle_packet(PacketUp :: hpr_packet_up:packet(), Opts :: map()) ->
@@ -41,7 +46,8 @@ handle_packet(PacketUp, Opts) ->
         {fun packet_type_check/1, [], invalid_packet_type},
         {fun gateway_check/2, [Gateway], wrong_gateway},
         {fun packet_session_check/2, [SessionKey], bad_signature},
-        {fun throttle_check/1, [], gateway_limit_exceeded}
+        {fun gateway_throttle_check/1, [], gateway_limit_exceeded},
+        {fun packet_throttle_check/1, [], packet_limit_exceeded}
     ],
     PacketUpType = hpr_packet_up:type(PacketUp),
     case execute_checks(PacketUp, Checks) of
@@ -385,11 +391,21 @@ packet_session_check(PacketUp, undefined) ->
 packet_session_check(PacketUp, SessionKey) ->
     hpr_packet_up:verify(PacketUp, SessionKey).
 
--spec throttle_check(PacketUp :: hpr_packet_up:packet()) ->
+-spec gateway_throttle_check(PacketUp :: hpr_packet_up:packet()) ->
     boolean().
-throttle_check(PacketUp) ->
+gateway_throttle_check(PacketUp) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
     case throttle:check(?GATEWAY_THROTTLE, Gateway) of
+        {limit_exceeded, _, _} -> false;
+        _ -> true
+    end.
+
+-spec packet_throttle_check(PacketUp :: hpr_packet_up:packet()) ->
+    boolean().
+packet_throttle_check(PacketUp) ->
+    Gateway = hpr_packet_up:gateway(PacketUp),
+    PHash = hpr_packet_up:phash(PacketUp),
+    case throttle:check(?PACKET_THROTTLE, {Gateway, PHash}) of
         {limit_exceeded, _, _} -> false;
         _ -> true
     end.
