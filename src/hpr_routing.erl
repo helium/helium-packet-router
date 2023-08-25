@@ -30,7 +30,7 @@
 init() ->
     GatewayRateLimit = application:get_env(?APP, gateway_rate_limit, ?DEFAULT_GATEWAY_THROTTLE),
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
-    PacketRateLimit = application:get_env(?APP, gateway_rate_limit, ?DEFAULT_PACKET_THROTTLE),
+    PacketRateLimit = application:get_env(?APP, packet_rate_limit, ?DEFAULT_PACKET_THROTTLE),
     ok = throttle:setup(?PACKET_THROTTLE, PacketRateLimit, per_second),
     ok.
 
