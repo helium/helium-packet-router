@@ -23,6 +23,7 @@
     lookup_devaddr_range/1,
 
     insert_skf/1,
+    insert_new_skf/1,
     update_skf/4,
     delete_skf/1,
     lookup_skf/2,
@@ -305,12 +306,33 @@ lookup_devaddr_range(DevAddr) ->
 -spec insert_skf(SKF :: hpr_skf:skf()) -> ok.
 insert_skf(SKF) ->
     RouteID = hpr_skf:route_id(SKF),
+    MD = skf_md(RouteID, SKF),
     case ?MODULE:lookup_route(RouteID) of
         [#hpr_route_ets{skf_ets = SKFETS}] ->
-            do_insert_skf(RouteID, SKFETS, SKF);
+            Deleted = do_remove_skf(SKFETS, SKF),
+            do_insert_skf(SKFETS, SKF),
+            case Deleted of
+                0 -> lager:debug(MD, "inserted SKF");
+                _ -> lager:debug([{deleted, Deleted} | MD], "updated SKF")
+            end;
         _Other ->
-            lager:error("failed to insert skf table not found ~p for ~s", [
-                _Other, RouteID
+            lager:error(MD, "failed to insert skf table not found ~p", [
+                _Other
+            ])
+    end,
+    ok.
+
+-spec insert_new_skf(SKF :: hpr_skf:skf()) -> ok.
+insert_new_skf(SKF) ->
+    RouteID = hpr_skf:route_id(SKF),
+    MD = skf_md(RouteID, SKF),
+    case ?MODULE:lookup_route(RouteID) of
+        [#hpr_route_ets{skf_ets = SKFETS}] ->
+            do_insert_skf(SKFETS, SKF),
+            lager:debug(MD, "inserted SKF");
+        _Other ->
+            lager:error(MD, "failed to insert new skf, tabl not found ~p", [
+                _Other
             ])
     end,
     ok.
@@ -445,7 +467,7 @@ replace_route_skfs(RouteID, NewSKFs) ->
                 {write_concurrency, true},
                 {heir, erlang:whereis(?SKF_HEIR), RouteID}
             ]),
-            lists:foreach(fun(SKF) -> do_insert_skf(RouteID, NewTab, SKF) end, NewSKFs),
+            lists:foreach(fun(SKF) -> do_insert_skf(NewTab, SKF) end, NewSKFs),
             true = ets:insert(?ETS_ROUTES, Route#hpr_route_ets{skf_ets = NewTab}),
 
             OldSize = ets:info(OldTab, size),
@@ -534,41 +556,34 @@ skfs_count_for_route(RouteID) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec do_insert_skf(hpr_route:id(), ets:table(), hpr_skf:skf()) -> ok.
-do_insert_skf(RouteID, SKFETS, SKF) ->
+-spec do_remove_skf(ets:table(), hpr_skf:skf()) ->
+    DeletedCount :: non_neg_integer().
+do_remove_skf(SKFETS, SKF) ->
+    DevAddr = hpr_skf:devaddr(SKF),
+    SessionKey = hpr_skf:session_key(SKF),
+    MS = [{{{'_', hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, '_'}}, [], [true]}],
+    ets:select_delete(SKFETS, MS).
+
+-spec do_insert_skf(ets:table(), hpr_skf:skf()) -> ok.
+do_insert_skf(SKFETS, SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
     MaxCopies = hpr_skf:max_copies(SKF),
-    MS = [{{{'_', hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, '_'}}, [], [true]}],
-    Deleted = ets:select_delete(SKFETS, MS),
     %% This is negative to make newest time on top
     Now = erlang:system_time(millisecond) * -1,
     true = ets:insert(SKFETS, {
         {Now, hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, MaxCopies}
     }),
-    case Deleted of
-        0 ->
-            lager:debug(
-                [
-                    {route_id, RouteID},
-                    {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
-                    {session_key, SessionKey},
-                    {max_copies, MaxCopies}
-                ],
-                "inserted SKF"
-            );
-        X ->
-            lager:debug(
-                [
-                    {route_id, RouteID},
-                    {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
-                    {session_key, SessionKey},
-                    {max_copies, MaxCopies}
-                ],
-                "updated SKF (~w)",
-                [X]
-            )
-    end.
+    ok.
+
+-spec skf_md(hpr_route:id(), hpr_skf:skf()) -> proplists:proplist().
+skf_md(RouteID, SKF) ->
+    [
+        {route_id, RouteID},
+        {devaddr, hpr_utils:int_to_hex_string(hpr_skf:devaddr(SKF))},
+        {session_key, hpr_skf:session_key(SKF)},
+        {max_copies, hpr_skf:max_copies(SKF)}
+    ].
 
 %% ------------------------------------------------------------------
 %% EUnit tests
