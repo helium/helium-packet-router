@@ -120,7 +120,7 @@ start_link(Args) ->
 
 -spec refresh_route(hpr_route:id()) -> {ok, refresh_map()} | {error, any()}.
 refresh_route(RouteID) ->
-    gen_server:call(?MODULE, {refresh_route, RouteID}).
+    gen_server:call(?MODULE, {refresh_route, RouteID}, timer:seconds(120)).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
