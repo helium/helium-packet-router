@@ -329,7 +329,7 @@ find_skf(SKToFind, [RouteETS | RoutesETS], Acc0) ->
             find_skf(SKToFind, RoutesETS, Acc0);
         SKFs ->
             Acc1 = lists:filtermap(
-                fun({{LastUsed, SK}, {DevAddr, MaxCopies}}) ->
+                fun({LastUsed, SK, DevAddr, MaxCopies}) ->
                     case SK =:= SKToFind of
                         true ->
                             {true, {DevAddr, SK, RouteID, LastUsed * -1, MaxCopies}};
@@ -513,7 +513,7 @@ format_eui({App, Dev}) ->
         hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
     ]).
 
-format_skf({{Timestamp, SKF}, {DevAddr, MaxCopies}}) ->
+format_skf({Timestamp, SKF, DevAddr, MaxCopies}) ->
     io_lib:format("  - (~s, ~s, ~w, ~w)~n", [
         hpr_utils:int_to_hex_string(DevAddr),
         hpr_utils:bin_to_hex_string(SKF),
