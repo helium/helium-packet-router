@@ -303,9 +303,7 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
         {true, false, _} ->
             Server = hpr_route:server(Route),
             Protocol = hpr_route:protocol(Server),
-            Key = crypto:hash(sha256, <<
-                (hpr_packet_up:phash(PacketUp))/binary, (hpr_route:lns(Route))/binary
-            >>),
+            Key = hpr_multi_buy:make_key(PacketUp, Route),
             MaxCopies =
                 case SKFMaxCopies of
                     0 -> hpr_route:max_copies(Route);

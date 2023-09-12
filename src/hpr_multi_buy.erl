@@ -6,7 +6,8 @@
 -export([
     init/0,
     update_counter/2,
-    cleanup/1
+    cleanup/1,
+    make_key/2
 ]).
 
 -define(ETS, hpr_multi_buy_ets).
@@ -69,6 +70,13 @@ cleanup(Duration) ->
         lager:debug("expiring ~w keys", [Deleted])
     end),
     ok.
+
+-spec make_key(hpr_packet_up:packet(), hpr_route:route()) -> binary().
+make_key(PacketUp, Route) ->
+    crypto:hash(sha256, <<
+        (hpr_packet_up:phash(PacketUp))/binary,
+        (hpr_route:lns(Route))/binary
+    >>).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
