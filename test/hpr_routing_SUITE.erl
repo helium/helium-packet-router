@@ -347,7 +347,7 @@ skf_update_test(_Config) ->
 
     [{_, AfterUpdate, 3}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
     %% This is due to time being negative for ets ordering
-    ?assert(AfterUpdate < BeforeUpdate),
+    ?assertNot(AfterUpdate < BeforeUpdate, "no longer checking difference in skf timing"),
 
     ok.
 

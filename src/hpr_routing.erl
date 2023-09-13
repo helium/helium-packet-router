@@ -115,7 +115,7 @@ establish_routing(PacketUp, Start) ->
 
 -spec do_routing(
     PacketUp :: hpr_packet_up:packet(),
-    RouteETS :: hpr_route_ets:route(),
+    [{RouteETS :: hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}],
     StartTime :: non_neg_integer()
 ) -> ok.
 do_routing(PacketUp, RoutesETS, Start) ->
