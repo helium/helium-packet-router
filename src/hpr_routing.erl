@@ -16,15 +16,11 @@
 
 -define(PACKET_ETS, hpr_packet_routing_ets).
 
--ifdef(TEST).
--define(SKF_UPDATE, timer:seconds(2)).
--else.
--define(SKF_UPDATE, timer:minutes(60)).
--endif.
-
 -type hpr_routing_response() ::
     ok
     | {error, gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic}.
+
+-type selected_route() :: {hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}.
 
 -export_type([hpr_routing_response/0]).
 
@@ -138,7 +134,7 @@ do_routing(PacketUp, RoutesETS, Start) ->
     hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Start).
 
 -spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
-    {ok, [{hpr_route_ets:route(), non_neg_integer()}]} | {error, invalid_mic}.
+    {ok, list(selected_route())} | {error, invalid_mic}.
 find_routes({join_req, {AppEUI, DevEUI}}, _PacketUp) ->
     Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
     {ok, [{R, 0} || R <- Routes]};
@@ -152,7 +148,7 @@ find_routes({uplink, {_Type, DevAddr}}, PacketUp) ->
 %% ------------------------------------------------------------------
 
 -spec find_routes_for_uplink(PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
-    {ok, [{hpr_route_ets:route(), non_neg_integer()}]} | {error, invalid_mic}.
+    {ok, list(selected_route())} | {error, invalid_mic}.
 find_routes_for_uplink(PacketUp, DevAddr) ->
     case hpr_route_ets:lookup_devaddr_range(DevAddr) of
         [] ->
@@ -164,35 +160,19 @@ find_routes_for_uplink(PacketUp, DevAddr) ->
 -spec find_routes_for_uplink(
     PacketUp :: hpr_packet_up:packet(),
     DevAddr :: non_neg_integer(),
-    [hpr_route_ets:route()],
-    [hpr_route_ets:route()],
-    undefined
-    | {
-        RouteETS :: hpr_route_ets:route(),
-        SessionKey :: binary(),
-        LastUsed :: non_neg_integer(),
-        SKFMaxCopies :: non_neg_integer()
-    }
-) -> {ok, [{hpr_route:route(), non_neg_integer()}]} | {error, invalid_mic}.
+    CandidateRoutes :: [hpr_route_ets:route()],
+    EmptyRoutes :: [hpr_route_ets:route()],
+    SelectedRoute :: undefined | selected_route()
+) -> {ok, list(selected_route())} | {error, invalid_mic}.
 find_routes_for_uplink(_PacketUp, _DevAddr, [], [], undefined) ->
     {error, invalid_mic};
 find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, undefined) ->
     {ok, [{R, 0} || R <- EmptyRoutes]};
-find_routes_for_uplink(
-    _PacketUp, DevAddr, [], EmptyRoutes, {RouteETS, SessionKey, LastUsed, SKFMaxCopies}
-) ->
-    LastHour = erlang:system_time(millisecond) - ?SKF_UPDATE,
-    case LastUsed < LastHour of
-        true ->
-            Route = hpr_route_ets:route(RouteETS),
-            erlang:spawn(hpr_route_ets, update_skf, [
-                DevAddr, SessionKey, hpr_route:id(Route), SKFMaxCopies
-            ]);
-        false ->
-            ok
-    end,
+find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, {RouteETS, SKFMaxCopies}) ->
     {ok, [{RouteETS, SKFMaxCopies} | [{R, 0} || R <- EmptyRoutes]]};
-find_routes_for_uplink(PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, SelectedRoute) ->
+find_routes_for_uplink(
+    PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, SelectedRoute
+) ->
     Route = hpr_route_ets:route(RouteETS),
     SKFETS = hpr_route_ets:skf_ets(RouteETS),
     case check_route_skfs(PacketUp, DevAddr, SKFETS) of
@@ -209,7 +189,7 @@ find_routes_for_uplink(PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, S
             end;
         false ->
             find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute);
-        {ok, SessionKey, LastUsed, SKFMaxCopies} ->
+        {ok, SKFMaxCopies} ->
             case SelectedRoute of
                 undefined ->
                     find_routes_for_uplink(
@@ -217,15 +197,7 @@ find_routes_for_uplink(PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, S
                         DevAddr,
                         RoutesETS,
                         EmptyRoutes,
-                        {RouteETS, SessionKey, LastUsed, SKFMaxCopies}
-                    );
-                {_R, _S, L, _M} when LastUsed > L ->
-                    find_routes_for_uplink(
-                        PacketUp,
-                        DevAddr,
-                        RoutesETS,
-                        EmptyRoutes,
-                        {RouteETS, SessionKey, LastUsed, SKFMaxCopies}
+                        {RouteETS, SKFMaxCopies}
                     );
                 _ ->
                     find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute)
@@ -235,7 +207,7 @@ find_routes_for_uplink(PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, S
 -spec check_route_skfs(
     PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer(), ets:table()
 ) ->
-    empty | false | {ok, binary(), non_neg_integer(), non_neg_integer()}.
+    empty | false | {ok, non_neg_integer()}.
 check_route_skfs(PacketUp, DevAddr, SKFETS) ->
     case hpr_route_ets:select_skf(SKFETS, DevAddr) of
         '$end_of_table' ->
@@ -244,34 +216,34 @@ check_route_skfs(PacketUp, DevAddr, SKFETS) ->
             Payload = hpr_packet_up:payload(PacketUp),
             case check_route_skfs(Payload, Continuation) of
                 false -> false;
-                {ok, _SessionKey, _LastUsed, _MaxCopies} = OK -> OK
+                {ok, MaxCopies} -> {ok, MaxCopies}
             end
     end.
 
 -spec check_route_skfs(
     Payload :: binary(),
     '$end_of_table' | {[{binary(), integer(), non_neg_integer()}], ets:continuation()}
-) -> false | {ok, binary(), non_neg_integer(), non_neg_integer()}.
+) -> false | {ok, non_neg_integer()}.
 check_route_skfs(_Payload, '$end_of_table') ->
     false;
 check_route_skfs(Payload, {SKFs, Continuation}) ->
     case check_skfs(Payload, SKFs) of
         false ->
             check_route_skfs(Payload, hpr_route_ets:select_skf(Continuation));
-        {ok, _SessionKey, _LastUsed, _MaxCopies} = OK ->
+        {ok, _MaxCopies} = OK ->
             OK
     end.
 
--spec check_skfs(Payload :: binary(), [{binary(), integer(), non_neg_integer()}]) ->
-    false | {ok, binary(), non_neg_integer(), non_neg_integer()}.
+-spec check_skfs(Payload :: binary(), [{binary(), non_neg_integer()}]) ->
+    false | {ok, non_neg_integer()}.
 check_skfs(_Payload, []) ->
     false;
-check_skfs(Payload, [{SessionKey, LastUsed, MaxCopies} | SKFs]) ->
+check_skfs(Payload, [{SessionKey, MaxCopies} | SKFs]) ->
     case hpr_lorawan:key_matches_mic(SessionKey, Payload) of
         false ->
             check_skfs(Payload, SKFs);
         true ->
-            {ok, SessionKey, LastUsed * -1, MaxCopies}
+            {ok, MaxCopies}
     end.
 
 -spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.

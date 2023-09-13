@@ -290,8 +290,8 @@ config_skf(["config", "skf", DevAddrOrSKF], [], []) ->
                         RouteID = hpr_route:id(Route),
                         ETS = hpr_route_ets:skf_ets(RouteETS),
                         [
-                            {DevAddr, SK, RouteID, LastUsed * -1, MaxCopies}
-                         || {SK, LastUsed, MaxCopies} <- hpr_route_ets:lookup_skf(ETS, DevAddr)
+                            {DevAddr, SK, RouteID, MaxCopies}
+                         || {SK, MaxCopies} <- hpr_route_ets:lookup_skf(ETS, DevAddr)
                         ] ++ Acc
                     end,
                     [],
@@ -305,11 +305,10 @@ config_skf(["config", "skf", DevAddrOrSKF], [], []) ->
         [] ->
             c_text("No SKF found for ~p", [DevAddrOrSKF]);
         SKFs ->
-            MkRow = fun({DevAddr, SK, RouteID, LastUsed, MaxCopies}) ->
+            MkRow = fun({DevAddr, SK, RouteID, MaxCopies}) ->
                 [
                     {" Route ID ", RouteID},
                     {" Session Key ", hpr_utils:bin_to_hex_string(SK)},
-                    {" Last Used ", LastUsed},
                     {" Max Copies ", MaxCopies},
                     {" DevAddr ", hpr_utils:int_to_hex_string(DevAddr)}
                 ]
