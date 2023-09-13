@@ -14,6 +14,8 @@
 -define(PACKET_THROTTLE, hpr_packet_rate_limit).
 -define(DEFAULT_PACKET_THROTTLE, 1).
 
+-define(PACKET_ETS, hpr_packet_routing_ets).
+
 -ifdef(TEST).
 -define(SKF_UPDATE, timer:seconds(2)).
 -else.
@@ -32,6 +34,13 @@ init() ->
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     PacketRateLimit = application:get_env(?APP, packet_rate_limit, ?DEFAULT_PACKET_THROTTLE),
     ok = throttle:setup(?PACKET_THROTTLE, PacketRateLimit, per_second),
+    ?PACKET_ETS = ets:new(?PACKET_ETS, [
+        public,
+        named_table,
+        set,
+        {write_concurrency, true},
+        {read_concurrency, true}
+    ]),
     ok.
 
 -spec handle_packet(PacketUp :: hpr_packet_up:packet(), Opts :: map()) ->
@@ -50,42 +59,83 @@ handle_packet(PacketUp, Opts) ->
         {fun packet_throttle_check/1, [], packet_limit_exceeded}
     ],
     PacketUpType = hpr_packet_up:type(PacketUp),
-    case execute_checks(PacketUp, Checks) of
+    Check = execute_checks(PacketUp, Checks),
+    case Check of
         {error, _Reason} = Error ->
             lager:debug("packet failed verification: ~p", [_Reason]),
             hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
             Error;
         ok ->
-            case ?MODULE:find_routes(PacketUpType, PacketUp) of
-                {error, _Reason} = Error ->
-                    lager:debug("failed to find routes: ~p", [_Reason]),
-                    hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
-                    Error;
-                {ok, []} ->
-                    lager:debug("no routes found"),
+            Hash = hpr_packet_up:phash(PacketUp),
+            case ets:lookup(?PACKET_ETS, Hash) of
+                [] ->
+                    establish_routing(PacketUp, Start);
+                [{_Hash, route, RoutesETS}] ->
+                    do_routing(PacketUp, RoutesETS, Start),
+                    ok;
+                [{_Hash, no_routes}] ->
                     ok = maybe_deliver_no_routes(PacketUp),
                     hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
                     ok;
-                {ok, RoutesETS} ->
-                    {Routed, IsFree} = maybe_deliver_packet_to_routes(PacketUp, RoutesETS),
-                    ok = maybe_report_packet(
-                        PacketUpType,
-                        [hpr_route_ets:route(RouteETS) || {RouteETS, _} <- RoutesETS],
-                        Routed,
-                        IsFree,
-                        PacketUp,
-                        Start
-                    ),
-                    N = erlang:length(RoutesETS),
-                    lager:debug(
-                        [{routes, N}, {routed, Routed}],
-                        "~w routes and delivered to ~w routes",
-                        [N, Routed]
-                    ),
-                    hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Start),
-                    ok
+                [{_Hash, {error, _Reason} = Error}] ->
+                    hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
+                    Error;
+                [{_Hash, locked, Packets}] ->
+                    ets:insert(?PACKET_ETS, {Hash, locked, [{PacketUp, Start} | Packets]})
             end
     end.
+
+-spec establish_routing(hpr_packet_up:packet(), Start :: non_neg_integer()) -> ok | {error, any()}.
+establish_routing(PacketUp, Start) ->
+    Hash = hpr_packet_up:phash(PacketUp),
+    true = ets:insert(?PACKET_ETS, {Hash, locked, [{PacketUp, Start}]}),
+    PacketUpType = hpr_packet_up:type(PacketUp),
+    case ?MODULE:find_routes(PacketUpType, PacketUp) of
+        {error, _Reason} = Error ->
+            true = ets:insert(?PACKET_ETS, {Hash, Error}),
+            Error;
+        {ok, []} ->
+            true = ets:insert(?PACKET_ETS, {Hash, no_routes}),
+            ok = maybe_deliver_no_routes(PacketUp),
+            hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
+            ok;
+        {ok, RoutesETS} ->
+            %% Routing found, pick up any queued packets
+            [{_Hash, locked, Queued}] = ets:lookup(?PACKET_ETS, Hash),
+            %% Remove lock
+            true = ets:insert(?PACKET_ETS, {Hash, route, RoutesETS}),
+            lists:foreach(
+                fun({QueuedPacket, QueuedStart}) ->
+                    do_routing(QueuedPacket, RoutesETS, QueuedStart)
+                end,
+                lists:reverse(Queued)
+            ),
+            ok
+    end.
+
+-spec do_routing(
+    PacketUp :: hpr_packet_up:packet(),
+    RouteETS :: hpr_route_ets:route(),
+    StartTime :: non_neg_integer()
+) -> ok.
+do_routing(PacketUp, RoutesETS, Start) ->
+    PacketUpType = hpr_packet_up:type(PacketUp),
+    {Routed, IsFree} = maybe_deliver_packet_to_routes(PacketUp, RoutesETS),
+    ok = maybe_report_packet(
+        PacketUpType,
+        [hpr_route_ets:route(RouteETS) || {RouteETS, _} <- RoutesETS],
+        Routed,
+        IsFree,
+        PacketUp,
+        Start
+    ),
+    N = erlang:length(RoutesETS),
+    lager:debug(
+        [{routes, N}, {routed, Routed}],
+        "~w routes and delivered to ~w routes",
+        [N, Routed]
+    ),
+    hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Start).
 
 -spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
     {ok, [{hpr_route_ets:route(), non_neg_integer()}]} | {error, invalid_mic}.
