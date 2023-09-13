@@ -744,6 +744,7 @@ multi_buy_requests_test(_Config) ->
         {write_concurrency, true}
     ]),
 
+    meck:new(hpr_multi_buy, [passthrough]),
     meck:new(helium_multi_buy_multi_buy_client, [passthrough]),
     %% By adding +2 here we simulate other servers also incrementing
     meck:expect(helium_multi_buy_multi_buy_client, inc, fun(#multi_buy_inc_req_v1_pb{key = Key}, _) ->
@@ -815,12 +816,18 @@ multi_buy_requests_test(_Config) ->
         Packets1
     ),
 
-    % We should max make 3 requests
-    ok = test_utils:wait_until(
-        fun() ->
-            3 == meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2)
-        end
-    ),
+    MultiBuyKey = hpr_multi_buy:make_key(hd(Packets1), Route),
+    %% We should stop making requests when the multi-buy service says it's seen
+    %% more than the MaxCopies. When we've sent more update_counter than
+    %% MaxCopies, we can check that we haven't exceeded MaxCopies worth of
+    %% requests because this tests is simulating other HPR seeing the same packet.
+    ok = test_utils:wait_until(fun() ->
+        UpdatesRequested = meck:num_calls(hpr_multi_buy, update_counter, [MultiBuyKey, MaxCopies]),
+        RequestsSent = meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2),
+        Headroom = 2,
+
+        UpdatesRequested > (MaxCopies + Headroom) andalso RequestsSent =< MaxCopies
+    end),
 
     Key = key,
     meck:reset(helium_multi_buy_multi_buy_client),
@@ -886,6 +893,7 @@ multi_buy_requests_test(_Config) ->
     ?assert(meck:validate(helium_multi_buy_multi_buy_client)),
     meck:unload(helium_multi_buy_multi_buy_client),
     meck:unload(hpr_protocol_router),
+    meck:unload(hpr_multi_buy),
     ets:delete(ETS),
     ok.
 
