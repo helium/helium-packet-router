@@ -90,6 +90,16 @@ init() ->
     ?ETS_EUI_PAIRS = ets:new(?ETS_EUI_PAIRS, [public, named_table, bag, {read_concurrency, true}]),
     ok.
 
+-spec make_skf_ets(hpr_route:id()) -> ets:tab().
+make_skf_ets(RouteID) ->
+    ets:new(?ETS_SKFS, [
+        public,
+        set,
+        {read_concurrency, true},
+        {write_concurrency, true},
+        {heir, erlang:whereis(?SKF_HEIR), RouteID}
+    ]).
+
 -spec route(RouteETS :: route()) -> hpr_route:route().
 route(RouteETS) ->
     RouteETS#hpr_route_ets.route.
@@ -141,13 +151,7 @@ insert_route(Route) ->
             [#hpr_route_ets{skf_ets = ETS}] ->
                 ETS;
             _Other ->
-                ets:new(?ETS_SKFS, [
-                    public,
-                    ordered_set,
-                    {read_concurrency, true},
-                    {write_concurrency, true},
-                    {heir, erlang:whereis(?SKF_HEIR), RouteID}
-                ])
+                make_skf_ets(RouteID)
         end,
     ?MODULE:insert_route(Route, SKFETS).
 
@@ -460,13 +464,7 @@ replace_route_devaddrs(RouteID, DevAddrRanges) ->
 replace_route_skfs(RouteID, NewSKFs) ->
     case ?MODULE:lookup_route(RouteID) of
         [#hpr_route_ets{skf_ets = OldTab} = Route] ->
-            NewTab = ets:new(?ETS_SKFS, [
-                public,
-                ordered_set,
-                {read_concurrency, true},
-                {write_concurrency, true},
-                {heir, erlang:whereis(?SKF_HEIR), RouteID}
-            ]),
+            NewTab = make_skf_ets(RouteID),
             lists:foreach(fun(SKF) -> do_insert_skf(NewTab, SKF) end, NewSKFs),
             true = ets:insert(?ETS_ROUTES, Route#hpr_route_ets{skf_ets = NewTab}),
 
