@@ -26,7 +26,8 @@
     success_test/1,
     no_routes_test/1,
     maybe_report_packet_test/1,
-    find_route_load_test/1
+    find_route_load_test/1,
+    routing_cleanup_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -56,7 +57,8 @@ all() ->
         success_test,
         no_routes_test,
         maybe_report_packet_test,
-        find_route_load_test
+        find_route_load_test,
+        routing_cleanup_test
     ].
 
 %%--------------------------------------------------------------------
@@ -1521,6 +1523,76 @@ find_route_load_test(_Config) ->
     ]),
 
     % ?assert(false),
+    ok.
+
+routing_cleanup_test(_Config) ->
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    CleanupPid0 = hpr_routing:get_crawl_routing_pid(),
+
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        }),
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 2
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+
+    JoinPacketUpValid = test_utils:join_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, #{gateway => Gateway})),
+
+    UplinkPacketUp = test_utils:uplink_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, #{gateway => Gateway})),
+
+    ?assert(meck:validate(hpr_protocol_router)),
+    meck:unload(hpr_protocol_router),
+
+    %% 2 unique packets sent so far
+    ?assertEqual(2, ets:info(hpr_packet_routing_ets, size)),
+
+    %% wait cleanup to happen one last time.
+    Waiting = 2 * hpr_utils:get_env_int(routing_cleanup_window_secs, 0),
+    timer:sleep(timer:seconds(Waiting)),
+
+    %% Packets have been cleaned out
+    ?assertEqual(0, ets:info(hpr_packet_routing_ets, size)),
+    CleanupPid1 = hpr_routing:get_crawl_routing_pid(),
+
+    %% Cleanup has been run and different Pid resides.
+    ?assertNotEqual(CleanupPid0, CleanupPid1),
+
     ok.
 
 %% ===================================================================

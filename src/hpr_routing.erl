@@ -8,6 +8,13 @@
     find_routes/2
 ]).
 
+-export([
+    start_crawl_routing/0,
+    cancel_crawl_routing/0,
+    get_crawl_routing_pid/0,
+    do_crawl_routing/1
+]).
+
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
@@ -15,6 +22,7 @@
 -define(DEFAULT_PACKET_THROTTLE, 1).
 
 -define(PACKET_ETS, hpr_packet_routing_ets).
+-define(ROUTING_CLEANUP, routing_cleanup).
 
 -type hpr_routing_response() ::
     ok
@@ -37,6 +45,10 @@ init() ->
         {write_concurrency, true},
         {read_concurrency, true}
     ]),
+
+    CleanupPid = start_crawl_routing(),
+    true = erlang:register(?ROUTING_CLEANUP, CleanupPid),
+
     ok.
 
 -spec handle_packet(PacketUp :: hpr_packet_up:packet(), Opts :: map()) ->
@@ -66,40 +78,87 @@ handle_packet(PacketUp, Opts) ->
             case ets:lookup(?PACKET_ETS, Hash) of
                 [] ->
                     establish_routing(PacketUp, Start);
-                [{_Hash, route, RoutesETS}] ->
+                [{_Hash, _Time, {route, RoutesETS}}] ->
                     do_routing(PacketUp, RoutesETS, Start),
                     ok;
-                [{_Hash, no_routes}] ->
+                [{_Hash, _Time, no_routes}] ->
                     ok = maybe_deliver_no_routes(PacketUp),
                     hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
                     ok;
-                [{_Hash, {error, _Reason} = Error}] ->
+                [{_Hash, _Time, {error, _Reason} = Error}] ->
                     hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
                     Error;
-                [{_Hash, locked, Packets}] ->
-                    ets:insert(?PACKET_ETS, {Hash, locked, [{PacketUp, Start} | Packets]})
+                [{_Hash, Time, {locked, Packets}}] ->
+                    ets:insert(?PACKET_ETS, {Hash, Time, {locked, [{PacketUp, Start} | Packets]}})
             end
     end.
 
+-spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
+    {ok, list(selected_route())} | {error, invalid_mic}.
+find_routes({join_req, {AppEUI, DevEUI}}, _PacketUp) ->
+    Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
+    {ok, [{R, 0} || R <- Routes]};
+find_routes({uplink, {_Type, DevAddr}}, PacketUp) ->
+    {Time, Results} = timer:tc(fun() -> find_routes_for_uplink(PacketUp, DevAddr) end),
+    ok = hpr_metrics:observe_find_routes(Time),
+    Results.
+
+-spec start_crawl_routing() -> pid().
+start_crawl_routing() ->
+    erlang:spawn(fun() ->
+        Timer = timer:seconds(hpr_utils:get_env_int(routing_cleanup_timer_secs, 10)),
+        Window = timer:seconds(hpr_utils:get_env_int(routing_cleanup_window_secs, 60)),
+        ok = timer:sleep(Timer),
+        Removed = do_crawl_routing(Window),
+        lager:debug(
+            [{timer, Timer}, {window, Window}, {removed, Removed}],
+            "cleaning routing table"
+        ),
+        true = erlang:unregister(?ROUTING_CLEANUP),
+        true = erlang:register(?ROUTING_CLEANUP, start_crawl_routing())
+    end).
+
+-spec cancel_crawl_routing() -> ok.
+cancel_crawl_routing() ->
+    true = exit(get_crawl_routing_pid(), kill),
+    ok.
+
+-spec get_crawl_routing_pid() -> undefined | pid().
+get_crawl_routing_pid() ->
+    erlang:whereis(?ROUTING_CLEANUP).
+
+-spec do_crawl_routing(Window :: non_neg_integer()) -> NumDeleted :: non_neg_integer().
+do_crawl_routing(Window) ->
+    Now = erlang:system_time(millisecond) - Window,
+    %% MS = ets:fun2ms(fun({Hash, Time, Result}) when Time < Now -> true end),
+    MS = [{{'$1', '$2', '$3'}, [{'<', '$2', {const, Now}}], [true]}],
+    ets:select_delete(?PACKET_ETS, MS).
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
+%% NOTE: all entries in `?PACKET_ETS' are 3-tuple {Hash, Time, Result} so it can
+%% be crawled with the same matchspec.
 -spec establish_routing(hpr_packet_up:packet(), Start :: non_neg_integer()) -> ok | {error, any()}.
 establish_routing(PacketUp, Start) ->
     Hash = hpr_packet_up:phash(PacketUp),
-    true = ets:insert(?PACKET_ETS, {Hash, locked, [{PacketUp, Start}]}),
+    true = ets:insert(?PACKET_ETS, {Hash, Start, {locked, [{PacketUp, Start}]}}),
     PacketUpType = hpr_packet_up:type(PacketUp),
     case ?MODULE:find_routes(PacketUpType, PacketUp) of
         {error, _Reason} = Error ->
             true = ets:insert(?PACKET_ETS, {Hash, Error}),
             Error;
         {ok, []} ->
-            true = ets:insert(?PACKET_ETS, {Hash, no_routes}),
+            true = ets:insert(?PACKET_ETS, {Hash, Start, no_routes}),
             ok = maybe_deliver_no_routes(PacketUp),
             hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
             ok;
         {ok, RoutesETS} ->
             %% Routing found, pick up any queued packets
-            [{_Hash, locked, Queued}] = ets:lookup(?PACKET_ETS, Hash),
+            [{_Hash, _Time, {locked, Queued}}] = ets:lookup(?PACKET_ETS, Hash),
             %% Remove lock
-            true = ets:insert(?PACKET_ETS, {Hash, route, RoutesETS}),
+            true = ets:insert(?PACKET_ETS, {Hash, Start, {route, RoutesETS}}),
             lists:foreach(
                 fun({QueuedPacket, QueuedStart}) ->
                     do_routing(QueuedPacket, RoutesETS, QueuedStart)
@@ -133,20 +192,6 @@ do_routing(PacketUp, RoutesETS, Start) ->
     ),
     hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Start).
 
--spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
-    {ok, list(selected_route())} | {error, invalid_mic}.
-find_routes({join_req, {AppEUI, DevEUI}}, _PacketUp) ->
-    Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
-    {ok, [{R, 0} || R <- Routes]};
-find_routes({uplink, {_Type, DevAddr}}, PacketUp) ->
-    {Time, Results} = timer:tc(fun() -> find_routes_for_uplink(PacketUp, DevAddr) end),
-    ok = hpr_metrics:observe_find_routes(Time),
-    Results.
-
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
-
 -spec find_routes_for_uplink(PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
     {ok, list(selected_route())} | {error, invalid_mic}.
 find_routes_for_uplink(PacketUp, DevAddr) ->
@@ -154,7 +199,7 @@ find_routes_for_uplink(PacketUp, DevAddr) ->
         [] ->
             {ok, []};
         RoutesETS ->
-            find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, [], undefined)
+            find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, [], [])
     end.
 
 -spec find_routes_for_uplink(
@@ -162,46 +207,49 @@ find_routes_for_uplink(PacketUp, DevAddr) ->
     DevAddr :: non_neg_integer(),
     CandidateRoutes :: [hpr_route_ets:route()],
     EmptyRoutes :: [hpr_route_ets:route()],
-    SelectedRoute :: undefined | selected_route()
+    SelectedRoute :: list(selected_route())
 ) -> {ok, list(selected_route())} | {error, invalid_mic}.
-find_routes_for_uplink(_PacketUp, _DevAddr, [], [], undefined) ->
+find_routes_for_uplink(_PacketUp, _DevAddr, [], [], []) ->
     {error, invalid_mic};
-find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, undefined) ->
+find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, []) ->
     {ok, [{R, 0} || R <- EmptyRoutes]};
-find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, {RouteETS, SKFMaxCopies}) ->
-    {ok, [{RouteETS, SKFMaxCopies} | [{R, 0} || R <- EmptyRoutes]]};
+find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, SelectedRoutes) ->
+    {ok, SelectedRoutes ++ [{R, 0} || R <- EmptyRoutes]};
 find_routes_for_uplink(
-    PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, SelectedRoute
+    PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, SelectedRoutes
 ) ->
     Route = hpr_route_ets:route(RouteETS),
     SKFETS = hpr_route_ets:skf_ets(RouteETS),
     case check_route_skfs(PacketUp, DevAddr, SKFETS) of
         empty ->
-            case hpr_route:ignore_empty_skf(Route) of
-                true ->
-                    find_routes_for_uplink(
-                        PacketUp, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute
-                    );
-                false ->
-                    find_routes_for_uplink(
-                        PacketUp, DevAddr, RoutesETS, [RouteETS | EmptyRoutes], SelectedRoute
-                    )
-            end;
+            EmptyRoutes1 =
+                case hpr_route:ignore_empty_skf(Route) of
+                    true -> EmptyRoutes;
+                    false -> [RouteETS | EmptyRoutes]
+                end,
+            find_routes_for_uplink(
+                PacketUp,
+                DevAddr,
+                RoutesETS,
+                EmptyRoutes1,
+                SelectedRoutes
+            );
         false ->
-            find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute);
+            find_routes_for_uplink(
+                PacketUp,
+                DevAddr,
+                RoutesETS,
+                EmptyRoutes,
+                SelectedRoutes
+            );
         {ok, SKFMaxCopies} ->
-            case SelectedRoute of
-                undefined ->
-                    find_routes_for_uplink(
-                        PacketUp,
-                        DevAddr,
-                        RoutesETS,
-                        EmptyRoutes,
-                        {RouteETS, SKFMaxCopies}
-                    );
-                _ ->
-                    find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, EmptyRoutes, SelectedRoute)
-            end
+            find_routes_for_uplink(
+                PacketUp,
+                DevAddr,
+                RoutesETS,
+                EmptyRoutes,
+                [{RouteETS, SKFMaxCopies} | SelectedRoutes]
+            )
     end.
 
 -spec check_route_skfs(
@@ -634,17 +682,17 @@ find_routes_for_uplink_multi_route_success() ->
         {ok, [{RouteETS1, 1}, {RouteETS2, 0}]}, find_routes_for_uplink(PacketUp, DevAddr1)
     ),
 
-    %% Testing with both Routes having a good SKF the latest one only should be picked
+    %% Testing with both Routes having a good SKF
     SKF2 = hpr_skf:new(#{
         route_id => RouteID2,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey1),
         max_copies => 2
     }),
-    timer:sleep(1),
     ok = hpr_route_ets:insert_skf(SKF2),
-
-    ?assertEqual({ok, [{RouteETS2, 2}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
+    ?assertEqual(
+        {ok, [{RouteETS2, 2}, {RouteETS1, 1}]}, find_routes_for_uplink(PacketUp, DevAddr1)
+    ),
 
     %% No SKF at all
     ok = hpr_route_ets:delete_skf(SKF1),
@@ -813,17 +861,17 @@ find_routes_for_uplink_ignore_empty_skf() ->
 
     ?assertEqual({ok, [{RouteETS1, 1}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
 
-    %% Testing with both Routes having a good SKF the latest one only should be picked
+    %% Testing with both Routes having a good SKF
     SKF2 = hpr_skf:new(#{
         route_id => RouteID2,
         devaddr => DevAddr1,
         session_key => hpr_utils:bin_to_hex_string(SessionKey1),
         max_copies => 2
     }),
-    timer:sleep(1),
     ok = hpr_route_ets:insert_skf(SKF2),
-
-    ?assertEqual({ok, [{RouteETS2, 2}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
+    ?assertEqual(
+        {ok, [{RouteETS2, 2}, {RouteETS1, 1}]}, find_routes_for_uplink(PacketUp, DevAddr1)
+    ),
 
     %% No SKF at all
     ok = hpr_route_ets:delete_skf(SKF1),

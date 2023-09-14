@@ -391,7 +391,8 @@ select_skf(Continuation) ->
     ets:select(Continuation).
 
 -spec select_skf(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
-    {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()} | '$end_of_table'.
+    {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
+    | '$end_of_table'.
 select_skf(ETS, DevAddr) ->
     MS = [{{'$2', {DevAddr, '$3'}}, [], [{{'$2', '$3'}}]}],
     ets:select(ETS, MS, 100).
@@ -848,31 +849,28 @@ test_skf() ->
     SKFETS2 = ?MODULE:skf_ets(RouteETS2),
 
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
-    ?assertMatch([{SK1, X, 1}] when X < 0, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertMatch([{SK1, 1}], ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
     SK2 = hpr_utils:hex_to_bin(SessionKey2),
-    ?assertMatch([{SK2, X, 2}] when X < 0, ?MODULE:lookup_skf(SKFETS2, DevAddr2)),
+    ?assertMatch([{SK2, 2}], ?MODULE:lookup_skf(SKFETS2, DevAddr2)),
 
-    T1 = erlang:system_time(millisecond) * -1,
-    timer:sleep(2),
     ?assertEqual(ok, ?MODULE:update_skf(DevAddr1, SK1, RouteID1, 11)),
-    ?assertMatch([{SK1, X, 11}] when X < T1, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertMatch([{SK1, 11}], ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
 
     SessionKey3 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF3 = hpr_skf:new(#{
         route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3, max_copies => 3
     }),
-    timer:sleep(1),
     ?assertEqual(ok, ?MODULE:insert_skf(SKF3)),
 
     SK3 = hpr_utils:hex_to_bin(SessionKey3),
-    ?assertMatch([{SK3, X, 3}, {SK1, Y, 11}] when X < Y, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertEqual([{SK3, 3}, {SK1, 11}], lists:keysort(2, ?MODULE:lookup_skf(SKFETS1, DevAddr1))),
 
     SKF4 = hpr_skf:new(#{
         route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3, max_copies => 10
     }),
-    timer:sleep(1),
+
     ?assertEqual(ok, ?MODULE:insert_skf(SKF4)),
-    ?assertMatch([{SK3, X, 10}, {SK1, Y, 11}] when X < Y, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertEqual([{SK3, 10}, {SK1, 11}], lists:keysort(2, ?MODULE:lookup_skf(SKFETS1, DevAddr1))),
 
     ?assertEqual(ok, ?MODULE:delete_skf(SKF1)),
     ?assertEqual(ok, ?MODULE:delete_skf(SKF4)),
