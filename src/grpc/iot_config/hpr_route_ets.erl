@@ -23,7 +23,6 @@
     lookup_devaddr_range/1,
 
     insert_skf/1,
-    insert_new_skf/1,
     update_skf/4,
     delete_skf/1,
     lookup_skf/2,
@@ -317,21 +316,6 @@ insert_skf(SKF) ->
             lager:debug(MD, "updated SKF");
         _Other ->
             lager:error(MD, "failed to insert skf table not found ~p", [
-                _Other
-            ])
-    end,
-    ok.
-
--spec insert_new_skf(SKF :: hpr_skf:skf()) -> ok.
-insert_new_skf(SKF) ->
-    RouteID = hpr_skf:route_id(SKF),
-    MD = skf_md(RouteID, SKF),
-    case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{skf_ets = SKFETS}] ->
-            do_insert_skf(SKFETS, SKF),
-            lager:debug(MD, "inserted SKF");
-        _Other ->
-            lager:error(MD, "failed to insert new skf, tabl not found ~p", [
                 _Other
             ])
     end,

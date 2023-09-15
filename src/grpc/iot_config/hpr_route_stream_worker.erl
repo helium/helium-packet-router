@@ -99,28 +99,10 @@
     devaddr_added := non_neg_integer()
 }.
 
-%% There is no indicator for the stream that tells us everything from the
-%% database has been loaded and the data has moved to updates. But we do know
-%% that the db will send everything as an `add' action. Meaning the first
-%% `remove' can be assumed as the start of the updating part of the stream.
--type stream_status() ::
-    % worker has started but not initialized
-    undefined
-    % successful connection
-    | awaiting_data
-    % initial loading of configuration
-    | loading
-    % first remove received, switching to update
-    | updating
-    % channel is not defined
-    | undefined_channel
-    % could not connect to config service
-    | error_connecting.
 
 -record(state, {
     stream :: grpcbox_client:stream() | undefined,
-    conn_backoff :: backoff:backoff(),
-    stream_status :: stream_status()
+    conn_backoff :: backoff:backoff()
 }).
 
 -define(SERVER, ?MODULE).
@@ -150,8 +132,7 @@ init(Args) ->
     self() ! ?INIT_STREAM,
     {ok, #state{
         stream = undefined,
-        conn_backoff = Backoff,
-        stream_status = undefined
+        conn_backoff = Backoff
     }}.
 
 handle_call({refresh_route, RouteID}, _From, State) ->
@@ -203,45 +184,29 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
+            ok = hpr_route_ets:delete_all(),
             {noreply, State#state{
-                stream = Stream, conn_backoff = Backoff1, stream_status = awaiting_data
+                stream = Stream, conn_backoff = Backoff1
             }};
         {error, undefined_channel} ->
             lager:error(
                 "`iot_config_channel` is not defined, or not started. Not attempting to reconnect."
             ),
-            {noreply, State#state{stream_status = undefined_channel}};
+            {noreply, State};
         {error, _E} ->
             {Delay, Backoff1} = backoff:fail(Backoff0),
             lager:error("failed to get stream sleeping ~wms : ~p", [Delay, _E]),
             _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
-            {noreply, State#state{conn_backoff = Backoff1, stream_status = error_connecting}}
+            {noreply, State#state{conn_backoff = Backoff1}}
     end;
 %% GRPC stream callbacks
-handle_info({data, _, _} = Msg, #state{stream_status = awaiting_data} = State) ->
-    %% Only delete route_ets when we start receiving data.
-    ok = hpr_route_ets:delete_all(),
-    ok = start_loading(),
-    ?MODULE:handle_info(Msg, State#state{stream_status = loading});
-handle_info(
-    {data, _StreamID, RouteStreamRes},
-    #state{stream_status = StreamStatus0} = State
-) ->
+handle_info({data, _StreamID, RouteStreamRes}, #state{} = State) ->
     Action = hpr_route_stream_res:action(RouteStreamRes),
     Data = hpr_route_stream_res:data(RouteStreamRes),
     {Type, _} = Data,
-    StreamStatus1 =
-        case {Action, StreamStatus0} of
-            {remove, loading} ->
-                lager:info("first remove, done loading"),
-                ok = done_loading(),
-                updating;
-            _ ->
-                StreamStatus0
-        end,
     lager:debug([{action, Action}, {type, Type}], "got route stream update"),
     _ = erlang:spawn(fun() -> ok = process_route_stream_res(Action, Data) end),
-    {noreply, State#state{stream_status = StreamStatus1}};
+    {noreply, State};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
     {noreply, State};
@@ -315,12 +280,7 @@ process_route_stream_res(add, {eui_pair, EUIPair}) ->
 process_route_stream_res(add, {devaddr_range, DevAddrRange}) ->
     hpr_route_ets:insert_devaddr_range(DevAddrRange);
 process_route_stream_res(add, {skf, SKF}) ->
-    case is_done_with_initial_loading() of
-        true ->
-            hpr_route_ets:insert_skf(SKF);
-        false ->
-            hpr_route_ets:insert_new_skf(SKF)
-    end;
+    hpr_route_ets:insert_skf(SKF);
 process_route_stream_res(remove, {route, Route}) ->
     hpr_route_ets:delete_route(Route);
 process_route_stream_res(remove, {eui_pair, EUIPair}) ->
@@ -466,15 +426,3 @@ do_recv_from_stream(stream_finished, _Stream, Acc) ->
 do_recv_from_stream(Msg, _Stream, _Acc) ->
     lager:warning("unhandled msg from stream: ~p", [Msg]),
     {error, {unhandled_message, Msg}}.
-
--spec start_loading() -> ok.
-start_loading() ->
-    persistent_term:put(config_loading, true).
-
--spec done_loading() -> ok.
-done_loading() ->
-    persistent_term:put(config_loading, false).
-
--spec is_done_with_initial_loading() -> boolean().
-is_done_with_initial_loading() ->
-    persistent_term:get(config_loading, false).
