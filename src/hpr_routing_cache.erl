@@ -175,12 +175,12 @@ do_crawl_routing(Window) ->
     Now = erlang:system_time(millisecond) - Window,
     %% MS = ets:fun2ms(fun(#routing_entry{time = Time}) when Time < 1234 -> true end).
     MS = [{
-        #routing_entry{
-            hash = '_',
-            time = '$1',
-            state = '_',
-            routes = '_',
-            packets = '_'
+        {routing_entry,
+            '_',
+            '$1',
+            '_',
+            '_',
+            '_'
         },
         [{'<', '$1', Now}],
         [true]
