@@ -53,6 +53,7 @@ init([]) ->
     ok = filelib:ensure_dir(KeyFileName),
     ok = hpr_utils:load_key(KeyFileName),
 
+    ok = hpr_routing_cache:init_ets(),
     ok = hpr_routing:init(),
     ok = hpr_multi_buy:init(),
     ok = hpr_protocol_router:init(),
@@ -75,6 +76,7 @@ init([]) ->
     ],
 
     ChildSpecs = [
+        ?WORKER(hpr_routing_cache, [#{}]),
         ?WORKER(hpr_metrics, [#{}]),
         ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
 

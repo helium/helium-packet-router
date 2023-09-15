@@ -8,30 +8,20 @@
     find_routes/2
 ]).
 
--export([
-    start_crawl_routing/0,
-    do_crawl_routing/1
-]).
-
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
 -define(PACKET_THROTTLE, hpr_packet_rate_limit).
 -define(DEFAULT_PACKET_THROTTLE, 1).
 
-%% NOTE: all entries in `?PACKET_ETS' are 3-tuple {Hash, Time, Result} so it can
-%% be crawled with the same matchspec.
-%% see: `do_crawl_routing/1'
--define(PACKET_ETS, hpr_packet_routing_ets).
--define(ROUTING_CLEANUP, routing_cleanup).
-
 -type hpr_routing_response() ::
     ok
     | {error, gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic}.
 
--type selected_route() :: {hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}.
+-type route() :: {hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}.
+-type routes() :: list(route()).
 
--export_type([hpr_routing_response/0]).
+-export_type([hpr_routing_response/0, route/0, routes/0]).
 
 -spec init() -> ok.
 init() ->
@@ -39,17 +29,6 @@ init() ->
     ok = throttle:setup(?GATEWAY_THROTTLE, GatewayRateLimit, per_second),
     PacketRateLimit = application:get_env(?APP, packet_rate_limit, ?DEFAULT_PACKET_THROTTLE),
     ok = throttle:setup(?PACKET_THROTTLE, PacketRateLimit, per_second),
-    ?PACKET_ETS = ets:new(?PACKET_ETS, [
-        public,
-        named_table,
-        set,
-        {write_concurrency, true},
-        {read_concurrency, true}
-    ]),
-
-    CleanupPid = start_crawl_routing(),
-    true = erlang:register(?ROUTING_CLEANUP, CleanupPid),
-
     ok.
 
 -spec handle_packet(PacketUp :: hpr_packet_up:packet(), Opts :: map()) ->
@@ -78,7 +57,7 @@ handle_packet(PacketUp, Opts) ->
     end.
 
 -spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
-    {ok, list(selected_route())} | {error, invalid_mic}.
+    {ok, routes()} | {error, invalid_mic}.
 find_routes({join_req, {AppEUI, DevEUI}}, _PacketUp) ->
     Routes = hpr_route_ets:lookup_eui_pair(AppEUI, DevEUI),
     {ok, [{R, 0} || R <- Routes]};
@@ -86,27 +65,6 @@ find_routes({uplink, {_Type, DevAddr}}, PacketUp) ->
     {Time, Results} = timer:tc(fun() -> find_routes_for_uplink(PacketUp, DevAddr) end),
     ok = hpr_metrics:observe_find_routes(Time),
     Results.
-
--spec start_crawl_routing() -> pid().
-start_crawl_routing() ->
-    erlang:spawn(fun() ->
-        Timer = timer:seconds(hpr_utils:get_env_int(routing_cleanup_timer_secs, 10)),
-        Window = timer:seconds(hpr_utils:get_env_int(routing_cleanup_window_secs, 60)),
-        ok = timer:sleep(Timer),
-        Removed = do_crawl_routing(Window),
-        lager:debug(
-            [{timer, Timer}, {window, Window}, {removed, Removed}],
-            "cleaning routing table"
-        ),
-        ok = maybe_start_crawl_routing()
-    end).
-
--spec do_crawl_routing(Window :: non_neg_integer()) -> NumDeleted :: non_neg_integer().
-do_crawl_routing(Window) ->
-    Now = erlang:system_time(millisecond) - Window,
-    %% MS = ets:fun2ms(fun({Hash, Time, Result}) when Time < Now -> true end),
-    MS = [{{'$1', '$2', '$3'}, [{'<', '$2', {const, Now}}], [true]}],
-    ets:select_delete(?PACKET_ETS, MS).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -116,49 +74,41 @@ do_crawl_routing(Window) ->
 do_handle_packet(PacketUp, Start) ->
     Hash = hpr_packet_up:phash(PacketUp),
     PacketUpType = hpr_packet_up:type(PacketUp),
-    case ets:lookup(?PACKET_ETS, Hash) of
-        [] ->
+    case hpr_routing_cache:lookup(Hash) of
+        new ->
             establish_routing(PacketUp, Start);
-        [{_Hash, _Time, {route, RoutesETS}}] ->
-            route_packet(PacketUp, RoutesETS, Start),
-            ok;
-        [{_Hash, _Time, no_routes}] ->
+        no_routes ->
             ok = maybe_deliver_no_routes(PacketUp),
             hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
             ok;
-        [{_Hash, _Time, {error, _Reason} = Error}] ->
+        {route, RoutesETS} ->
+            route_packet(PacketUp, RoutesETS, Start),
+            ok;
+        {locked, RoutingEntry} ->
+            hpr_routing_cache:queue(RoutingEntry, {PacketUp, Start});
+        {error, _Reason} = Error ->
             hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
-            Error;
-        [{_Hash, Time, {locked, Packets}}] ->
-            %% Re-using time here means cleanup will happen from the first time
-            %% a packet is seen. Replacing with erlang:system_time(millisecond)
-            %% will cause cleanup to happen from the last time a packet is seen.
-            ets:insert(?PACKET_ETS, {Hash, Time, {locked, [{PacketUp, Start} | Packets]}}),
-            ok
+            Error
     end.
 
 -spec establish_routing(hpr_packet_up:packet(), Start :: non_neg_integer()) -> ok | {error, any()}.
 establish_routing(PacketUp, Start) ->
-    Hash = hpr_packet_up:phash(PacketUp),
-    case ets:insert_new(?PACKET_ETS, {Hash, Start, {locked, [{PacketUp, Start}]}}) of
-        false ->
+    case hpr_routing_cache:lock(PacketUp, Start) of
+        {error, already_locked} ->
             do_handle_packet(PacketUp, Start);
-        true ->
+        {ok, RoutingEntry} ->
             PacketUpType = hpr_packet_up:type(PacketUp),
             case ?MODULE:find_routes(PacketUpType, PacketUp) of
                 {error, _Reason} = Error ->
-                    true = ets:insert(?PACKET_ETS, {Hash, Start, Error}),
+                    ok = hpr_routing_cache:error(RoutingEntry, Error),
                     Error;
                 {ok, []} ->
-                    true = ets:insert(?PACKET_ETS, {Hash, Start, no_routes}),
+                    ok = hpr_routing_cache:no_routes(RoutingEntry),
                     ok = maybe_deliver_no_routes(PacketUp),
                     hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
                     ok;
                 {ok, RoutesETS} ->
-                    %% Routing found, pick up any queued packets
-                    [{_Hash, _Time, {locked, Queued}}] = ets:lookup(?PACKET_ETS, Hash),
-                    %% Remove lock
-                    true = ets:insert(?PACKET_ETS, {Hash, Start, {route, RoutesETS}}),
+                    Queued = hpr_routing_cache:routes(RoutingEntry, RoutesETS),
                     lists:foreach(
                         fun({QueuedPacket, QueuedStart}) ->
                             route_packet(QueuedPacket, RoutesETS, QueuedStart)
@@ -194,7 +144,7 @@ route_packet(PacketUp, RoutesETS, Start) ->
     hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Start).
 
 -spec find_routes_for_uplink(PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
-    {ok, list(selected_route())} | {error, invalid_mic}.
+    {ok, routes()} | {error, invalid_mic}.
 find_routes_for_uplink(PacketUp, DevAddr) ->
     case hpr_route_ets:lookup_devaddr_range(DevAddr) of
         [] ->
@@ -208,8 +158,8 @@ find_routes_for_uplink(PacketUp, DevAddr) ->
     DevAddr :: non_neg_integer(),
     CandidateRoutes :: [hpr_route_ets:route()],
     EmptyRoutes :: [hpr_route_ets:route()],
-    SelectedRoute :: list(selected_route())
-) -> {ok, list(selected_route())} | {error, invalid_mic}.
+    SelectedRoute :: routes()
+) -> {ok, routes()} | {error, invalid_mic}.
 find_routes_for_uplink(_PacketUp, _DevAddr, [], [], []) ->
     {error, invalid_mic};
 find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, []) ->
@@ -489,37 +439,6 @@ execute_checks(PacketUp, [{Fun, Args, ErrorReason} | Rest]) ->
         true ->
             execute_checks(PacketUp, Rest)
     end.
-
-%% If there is no cleanup pid registerd, start one.
-%% We are the current cleanup pid, start another one.
-%% We are not the current cleanup pid, do nothing.
-%%
-%% EX: A way to stop cleanup from happened.
-%% ```
-%%   erlang:unregister(routing_cleanup).
-%%   erlang:register(spawn(fun() -> ok end)).
-%% ```
-%%
-%% The next time cleanup goes to restart, it will see
-%% another pid in it's place and bail.
--spec maybe_start_crawl_routing() -> ok.
-maybe_start_crawl_routing() ->
-    maybe_start_crawl_routing(whereis(?ROUTING_CLEANUP), self()).
-
--spec maybe_start_crawl_routing(undefined | pid(), pid()) -> ok.
-maybe_start_crawl_routing(undefined, _) ->
-    lager:warning("~p registration not found, starting a new one", [?ROUTING_CLEANUP]),
-    true = erlang:register(?ROUTING_CLEANUP, start_crawl_routing()),
-    ok;
-maybe_start_crawl_routing(Same, Same) ->
-    lager:debug("starting new crawl_routing"),
-    true = erlang:unregister(?ROUTING_CLEANUP),
-    true = erlang:register(?ROUTING_CLEANUP, start_crawl_routing()),
-    ok;
-maybe_start_crawl_routing(_Pid1, _Pid2) ->
-    lager:warning("another process is registerd to ~p, stopping", [?ROUTING_CLEANUP]),
-    ok.
-
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
