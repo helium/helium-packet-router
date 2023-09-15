@@ -68,30 +68,13 @@ handle_packet(PacketUp, Opts) ->
         {fun packet_throttle_check/1, [], packet_limit_exceeded}
     ],
     PacketUpType = hpr_packet_up:type(PacketUp),
-    Check = execute_checks(PacketUp, Checks),
-    case Check of
+    case execute_checks(PacketUp, Checks) of
         {error, _Reason} = Error ->
             lager:debug("packet failed verification: ~p", [_Reason]),
             hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
             Error;
         ok ->
-            Hash = hpr_packet_up:phash(PacketUp),
-            case ets:lookup(?PACKET_ETS, Hash) of
-                [] ->
-                    establish_routing(PacketUp, Start);
-                [{_Hash, _Time, {route, RoutesETS}}] ->
-                    do_routing(PacketUp, RoutesETS, Start),
-                    ok;
-                [{_Hash, _Time, no_routes}] ->
-                    ok = maybe_deliver_no_routes(PacketUp),
-                    hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
-                    ok;
-                [{_Hash, _Time, {error, _Reason} = Error}] ->
-                    hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
-                    Error;
-                [{_Hash, Time, {locked, Packets}}] ->
-                    ets:insert(?PACKET_ETS, {Hash, Time, {locked, [{PacketUp, Start} | Packets]}})
-            end
+            do_handle_packet(PacketUp, Start)
     end.
 
 -spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
@@ -129,42 +112,69 @@ do_crawl_routing(Window) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-%% NOTE: all entries in `?PACKET_ETS' are 3-tuple {Hash, Time, Result} so it can
-%% be crawled with the same matchspec.
--spec establish_routing(hpr_packet_up:packet(), Start :: non_neg_integer()) -> ok | {error, any()}.
-establish_routing(PacketUp, Start) ->
+-spec do_handle_packet(hpr_packet_up:packet(), Start :: non_neg_integer()) -> ok | {error, any()}.
+do_handle_packet(PacketUp, Start) ->
     Hash = hpr_packet_up:phash(PacketUp),
-    true = ets:insert(?PACKET_ETS, {Hash, Start, {locked, [{PacketUp, Start}]}}),
     PacketUpType = hpr_packet_up:type(PacketUp),
-    case ?MODULE:find_routes(PacketUpType, PacketUp) of
-        {error, _Reason} = Error ->
-            true = ets:insert(?PACKET_ETS, {Hash, Error}),
-            Error;
-        {ok, []} ->
-            true = ets:insert(?PACKET_ETS, {Hash, Start, no_routes}),
+    case ets:lookup(?PACKET_ETS, Hash) of
+        [] ->
+            establish_routing(PacketUp, Start);
+        [{_Hash, _Time, {route, RoutesETS}}] ->
+            route_packet(PacketUp, RoutesETS, Start),
+            ok;
+        [{_Hash, _Time, no_routes}] ->
             ok = maybe_deliver_no_routes(PacketUp),
             hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
             ok;
-        {ok, RoutesETS} ->
-            %% Routing found, pick up any queued packets
-            [{_Hash, _Time, {locked, Queued}}] = ets:lookup(?PACKET_ETS, Hash),
-            %% Remove lock
-            true = ets:insert(?PACKET_ETS, {Hash, Start, {route, RoutesETS}}),
-            lists:foreach(
-                fun({QueuedPacket, QueuedStart}) ->
-                    do_routing(QueuedPacket, RoutesETS, QueuedStart)
-                end,
-                lists:reverse(Queued)
-            ),
+        [{_Hash, _Time, {error, _Reason} = Error}] ->
+            hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
+            Error;
+        [{_Hash, Time, {locked, Packets}}] ->
+            %% Re-using time here means cleanup will happen from the first time
+            %% a packet is seen. Replacing with erlang:system_time(millisecond)
+            %% will cause cleanup to happen from the last time a packet is seen.
+            ets:insert(?PACKET_ETS, {Hash, Time, {locked, [{PacketUp, Start} | Packets]}}),
             ok
     end.
 
--spec do_routing(
+-spec establish_routing(hpr_packet_up:packet(), Start :: non_neg_integer()) -> ok | {error, any()}.
+establish_routing(PacketUp, Start) ->
+    Hash = hpr_packet_up:phash(PacketUp),
+    case ets:insert_new(?PACKET_ETS, {Hash, Start, {locked, [{PacketUp, Start}]}}) of
+        false ->
+            do_handle_packet(PacketUp, Start);
+        true ->
+            PacketUpType = hpr_packet_up:type(PacketUp),
+            case ?MODULE:find_routes(PacketUpType, PacketUp) of
+                {error, _Reason} = Error ->
+                    true = ets:insert(?PACKET_ETS, {Hash, Start, Error}),
+                    Error;
+                {ok, []} ->
+                    true = ets:insert(?PACKET_ETS, {Hash, Start, no_routes}),
+                    ok = maybe_deliver_no_routes(PacketUp),
+                    hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
+                    ok;
+                {ok, RoutesETS} ->
+                    %% Routing found, pick up any queued packets
+                    [{_Hash, _Time, {locked, Queued}}] = ets:lookup(?PACKET_ETS, Hash),
+                    %% Remove lock
+                    true = ets:insert(?PACKET_ETS, {Hash, Start, {route, RoutesETS}}),
+                    lists:foreach(
+                        fun({QueuedPacket, QueuedStart}) ->
+                            route_packet(QueuedPacket, RoutesETS, QueuedStart)
+                        end,
+                        lists:reverse(Queued)
+                    ),
+                    ok
+            end
+    end.
+
+-spec route_packet(
     PacketUp :: hpr_packet_up:packet(),
     [{RouteETS :: hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}],
     StartTime :: non_neg_integer()
 ) -> ok.
-do_routing(PacketUp, RoutesETS, Start) ->
+route_packet(PacketUp, RoutesETS, Start) ->
     PacketUpType = hpr_packet_up:type(PacketUp),
     {Routed, IsFree} = maybe_deliver_packet_to_routes(PacketUp, RoutesETS),
     ok = maybe_report_packet(
