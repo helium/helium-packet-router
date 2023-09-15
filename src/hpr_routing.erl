@@ -10,8 +10,6 @@
 
 -export([
     start_crawl_routing/0,
-    cancel_crawl_routing/0,
-    get_crawl_routing_pid/0,
     do_crawl_routing/1
 ]).
 
@@ -21,6 +19,9 @@
 -define(PACKET_THROTTLE, hpr_packet_rate_limit).
 -define(DEFAULT_PACKET_THROTTLE, 1).
 
+%% NOTE: all entries in `?PACKET_ETS' are 3-tuple {Hash, Time, Result} so it can
+%% be crawled with the same matchspec.
+%% see: `do_crawl_routing/1'
 -define(PACKET_ETS, hpr_packet_routing_ets).
 -define(ROUTING_CLEANUP, routing_cleanup).
 
@@ -114,18 +115,8 @@ start_crawl_routing() ->
             [{timer, Timer}, {window, Window}, {removed, Removed}],
             "cleaning routing table"
         ),
-        true = erlang:unregister(?ROUTING_CLEANUP),
-        true = erlang:register(?ROUTING_CLEANUP, start_crawl_routing())
+        ok = maybe_start_crawl_routing()
     end).
-
--spec cancel_crawl_routing() -> ok.
-cancel_crawl_routing() ->
-    true = exit(get_crawl_routing_pid(), kill),
-    ok.
-
--spec get_crawl_routing_pid() -> undefined | pid().
-get_crawl_routing_pid() ->
-    erlang:whereis(?ROUTING_CLEANUP).
 
 -spec do_crawl_routing(Window :: non_neg_integer()) -> NumDeleted :: non_neg_integer().
 do_crawl_routing(Window) ->
@@ -488,6 +479,37 @@ execute_checks(PacketUp, [{Fun, Args, ErrorReason} | Rest]) ->
         true ->
             execute_checks(PacketUp, Rest)
     end.
+
+%% If there is no cleanup pid registerd, start one.
+%% We are the current cleanup pid, start another one.
+%% We are not the current cleanup pid, do nothing.
+%%
+%% EX: A way to stop cleanup from happened.
+%% ```
+%%   erlang:unregister(routing_cleanup).
+%%   erlang:register(spawn(fun() -> ok end)).
+%% ```
+%%
+%% The next time cleanup goes to restart, it will see
+%% another pid in it's place and bail.
+-spec maybe_start_crawl_routing() -> ok.
+maybe_start_crawl_routing() ->
+    maybe_start_crawl_routing(whereis(?ROUTING_CLEANUP), self()).
+
+-spec maybe_start_crawl_routing(undefined | pid(), pid()) -> ok.
+maybe_start_crawl_routing(undefined, _) ->
+    lager:warning("~p registration not found, starting a new one", [?ROUTING_CLEANUP]),
+    true = erlang:register(?ROUTING_CLEANUP, start_crawl_routing()),
+    ok;
+maybe_start_crawl_routing(Same, Same) ->
+    lager:debug("starting new crawl_routing"),
+    true = erlang:unregister(?ROUTING_CLEANUP),
+    true = erlang:register(?ROUTING_CLEANUP, start_crawl_routing()),
+    ok;
+maybe_start_crawl_routing(_Pid1, _Pid2) ->
+    lager:warning("another process is registerd to ~p, stopping", [?ROUTING_CLEANUP]),
+    ok.
+
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests

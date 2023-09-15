@@ -1530,7 +1530,7 @@ routing_cleanup_test(_Config) ->
     SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
-    CleanupPid0 = hpr_routing:get_crawl_routing_pid(),
+    CleanupPid0 = whereis(routing_cleanup),
 
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
@@ -1588,7 +1588,7 @@ routing_cleanup_test(_Config) ->
 
     %% Packets have been cleaned out
     ?assertEqual(0, ets:info(hpr_packet_routing_ets, size)),
-    CleanupPid1 = hpr_routing:get_crawl_routing_pid(),
+    CleanupPid1 = whereis(routing_cleanup),
 
     %% Cleanup has been run and different Pid resides.
     ?assertNotEqual(CleanupPid0, CleanupPid1),
