@@ -361,7 +361,7 @@ delete_skf(SKF) ->
             DevAddr = hpr_skf:devaddr(SKF),
             SessionKey = hpr_skf:session_key(SKF),
             MaxCopies = hpr_skf:max_copies(SKF),
-            %% Here we ignore max_copies
+
             true = ets:delete(SKFETS, hpr_utils:hex_to_bin(SessionKey)),
             lager:debug(
                 [
