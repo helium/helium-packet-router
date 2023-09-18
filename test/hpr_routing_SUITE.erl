@@ -17,7 +17,6 @@
     wrong_gateway_test/1,
     bad_signature_test/1,
     mic_check_test/1,
-    skf_update_test/1,
     skf_max_copies_test/1,
     multi_buy_without_service_test/1,
     multi_buy_with_service_test/1,
@@ -27,7 +26,8 @@
     success_test/1,
     no_routes_test/1,
     maybe_report_packet_test/1,
-    find_route_load_test/1
+    find_route_load_test/1,
+    routing_cleanup_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -48,7 +48,6 @@ all() ->
         wrong_gateway_test,
         bad_signature_test,
         mic_check_test,
-        skf_update_test,
         skf_max_copies_test,
         multi_buy_without_service_test,
         multi_buy_with_service_test,
@@ -58,7 +57,8 @@ all() ->
         success_test,
         no_routes_test,
         maybe_report_packet_test,
-        find_route_load_test
+        find_route_load_test,
+        routing_cleanup_test
     ].
 
 %%--------------------------------------------------------------------
@@ -291,63 +291,6 @@ mic_check_test(_Config) ->
     ),
 
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(3), #{gateway => Gateway})),
-
-    ok.
-
-skf_update_test(_Config) ->
-    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
-    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
-
-    AppSessionKey = crypto:strong_rand_bytes(16),
-    NwkSessionKey = crypto:strong_rand_bytes(16),
-    DevAddr = 16#00000001,
-    PacketUp = test_utils:uplink_packet_up(#{
-        app_session_key => AppSessionKey,
-        nwk_session_key => NwkSessionKey,
-        devaddr => DevAddr,
-        gateway => Gateway,
-        sig_fun => SigFun
-    }),
-
-    Route = hpr_route:test_new(#{
-        id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
-        net_id => 0,
-        oui => 1,
-        server => #{
-            host => "lns1.testdomain.com",
-            port => 80,
-            protocol => {http_roaming, #{}}
-        },
-        max_copies => 1
-    }),
-    RouteID = hpr_route:id(Route),
-    ?assertEqual(ok, hpr_route_ets:insert_route(Route)),
-
-    DevAddrRange = hpr_devaddr_range:test_new(#{
-        route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
-    }),
-    ?assertEqual(ok, hpr_route_ets:insert_devaddr_range(DevAddrRange)),
-
-    SKF = hpr_skf:new(#{
-        route_id => RouteID,
-        devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
-        max_copies => 3
-    }),
-    ?assertEqual(ok, hpr_route_ets:insert_skf(SKF)),
-
-    [RouteETS] = hpr_route_ets:lookup_route(RouteID),
-    ETS = hpr_route_ets:skf_ets(RouteETS),
-
-    %% Here we are making sure that the SKF got updated
-    [{_, BeforeUpdate, 3}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
-    timer:sleep(2000),
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp, #{gateway => Gateway})),
-
-    [{_, AfterUpdate, 3}] = hpr_route_ets:lookup_skf(ETS, DevAddr),
-    %% This is due to time being negative for ets ordering
-    ?assert(AfterUpdate < BeforeUpdate),
 
     ok.
 
@@ -744,6 +687,7 @@ multi_buy_requests_test(_Config) ->
         {write_concurrency, true}
     ]),
 
+    meck:new(hpr_multi_buy, [passthrough]),
     meck:new(helium_multi_buy_multi_buy_client, [passthrough]),
     %% By adding +2 here we simulate other servers also incrementing
     meck:expect(helium_multi_buy_multi_buy_client, inc, fun(#multi_buy_inc_req_v1_pb{key = Key}, _) ->
@@ -815,12 +759,18 @@ multi_buy_requests_test(_Config) ->
         Packets1
     ),
 
-    % We should max make 3 requests
-    ok = test_utils:wait_until(
-        fun() ->
-            3 == meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2)
-        end
-    ),
+    MultiBuyKey = hpr_multi_buy:make_key(hd(Packets1), Route),
+    %% We should stop making requests when the multi-buy service says it's seen
+    %% more than the MaxCopies. When we've sent more update_counter than
+    %% MaxCopies, we can check that we haven't exceeded MaxCopies worth of
+    %% requests because this tests is simulating other HPR seeing the same packet.
+    ok = test_utils:wait_until(fun() ->
+        UpdatesRequested = meck:num_calls(hpr_multi_buy, update_counter, [MultiBuyKey, MaxCopies]),
+        RequestsSent = meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2),
+        Headroom = 2,
+
+        UpdatesRequested > (MaxCopies + Headroom) andalso RequestsSent =< MaxCopies
+    end),
 
     Key = key,
     meck:reset(helium_multi_buy_multi_buy_client),
@@ -886,6 +836,7 @@ multi_buy_requests_test(_Config) ->
     ?assert(meck:validate(helium_multi_buy_multi_buy_client)),
     meck:unload(helium_multi_buy_multi_buy_client),
     meck:unload(hpr_protocol_router),
+    meck:unload(hpr_multi_buy),
     ets:delete(ETS),
     ok.
 
@@ -1572,6 +1523,70 @@ find_route_load_test(_Config) ->
     ]),
 
     % ?assert(false),
+    ok.
+
+routing_cleanup_test(_Config) ->
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+
+    meck:new(hpr_protocol_router, [passthrough]),
+    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+
+    DevAddr = 16#00000000,
+    {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => NetID,
+        oui => 1,
+        server => #{
+            host => "127.0.0.1",
+            port => 80,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 1
+        }),
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 1, dev_eui => 2
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
+        })
+    ],
+    ok = hpr_route_ets:insert_route(Route),
+    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
+    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+
+    JoinPacketUpValid = test_utils:join_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, #{gateway => Gateway})),
+
+    UplinkPacketUp = test_utils:uplink_packet_up(#{
+        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
+    }),
+    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, #{gateway => Gateway})),
+
+    ?assert(meck:validate(hpr_protocol_router)),
+    meck:unload(hpr_protocol_router),
+
+    %% 2 unique packets sent so far
+    ?assertEqual(2, ets:info(hpr_routing_cache_ets, size)),
+
+    %% wait cleanup to happen one last time.
+    Waiting = 2 * hpr_utils:get_env_int(routing_cache_window_secs, 0),
+    timer:sleep(timer:seconds(Waiting)),
+
+    %% Packets have been cleaned out
+    ?assertEqual(0, ets:info(hpr_routing_cache_ets, size)),
+
     ok.
 
 %% ===================================================================

@@ -23,7 +23,6 @@
     lookup_devaddr_range/1,
 
     insert_skf/1,
-    insert_new_skf/1,
     update_skf/4,
     delete_skf/1,
     lookup_skf/2,
@@ -90,6 +89,16 @@ init() ->
     ?ETS_EUI_PAIRS = ets:new(?ETS_EUI_PAIRS, [public, named_table, bag, {read_concurrency, true}]),
     ok.
 
+-spec make_skf_ets(hpr_route:id()) -> ets:tab().
+make_skf_ets(RouteID) ->
+    ets:new(?ETS_SKFS, [
+        public,
+        set,
+        {read_concurrency, true},
+        {write_concurrency, true},
+        {heir, erlang:whereis(?SKF_HEIR), RouteID}
+    ]).
+
 -spec route(RouteETS :: route()) -> hpr_route:route().
 route(RouteETS) ->
     RouteETS#hpr_route_ets.route.
@@ -141,13 +150,7 @@ insert_route(Route) ->
             [#hpr_route_ets{skf_ets = ETS}] ->
                 ETS;
             _Other ->
-                ets:new(?ETS_SKFS, [
-                    public,
-                    ordered_set,
-                    {read_concurrency, true},
-                    {write_concurrency, true},
-                    {heir, erlang:whereis(?SKF_HEIR), RouteID}
-                ])
+                make_skf_ets(RouteID)
         end,
     ?MODULE:insert_route(Route, SKFETS).
 
@@ -309,29 +312,10 @@ insert_skf(SKF) ->
     MD = skf_md(RouteID, SKF),
     case ?MODULE:lookup_route(RouteID) of
         [#hpr_route_ets{skf_ets = SKFETS}] ->
-            Deleted = do_remove_skf(SKFETS, SKF),
             do_insert_skf(SKFETS, SKF),
-            case Deleted of
-                0 -> lager:debug(MD, "inserted SKF");
-                _ -> lager:debug([{deleted, Deleted} | MD], "updated SKF")
-            end;
+            lager:debug(MD, "updated SKF");
         _Other ->
             lager:error(MD, "failed to insert skf table not found ~p", [
-                _Other
-            ])
-    end,
-    ok.
-
--spec insert_new_skf(SKF :: hpr_skf:skf()) -> ok.
-insert_new_skf(SKF) ->
-    RouteID = hpr_skf:route_id(SKF),
-    MD = skf_md(RouteID, SKF),
-    case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{skf_ets = SKFETS}] ->
-            do_insert_skf(SKFETS, SKF),
-            lager:debug(MD, "inserted SKF");
-        _Other ->
-            lager:error(MD, "failed to insert new skf, tabl not found ~p", [
                 _Other
             ])
     end,
@@ -361,9 +345,8 @@ delete_skf(SKF) ->
             DevAddr = hpr_skf:devaddr(SKF),
             SessionKey = hpr_skf:session_key(SKF),
             MaxCopies = hpr_skf:max_copies(SKF),
-            %% Here we ignore max_copies
-            MS = [{{{'_', hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, '_'}}, [], [true]}],
-            Deleted = ets:select_delete(SKFETS, MS),
+
+            true = ets:delete(SKFETS, hpr_utils:hex_to_bin(SessionKey)),
             lager:debug(
                 [
                     {route_id, RouteID},
@@ -371,8 +354,7 @@ delete_skf(SKF) ->
                     {session_key, SessionKey},
                     {max_copies, MaxCopies}
                 ],
-                "deleted ~p SKF",
-                [Deleted]
+                "deleted SKF"
             );
         _Other ->
             lager:warning("failed to delete skf not found ~p for ~s", [
@@ -382,9 +364,9 @@ delete_skf(SKF) ->
     ok.
 
 -spec lookup_skf(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
-    [{SessionKey :: binary(), Timestamp :: integer(), MaxCopies :: non_neg_integer()}].
+    [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
 lookup_skf(ETS, DevAddr) ->
-    MS = [{{{'$1', '$2'}, {DevAddr, '$3'}}, [], [{{'$2', '$1', '$3'}}]}],
+    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
     ets:select(ETS, MS).
 
 -spec select_skf(Continuation :: ets:continuation()) ->
@@ -393,9 +375,10 @@ select_skf(Continuation) ->
     ets:select(Continuation).
 
 -spec select_skf(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
-    {[{binary(), integer(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
+    {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
+    | '$end_of_table'.
 select_skf(ETS, DevAddr) ->
-    MS = [{{{'$1', '$2'}, {DevAddr, '$3'}}, [], [{{'$2', '$1', '$3'}}]}],
+    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
     ets:select(ETS, MS, 100).
 
 -spec delete_all() -> ok.
@@ -460,13 +443,7 @@ replace_route_devaddrs(RouteID, DevAddrRanges) ->
 replace_route_skfs(RouteID, NewSKFs) ->
     case ?MODULE:lookup_route(RouteID) of
         [#hpr_route_ets{skf_ets = OldTab} = Route] ->
-            NewTab = ets:new(?ETS_SKFS, [
-                public,
-                ordered_set,
-                {read_concurrency, true},
-                {write_concurrency, true},
-                {heir, erlang:whereis(?SKF_HEIR), RouteID}
-            ]),
+            NewTab = make_skf_ets(RouteID),
             lists:foreach(fun(SKF) -> do_insert_skf(NewTab, SKF) end, NewSKFs),
             true = ets:insert(?ETS_ROUTES, Route#hpr_route_ets{skf_ets = NewTab}),
 
@@ -556,24 +533,13 @@ skfs_count_for_route(RouteID) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec do_remove_skf(ets:table(), hpr_skf:skf()) ->
-    DeletedCount :: non_neg_integer().
-do_remove_skf(SKFETS, SKF) ->
-    DevAddr = hpr_skf:devaddr(SKF),
-    SessionKey = hpr_skf:session_key(SKF),
-    MS = [{{{'_', hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, '_'}}, [], [true]}],
-    ets:select_delete(SKFETS, MS).
-
 -spec do_insert_skf(ets:table(), hpr_skf:skf()) -> ok.
 do_insert_skf(SKFETS, SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
     MaxCopies = hpr_skf:max_copies(SKF),
-    %% This is negative to make newest time on top
-    Now = erlang:system_time(millisecond) * -1,
-    true = ets:insert(SKFETS, {
-        {Now, hpr_utils:hex_to_bin(SessionKey)}, {DevAddr, MaxCopies}
-    }),
+
+    true = ets:insert(SKFETS, {hpr_utils:hex_to_bin(SessionKey), {DevAddr, MaxCopies}}),
     ok.
 
 -spec skf_md(hpr_route:id(), hpr_skf:skf()) -> proplists:proplist().
@@ -867,31 +833,28 @@ test_skf() ->
     SKFETS2 = ?MODULE:skf_ets(RouteETS2),
 
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
-    ?assertMatch([{SK1, X, 1}] when X < 0, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertMatch([{SK1, 1}], ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
     SK2 = hpr_utils:hex_to_bin(SessionKey2),
-    ?assertMatch([{SK2, X, 2}] when X < 0, ?MODULE:lookup_skf(SKFETS2, DevAddr2)),
+    ?assertMatch([{SK2, 2}], ?MODULE:lookup_skf(SKFETS2, DevAddr2)),
 
-    T1 = erlang:system_time(millisecond) * -1,
-    timer:sleep(2),
     ?assertEqual(ok, ?MODULE:update_skf(DevAddr1, SK1, RouteID1, 11)),
-    ?assertMatch([{SK1, X, 11}] when X < T1, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertMatch([{SK1, 11}], ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
 
     SessionKey3 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF3 = hpr_skf:new(#{
         route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3, max_copies => 3
     }),
-    timer:sleep(1),
     ?assertEqual(ok, ?MODULE:insert_skf(SKF3)),
 
     SK3 = hpr_utils:hex_to_bin(SessionKey3),
-    ?assertMatch([{SK3, X, 3}, {SK1, Y, 11}] when X < Y, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertEqual([{SK3, 3}, {SK1, 11}], lists:keysort(2, ?MODULE:lookup_skf(SKFETS1, DevAddr1))),
 
     SKF4 = hpr_skf:new(#{
         route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3, max_copies => 10
     }),
-    timer:sleep(1),
+
     ?assertEqual(ok, ?MODULE:insert_skf(SKF4)),
-    ?assertMatch([{SK3, X, 10}, {SK1, Y, 11}] when X < Y, ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertEqual([{SK3, 10}, {SK1, 11}], lists:keysort(2, ?MODULE:lookup_skf(SKFETS1, DevAddr1))),
 
     ?assertEqual(ok, ?MODULE:delete_skf(SKF1)),
     ?assertEqual(ok, ?MODULE:delete_skf(SKF4)),

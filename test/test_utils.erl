@@ -88,7 +88,7 @@ init_per_testcase(TestCase, Config) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            {state, Stream, _Backoff, _} = sys:get_state(hpr_route_stream_worker),
+            {state, Stream, _Backoff} = sys:get_state(hpr_route_stream_worker),
             Stream =/= undefined andalso
                 erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_route))
         end,
@@ -270,8 +270,12 @@ wait_until(Fun, Retry, Delay) when Retry > 0 ->
     case Res of
         true ->
             ok;
+        {true, _} ->
+            ok;
         {fail, _Reason} = Fail ->
             Fail;
+        {false, Extra} when Retry == 1 ->
+            {fail, Extra};
         _ when Retry == 1 ->
             {fail, Res};
         _ ->

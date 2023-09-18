@@ -26,6 +26,7 @@
     pmap/2, pmap/4,
     enumerate_0/1,
     enumerate_last/1,
+    get_env_int/2,
     %%
     load_key/1,
     pubkey_bin/0,
@@ -219,6 +220,14 @@ enumerate_0(L) ->
 enumerate_last(L) ->
     Last = erlang:length(L),
     [{Idx + 1 == Last, El} || {Idx, El} <- enumerate_0(L)].
+
+-spec get_env_int(atom(), integer()) -> integer().
+get_env_int(Key, Default) ->
+    case application:get_env(hpr, Key, Default) of
+        [] -> Default;
+        Str when is_list(Str) -> erlang:list_to_integer(Str);
+        I -> I
+    end.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
