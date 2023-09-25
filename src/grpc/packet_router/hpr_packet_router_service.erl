@@ -17,13 +17,16 @@
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
 -define(SESSION_TIMER, timer:minutes(30)).
 -define(SESSION_RESET, session_reset).
+-define(SESSION_OFFER_RES_TIMEOUT, timer:minutes(5)).
+-define(SESSION_OFFER_TIMEOUT, session_offer_timeout).
 
 -record(handler_state, {
     started :: non_neg_integer(),
     pubkey_bin :: undefined | binary(),
     nonce :: undefined | binary(),
     session_key :: undefined | binary(),
-    session_timer :: undefined | reference()
+    session_timer :: undefined | reference(),
+    session_offer_timer :: undefined | reference()
 }).
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
@@ -71,6 +74,23 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
 handle_info(?SESSION_RESET, StreamState0) ->
     {EnvDown, StreamState1} = create_session_offer(StreamState0),
     grpcbox_stream:send(false, EnvDown, StreamState1);
+handle_info({?SESSION_OFFER_TIMEOUT, Nonce}, StreamState) ->
+    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    CurrNonce = HandlerState#handler_state.nonce,
+    case Nonce == CurrNonce of
+        true ->
+            lager:debug("session offer timeout triggered but nonces matched"),
+            StreamState;
+        false ->
+            lager:warning(
+                "session offer timeout triggered, ~s =/= ~s, closing stream",
+                [
+                    hpr_utils:bin_to_hex_string(Nonce), hpr_utils:bin_to_hex_string(CurrNonce)
+                ]
+            ),
+            EnvDown = hpr_envelope_down:new(undefined),
+            grpcbox_stream:send(true, EnvDown, StreamState)
+    end;
 handle_info(_Msg, StreamState) ->
     StreamState.
 
@@ -191,6 +211,9 @@ handle_session_init(SessionInit, StreamState) ->
                             HandlerState0#handler_state.session_timer
                         )
                     },
+                    ok = hpr_utils:cancel_timer(
+                        HandlerState0#handler_state.session_offer_timer
+                    ),
                     {ok, grpcbox_stream:stream_handler_state(StreamState, HandlerState1)}
             end
     end.
@@ -200,9 +223,10 @@ handle_session_init(SessionInit, StreamState) ->
 create_session_offer(StreamState0) ->
     HandlerState0 = grpcbox_stream:stream_handler_state(StreamState0),
     Nonce = crypto:strong_rand_bytes(32),
+    Timer = erlang:send_after(?SESSION_OFFER_RES_TIMEOUT, self(), {?SESSION_OFFER_TIMEOUT, Nonce}),
     EnvDown = hpr_envelope_down:new(hpr_session_offer:new(Nonce)),
     StreamState1 = grpcbox_stream:stream_handler_state(
-        StreamState0, HandlerState0#handler_state{nonce = Nonce}
+        StreamState0, HandlerState0#handler_state{nonce = Nonce, session_offer_timer = Timer}
     ),
     lager:debug("session offer ~s", [
         hpr_utils:bin_to_hex_string(Nonce)
@@ -210,10 +234,8 @@ create_session_offer(StreamState0) ->
     {EnvDown, StreamState1}.
 
 -spec schedule_session_reset(OldTimer :: undefined | reference()) -> reference().
-schedule_session_reset(OldTimer) when is_reference(OldTimer) ->
-    _ = erlang:cancel_timer(OldTimer),
-    erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET);
-schedule_session_reset(_OldTimer) ->
+schedule_session_reset(OldTimer) ->
+    _ = hpr_utils:cancel_timer(OldTimer),
     erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET).
 
 %% ------------------------------------------------------------------
