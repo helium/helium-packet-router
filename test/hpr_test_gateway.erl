@@ -13,7 +13,8 @@
     receive_env_down/1,
     receive_register/1,
     receive_session_init/2,
-    receive_stream_down/1
+    receive_stream_down/1,
+    receive_terminate/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -111,6 +112,15 @@ receive_stream_down(GatewayPid) ->
     receive
         {?MODULE, GatewayPid, ?STREAM_DOWN} ->
             ok
+    after timer:seconds(2) ->
+        {error, timeout}
+    end.
+
+-spec receive_terminate(GatewayPid :: pid()) -> {ok, any()} | {error, timeout}.
+receive_terminate(GatewayPid) ->
+    receive
+        {?MODULE, GatewayPid, {terminate, Stream}} ->
+            {ok, Stream}
     after timer:seconds(2) ->
         {error, timeout}
     end.
@@ -279,14 +289,16 @@ handle_info(_Msg, State) ->
     lager:debug("unknown info ~p", [_Msg]),
     {noreply, State}.
 
-terminate(_Reason, #state{pubkey_bin = PubKeyBin, stream = undefined}) ->
+terminate(_Reason, #state{forward = Pid, pubkey_bin = PubKeyBin, stream = undefined}) ->
     ok = grpcbox_channel:stop(PubKeyBin),
     lager:debug("terminate ~p", [_Reason]),
+    Pid ! {?MODULE, self(), {terminate, undefined}},
     ok;
-terminate(_Reason, #state{pubkey_bin = PubKeyBin, stream = Stream}) ->
+terminate(_Reason, #state{forward = Pid, pubkey_bin = PubKeyBin, stream = Stream}) ->
     ok = grpcbox_client:close_send(Stream),
     ok = grpcbox_channel:stop(PubKeyBin),
     lager:debug("terminate ~p", [_Reason]),
+    Pid ! {?MODULE, self(), {terminate, Stream}},
     ok.
 
 %% ------------------------------------------------------------------
