@@ -17,7 +17,11 @@
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
 -define(SESSION_TIMER, timer:minutes(30)).
 -define(SESSION_RESET, session_reset).
+-ifdef(TEST).
+-define(SESSION_OFFER_RES_TIMEOUT, timer:seconds(2)).
+-else.
 -define(SESSION_OFFER_RES_TIMEOUT, timer:minutes(5)).
+-endif.
 -define(SESSION_OFFER_TIMEOUT, session_offer_timeout).
 
 -record(handler_state, {
@@ -74,18 +78,16 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
 handle_info(?SESSION_RESET, StreamState0) ->
     {EnvDown, StreamState1} = create_session_offer(StreamState0),
     grpcbox_stream:send(false, EnvDown, StreamState1);
-handle_info({?SESSION_OFFER_TIMEOUT, Nonce}, StreamState) ->
+handle_info(?SESSION_OFFER_TIMEOUT, StreamState) ->
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    CurrNonce = HandlerState#handler_state.nonce,
-    case Nonce == CurrNonce of
+    case HandlerState#handler_state.session_key =/= undefined of
         true ->
-            lager:debug("session offer timeout triggered but nonces matched"),
+            lager:debug("session offer timeout triggered but session_key is set"),
             StreamState;
         false ->
             lager:warning(
-                "session offer timeout triggered, ~s =/= ~s, closing stream",
-                [
-                    hpr_utils:bin_to_hex_string(Nonce), hpr_utils:bin_to_hex_string(CurrNonce)
+                "session offer ~s timeout triggered, closing stream", [
+                    hpr_utils:bin_to_hex_string(HandlerState#handler_state.nonce)
                 ]
             ),
             EnvDown = hpr_envelope_down:new(undefined),
@@ -223,7 +225,7 @@ handle_session_init(SessionInit, StreamState) ->
 create_session_offer(StreamState0) ->
     HandlerState0 = grpcbox_stream:stream_handler_state(StreamState0),
     Nonce = crypto:strong_rand_bytes(32),
-    Timer = erlang:send_after(?SESSION_OFFER_RES_TIMEOUT, self(), {?SESSION_OFFER_TIMEOUT, Nonce}),
+    Timer = erlang:send_after(?SESSION_OFFER_RES_TIMEOUT, self(), ?SESSION_OFFER_TIMEOUT),
     EnvDown = hpr_envelope_down:new(hpr_session_offer:new(Nonce)),
     StreamState1 = grpcbox_stream:stream_handler_state(
         StreamState0, HandlerState0#handler_state{nonce = Nonce, session_offer_timer = Timer}

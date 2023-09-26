@@ -7,7 +7,8 @@
 ]).
 
 -export([
-    session_test/1
+    session_test/1,
+    timeout_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -24,7 +25,8 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        session_test
+        session_test,
+        timeout_test
     ].
 
 %%--------------------------------------------------------------------
@@ -134,6 +136,57 @@ session_test(_Config) ->
     meck:unload(hpr_routing),
 
     gen_server:stop(GatewayPid),
+
+    ok.
+
+timeout_test(_Config) ->
+    RouteID = "8d502f32-4d58-4746-965e-8c7dfdcfc625",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 0,
+        oui => 4020,
+        server => #{
+            host => "127.0.0.1",
+            port => 8082,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 2
+    }),
+    EUIPairs = [
+        hpr_eui_pair:test_new(#{
+            route_id => RouteID, app_eui => 802041902051071031, dev_eui => 8942655256770396549
+        })
+    ],
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#00000010
+        })
+    ],
+    {ok, GatewayPid1} = hpr_test_gateway:start(#{
+        forward => self(),
+        route => Route,
+        eui_pairs => EUIPairs,
+        devaddr_ranges => DevAddrRanges,
+        ignore_session_offer => false
+    }),
+
+    {ok, _} = hpr_test_gateway:receive_session_init(GatewayPid1, timer:seconds(1)),
+    {error, timeout} = hpr_test_gateway:receive_stream_down(GatewayPid1),
+
+    gen_server:stop(GatewayPid1),
+
+    {ok, GatewayPid2} = hpr_test_gateway:start(#{
+        forward => self(),
+        route => Route,
+        eui_pairs => EUIPairs,
+        devaddr_ranges => DevAddrRanges,
+        ignore_session_offer => true
+    }),
+
+    {error, timeout} = hpr_test_gateway:receive_session_init(GatewayPid2, timer:seconds(3)),
+    ok = hpr_test_gateway:receive_stream_down(GatewayPid2),
+
+    gen_server:stop(GatewayPid2),
 
     ok.
 
