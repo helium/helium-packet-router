@@ -48,7 +48,7 @@ route(eos, StreamState) ->
     lager:debug("received eos for stream"),
     {stop, StreamState};
 route(EnvUp, StreamState) ->
-    ct:pal("got env up ~p", [EnvUp]),
+    lager:debug("got env up ~p", [EnvUp]),
     try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
             handle_packet(PacketUp, StreamState);
