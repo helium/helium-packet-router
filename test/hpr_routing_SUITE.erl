@@ -1300,7 +1300,8 @@ maybe_report_packet_test(_Config) ->
         meck:history(hpr_protocol_router)
     ),
 
-    ?assertEqual(2, meck:num_calls(hpr_packet_reporter, report_packet, 4)),
+    %% Join packets are not reported anymore
+    ?assertEqual(1, meck:num_calls(hpr_packet_reporter, report_packet, 4)),
 
     ok = meck:reset(hpr_packet_reporter),
 

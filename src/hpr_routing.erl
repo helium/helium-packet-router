@@ -375,7 +375,7 @@ deliver_packet(_OtherProtocol, _PacketUp, _Route) ->
 ) -> ok.
 maybe_report_packet(_PacketUpType, _Routes, 0, _IsFree, _PacketUp, _ReceivedTime) ->
     lager:debug("not reporting packet, no routed");
-maybe_report_packet(_PacketType, Routes, Routed, IsFree, PacketUp, ReceivedTime) when Routed > 0 ->
+maybe_report_packet({uplink, _}, Routes, Routed, IsFree, PacketUp, ReceivedTime) when Routed > 0 ->
     UniqueOUINetID = lists:usort([{hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]),
     case erlang:length(UniqueOUINetID) of
         1 ->
@@ -389,7 +389,8 @@ maybe_report_packet(_PacketType, Routes, Routed, IsFree, PacketUp, ReceivedTime)
 maybe_report_packet({Type, _}, _Routes, _Routed, _IsFree, _PacketUp, _ReceivedTime) ->
     lager:debug("not reporting ~p packet", [Type]).
 
--spec packet_type_check(PacketUp :: hpr_packet_up:packet()) -> boolean().
+-spec packet_type_check(PacketUp :: hpr_packet_up:packet()) ->
+    boolean().
 packet_type_check(PacketUp) ->
     case hpr_packet_up:type(PacketUp) of
         {undefined, _} -> false;
