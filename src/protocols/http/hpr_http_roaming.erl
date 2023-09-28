@@ -55,7 +55,6 @@
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     PacketDown :: hpr_packet_down:packet()
 }.
--type pr_start_notif() :: {PRStartNotif :: map(), RouteID :: hpr_route:id()}.
 
 -type region() :: atom().
 -type token() :: binary().
@@ -106,7 +105,7 @@ make_uplink_payload(
     TransactionID,
     DedupWindowSize,
     RouteID,
-    ReceiverNSID
+    _ReceiverNSID
 ) ->
     #packet{
         packet_up = PacketUp,
@@ -125,10 +124,8 @@ make_uplink_payload(
     Token = make_uplink_token(PubKeyBin, Region, PacketTime, RouteID),
 
     VersionBase = #{
-        'ProtocolVersion' => <<"1.1">>,
-        'SenderNSID' => hpr_utils:sender_nsid(),
-        'DedupWindowSize' => DedupWindowSize,
-        'ReceiverNSID' => ReceiverNSID
+        'ProtocolVersion' => <<"1.0">>,
+        'DedupWindowSize' => DedupWindowSize
     },
 
     VersionBase#{
@@ -168,7 +165,7 @@ routing_key_and_value(PacketUp) ->
 -spec handle_message(prstart_ans() | xmitdata_req()) ->
     ok
     | {downlink, xmitdata_ans(), downlink(), RouteID :: hpr_route:id()}
-    | {join_accept, downlink(), pr_start_notif()}
+    | {join_accept, downlink()}
     | {error, any()}.
 handle_message(#{<<"MessageType">> := MT} = M) ->
     case MT of
@@ -184,13 +181,13 @@ handle_message(#{<<"MessageType">> := MT} = M) ->
     end.
 
 -spec handle_prstart_ans(prstart_ans()) ->
-    ok | {join_accept, downlink(), pr_start_notif()} | {error, any()}.
+    ok | {join_accept, downlink()} | {error, any()}.
 handle_prstart_ans(
     #{
         <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
         <<"MessageType">> := <<"PRStartAns">>,
-        <<"SenderID">> := ReceiverID,
-        <<"TransactionID">> := TransactionID,
+        <<"SenderID">> := _ReceiverID,
+        <<"TransactionID">> := _TransactionID,
 
         <<"PHYPayload">> := Payload,
         <<"DevEUI">> := _DevEUI,
@@ -200,12 +197,12 @@ handle_prstart_ans(
             <<"DataRate1">> := DR,
             <<"FNSULToken">> := Token
         } = DLMeta
-    } = PRStart
+    }
 ) ->
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, PubKeyBin, Region, PacketTime, RouteID} ->
+        {ok, PubKeyBin, Region, PacketTime, _RouteID} ->
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
                 hpr_http_roaming_utils:uint32(PacketTime + ?JOIN1_DELAY),
@@ -213,33 +210,15 @@ handle_prstart_ans(
                 hpr_lorawan:index_to_datarate(Region, DR),
                 rx2_from_dlmetadata(DLMeta, PacketTime, Region, ?JOIN2_DELAY)
             ),
-            PRStartNotif0 = #{
-                'ProtocolVersion' => <<"1.1">>,
-                'SenderID' => <<"0xC00053">>,
-                'ReceiverID' => ReceiverID,
-                'TransactionID' => TransactionID,
-                'MessageType' => <<"PRStartNotif">>,
-                'Result' => #{'ResultCode' => <<"Success">>}
-            },
-            PRStartNotif1 =
-                case maps:get(<<"SenderNSID">>, PRStart, undefined) of
-                    undefined ->
-                        PRStartNotif0;
-                    ReceiverNSID ->
-                        PRStartNotif0#{
-                            'SenderNSID' => hpr_utils:sender_nsid(),
-                            'ReceiverNSID' => ReceiverNSID
-                        }
-                end,
 
-            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif1, RouteID}}
+            {join_accept, {PubKeyBin, DownlinkPacket}}
     end;
 handle_prstart_ans(
     #{
         <<"Result">> := #{<<"ResultCode">> := <<"Success">>},
         <<"MessageType">> := <<"PRStartAns">>,
-        <<"SenderID">> := ReceiverID,
-        <<"TransactionID">> := TransactionID,
+        <<"SenderID">> := _ReceiverID,
+        <<"TransactionID">> := _TransactionID,
 
         <<"PHYPayload">> := Payload,
         <<"DevEUI">> := _DevEUI,
@@ -249,12 +228,12 @@ handle_prstart_ans(
             <<"DataRate2">> := DR,
             <<"FNSULToken">> := Token
         }
-    } = PRStart
+    }
 ) ->
     case parse_uplink_token(Token) of
         {error, _} = Err ->
             Err;
-        {ok, PubKeyBin, Region, PacketTime, RouteID} ->
+        {ok, PubKeyBin, Region, PacketTime, _RouteID} ->
             DataRate = hpr_lorawan:index_to_datarate(Region, DR),
             DownlinkPacket = hpr_packet_down:new_downlink(
                 hpr_http_roaming_utils:hexstring_to_binary(Payload),
@@ -263,25 +242,7 @@ handle_prstart_ans(
                 DataRate,
                 undefined
             ),
-            PRStartNotif0 = #{
-                'ProtocolVersion' => <<"1.1">>,
-                'SenderID' => <<"0xC00053">>,
-                'ReceiverID' => ReceiverID,
-                'TransactionID' => TransactionID,
-                'MessageType' => <<"PRStartNotif">>,
-                'Result' => #{'ResultCode' => <<"Success">>}
-            },
-            PRStartNotif1 =
-                case maps:get(<<"SenderNSID">>, PRStart, undefined) of
-                    undefined ->
-                        PRStartNotif0;
-                    ReceiverNSID ->
-                        PRStartNotif0#{
-                            'SenderNSID' => hpr_utils:sender_nsid(),
-                            'ReceiverNSID' => ReceiverNSID
-                        }
-                end,
-            {join_accept, {PubKeyBin, DownlinkPacket}, {PRStartNotif1, RouteID}}
+            {join_accept, {PubKeyBin, DownlinkPacket}}
     end;
 handle_prstart_ans(#{
     <<"MessageType">> := <<"PRStartAns">>,
@@ -321,7 +282,6 @@ handle_xmitdata_req(#{
     <<"ProtocolVersion">> := ProtocolVersion,
     <<"TransactionID">> := IncomingTransactionID,
     <<"SenderID">> := SenderID,
-    <<"SenderNSID">> := SenderNSID,
     <<"PHYPayload">> := Payload,
     <<"DLMetaData">> := #{
         <<"ClassMode">> := <<"A">>,
@@ -336,8 +296,6 @@ handle_xmitdata_req(#{
         'MessageType' => <<"XmitDataAns">>,
         'ReceiverID' => SenderID,
         'SenderID' => <<"0xC00053">>,
-        'ReceiverNSID' => SenderNSID,
-        'SenderNSID' => hpr_utils:sender_nsid(),
         'Result' => #{'ResultCode' => <<"Success">>},
         'TransactionID' => IncomingTransactionID,
         'DLFreq1' => FrequencyMhz1
@@ -369,7 +327,6 @@ handle_xmitdata_req(#{
     <<"ProtocolVersion">> := ProtocolVersion,
     <<"TransactionID">> := IncomingTransactionID,
     <<"SenderID">> := SenderID,
-    <<"SenderNSID">> := SenderNSID,
     <<"PHYPayload">> := Payload,
     <<"DLMetaData">> := #{
         <<"ClassMode">> := DeviceClass,
@@ -383,8 +340,6 @@ handle_xmitdata_req(#{
         'ProtocolVersion' => ProtocolVersion,
         'MessageType' => <<"XmitDataAns">>,
         'ReceiverID' => SenderID,
-        'ReceiverNSID' => SenderNSID,
-        'SenderNSID' => hpr_utils:sender_nsid(),
         'SenderID' => <<"0xC00053">>,
         'Result' => #{'ResultCode' => <<"Success">>},
         'TransactionID' => IncomingTransactionID,
@@ -527,7 +482,7 @@ gw_info(#packet{packet_up = PacketUp, gateway_location = GatewayLocation}) ->
     RSSI = hpr_packet_up:rssi(PacketUp),
 
     GW = #{
-        'GWID' => hpr_http_roaming_utils:binary_to_hexstring(hpr_utils:pubkeybin_to_mac(PubKeyBin)),
+        'ID' => hpr_http_roaming_utils:binary_to_hexstring(hpr_utils:pubkeybin_to_mac(PubKeyBin)),
         'RFRegion' => Region,
         'RSSI' => RSSI,
         'SNR' => SNR,
@@ -575,12 +530,10 @@ class_c_downlink_test() ->
     ),
 
     Input = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"ReceiverID">> => <<"0xc00053">>,
         <<"SenderID">> => <<"0x600013">>,
-        <<"SenderNSID">> => <<"">>,
-        <<"ReceiverNSID">> => <<"">>,
         <<"DLMetaData">> => #{
             <<"ClassMode">> => <<"C">>,
             <<"DLFreq2">> => 869.525,
@@ -611,12 +564,10 @@ chirpstack_join_accept_test() ->
     ),
 
     A = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"MessageType">> => <<"PRStartAns">>,
         <<"ReceiverID">> => <<"C00053">>,
         <<"SenderID">> => <<"600013">>,
-        <<"SenderNSID">> => <<"">>,
-        <<"ReceiverNSID">> => <<"">>,
         <<"DLMetaData">> => #{
             <<"ClassMode">> => <<"A">>,
             <<"DLFreq1">> => 925.1,
@@ -642,7 +593,7 @@ chirpstack_join_accept_test() ->
         <<"TransactionID">> => TransactionID,
         <<"VSExtension">> => #{}
     },
-    ?assertMatch({join_accept, {PubKeyBin, _}, {_, _}}, ?MODULE:handle_message(A)),
+    ?assertMatch({join_accept, {PubKeyBin, _}}, ?MODULE:handle_message(A)),
 
     ok.
 
@@ -660,11 +611,9 @@ rx1_timestamp_test() ->
 
     MakeInput = fun(RXDelay) ->
         #{
-            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"ProtocolVersion">> => <<"1.0">>,
             <<"SenderID">> => <<"0x600013">>,
             <<"ReceiverID">> => <<"0xc00053">>,
-            <<"SenderNSID">> => <<"">>,
-            <<"ReceiverNSID">> => <<"">>,
             <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
             <<"MessageType">> => <<"XmitDataReq">>,
             <<"PHYPayload">> =>
@@ -718,11 +667,9 @@ rx1_downlink_test() ->
     ),
 
     Input = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"SenderID">> => <<"0x600013">>,
         <<"ReceiverID">> => <<"0xc00053">>,
-        <<"SenderNSID">> => <<"">>,
-        <<"ReceiverNSID">> => <<"">>,
         <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> => Payload,
@@ -772,11 +719,9 @@ rx2_downlink_test() ->
     ),
 
     Input = #{
-        <<"ProtocolVersion">> => <<"1.1">>,
+        <<"ProtocolVersion">> => <<"1.0">>,
         <<"SenderID">> => <<"0x600013">>,
         <<"ReceiverID">> => <<"0xc00053">>,
-        <<"SenderNSID">> => <<"">>,
-        <<"ReceiverNSID">> => <<"">>,
         <<"TransactionID">> => rand:uniform(16#FFFF_FFFF),
         <<"MessageType">> => <<"XmitDataReq">>,
         <<"PHYPayload">> =>

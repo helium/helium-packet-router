@@ -237,44 +237,10 @@ send_data(
                                 {error, Err} ->
                                     lager:error("error handling response: ~p", [Err]),
                                     ok;
-                                {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, RouteID}} ->
-                                    case hpr_route_storage:lookup(RouteID) of
-                                        {error, not_found} ->
-                                            lager:warning(
-                                                [{route_id, RouteID}],
-                                                "received downlink for non-existent route"
-                                            );
-                                        {ok, RouteETS} ->
-                                            Route = hpr_route_ets:route(RouteETS),
-                                            Endpoint = hpr_route:lns(Route),
-                                            case
-                                                hpr_packet_router_service:send_packet_down(
-                                                    PubKeyBin, PacketDown
-                                                )
-                                            of
-                                                ok ->
-                                                    lager:debug("got join_accept"),
-                                                    _ = hackney:post(
-                                                        Endpoint,
-                                                        Headers,
-                                                        jsx:encode(PRStartNotif),
-                                                        [with_body]
-                                                    ),
-                                                    ok;
-                                                {error, not_found} ->
-                                                    _ = hackney:post(
-                                                        Endpoint,
-                                                        Headers,
-                                                        jsx:encode(PRStartNotif#{
-                                                            'Result' => #{
-                                                                'ResultCode' => <<"XmitFailed">>
-                                                            }
-                                                        }),
-                                                        [with_body]
-                                                    ),
-                                                    ok
-                                            end
-                                    end;
+                                {join_accept, {PubKeyBin, PacketDown}} ->
+                                    hpr_packet_router_service:send_packet_down(
+                                        PubKeyBin, PacketDown
+                                    );
                                 ok ->
                                     lager:debug("sent"),
                                     ok
