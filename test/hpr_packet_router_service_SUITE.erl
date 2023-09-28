@@ -162,6 +162,8 @@ timeout_test(_Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#00000010
         })
     ],
+
+    %% Normal test
     {ok, GatewayPid1} = hpr_test_gateway:start(#{
         forward => self(),
         route => Route,
@@ -173,8 +175,17 @@ timeout_test(_Config) ->
     {ok, _} = hpr_test_gateway:receive_session_init(GatewayPid1, timer:seconds(1)),
     {error, timeout} = hpr_test_gateway:receive_stream_down(GatewayPid1),
 
+    SessionKey1 = hpr_test_gateway:session_key(GatewayPid1),
+
+    PubKeyBin1 = hpr_test_gateway:pubkey_bin(GatewayPid1),
+    {ok, Pid1} = hpr_packet_router_service:locate(PubKeyBin1),
+
+    %% Checking that session keys are the same
+    ?assertEqual(SessionKey1, session_key_from_stream(Pid1)),
+
     gen_server:stop(GatewayPid1),
 
+    %% Testing with session key offer disabled, should result in closing of stream
     {ok, GatewayPid2} = hpr_test_gateway:start(#{
         forward => self(),
         route => Route,
@@ -188,8 +199,42 @@ timeout_test(_Config) ->
 
     gen_server:stop(GatewayPid2),
 
+    %% Normal test with session reset
+    {ok, GatewayPid3} = hpr_test_gateway:start(#{
+        forward => self(),
+        route => Route,
+        eui_pairs => EUIPairs,
+        devaddr_ranges => DevAddrRanges,
+        ignore_session_offer => false
+    }),
+
+    {ok, _} = hpr_test_gateway:receive_session_init(GatewayPid3, timer:seconds(1)),
+    {error, timeout} = hpr_test_gateway:receive_stream_down(GatewayPid3),
+
+    SessionKey3 = hpr_test_gateway:session_key(GatewayPid3),
+    PubKeyBin3 = hpr_test_gateway:pubkey_bin(GatewayPid3),
+    {ok, Pid3} = hpr_packet_router_service:locate(PubKeyBin3),
+
+    %% Checking that session keys are the same
+    ?assertEqual(SessionKey3, session_key_from_stream(Pid3)),
+    Pid3 ! session_reset,
+
+    {ok, _} = hpr_test_gateway:receive_session_init(GatewayPid3, timer:seconds(1)),
+    {error, timeout} = hpr_test_gateway:receive_stream_down(GatewayPid3),
+
+    SessionKey4 = hpr_test_gateway:session_key(GatewayPid3),
+    ?assert(SessionKey3 =/= SessionKey4),
+    ?assertEqual(SessionKey4, session_key_from_stream(Pid3)),
+
     ok.
 
 %% ===================================================================
 %% Helpers
 %% ===================================================================
+
+session_key_from_stream(Pid) ->
+    State = sys:get_state(Pid),
+    StreamState = erlang:element(2, State),
+    CallbackState = erlang:element(20, StreamState),
+    HandlerState = erlang:element(3, CallbackState),
+    erlang:element(5, HandlerState).

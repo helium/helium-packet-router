@@ -48,7 +48,7 @@ route(eos, StreamState) ->
     lager:debug("received eos for stream"),
     {stop, StreamState};
 route(EnvUp, StreamState) ->
-    lager:debug("got env up ~p", [EnvUp]),
+    ct:pal("got env up ~p", [EnvUp]),
     try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
             handle_packet(PacketUp, StreamState);
@@ -78,13 +78,15 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
 handle_info(?SESSION_RESET, StreamState0) ->
     {EnvDown, StreamState1} = create_session_offer(StreamState0),
     grpcbox_stream:send(false, EnvDown, StreamState1);
-handle_info(?SESSION_OFFER_TIMEOUT, StreamState) ->
+handle_info({?SESSION_OFFER_TIMEOUT, OldSessionKey}, StreamState) ->
+    lager:debug("got session offer timeout ~s", [hpr_utils:bin_to_hex_string(OldSessionKey)]),
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    case HandlerState#handler_state.session_key =/= undefined of
-        true ->
-            lager:debug("session offer timeout triggered but session_key is set"),
-            StreamState;
+    CurrSessionKey = HandlerState#handler_state.session_key,
+    case CurrSessionKey =/= undefined andalso CurrSessionKey =/= OldSessionKey of
         false ->
+            lager:debug("session offer timeout triggered but session_key is set and new"),
+            StreamState;
+        true ->
             lager:warning(
                 "session offer ~s timeout triggered, closing stream", [
                     hpr_utils:bin_to_hex_string(HandlerState#handler_state.nonce)
@@ -225,7 +227,11 @@ handle_session_init(SessionInit, StreamState) ->
 create_session_offer(StreamState0) ->
     HandlerState0 = grpcbox_stream:stream_handler_state(StreamState0),
     Nonce = crypto:strong_rand_bytes(32),
-    Timer = erlang:send_after(?SESSION_OFFER_RES_TIMEOUT, self(), ?SESSION_OFFER_TIMEOUT),
+    Timer = erlang:send_after(
+        ?SESSION_OFFER_RES_TIMEOUT,
+        self(),
+        {?SESSION_OFFER_TIMEOUT, HandlerState0#handler_state.session_key}
+    ),
     EnvDown = hpr_envelope_down:new(hpr_session_offer:new(Nonce)),
     StreamState1 = grpcbox_stream:stream_handler_state(
         StreamState0, HandlerState0#handler_state{nonce = Nonce, session_offer_timer = Timer}

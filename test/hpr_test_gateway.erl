@@ -8,6 +8,7 @@
 -export([
     start/1,
     pubkey_bin/1,
+    session_key/1,
     send_packet/2,
     receive_send_packet/1,
     receive_env_down/1,
@@ -62,6 +63,10 @@ start(Args) ->
 -spec pubkey_bin(Pid :: pid()) -> libp2p_crypto:pubkey_bin().
 pubkey_bin(Pid) ->
     gen_server:call(Pid, pubkey_bin).
+
+-spec session_key(Pid :: pid()) -> binary().
+session_key(Pid) ->
+    gen_server:call(Pid, session_key).
 
 -spec send_packet(Pid :: pid(), Args :: map()) -> ok.
 send_packet(Pid, Args) ->
@@ -150,6 +155,8 @@ init(
 
 handle_call(pubkey_bin, _From, #state{pubkey_bin = PubKeyBin} = State) ->
     {reply, PubKeyBin, State};
+handle_call(session_key, _From, #state{session_key = {SessionKey, _}} = State) ->
+    {reply, SessionKey, State};
 handle_call(_Msg, _From, State) ->
     lager:debug("unknown call ~p", [_Msg]),
     {reply, ok, State}.
@@ -234,7 +241,7 @@ handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = Si
             EnvUp = hpr_envelope_up:new(SignedReg),
             ok = grpcbox_client:send(Stream, EnvUp),
             Pid ! {?MODULE, self(), {?REGISTER, EnvUp}},
-            lager:debug("connected and registered"),
+            lager:debug("connected and registering"),
             {noreply, State#state{stream = Stream}}
     end;
 %% GRPC stream callbacks
