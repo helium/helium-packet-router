@@ -328,10 +328,10 @@ find_skf(SKToFind, [RouteETS | RoutesETS], Acc0) ->
             find_skf(SKToFind, RoutesETS, Acc0);
         SKFs ->
             Acc1 = lists:filtermap(
-                fun({{LastUsed, SK}, {DevAddr, MaxCopies}}) ->
+                fun({SK, {DevAddr, MaxCopies}}) ->
                     case SK =:= SKToFind of
                         true ->
-                            {true, {DevAddr, SK, RouteID, LastUsed * -1, MaxCopies}};
+                            {true, {DevAddr, SK, RouteID, MaxCopies}};
                         false ->
                             false
                     end
