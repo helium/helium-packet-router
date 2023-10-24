@@ -8,6 +8,8 @@
     find_routes/2
 ]).
 
+-define(MAX_JOIN_REQ, 999).
+
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
 
@@ -126,7 +128,7 @@ establish_routing(PacketUp, Start) ->
 ) -> ok.
 route_packet(PacketUp, RoutesETS, Start) ->
     PacketUpType = hpr_packet_up:type(PacketUp),
-    {Routed, IsFree} = maybe_deliver_packet_to_routes(PacketUp, RoutesETS),
+    {Routed, IsFree} = maybe_deliver_packet_to_routes(PacketUpType, PacketUp, RoutesETS),
     ok = maybe_report_packet(
         PacketUpType,
         [hpr_route_ets:route(RouteETS) || {RouteETS, _} <- RoutesETS],
@@ -264,21 +266,22 @@ maybe_deliver_no_routes(PacketUp) ->
     end.
 
 -spec maybe_deliver_packet_to_routes(
+    PacketUpType :: hpr_packet_up:packet_type(),
     PacketUp :: hpr_packet_up:packet(),
     RoutesETS :: [{hpr_route_ets:route(), non_neg_integer()}]
 ) -> {non_neg_integer(), boolean()}.
-maybe_deliver_packet_to_routes(PacketUp, RoutesETS) ->
+maybe_deliver_packet_to_routes(PacketUpType, PacketUp, RoutesETS) ->
     case erlang:length(RoutesETS) of
         1 ->
             [{RouteETS, SKFMaxCopies}] = RoutesETS,
-            case maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) of
+            case maybe_deliver_packet_to_route(PacketUpType, PacketUp, RouteETS, SKFMaxCopies) of
                 {ok, IsFree} -> {1, IsFree};
                 {error, _} -> {0, false}
             end;
         X when X > 1 ->
             MaybeDelivered = hpr_utils:pmap(
                 fun({RouteETS, SKFMaxCopies}) ->
-                    maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies)
+                    maybe_deliver_packet_to_route(PacketUpType, PacketUp, RouteETS, SKFMaxCopies)
                 end,
                 RoutesETS
             ),
@@ -297,11 +300,12 @@ maybe_deliver_packet_to_routes(PacketUp, RoutesETS) ->
     end.
 
 -spec maybe_deliver_packet_to_route(
+    PacketUpType :: hpr_packet_up:packet_type(),
     PacketUp :: hpr_packet_up:packet(),
     RouteETS :: hpr_route_ets:route(),
     SKFMaxCopies :: non_neg_integer()
 ) -> {ok, boolean()} | {error, any()}.
-maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
+maybe_deliver_packet_to_route(PacketUpType, PacketUp, RouteETS, SKFMaxCopies) ->
     Route = hpr_route_ets:route(RouteETS),
     RouteMD = hpr_route:md(Route),
     BackoffTimestamp =
@@ -322,12 +326,11 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
             lager:debug(RouteMD, "not sending, route in cooldown, back in ~wms", [Timestamp - Now]),
             {error, in_cooldown};
         {true, false, _} ->
-            Server = hpr_route:server(Route),
-            Protocol = hpr_route:protocol(Server),
             Key = hpr_multi_buy:make_key(PacketUp, Route),
             MaxCopies =
-                case SKFMaxCopies of
-                    0 -> hpr_route:max_copies(Route);
+                case {SKFMaxCopies, PacketUpType} of
+                    {0, {join_req, _}} -> ?MAX_JOIN_REQ;
+                    {0, _} -> hpr_route:max_copies(Route);
                     _ -> SKFMaxCopies
                 end,
             case hpr_multi_buy:update_counter(Key, MaxCopies) of
@@ -335,6 +338,8 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
                     Error;
                 {ok, IsFree} ->
+                    Server = hpr_route:server(Route),
+                    Protocol = hpr_route:protocol(Server),
                     RouteID = hpr_route:id(Route),
                     case deliver_packet(Protocol, PacketUp, Route) of
                         {error, Reason} = Error ->
@@ -374,7 +379,7 @@ deliver_packet(_OtherProtocol, _PacketUp, _Route) ->
     ReceivedTime :: non_neg_integer()
 ) -> ok.
 maybe_report_packet(_PacketUpType, _Routes, 0, _IsFree, _PacketUp, _ReceivedTime) ->
-    lager:debug("not reporting packet, no routed");
+    lager:debug("not reporting packet, not routed");
 maybe_report_packet({uplink, _}, Routes, Routed, IsFree, PacketUp, ReceivedTime) when Routed > 0 ->
     UniqueOUINetID = lists:usort([{hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]),
     case erlang:length(UniqueOUINetID) of
