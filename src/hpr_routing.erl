@@ -893,7 +893,9 @@ maybe_deliver_packet_to_route_locked() ->
 
     ?assertEqual(
         {error, locked},
-        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
+        maybe_deliver_packet_to_route(
+            hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, erlang:system_time(millisecond), 1
+        )
     ),
 
     ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 4)),
@@ -925,7 +927,9 @@ maybe_deliver_packet_to_route_inactive() ->
 
     ?assertEqual(
         {error, inactive},
-        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
+        maybe_deliver_packet_to_route(
+            hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, erlang:system_time(millisecond), 1
+        )
     ),
 
     ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 4)),
@@ -958,7 +962,9 @@ maybe_deliver_packet_to_route_in_cooldown() ->
 
     ?assertEqual(
         {error, in_cooldown},
-        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
+        maybe_deliver_packet_to_route(
+            hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, erlang:system_time(millisecond), 1
+        )
     ),
 
     ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 4)),
@@ -995,18 +1001,24 @@ maybe_deliver_packet_to_route_multi_buy() ->
     %% Packet 1 accepted using SKF Multi buy 1 (counter 1)
     ?assertEqual(
         {ok, true},
-        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
+        maybe_deliver_packet_to_route(
+            hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, erlang:system_time(millisecond), 1
+        )
     ),
     %% Packet 2 refused using SKF Multi buy 1 (counter 2)
     ?assertEqual(
         {error, multi_buy},
-        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
+        maybe_deliver_packet_to_route(
+            hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, erlang:system_time(millisecond), 1
+        )
     ),
 
     %% Packet 3 accepted using route multi buy 3 (counter 3)
     ?assertEqual(
         {ok, true},
-        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 0)
+        maybe_deliver_packet_to_route(
+            hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, erlang:system_time(millisecond), 0
+        )
     ),
     %% Packet 4 refused using route multi buy 3 (counter 4)
     ?assertEqual(
