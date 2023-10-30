@@ -862,7 +862,8 @@ maybe_deliver_packet_to_route_locked() ->
     [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
 
     ?assertEqual(
-        {error, locked}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {error, locked},
+        maybe_deliver_packet_to_route(hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, 1)
     ),
 
     ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
@@ -893,7 +894,8 @@ maybe_deliver_packet_to_route_inactive() ->
     [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
 
     ?assertEqual(
-        {error, inactive}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {error, inactive},
+        maybe_deliver_packet_to_route(hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, 1)
     ),
 
     ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
@@ -925,7 +927,8 @@ maybe_deliver_packet_to_route_in_cooldown() ->
     [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
 
     ?assertEqual(
-        {error, in_cooldown}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {error, in_cooldown},
+        maybe_deliver_packet_to_route(hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, 1)
     ),
 
     ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
@@ -961,20 +964,24 @@ maybe_deliver_packet_to_route_multi_buy() ->
     [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
     %% Packet 1 accepted using SKF Multi buy 1 (counter 1)
     ?assertEqual(
-        {ok, true}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {ok, true},
+        maybe_deliver_packet_to_route(hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, 1)
     ),
     %% Packet 2 refused using SKF Multi buy 1 (counter 2)
     ?assertEqual(
-        {error, multi_buy}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {error, multi_buy},
+        maybe_deliver_packet_to_route(hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, 1)
     ),
 
     %% Packet 3 accepted using route multi buy 3 (counter 3)
     ?assertEqual(
-        {ok, true}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 0)
+        {ok, true},
+        maybe_deliver_packet_to_route(hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, 0)
     ),
     %% Packet 4 refused using route multi buy 3 (counter 4)
     ?assertEqual(
-        {error, multi_buy}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 0)
+        {error, multi_buy},
+        maybe_deliver_packet_to_route(hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, 0)
     ),
 
     ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
