@@ -207,7 +207,6 @@ handle_info({data, _StreamID, RouteStreamRes}, #state{} = State) ->
     _ = erlang:spawn(
         fun() ->
             ok = process_route_stream_res(Action, Data),
-            {Type, _} = Data,
             ok = hpr_metrics:ics_update(Type, Action)
         end
     ),
