@@ -1,6 +1,8 @@
 -module(hpr_route_stream_worker_SUITE).
 
 -include_lib("eunit/include/eunit.hrl").
+
+-include("hpr_metrics.hrl").
 -include("../src/grpc/autogen/iot_config_pb.hrl").
 
 -export([
@@ -107,6 +109,23 @@ main_test(_Config) ->
         end
     ),
 
+    ?assertEqual(
+        1,
+        prometheus_counter:value(?METRICS_ICS_UPDATES_COUNTER, [route, add])
+    ),
+    ?assertEqual(
+        1,
+        prometheus_counter:value(?METRICS_ICS_UPDATES_COUNTER, [eui_pair, add])
+    ),
+    ?assertEqual(
+        1,
+        prometheus_counter:value(?METRICS_ICS_UPDATES_COUNTER, [devaddr_range, add])
+    ),
+    ?assertEqual(
+        1,
+        prometheus_counter:value(?METRICS_ICS_UPDATES_COUNTER, [skf, add])
+    ),
+
     [RouteETS1] = hpr_route_ets:lookup_route(Route1ID),
     SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
@@ -130,6 +149,11 @@ main_test(_Config) ->
         fun() ->
             0 =:= ets:info(hpr_route_eui_pairs_ets, size)
         end
+    ),
+
+    ?assertEqual(
+        1,
+        prometheus_counter:value(?METRICS_ICS_UPDATES_COUNTER, [eui_pair, remove])
     ),
 
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 12)),

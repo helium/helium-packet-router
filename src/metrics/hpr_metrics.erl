@@ -15,7 +15,8 @@
     observe_packet_report/2,
     observe_multi_buy/2,
     observe_find_routes/1,
-    observe_grpc_connection/2
+    observe_grpc_connection/2,
+    ics_update/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -116,6 +117,14 @@ observe_grpc_connection(Type, Start) ->
         [Type],
         erlang:system_time(millisecond) - Start
     ).
+
+-spec ics_update(
+    Type :: route | eui_pair | devaddr_range | skf,
+    Action :: add | remove
+) -> ok.
+ics_update(Type, Action) ->
+    _ = prometheus_counter:inc(?METRICS_ICS_UPDATES_COUNTER, [Type, Action]),
+    ok.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
