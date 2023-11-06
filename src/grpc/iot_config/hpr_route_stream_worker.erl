@@ -99,7 +99,6 @@
     devaddr_added := non_neg_integer()
 }.
 
-
 -record(state, {
     stream :: grpcbox_client:stream() | undefined,
     conn_backoff :: backoff:backoff()
