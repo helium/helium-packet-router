@@ -174,15 +174,11 @@ terminate(_Reason, _State = #state{}) ->
 do_crawl_routing(Window) ->
     Now = erlang:system_time(millisecond) - Window,
     %% MS = ets:fun2ms(fun(#routing_entry{time = Time}) when Time < 1234 -> true end).
-    MS = [{
-        {routing_entry,
-            '_',
-            '$1',
-            '_',
-            '_',
-            '_'
-        },
-        [{'<', '$1', Now}],
-        [true]
-    }],
+    MS = [
+        {
+            {routing_entry, '_', '$1', '_', '_', '_'},
+            [{'<', '$1', Now}],
+            [true]
+        }
+    ],
     ets:select_delete(?ROUTING_ETS, MS).

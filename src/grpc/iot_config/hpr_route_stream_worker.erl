@@ -99,7 +99,6 @@
     devaddr_added := non_neg_integer()
 }.
 
-
 -record(state, {
     stream :: grpcbox_client:stream() | undefined,
     conn_backoff :: backoff:backoff()
@@ -205,7 +204,12 @@ handle_info({data, _StreamID, RouteStreamRes}, #state{} = State) ->
     Data = hpr_route_stream_res:data(RouteStreamRes),
     {Type, _} = Data,
     lager:debug([{action, Action}, {type, Type}], "got route stream update"),
-    _ = erlang:spawn(fun() -> ok = process_route_stream_res(Action, Data) end),
+    _ = erlang:spawn(
+        fun() ->
+            ok = process_route_stream_res(Action, Data),
+            ok = hpr_metrics:ics_update(Type, Action)
+        end
+    ),
     {noreply, State};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
