@@ -8,10 +8,14 @@
 -export([
     start/1,
     pubkey_bin/1,
+    session_key/1,
     send_packet/2,
     receive_send_packet/1,
     receive_env_down/1,
-    receive_register/1
+    receive_register/1,
+    receive_session_init/2,
+    receive_stream_down/1,
+    receive_terminate/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -31,6 +35,8 @@
 -define(RCV_TIMEOUT, 100).
 -define(SEND_PACKET, send_packet).
 -define(REGISTER, register).
+-define(SESSION_INIT, session_init).
+-define(STREAM_DOWN, stream_down).
 
 -record(state, {
     forward :: pid(),
@@ -57,6 +63,10 @@ start(Args) ->
 pubkey_bin(Pid) ->
     gen_server:call(Pid, pubkey_bin).
 
+-spec session_key(Pid :: pid()) -> binary().
+session_key(Pid) ->
+    gen_server:call(Pid, session_key).
+
 -spec send_packet(Pid :: pid(), Args :: map()) -> ok.
 send_packet(Pid, Args) ->
     gen_server:cast(Pid, {?SEND_PACKET, Args}).
@@ -82,11 +92,39 @@ receive_env_down(GatewayPid) ->
     end.
 
 -spec receive_register(GatewayPid :: pid()) ->
-    {ok, EnvDown :: hpr_envelope_up:envelope()} | {error, timeout}.
+    {ok, EnvUp :: hpr_envelope_up:envelope()} | {error, timeout}.
 receive_register(GatewayPid) ->
     receive
         {?MODULE, GatewayPid, {?REGISTER, EnvUp}} ->
             {ok, EnvUp}
+    after timer:seconds(2) ->
+        {error, timeout}
+    end.
+
+-spec receive_session_init(GatewayPid :: pid(), Timeout :: non_neg_integer()) ->
+    {ok, EnvUp :: hpr_envelope_up:envelope()} | {error, timeout}.
+receive_session_init(GatewayPid, Timeout) ->
+    receive
+        {?MODULE, GatewayPid, {?SESSION_INIT, EnvUp}} ->
+            {ok, EnvUp}
+    after Timeout ->
+        {error, timeout}
+    end.
+
+-spec receive_stream_down(GatewayPid :: pid()) -> ok | {error, timeout}.
+receive_stream_down(GatewayPid) ->
+    receive
+        {?MODULE, GatewayPid, ?STREAM_DOWN} ->
+            ok
+    after timer:seconds(2) ->
+        {error, timeout}
+    end.
+
+-spec receive_terminate(GatewayPid :: pid()) -> {ok, any()} | {error, timeout}.
+receive_terminate(GatewayPid) ->
+    receive
+        {?MODULE, GatewayPid, {terminate, Stream}} ->
+            {ok, Stream}
     after timer:seconds(2) ->
         {error, timeout}
     end.
@@ -115,6 +153,8 @@ init(
 
 handle_call(pubkey_bin, _From, #state{pubkey_bin = PubKeyBin} = State) ->
     {reply, PubKeyBin, State};
+handle_call(session_key, _From, #state{session_key = {SessionKey, _}} = State) ->
+    {reply, SessionKey, State};
 handle_call(_Msg, _From, State) ->
     lager:debug("unknown call ~p", [_Msg]),
     {reply, ok, State}.
@@ -199,7 +239,7 @@ handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = Si
             EnvUp = hpr_envelope_up:new(SignedReg),
             ok = grpcbox_client:send(Stream, EnvUp),
             Pid ! {?MODULE, self(), {?REGISTER, EnvUp}},
-            lager:debug("connected and registered"),
+            lager:debug("connected and registering"),
             {noreply, State#state{stream = Stream}}
     end;
 %% GRPC stream callbacks
@@ -209,6 +249,8 @@ handle_info(
 ) ->
     lager:debug("got EnvDown ~p", [EnvDown]),
     case hpr_envelope_down:data(EnvDown) of
+        undefined ->
+            {noreply, State};
         {packet, _Packet} ->
             Pid ! {?MODULE, self(), {data, EnvDown}},
             {noreply, State};
@@ -224,25 +266,30 @@ handle_info(
             lager:debug("session initialized"),
             {noreply, State#state{session_key = {SessionKey, libp2p_crypto:mk_sig_fun(PrivKey)}}}
     end;
-handle_info(
-    {'DOWN', Ref, process, Pid, _Reason},
-    #state{stream = #{stream_pid := Pid, monitor_ref := Ref}} = State
-) ->
-    lager:debug("test gateway stream went down"),
-    {noreply, State#state{stream = undefined}};
 handle_info({headers, _StreamID, _Headers}, State) ->
+    lager:debug("test gateway got headers ~p for ~w", [_Headers, _StreamID]),
     {noreply, State};
 handle_info({trailers, _StreamID, _Trailers}, State) ->
+    lager:debug("test gateway got trailers ~p for ~w", [_Trailers, _StreamID]),
     {noreply, State};
+handle_info({eos, StreamID}, #state{forward = ForwardPid} = State) ->
+    lager:debug("test gateway got eos for ~w", [StreamID]),
+    ForwardPid ! {?MODULE, self(), ?STREAM_DOWN},
+    {noreply, State#state{stream = undefined}};
 handle_info(_Msg, State) ->
     lager:debug("unknown info ~p", [_Msg]),
     {noreply, State}.
 
+terminate(_Reason, #state{forward = Pid, pubkey_bin = PubKeyBin, stream = undefined}) ->
+    ok = grpcbox_channel:stop(PubKeyBin),
+    lager:debug("terminate ~p", [_Reason]),
+    Pid ! {?MODULE, self(), {terminate, undefined}},
+    ok;
 terminate(_Reason, #state{forward = Pid, pubkey_bin = PubKeyBin, stream = Stream}) ->
     ok = grpcbox_client:close_send(Stream),
     ok = grpcbox_channel:stop(PubKeyBin),
-    Pid ! {?MODULE, self(), {terminate, Stream}},
     lager:debug("terminate ~p", [_Reason]),
+    Pid ! {?MODULE, self(), {terminate, Stream}},
     ok.
 
 %% ------------------------------------------------------------------

@@ -320,20 +320,19 @@ gateway_disconnect_test(_Config) ->
     _ConnPid = h2_stream_set:connection(StreamSet),
 
     ok = gen_server:stop(GatewayPid),
-    ok =
-        receive
-            {hpr_test_gateway, GatewayPid,
-                {terminate, #{channel := GatewayStreamSet, stream_pid := GatewayStreamPid}}} ->
-                GatewayConnPid = h2_stream_set:connection(GatewayStreamSet),
-                ok = test_utils:wait_until(
-                    fun() ->
-                        false == erlang:is_process_alive(GatewayConnPid) andalso
-                            false == erlang:is_process_alive(GatewayStreamPid) andalso
-                            false == erlang:is_process_alive(GatewayPid)
-                    end
-                )
-        after timer:seconds(3) -> ct:fail(no_terminate_rcvd)
-        end,
+    case hpr_test_gateway:receive_terminate(GatewayPid) of
+        {error, timeout} ->
+            ct:fail(no_terminate_rcvd);
+        {ok, #{channel := GatewayStreamSet, stream_pid := GatewayStreamPid}} ->
+            GatewayConnPid = h2_stream_set:connection(GatewayStreamSet),
+            ok = test_utils:wait_until(
+                fun() ->
+                    false == erlang:is_process_alive(GatewayConnPid) andalso
+                        false == erlang:is_process_alive(GatewayStreamPid) andalso
+                        false == erlang:is_process_alive(GatewayPid)
+                end
+            )
+    end,
 
     ok = test_utils:wait_until(
         fun() ->
