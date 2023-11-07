@@ -15,20 +15,20 @@
 ]).
 
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
--define(SESSION_TIMER, timer:minutes(30)).
--define(SESSION_RESET, session_reset).
+-define(SESSION_TIMER, timer:minutes(35)).
+-define(SESSION_KILL, session_kill).
 
 -record(handler_state, {
     started :: non_neg_integer(),
     pubkey_bin :: undefined | binary(),
     nonce :: undefined | binary(),
-    session_key :: undefined | binary(),
-    session_timer :: undefined | reference()
+    session_key :: undefined | binary()
 }).
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_Rpc, StreamState) ->
     HandlerState = #handler_state{started = erlang:system_time(millisecond)},
+    ok = schedule_session_kill(),
     grpcbox_stream:stream_handler_state(StreamState, HandlerState).
 
 -spec route(hpr_envelope_up:envelope(), grpcbox_stream:t()) ->
@@ -68,9 +68,9 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
     lager:info("give_away registration to ~p", [NewPid]),
     gproc:give_away({n, l, ?REG_KEY(PubKeyBin)}, NewPid),
     grpcbox_stream:send(true, hpr_envelope_down:new(undefined), StreamState);
-handle_info(?SESSION_RESET, StreamState0) ->
-    {EnvDown, StreamState1} = create_session_offer(StreamState0),
-    grpcbox_stream:send(false, EnvDown, StreamState1);
+handle_info(?SESSION_KILL, StreamState0) ->
+    lager:debug("received session kill for stream"),
+    grpcbox_stream:send(true, hpr_envelope_down:new(undefined), StreamState0);
 handle_info(_Msg, StreamState) ->
     StreamState.
 
@@ -185,12 +185,7 @@ handle_session_init(SessionInit, StreamState) ->
                         hpr_utils:bin_to_hex_string(Nonce),
                         libp2p_crypto:bin_to_b58(SessionKey)
                     ]),
-                    HandlerState1 = HandlerState0#handler_state{
-                        session_key = SessionKey,
-                        session_timer = schedule_session_reset(
-                            HandlerState0#handler_state.session_timer
-                        )
-                    },
+                    HandlerState1 = HandlerState0#handler_state{session_key = SessionKey},
                     {ok, grpcbox_stream:stream_handler_state(StreamState, HandlerState1)}
             end
     end.
@@ -209,12 +204,10 @@ create_session_offer(StreamState0) ->
     ]),
     {EnvDown, StreamState1}.
 
--spec schedule_session_reset(OldTimer :: undefined | reference()) -> reference().
-schedule_session_reset(OldTimer) when is_reference(OldTimer) ->
-    _ = erlang:cancel_timer(OldTimer),
-    erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET);
-schedule_session_reset(_OldTimer) ->
-    erlang:send_after(?SESSION_TIMER, self(), ?SESSION_RESET).
+-spec schedule_session_kill() -> ok.
+schedule_session_kill() ->
+    erlang:send_after(?SESSION_TIMER, self(), ?SESSION_KILL),
+    ok.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
