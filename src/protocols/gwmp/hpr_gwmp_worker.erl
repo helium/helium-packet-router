@@ -253,17 +253,9 @@ packet_up_to_push_data(Up, GatewayTime) ->
             data => base64:encode(hpr_packet_up:payload(Up)),
             meta => #{
                 gateway_id => B58,
-                gateway_name => Name
+                gateway_name => Name,
+                regi => hpr_packet_up:region(Up)
             }
-        },
-        #{
-            regi => hpr_packet_up:region(Up),
-            %% TODO: Add back potential geo stuff
-            %% CP breaks if {lati, long} are not parseable number
-            %% inde => Index,
-            %% lati => Lat,
-            %% long => Long,
-            pubk => B58
         }
     ),
     {Token, Data}.
