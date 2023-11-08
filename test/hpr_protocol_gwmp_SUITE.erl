@@ -739,14 +739,11 @@ verify_push_data(PacketUp, PushDataBinary) ->
                         ),
                         <<"gateway_name">> => erlang:list_to_binary(
                             hpr_utils:gateway_name(PubKeyBin)
-                        )
+                        ),
+                        <<"regi">> => erlang:atom_to_binary(
+                            hpr_packet_up:region(PacketUp))
                     }
                 }
-            ],
-        <<"stat">> =>
-            #{
-                <<"pubk">> => erlang:list_to_binary(libp2p_crypto:bin_to_b58(PubKeyBin)),
-                <<"regi">> => erlang:atom_to_binary(hpr_packet_up:region(PacketUp))
-            }
+            ]
     },
     ?assert(test_utils:match_map(MapFromPacketUp, JsonData)).
