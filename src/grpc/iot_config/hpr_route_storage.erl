@@ -1,7 +1,7 @@
 -module(hpr_route_storage).
 
 -export([
-    init/0,
+    init_ets/0,
 
     insert/1, insert/2, insert/3,
     delete/1,
@@ -20,7 +20,11 @@
 -type backoff() :: undefined | {non_neg_integer(), backoff:backoff()}.
 -type route() :: #hpr_route_ets{}.
 
-init() ->
+-spec init_ets() -> ok.
+init_ets() ->
+    ?ETS_ROUTES = ets:new(?ETS_ROUTES, [
+        public, named_table, set, {keypos, #hpr_route_ets.id}, {read_concurrency, true}
+    ]),
     ok.
 
 -spec insert(Route :: hpr_route:route()) -> ok.

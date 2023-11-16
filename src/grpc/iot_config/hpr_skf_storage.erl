@@ -2,12 +2,15 @@
 
 -export([
     make_ets/1,
-    delete_route/1,
-    replace_route/2,
 
     insert/1,
     update/4,
-    delete/1
+    delete/1,
+    lookup/2,
+    select/1, select/2,
+
+    delete_route/1,
+    replace_route/2
 ]).
 
 -define(ETS_SKFS, hpr_route_skfs_ets).
@@ -82,6 +85,24 @@ delete(SKF) ->
             ])
     end,
     ok.
+
+-spec lookup(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
+    [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
+lookup(ETS, DevAddr) ->
+    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
+    ets:select(ETS, MS).
+
+-spec select(Continuation :: ets:continuation()) ->
+    {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
+select(Continuation) ->
+    ets:select(Continuation).
+
+-spec select(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
+    {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
+    | '$end_of_table'.
+select(ETS, DevAddr) ->
+    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
+    ets:select(ETS, MS, 100).
 
 %% -------------------------------------------------------------------
 %% Route Stream Functions
