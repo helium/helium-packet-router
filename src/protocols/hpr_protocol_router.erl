@@ -8,7 +8,7 @@
 -export([
     start_link/1,
     init/0,
-    send/2,
+    send/3,
     get_stream/3,
     remove_stream/1, remove_stream/2,
     register/2
@@ -64,9 +64,10 @@ init() ->
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
-    Route :: hpr_route:route()
+    Route :: hpr_route:route(),
+    GatewayLocation :: {h3:index(), float(), float()} | undefined
 ) -> ok | {error, any()}.
-send(PacketUp, Route) ->
+send(PacketUp, Route, _GatewayLocation) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
     LNS = hpr_route:lns(Route),
     Server = hpr_route:server(Route),

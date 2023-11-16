@@ -105,7 +105,9 @@ register(PubKeyBin) ->
         {error, not_found} ->
             true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
             lager:debug("register"),
-            hpr_protocol_router:register(PubKeyBin, Self),
+            ok = hpr_protocol_router:register(PubKeyBin, Self),
+            %% Atttempt to get location from ICS to pre-cache data
+            _ = hpr_gateway_location:get(PubKeyBin),
             ok;
         {ok, Self} ->
             lager:info("nothing to do, already registered"),

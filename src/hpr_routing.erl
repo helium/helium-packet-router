@@ -336,7 +336,16 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
                     Error;
                 {ok, IsFree} ->
                     RouteID = hpr_route:id(Route),
-                    case deliver_packet(Protocol, PacketUp, Route) of
+                    PubKeyBin = hpr_packet_up:gateway(PacketUp),
+                    GatewayLocation =
+                        case hpr_gateway_location:get(PubKeyBin) of
+                            {error, _Reason} ->
+                                lager:debug("failed to get gateway location ~p", [_Reason]),
+                                undefined;
+                            {ok, H3Index, Lat, Long} ->
+                                {H3Index, Lat, Long}
+                        end,
+                    case deliver_packet(Protocol, PacketUp, Route, GatewayLocation) of
                         {error, Reason} = Error ->
                             lager:warning(RouteMD, "error ~p", [Reason]),
                             ok = hpr_route_ets:inc_backoff(RouteID),
@@ -354,15 +363,16 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
 -spec deliver_packet(
     hpr_route:protocol(),
     PacketUp :: hpr_packet_up:packet(),
-    Route :: hpr_route:route()
+    Route :: hpr_route:route(),
+    GatewayLocation :: {h3:index(), float(), float()} | undefined
 ) -> hpr_routing_response().
-deliver_packet({packet_router, _}, PacketUp, Route) ->
-    hpr_protocol_router:send(PacketUp, Route);
-deliver_packet({gwmp, _}, PacketUp, Route) ->
-    hpr_protocol_gwmp:send(PacketUp, Route);
-deliver_packet({http_roaming, _}, PacketUp, Route) ->
-    hpr_protocol_http_roaming:send(PacketUp, Route);
-deliver_packet(_OtherProtocol, _PacketUp, _Route) ->
+deliver_packet({packet_router, _}, PacketUp, Route, GatewayLocation) ->
+    hpr_protocol_router:send(PacketUp, Route, GatewayLocation);
+deliver_packet({gwmp, _}, PacketUp, Route, GatewayLocation) ->
+    hpr_protocol_gwmp:send(PacketUp, Route, GatewayLocation);
+deliver_packet({http_roaming, _}, PacketUp, Route, GatewayLocation) ->
+    hpr_protocol_http_roaming:send(PacketUp, Route, GatewayLocation);
+deliver_packet(_OtherProtocol, _PacketUp, _Route, _GatewayLocation) ->
     lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
 
 -spec maybe_report_packet(

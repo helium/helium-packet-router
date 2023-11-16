@@ -11,13 +11,14 @@
 
 -include("hpr_http_roaming.hrl").
 
--export([send/2]).
+-export([send/3]).
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
-    Route :: hpr_route:route()
+    Route :: hpr_route:route(),
+    GatewayLocation :: {h3:index(), float(), float()} | undefined
 ) -> ok | {error, any()}.
-send(PacketUp, Route) ->
+send(PacketUp, Route, _GatewayLocation) ->
     WorkerKey = worker_key_from(PacketUp, Route),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
