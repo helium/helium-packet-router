@@ -54,6 +54,7 @@ end_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 
 main_test(_Config) ->
+    %% Create gateway and add location to service
     #{public := PubKey1} = libp2p_crypto:generate_keys(ecc_compact),
     PubKeyBin1 = libp2p_crypto:pubkey_to_bin(PubKey1),
     IndexString = "8828308281fffff",
@@ -62,35 +63,35 @@ main_test(_Config) ->
         PubKeyBin1,
         IndexString
     ),
+    {ExpectedLat, ExpectedLong} = h3:to_geo(ExpectedIndex),
 
-    Before = erlang:system_time(millisecond),
+    %% Make request to get gateway location
+    Before = erlang:system_time(millisecond) - 1,
+    ?assertEqual(
+        {ok, ExpectedIndex, ExpectedLat, ExpectedLong}, hpr_gateway_location:get(PubKeyBin1)
+    ),
 
-    %% Let worker start
-    ok = test_utils:wait_until(fun() ->
-        try hpr_test_ics_gateway_service:get(PubKeyBin1) of
-            {ok, ExpectedIndex, _, _} -> true;
-            _ -> false
-        catch
-            _:_ ->
-                false
-        end
-    end),
-
-    [LocationRec] = ets:lookup(hpr_gateway_location_ets, PubKeyBin1),
-
-    ?assertEqual(PubKeyBin1, LocationRec#location.gateway),
-    ?assertEqual(ExpectedIndex, LocationRec#location.h3_index),
-    ?assertNotEqual(undefined, LocationRec#location.lat),
-    ?assertNotEqual(undefined, LocationRec#location.long),
-
-    Timestamp = LocationRec#location.timestamp,
-    Now = erlang:system_time(millisecond),
-
-    ?assert(Timestamp > Before),
-    ?assert(Timestamp =< Now),
-
+    %% Check that req was received
     [{location, Req1}] = rcv_loop([]),
     ?assertEqual(PubKeyBin1, Req1#iot_config_gateway_location_req_v1_pb.gateway),
+
+    %% Verify ETS data
+    [ETSLocationRec] = ets:lookup(hpr_gateway_location_ets, PubKeyBin1),
+    ?assertEqual(PubKeyBin1, ETSLocationRec#location.gateway),
+    ?assertEqual(ExpectedIndex, ETSLocationRec#location.h3_index),
+    ?assertEqual(ExpectedLat, ETSLocationRec#location.lat),
+    ?assertEqual(ExpectedLong, ETSLocationRec#location.long),
+    ?assert(ETSLocationRec#location.timestamp > Before),
+    ?assert(ETSLocationRec#location.timestamp =< erlang:system_time(millisecond)),
+
+    %% Verify DETS data
+    [DETSLocationRec] = dets:lookup(hpr_gateway_location_dets, PubKeyBin1),
+    ?assertEqual(PubKeyBin1, DETSLocationRec#location.gateway),
+    ?assertEqual(ExpectedIndex, DETSLocationRec#location.h3_index),
+    ?assertEqual(ExpectedLat, DETSLocationRec#location.lat),
+    ?assertEqual(ExpectedLong, DETSLocationRec#location.long),
+    ?assert(DETSLocationRec#location.timestamp > Before),
+    ?assert(DETSLocationRec#location.timestamp =< erlang:system_time(millisecond)),
 
     ok.
 
