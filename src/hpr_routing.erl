@@ -257,7 +257,7 @@ maybe_deliver_no_routes(PacketUp) ->
             lists:foreach(
                 fun({Host, Port}) ->
                     Route = hpr_route:new_packet_router(Host, Port),
-                    hpr_protocol_router:send(PacketUp, Route)
+                    hpr_protocol_router:send(PacketUp, Route, undefined)
                 end,
                 HostsAndPorts
             )
