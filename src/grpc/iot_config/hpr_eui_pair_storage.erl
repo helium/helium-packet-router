@@ -2,7 +2,9 @@
 
 -export([
     delete_route/1,
+    replace_route/2,
 
+    insert/1,
     lookup/2
 ]).
 
@@ -27,6 +29,24 @@ lookup(AppEUI, DevEUI) ->
         ]) ++ lookup(AppEUI, 0)
     ).
 
+-spec insert(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
+insert(EUIPair) ->
+    true = ets:insert(?ETS_EUI_PAIRS, [
+        {
+            {hpr_eui_pair:app_eui(EUIPair), hpr_eui_pair:dev_eui(EUIPair)},
+            hpr_eui_pair:route_id(EUIPair)
+        }
+    ]),
+    lager:debug(
+        [
+            {app_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:app_eui(EUIPair))},
+            {dev_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:dev_eui(EUIPair))},
+            {route_id, hpr_eui_pair:route_id(EUIPair)}
+        ],
+        "inserted eui pair"
+    ),
+    ok.
+
 %% -------------------------------------------------------------------
 %% Route Stream Helpers
 %% -------------------------------------------------------------------
@@ -35,3 +55,10 @@ lookup(AppEUI, DevEUI) ->
 delete_route(RouteID) ->
     MS2 = [{{'_', RouteID}, [], [true]}],
     ets:select_delete(?ETS_EUI_PAIRS, MS2).
+
+-spec replace_route(RouteID :: hpr_route:id(), EUIs :: list(hpr_eui_pair:eui_pair())) ->
+    non_neg_integer().
+replace_route(RouteID, EUIs) ->
+    Removed = ?MODULE:delete_route(RouteID),
+    lists:foreach(fun ?MODULE:insert/1, EUIs),
+    Removed.

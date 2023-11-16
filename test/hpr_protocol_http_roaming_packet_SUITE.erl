@@ -1677,10 +1677,10 @@ message_type_from_uplink_ok(_MessageType, _FlowType) ->
 flow_type_from(UplinkToken) ->
     {ok, _PubKeyBin, _Region, _PacketTime, RouteID} =
         hpr_http_roaming:parse_uplink_token(UplinkToken),
-    case hpr_route_ets:lookup_route(RouteID) of
-        [] ->
+    case hpr_route_storage:lookup(RouteID) of
+        {error, not_found} ->
             throw(could_not_find_route_from_token);
-        [RouteETS] ->
+        {ok, RouteETS} ->
             Route = hpr_route_ets:route(RouteETS),
             hpr_route:http_roaming_flow_type(Route)
     end.

@@ -287,7 +287,7 @@ refresh_route_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(Route1ID) of
-                [RouteETS] ->
+                {ok, RouteETS} ->
                     1 =:= ets:info(hpr_routes_ets, size) andalso
                         1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
                         1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
@@ -298,7 +298,7 @@ refresh_route_test(_Config) ->
         end
     ),
 
-    [RouteETS1] = hpr_route_ets:lookup_route(Route1ID),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(Route1ID),
     SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
     %% Check that we can query route via config
@@ -349,7 +349,7 @@ refresh_route_test(_Config) ->
         },
         Answer
     ),
-    [RouteETS2] = hpr_route_ets:lookup_route(Route1ID),
+    {ok, RouteETS2} = hpr_route_ets:lookup_route(Route1ID),
     SKFETS2 = hpr_route_ets:skf_ets(RouteETS2),
 
     %% Old routing is removed
@@ -396,7 +396,7 @@ refresh_route_test(_Config) ->
     ),
 
     %% Everything was removed
-    [RouteETS3] = hpr_route_ets:lookup_route(Route1ID),
+    {ok, RouteETS3} = hpr_route_ets:lookup_route(Route1ID),
     SKFETS3 = hpr_route_ets:skf_ets(RouteETS3),
     ?assertMatch([], hpr_route_ets:lookup_devaddr_range(16#00000005)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 12)),

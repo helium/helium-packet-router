@@ -180,7 +180,7 @@ config_oui_list(_, _, _) ->
 
 config_route(["config", "route", RouteID], [], Flags) ->
     Options = maps:from_list(Flags),
-    RoutesETS = hpr_route_ets:lookup_route(RouteID),
+    {ok, RouteETS} = hpr_route_ets:lookup_route(RouteID),
 
     %% ========================================================
     %% - ID         :: 48088786-5465-4115-92de-5214a88e9a75
@@ -209,15 +209,7 @@ config_route(["config", "route", RouteID], [], Flags) ->
         display_skfs => maps:is_key(display_skfs, Options)
     },
 
-    c_list(
-        lists:foldl(
-            fun(RouteETS, Lines) ->
-                Lines ++ [Spacer | mk_route_info(RouteETS, DisplayOptions)]
-            end,
-            [],
-            RoutesETS
-        )
-    );
+    c_list([Spacer | mk_route_info(RouteETS, DisplayOptions)]);
 config_route(_, _, _) ->
     usage.
 
@@ -256,9 +248,9 @@ config_route_refresh(_, _, _) ->
 
 config_route_activate(["config", "route", "activate", RouteID], [], _Flags) ->
     case hpr_route_ets:lookup_route(RouteID) of
-        [] ->
+        {error, not_found} ->
             c_text("Route ~s not found", [RouteID]);
-        [RouteETS] ->
+        {ok, RouteETS} ->
             Route0 = hpr_route_ets:route(RouteETS),
             Route1 = hpr_route:active(true, Route0),
             ok = hpr_route_ets:insert_route(Route1),
@@ -269,9 +261,9 @@ config_route_activate(_, _, _) ->
 
 config_route_deactivate(["config", "route", "deactivate", RouteID], [], _Flags) ->
     case hpr_route_ets:lookup_route(RouteID) of
-        [] ->
+        {error, not_found} ->
             c_text("Route ~s not found", [RouteID]);
-        [RouteETS] ->
+        {ok, RouteETS} ->
             Route0 = hpr_route_ets:route(RouteETS),
             Route1 = hpr_route:active(false, Route0),
             ok = hpr_route_ets:insert_route(Route1),

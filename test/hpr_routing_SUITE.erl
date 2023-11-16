@@ -227,7 +227,7 @@ mic_check_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(RouteID) of
-                [RouteETS] ->
+                {ok, RouteETS} ->
                     ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
                 _ ->
@@ -256,7 +256,7 @@ mic_check_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(RouteID) of
-                [RouteETS] ->
+                {ok, RouteETS} ->
                     ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
                 _ ->
@@ -281,7 +281,7 @@ mic_check_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(RouteID) of
-                [RouteETS] ->
+                {ok, RouteETS} ->
                     ETS = hpr_route_ets:skf_ets(RouteETS),
                     2 =:= ets:info(ETS, size);
                 _ ->
@@ -331,7 +331,7 @@ skf_max_copies_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(RouteID) of
-                [RouteETS] ->
+                {ok, RouteETS} ->
                     ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
                 _ ->
@@ -1027,7 +1027,7 @@ in_cooldown_route_test(_Config) ->
     ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 3)),
 
     %% We check the route and make sure that the backoff is setup properly
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID),
     {Timestamp1, Backoff1} = hpr_route_ets:backoff(RouteETS1),
     ?assert(Timestamp1 > erlang:system_time(millisecond)),
     ?assertEqual(2000, backoff:get(Backoff1)),
@@ -1040,7 +1040,7 @@ in_cooldown_route_test(_Config) ->
     ?assertEqual(3, meck:num_calls(hpr_protocol_router, send, 3)),
 
     %% The route backoff should be back to undefined
-    [RouteETS2] = hpr_route_ets:lookup_route(RouteID),
+    {ok, RouteETS2} = hpr_route_ets:lookup_route(RouteID),
     ?assertEqual(undefined, hpr_route_ets:backoff(RouteETS2)),
 
     ?assert(meck:validate(hpr_protocol_router)),
@@ -1431,7 +1431,7 @@ find_route_load_test(_Config) ->
     {Time1, Result1} = timer:tc(hpr_routing, find_routes, [PacketType, PacketUp]),
     ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Time1, Result1}]),
 
-    [RouteETS1] = hpr_route_ets:lookup_route(Route1ID),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(Route1ID),
     SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
     timer:sleep(2000),
@@ -1503,7 +1503,7 @@ find_route_load_test(_Config) ->
     }),
     hpr_route_ets:insert_skf(SKF2),
 
-    [RouteETS2] = hpr_route_ets:lookup_route(Route2ID),
+    {ok, RouteETS2} = hpr_route_ets:lookup_route(Route2ID),
     SKFETS2 = hpr_route_ets:skf_ets(RouteETS2),
     timer:sleep(10),
     lists:foreach(
