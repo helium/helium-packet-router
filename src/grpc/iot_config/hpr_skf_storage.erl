@@ -108,6 +108,7 @@ replace_route(RouteID, NewSKFs) ->
             OldTab = hpr_route_ets:skf_ets(RouteETS),
             NewTab = make_ets(RouteID),
             lists:foreach(fun(SKF) -> do_insert_skf(NewTab, SKF) end, NewSKFs),
+
             ok = hpr_route_storage:insert(
                 hpr_route_ets:route(RouteETS),
                 NewTab,
@@ -115,6 +116,8 @@ replace_route(RouteID, NewSKFs) ->
             ),
 
             OldSize = ets:info(OldTab, size),
+
+            ct:print("replace on ~s: ~p", [RouteID, [{old, OldSize}, {new, length(NewSKFs)}]]),
             ets:delete(OldTab),
             {ok, OldSize};
         Other ->

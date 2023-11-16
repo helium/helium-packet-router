@@ -139,6 +139,11 @@ handle_call({refresh_route, RouteID}, _From, State) ->
     EUIResponse = refresh_euis(RouteID),
     SKFResponse = refresh_skfs(RouteID),
 
+    ct:print(
+        "refreshing: ~s~n  D: ~p~n  E: ~p~nS: ~p",
+        [RouteID, DevaddrResponse, EUIResponse, SKFResponse]
+    ),
+
     Reply =
         case {DevaddrResponse, EUIResponse, SKFResponse} of
             {{ok, {DBefore, DAfter}}, {ok, {EBefore, EAfter}}, {ok, {SBefore, SAfter}}} ->
@@ -317,9 +322,9 @@ refresh_skfs(RouteID) ->
                 SKFs when erlang:is_list(SKFs) ->
                     Previous = hpr_route_ets:skfs_for_route(RouteID),
                     PreviousCnt = hpr_route_ets:replace_route_skfs(RouteID, SKFs),
-                    lager:info(
-                        [{previous, PreviousCnt}, {current, length(SKFs)}],
-                        "route refresh skfs"
+                    ct:print(
+                        "route refresh skfs ~p",
+                        [{{previous, PreviousCnt}, {current, length(SKFs)}}]
                     ),
                     {ok, {Previous, SKFs}}
             end;

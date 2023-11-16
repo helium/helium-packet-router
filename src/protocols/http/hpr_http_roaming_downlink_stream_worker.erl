@@ -159,10 +159,10 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
             lager:error("dowlink handle message error ~p", [Err]),
             {500, <<"An error occurred">>};
         {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, RouteID}} ->
-            case hpr_route_ets:lookup_route(RouteID) of
-                [] ->
+            case hpr_route_storage:lookup(RouteID) of
+                {error, not_found} ->
                     lager:warning([{route_id, RouteID}], "join_accept for non-existent route");
-                [RouteETS] ->
+                {ok, RouteETS} ->
                     lager:debug(
                         [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
                         "sending downlink"
@@ -193,10 +193,10 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                     end
             end;
         {downlink, PayloadResponse, {PubKeyBin, PacketDown}, RouteID} ->
-            case hpr_route_ets:lookup_route(RouteID) of
-                [] ->
+            case hpr_route_storage:lookup(RouteID) of
+                {error, not_found} ->
                     lager:warning([{route_id, RouteID}], "downlink for non-existent route");
-                [RouteETS] ->
+                {ok, RouteETS} ->
                     lager:debug(
                         [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
                         "sending downlink"

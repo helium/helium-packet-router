@@ -238,13 +238,13 @@ send_data(
                                     lager:error("error handling response: ~p", [Err]),
                                     ok;
                                 {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, RouteID}} ->
-                                    case hpr_route_ets:lookup_route(RouteID) of
-                                        [] ->
+                                    case hpr_route_storage:lookup(RouteID) of
+                                        {error, not_found} ->
                                             lager:warning(
                                                 [{route_id, RouteID}],
                                                 "received downlink for non-existent route"
                                             );
-                                        [RouteETS] ->
+                                        {ok, RouteETS} ->
                                             Route = hpr_route_ets:route(RouteETS),
                                             Endpoint = hpr_route:lns(Route),
                                             case

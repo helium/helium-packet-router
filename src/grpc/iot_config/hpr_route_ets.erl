@@ -102,25 +102,25 @@ backoff(RouteETS) ->
 inc_backoff(RouteID) ->
     Now = erlang:system_time(millisecond),
     case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{backoff = undefined}] ->
+        {ok, #hpr_route_ets{backoff = undefined}} ->
             Backoff = backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX),
             Delay = backoff:get(Backoff),
             ?MODULE:update_backoff(RouteID, {Now + Delay, Backoff});
-        [#hpr_route_ets{backoff = {_, Backoff0}}] ->
+        {ok, #hpr_route_ets{backoff = {_, Backoff0}}} ->
             {Delay, Backoff1} = backoff:fail(Backoff0),
             ?MODULE:update_backoff(RouteID, {Now + Delay, Backoff1});
-        _Other ->
+        {error, not_found} ->
             ok
     end.
 
 -spec reset_backoff(RouteID :: hpr_route:id()) -> ok.
 reset_backoff(RouteID) ->
     case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{backoff = undefined}] ->
+        {ok, #hpr_route_ets{backoff = undefined}} ->
             ok;
-        [#hpr_route_ets{backoff = _}] ->
+        {ok, #hpr_route_ets{backoff = _}} ->
             ?MODULE:update_backoff(RouteID, undefined);
-        _Other ->
+        {error, not_found} ->
             ok
     end.
 
@@ -135,7 +135,7 @@ insert_route(Route) ->
 
 -spec insert_route(Route :: hpr_route:route(), SKFETS :: ets:table()) -> ok.
 insert_route(Route, SKFETS) ->
-    hpr_route_storage:insert_route(Route, SKFETS, undefined).
+    hpr_route_storage:insert(Route, SKFETS, undefined).
 
 -spec insert_route(Route :: hpr_route:route(), SKFETS :: ets:table(), Backoff :: backoff()) -> ok.
 insert_route(Route, SKFETS, Backoff) ->
@@ -145,27 +145,13 @@ insert_route(Route, SKFETS, Backoff) ->
 delete_route(Route) ->
     hpr_route_storage:delete(Route).
 
--spec lookup_route(ID :: hpr_route:id()) -> [route()].
+-spec lookup_route(ID :: hpr_route:id()) -> {ok, route()} | {error, not_found}.
 lookup_route(ID) ->
     hpr_route_storage:lookup(ID).
 
 -spec insert_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
 insert_eui_pair(EUIPair) ->
-    true = ets:insert(?ETS_EUI_PAIRS, [
-        {
-            {hpr_eui_pair:app_eui(EUIPair), hpr_eui_pair:dev_eui(EUIPair)},
-            hpr_eui_pair:route_id(EUIPair)
-        }
-    ]),
-    lager:debug(
-        [
-            {app_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:app_eui(EUIPair))},
-            {dev_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:dev_eui(EUIPair))},
-            {route_id, hpr_eui_pair:route_id(EUIPair)}
-        ],
-        "inserted eui pair"
-    ),
-    ok.
+    hpr_eui_pair_storage:insert(EUIPair).
 
 -spec delete_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
 delete_eui_pair(EUIPair) ->
@@ -300,23 +286,21 @@ delete_all() ->
     EUIs :: list(hpr_eui_pair:eui_pair())
 ) -> non_neg_integer().
 replace_route_euis(RouteID, EUIs) ->
-    Removed = ?MODULE:delete_route_euis(RouteID),
-    lists:foreach(fun insert_eui_pair/1, EUIs),
-    Removed.
+    hpr_eui_pair_storage:replace_route(RouteID, EUIs).
 
 -spec replace_route_devaddrs(
     RouteID :: hpr_route:id(),
     DevAddrRanges :: list(hpr_devaddr_range:devaddr_range())
 ) -> non_neg_integer().
 replace_route_devaddrs(RouteID, DevAddrRanges) ->
-    Removed = ?MODULE:delete_route_devaddrs(RouteID),
+    Removed = hpr_devaddr_range_storage:delete_route(RouteID),
     lists:foreach(fun insert_devaddr_range/1, DevAddrRanges),
     Removed.
 
 -spec replace_route_skfs(hpr_route:id(), list(hpr_skf:skf())) ->
     {ok, non_neg_integer()} | {error, any()}.
 replace_route_skfs(RouteID, NewSKFs) ->
-    hpr_skf_storage:replace_route_skfs(RouteID, NewSKFs).
+    hpr_skf_storage:replace_route(RouteID, NewSKFs).
 
 %% ------------------------------------------------------------------
 %% CLI Functions
@@ -377,17 +361,19 @@ devaddr_ranges_count_for_route(RouteID) ->
         Vals :: {Devaddr :: non_neg_integer(), MaxCopies :: non_neg_integer()}
     }).
 skfs_for_route(RouteID) ->
-    case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{skf_ets = SKFETS}] ->
+    case hpr_route_storage:lookup(RouteID) of
+        {ok, RouteETS} ->
+            SKFETS = ?MODULE:skf_ets(RouteETS),
             ets:tab2list(SKFETS);
-        _Other ->
+        {error, not_found} ->
             []
     end.
 
 -spec skfs_count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
 skfs_count_for_route(RouteID) ->
-    case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{skf_ets = SKFETS}] ->
+    case hpr_route_storage:lookup(RouteID) of
+        {ok, RouteETS} ->
+            SKFETS = ?MODULE:skf_ets(RouteETS),
             ets:info(SKFETS, size);
         _Other ->
             0

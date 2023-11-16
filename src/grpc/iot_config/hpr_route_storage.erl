@@ -28,7 +28,7 @@ insert(Route) ->
     RouteID = hpr_route:id(Route),
     SKFETS =
         case ?MODULE:lookup(RouteID) of
-            [#hpr_route_ets{skf_ets = ETS}] ->
+            {ok, #hpr_route_ets{skf_ets = ETS}} ->
                 ETS;
             _Other ->
                 hpr_skf_storage:make_ets(RouteID)
