@@ -436,7 +436,7 @@ test_route() ->
 
     %% Create
     ?assertEqual(ok, ?MODULE:insert_route(Route0)),
-    [RouteETS0] = ?MODULE:lookup_route(RouteID),
+    {ok, RouteETS0} = ?MODULE:lookup_route(RouteID),
     ?assertEqual(RouteID, RouteETS0#hpr_route_ets.id),
     ?assertEqual(Route0, ?MODULE:route(RouteETS0)),
     SKFETS0 = ?MODULE:skf_ets(RouteETS0),
@@ -457,7 +457,7 @@ test_route() ->
         max_copies => 22
     }),
     ?assertEqual(ok, ?MODULE:insert_route(Route1)),
-    [RouteETS1] = ?MODULE:lookup_route(RouteID),
+    {ok, RouteETS1} = ?MODULE:lookup_route(RouteID),
     ?assertEqual(RouteID, RouteETS1#hpr_route_ets.id),
     ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
     SKFETS1 = ?MODULE:skf_ets(RouteETS0),
@@ -468,12 +468,12 @@ test_route() ->
 
     Backoff = {erlang:system_time(millisecond), backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX)},
     ?assertEqual(ok, ?MODULE:update_backoff(RouteID, Backoff)),
-    [RouteETS2] = ?MODULE:lookup_route(RouteID),
+    {ok, RouteETS2} = ?MODULE:lookup_route(RouteID),
     ?assertEqual(Backoff, ?MODULE:backoff(RouteETS2)),
 
     %% Delete
     ?assertEqual(ok, ?MODULE:delete_route(Route1)),
-    ?assertEqual([], ?MODULE:lookup_route(RouteID)),
+    ?assertEqual({error, not_found}, ?MODULE:lookup_route(RouteID)),
     ?assertEqual(undefined, ets:info(SKFETS1)),
     ok.
 
@@ -659,8 +659,8 @@ test_skf() ->
     ?assertEqual(ok, ?MODULE:insert_skf(SKF1)),
     ?assertEqual(ok, ?MODULE:insert_skf(SKF2)),
 
-    [RouteETS1] = ?MODULE:lookup_route(RouteID1),
-    [RouteETS2] = ?MODULE:lookup_route(RouteID2),
+    {ok, RouteETS1} = ?MODULE:lookup_route(RouteID1),
+    {ok, RouteETS2} = ?MODULE:lookup_route(RouteID2),
     SKFETS1 = ?MODULE:skf_ets(RouteETS1),
     SKFETS2 = ?MODULE:skf_ets(RouteETS2),
 
