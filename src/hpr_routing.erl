@@ -536,7 +536,7 @@ find_routes_for_uplink_single_route_success() ->
 
     PacketUp = test_utils:uplink_packet_up(#{devaddr => DevAddr1, nwk_session_key => SessionKey1}),
 
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID1),
     ?assertEqual(Route1, hpr_route_ets:route(RouteETS1)),
 
     ?assertEqual({ok, [{RouteETS1, 1}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
@@ -637,10 +637,10 @@ find_routes_for_uplink_multi_route_success() ->
         devaddr => DevAddr1, nwk_session_key => SessionKey1
     }),
 
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID1),
     ?assertEqual(Route1, hpr_route_ets:route(RouteETS1)),
 
-    [RouteETS2] = hpr_route_ets:lookup_route(RouteID2),
+    {ok, RouteETS2} = hpr_route_ets:lookup_route(RouteID2),
     ?assertEqual(Route2, hpr_route_ets:route(RouteETS2)),
 
     ?assertEqual(
@@ -725,10 +725,10 @@ find_routes_for_uplink_multi_route_failed() ->
         devaddr => DevAddr1, nwk_session_key => crypto:strong_rand_bytes(16)
     }),
 
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID1),
     ?assertEqual(Route1, hpr_route_ets:route(RouteETS1)),
 
-    [RouteETS2] = hpr_route_ets:lookup_route(RouteID2),
+    {ok, RouteETS2} = hpr_route_ets:lookup_route(RouteID2),
     ?assertEqual(Route2, hpr_route_ets:route(RouteETS2)),
 
     ?assertEqual({ok, [{RouteETS2, 0}]}, find_routes_for_uplink(PacketUp1, DevAddr1)),
@@ -818,10 +818,10 @@ find_routes_for_uplink_ignore_empty_skf() ->
         devaddr => DevAddr1, nwk_session_key => SessionKey1
     }),
 
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID1),
     ?assertEqual(Route1, hpr_route_ets:route(RouteETS1)),
 
-    [RouteETS2] = hpr_route_ets:lookup_route(RouteID2),
+    {ok, RouteETS2} = hpr_route_ets:lookup_route(RouteID2),
     ?assertEqual(Route2, hpr_route_ets:route(RouteETS2)),
 
     ?assertEqual({ok, [{RouteETS1, 1}]}, find_routes_for_uplink(PacketUp, DevAddr1)),
@@ -867,7 +867,7 @@ maybe_deliver_packet_to_route_locked() ->
     ok = hpr_route_ets:insert_route(Route1),
 
     PacketUp = test_utils:uplink_packet_up(#{}),
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID1),
 
     ?assertEqual(
         {error, locked}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
@@ -898,7 +898,7 @@ maybe_deliver_packet_to_route_inactive() ->
     ok = hpr_route_ets:insert_route(Route1),
 
     PacketUp = test_utils:uplink_packet_up(#{}),
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID1),
 
     ?assertEqual(
         {error, inactive}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
@@ -930,7 +930,7 @@ maybe_deliver_packet_to_route_in_cooldown() ->
 
     PacketUp = test_utils:uplink_packet_up(#{}),
     ok = hpr_route_ets:inc_backoff(RouteID1),
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID1),
 
     ?assertEqual(
         {error, in_cooldown}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
@@ -966,7 +966,7 @@ maybe_deliver_packet_to_route_multi_buy() ->
 
     PacketUp = test_utils:uplink_packet_up(#{}),
 
-    [RouteETS1] = hpr_route_ets:lookup_route(RouteID1),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID1),
     %% Packet 1 accepted using SKF Multi buy 1 (counter 1)
     ?assertEqual(
         {ok, true}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
