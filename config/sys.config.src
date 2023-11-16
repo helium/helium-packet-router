@@ -1,6 +1,6 @@
 [
     {hpr, [
-        {key, "/var/data/hpr.key"},
+        {data_dir, "/var/data"},
         {http_roaming_sender_nsid, <<"${HPR_ROAMING_SENDER_NSID}">>},
         {no_routes, [{"${HPR_PP_HOST_1}", 8080}, {"${HPR_PP_HOST_2}", 8080}]},
         {packet_reporter, #{
@@ -25,8 +25,7 @@
             port => "${HPR_MULTI_BUY_SERVICE_PORT}"
         }},
         {routing_cache_timeout_secs, 15},
-        {routing_cache_window_secs, 120},
-        {gateway_location_dets, "/var/data/hpr_gateway_location_dets"}
+        {routing_cache_window_secs, 120}
     ]},
     {aws_credentials, [
         {credential_providers, [aws_credentials_env, aws_credentials_ec2]}

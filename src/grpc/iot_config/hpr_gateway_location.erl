@@ -16,7 +16,7 @@
 
 -define(ETS, hpr_gateway_location_ets).
 -define(DETS, hpr_gateway_location_dets).
--define(DEFAULT_DETS_FILE, "/var/data/hpr_gateway_location_dets").
+-define(DEFAULT_DETS_FILE, "hpr_gateway_location_dets").
 -define(CLEANUP_INTERVAL, timer:hours(1)).
 -define(CACHE_TIME, timer:hours(24)).
 -define(NOT_FOUND, not_found).
@@ -139,7 +139,9 @@ get_location_from_ics(PubKeyBin) ->
 
 -spec open_dets() -> ok.
 open_dets() ->
-    DETSFile = application:get_env(?APP, gateway_rate_limit, ?DEFAULT_DETS_FILE),
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join(DataDir, ?DEFAULT_DETS_FILE),
+    ok = filelib:ensure_dir(DETSFile),
     case dets:open_file(?DETS, [{file, DETSFile}, {keypos, #location.gateway}]) of
         {error, _Reason} ->
             Deleted = file:delete(DETSFile),

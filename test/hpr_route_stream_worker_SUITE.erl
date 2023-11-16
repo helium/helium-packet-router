@@ -81,16 +81,16 @@ main_test(_Config) ->
         session_key => SessionKey1,
         max_copies => 1
     }),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}})
     ),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
     ),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange1}})
     ),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {skf, SessionKeyFilter}})
     ),
 
@@ -141,7 +141,7 @@ main_test(_Config) ->
     ),
 
     %% Delete EUI Pairs / DevAddr Ranges / SKF
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => remove, data => {eui_pair, EUIPair1}})
     ),
 
@@ -160,7 +160,7 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(1, 100)),
     ?assertEqual([], hpr_route_ets:lookup_eui_pair(3, 3)),
 
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => remove, data => {devaddr_range, DevAddrRange1}})
     ),
 
@@ -174,7 +174,7 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000006)),
     ?assertEqual([], hpr_route_ets:lookup_devaddr_range(16#00000020)),
 
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => remove, data => {skf, SessionKeyFilter}})
     ),
 
@@ -187,13 +187,13 @@ main_test(_Config) ->
     ?assertEqual([], hpr_route_ets:lookup_skf(SKFETS1, DevAddr1)),
 
     %% Add back euis, ranges and skf to test full route delete
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
     ),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange1}})
     ),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {skf, SessionKeyFilter}})
     ),
     ok = test_utils:wait_until(
@@ -220,7 +220,7 @@ main_test(_Config) ->
     ),
 
     %% Remove route should delete eveything
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => remove, data => {route, Route1}})
     ),
 
@@ -265,16 +265,16 @@ refresh_route_test(_Config) ->
         route_id => Route1ID, devaddr => DevAddr1, session_key => SessionKey1, max_copies => 1
     }),
 
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}})
     ),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
     ),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange1}})
     ),
-    ok = hpr_test_iot_config_service_route:stream_resp(
+    ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {skf, SessionKeyFilter1}})
     ),
 

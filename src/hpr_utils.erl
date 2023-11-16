@@ -32,58 +32,11 @@
     pubkey_bin/0,
     sig_fun/0,
     sender_nsid/0,
-    b58/0
+    b58/0,
+    base_data_dir/0
 ]).
 
 -type trace() :: packet_gateway | stream_gateway | devaddr | app_eui | dev_eui.
-
--spec load_key(KeyFileName :: string()) -> ok.
-load_key(KeyFileName) ->
-    {PubKey, SigFun} =
-        Key =
-        case libp2p_crypto:load_keys(KeyFileName) of
-            {ok, #{secret := PrivKey, public := PubKey0}} ->
-                {PubKey0, libp2p_crypto:mk_sig_fun(PrivKey)};
-            {error, enoent} ->
-                KeyMap =
-                    #{secret := PrivKey, public := PubKey0} = libp2p_crypto:generate_keys(
-                        ed25519
-                    ),
-                ok = libp2p_crypto:save_keys(KeyMap, KeyFileName),
-                {PubKey0, libp2p_crypto:mk_sig_fun(PrivKey)}
-        end,
-
-    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
-    B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
-    ok = persistent_term:put(?HPR_PUBKEY_BIN, PubKeyBin),
-
-    %% Keep as binary for http protocol jsx encoding/decoding
-    SenderNSID =
-        case application:get_env(hpr, http_roaming_sender_nsid, erlang:list_to_binary(B58)) of
-            <<"">> -> erlang:list_to_binary(B58);
-            Val -> Val
-        end,
-    ok = persistent_term:put(?HPR_SENDER_NSID, SenderNSID),
-
-    ok = persistent_term:put(?HPR_B58, B58),
-    ok = persistent_term:put(?HPR_SIG_FUN, SigFun),
-    ok = persistent_term:put(?HPR_KEY, Key).
-
--spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
-pubkey_bin() ->
-    persistent_term:get(?HPR_PUBKEY_BIN, undefined).
-
--spec sig_fun() -> libp2p_crypto:sig_fun().
-sig_fun() ->
-    persistent_term:get(?HPR_SIG_FUN, undefined).
-
--spec sender_nsid() -> string().
-sender_nsid() ->
-    persistent_term:get(?HPR_SENDER_NSID, undefined).
-
--spec b58() -> binary().
-b58() ->
-    persistent_term:get(?HPR_B58, undefined).
 
 -spec gateway_name(PubKeyBin :: libp2p_crypto:pubkey_bin() | string()) -> string().
 gateway_name(PubKeyBin) when is_binary(PubKeyBin) ->
@@ -228,6 +181,61 @@ get_env_int(Key, Default) ->
         Str when is_list(Str) -> erlang:list_to_integer(Str);
         I -> I
     end.
+
+-spec load_key(KeyFileName :: string()) -> ok.
+load_key(KeyFileName) ->
+    {PubKey, SigFun} =
+        Key =
+        case libp2p_crypto:load_keys(KeyFileName) of
+            {ok, #{secret := PrivKey, public := PubKey0}} ->
+                {PubKey0, libp2p_crypto:mk_sig_fun(PrivKey)};
+            {error, enoent} ->
+                KeyMap =
+                    #{secret := PrivKey, public := PubKey0} = libp2p_crypto:generate_keys(
+                        ed25519
+                    ),
+                ok = libp2p_crypto:save_keys(KeyMap, KeyFileName),
+                {PubKey0, libp2p_crypto:mk_sig_fun(PrivKey)}
+        end,
+
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
+    ok = persistent_term:put(?HPR_PUBKEY_BIN, PubKeyBin),
+
+    %% Keep as binary for http protocol jsx encoding/decoding
+    SenderNSID =
+        case application:get_env(hpr, http_roaming_sender_nsid, erlang:list_to_binary(B58)) of
+            <<"">> -> erlang:list_to_binary(B58);
+            Val -> Val
+        end,
+    ok = persistent_term:put(?HPR_SENDER_NSID, SenderNSID),
+
+    ok = persistent_term:put(?HPR_B58, B58),
+    ok = persistent_term:put(?HPR_SIG_FUN, SigFun),
+    ok = persistent_term:put(?HPR_KEY, Key).
+
+-spec pubkey_bin() -> libp2p_crypto:pubkey_bin().
+pubkey_bin() ->
+    persistent_term:get(?HPR_PUBKEY_BIN, undefined).
+
+-spec sig_fun() -> libp2p_crypto:sig_fun().
+sig_fun() ->
+    persistent_term:get(?HPR_SIG_FUN, undefined).
+
+-spec sender_nsid() -> string().
+sender_nsid() ->
+    persistent_term:get(?HPR_SENDER_NSID, undefined).
+
+-spec b58() -> binary().
+b58() ->
+    persistent_term:get(?HPR_B58, undefined).
+
+-spec base_data_dir() -> string().
+base_data_dir() ->
+    DataDir = application:get_env(?APP, data_dir, ?DATA_DIR),
+    lager:info("base data dir ~s", [DataDir]),
+    ok = filelib:ensure_dir(DataDir),
+    DataDir.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions

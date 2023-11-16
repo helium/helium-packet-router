@@ -46,8 +46,9 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    KeyFileName = application:get_env(?APP, key, "/var/data/hpr.key"),
+    DataDir = hpr_utils:base_data_dir(),
 
+    KeyFileName = filename:join(DataDir, "hpr.key"),
     lager:info("KeyFileName ~s", [KeyFileName]),
 
     ok = filelib:ensure_dir(KeyFileName),
