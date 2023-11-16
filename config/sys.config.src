@@ -25,7 +25,8 @@
             port => "${HPR_MULTI_BUY_SERVICE_PORT}"
         }},
         {routing_cache_timeout_secs, 15},
-        {routing_cache_window_secs, 120}
+        {routing_cache_window_secs, 120},
+        {gateway_location_dets, "/var/data/hpr_gateway_location_dets"}
     ]},
     {aws_credentials, [
         {credential_providers, [aws_credentials_env, aws_credentials_ec2]}

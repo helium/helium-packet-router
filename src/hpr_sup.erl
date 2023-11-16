@@ -58,6 +58,7 @@ init([]) ->
     ok = hpr_multi_buy:init(),
     ok = hpr_protocol_router:init(),
     ok = hpr_route_ets:init(),
+    ok = hpr_gateway_location:init(),
 
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
     ConfigServiceConfig = application:get_env(?APP, iot_config_service, #{}),

@@ -741,7 +741,8 @@ verify_push_data(PacketUp, PushDataBinary) ->
                             hpr_utils:gateway_name(PubKeyBin)
                         ),
                         <<"regi">> => erlang:atom_to_binary(
-                            hpr_packet_up:region(PacketUp))
+                            hpr_packet_up:region(PacketUp)
+                        )
                     }
                 }
             ]
