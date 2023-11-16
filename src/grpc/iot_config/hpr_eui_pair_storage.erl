@@ -1,14 +1,22 @@
 -module(hpr_eui_pair_storage).
 
 -export([
-    delete_route/1,
-    replace_route/2,
+    init_ets/0,
 
     insert/1,
-    lookup/2
+    lookup/2,
+delete/1,
+
+    delete_route/1,
+    replace_route/2
 ]).
 
 -define(ETS_EUI_PAIRS, hpr_route_eui_pairs_ets).
+
+-spec init_ets() -> ok.
+init_ets() ->
+    ?ETS_EUI_PAIRS = ets:new(?ETS_EUI_PAIRS, [public, named_table, bag, {read_concurrency, true}]),
+    ok.
 
 -spec lookup(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
     [hpr_route_ets:route()].
@@ -44,6 +52,22 @@ insert(EUIPair) ->
             {route_id, hpr_eui_pair:route_id(EUIPair)}
         ],
         "inserted eui pair"
+    ),
+    ok.
+
+-spec delete(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
+delete(EUIPair) ->
+    true = ets:delete_object(?ETS_EUI_PAIRS, {
+        {hpr_eui_pair:app_eui(EUIPair), hpr_eui_pair:dev_eui(EUIPair)},
+        hpr_eui_pair:route_id(EUIPair)
+    }),
+    lager:debug(
+        [
+            {app_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:app_eui(EUIPair))},
+            {dev_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:dev_eui(EUIPair))},
+            {route_id, hpr_eui_pair:route_id(EUIPair)}
+        ],
+        "deleted eui pair"
     ),
     ok.
 

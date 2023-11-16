@@ -77,13 +77,9 @@
 
 -spec init() -> ok.
 init() ->
-    ?ETS_ROUTES = ets:new(?ETS_ROUTES, [
-        public, named_table, set, {keypos, #hpr_route_ets.id}, {read_concurrency, true}
-    ]),
-    ?ETS_DEVADDR_RANGES = ets:new(?ETS_DEVADDR_RANGES, [
-        public, named_table, bag, {read_concurrency, true}
-    ]),
-    ?ETS_EUI_PAIRS = ets:new(?ETS_EUI_PAIRS, [public, named_table, bag, {read_concurrency, true}]),
+    ok = hpr_route_storage:init_ets(),
+    ok = hpr_devaddr_range_storage:init_ets(),
+    ok = hpr_eui_pair_storage:init_ets(),
     ok.
 
 -spec route(RouteETS :: route()) -> hpr_route:route().
@@ -155,19 +151,7 @@ insert_eui_pair(EUIPair) ->
 
 -spec delete_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
 delete_eui_pair(EUIPair) ->
-    true = ets:delete_object(?ETS_EUI_PAIRS, {
-        {hpr_eui_pair:app_eui(EUIPair), hpr_eui_pair:dev_eui(EUIPair)},
-        hpr_eui_pair:route_id(EUIPair)
-    }),
-    lager:debug(
-        [
-            {app_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:app_eui(EUIPair))},
-            {dev_eui, hpr_utils:int_to_hex_string(hpr_eui_pair:dev_eui(EUIPair))},
-            {route_id, hpr_eui_pair:route_id(EUIPair)}
-        ],
-        "deleted eui pair"
-    ),
-    ok.
+    hpr_eui_pair_storage:delete(EUIPair).
 
 -spec lookup_eui_pair(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
     [route()].
@@ -176,58 +160,15 @@ lookup_eui_pair(AppEUI, DevEUI) ->
 
 -spec insert_devaddr_range(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 insert_devaddr_range(DevAddrRange) ->
-    true = ets:insert(?ETS_DEVADDR_RANGES, [
-        {
-            {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
-            hpr_devaddr_range:route_id(DevAddrRange)
-        }
-    ]),
-    lager:debug(
-        [
-            {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
-            {end_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:end_addr(DevAddrRange))},
-            {route_id, hpr_devaddr_range:route_id(DevAddrRange)}
-        ],
-        "inserted devaddr range"
-    ),
-    ok.
+    hpr_devaddr_range_storage:insert(DevAddrRange).
 
 -spec delete_devaddr_range(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 delete_devaddr_range(DevAddrRange) ->
-    true = ets:delete_object(?ETS_DEVADDR_RANGES, {
-        {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
-        hpr_devaddr_range:route_id(DevAddrRange)
-    }),
-    lager:debug(
-        [
-            {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
-            {end_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:end_addr(DevAddrRange))},
-            {route_id, hpr_devaddr_range:route_id(DevAddrRange)}
-        ],
-        "deleted devaddr range"
-    ),
-    ok.
+    hpr_devaddr_range_storage:delete(DevAddrRange).
 
 -spec lookup_devaddr_range(DevAddr :: non_neg_integer()) -> [route()].
 lookup_devaddr_range(DevAddr) ->
-    MS = [
-        {
-            {{'$1', '$2'}, '$3'},
-            [
-                {'andalso', {'=<', '$1', DevAddr}, {'=<', DevAddr, '$2'}}
-            ],
-            ['$3']
-        }
-    ],
-    RouteIDs = ets:select(?ETS_DEVADDR_RANGES, MS),
-
-    lists:usort(
-        lists:flatten([
-            Route
-         || RouteID <- RouteIDs,
-            {ok, Route} <- [?MODULE:lookup_route(RouteID)]
-        ])
-    ).
+    hpr_devaddr_range_storage:lookup(DevAddr).
 
 -spec insert_skf(SKF :: hpr_skf:skf()) -> ok.
 insert_skf(SKF) ->
@@ -249,20 +190,18 @@ delete_skf(SKF) ->
 -spec lookup_skf(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
     [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
 lookup_skf(ETS, DevAddr) ->
-    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
-    ets:select(ETS, MS).
+    hpr_skf_storage:lookup(ETS, DevAddr).
 
 -spec select_skf(Continuation :: ets:continuation()) ->
     {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
 select_skf(Continuation) ->
-    ets:select(Continuation).
+    hpr_skf_storage:select(Continuation).
 
 -spec select_skf(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
     {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
     | '$end_of_table'.
 select_skf(ETS, DevAddr) ->
-    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
-    ets:select(ETS, MS, 100).
+    hpr_skf_storage:select(ETS, DevAddr).
 
 -spec delete_all() -> ok.
 delete_all() ->
@@ -293,9 +232,7 @@ replace_route_euis(RouteID, EUIs) ->
     DevAddrRanges :: list(hpr_devaddr_range:devaddr_range())
 ) -> non_neg_integer().
 replace_route_devaddrs(RouteID, DevAddrRanges) ->
-    Removed = hpr_devaddr_range_storage:delete_route(RouteID),
-    lists:foreach(fun insert_devaddr_range/1, DevAddrRanges),
-    Removed.
+    hpr_devaddr_range_storage:replace_route(RouteID, DevAddrRanges).
 
 -spec replace_route_skfs(hpr_route:id(), list(hpr_skf:skf())) ->
     {ok, non_neg_integer()} | {error, any()}.

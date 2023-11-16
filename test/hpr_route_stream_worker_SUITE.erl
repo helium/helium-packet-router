@@ -99,15 +99,10 @@ main_test(_Config) ->
         fun() ->
             case hpr_route_ets:lookup_route(Route1ID) of
                 {ok, RouteETS} ->
-                    One = ets:info(hpr_routes_ets, size),
-                    Two = ets:info(hpr_route_eui_pairs_ets, size),
-                    Three = ets:info(hpr_route_devaddr_ranges_ets, size),
-                    Four = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
-                    ct:print("Counts: ~p", [{One, Two, Three, Four}]),
-                    1 =:= One andalso
-                        1 =:= Two andalso
-                        1 =:= Three andalso
-                        1 =:= Four;
+                    1 =:= ets:info(hpr_routes_ets, size) andalso
+                        1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
+                        1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
+                        1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
                 _ ->
                     false
             end
