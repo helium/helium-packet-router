@@ -33,11 +33,8 @@
 
 %% Route Stream helpers
 -export([
-    delete_route_devaddrs/1,
     replace_route_devaddrs/2,
-    delete_route_euis/1,
     replace_route_euis/2,
-    delete_route_skfs/1,
     replace_route_skfs/2
 ]).
 
@@ -89,16 +86,6 @@ init() ->
     ?ETS_EUI_PAIRS = ets:new(?ETS_EUI_PAIRS, [public, named_table, bag, {read_concurrency, true}]),
     ok.
 
--spec make_skf_ets(hpr_route:id()) -> ets:tab().
-make_skf_ets(RouteID) ->
-    ets:new(?ETS_SKFS, [
-        public,
-        set,
-        {read_concurrency, true},
-        {write_concurrency, true},
-        {heir, erlang:whereis(?SKF_HEIR), RouteID}
-    ]).
-
 -spec route(RouteETS :: route()) -> hpr_route:route().
 route(RouteETS) ->
     RouteETS#hpr_route_ets.route.
@@ -144,63 +131,23 @@ update_backoff(RouteID, Backoff) ->
 
 -spec insert_route(Route :: hpr_route:route()) -> ok.
 insert_route(Route) ->
-    RouteID = hpr_route:id(Route),
-    SKFETS =
-        case ?MODULE:lookup_route(RouteID) of
-            [#hpr_route_ets{skf_ets = ETS}] ->
-                ETS;
-            _Other ->
-                make_skf_ets(RouteID)
-        end,
-    ?MODULE:insert_route(Route, SKFETS).
+    hpr_route_storage:insert(Route).
 
 -spec insert_route(Route :: hpr_route:route(), SKFETS :: ets:table()) -> ok.
 insert_route(Route, SKFETS) ->
-    ?MODULE:insert_route(Route, SKFETS, undefined).
+    hpr_route_storage:insert_route(Route, SKFETS, undefined).
 
 -spec insert_route(Route :: hpr_route:route(), SKFETS :: ets:table(), Backoff :: backoff()) -> ok.
 insert_route(Route, SKFETS, Backoff) ->
-    RouteID = hpr_route:id(Route),
-    RouteETS = #hpr_route_ets{
-        id = RouteID,
-        route = Route,
-        skf_ets = SKFETS,
-        backoff = Backoff
-    },
-    true = ets:insert(?ETS_ROUTES, RouteETS),
-    Server = hpr_route:server(Route),
-    RouteFields = [
-        {id, RouteID},
-        {net_id, hpr_utils:net_id_display(hpr_route:net_id(Route))},
-        {oui, hpr_route:oui(Route)},
-        {protocol, hpr_route:protocol_type(Server)},
-        {max_copies, hpr_route:max_copies(Route)},
-        {active, hpr_route:active(Route)},
-        {locked, hpr_route:locked(Route)},
-        {ignore_empty_skf, hpr_route:ignore_empty_skf(Route)},
-        {skf_ets, SKFETS},
-        {backoff, Backoff}
-    ],
-    lager:info(RouteFields, "inserting route"),
-    ok.
+    hpr_route_storage:insert(Route, SKFETS, Backoff).
 
 -spec delete_route(Route :: hpr_route:route()) -> ok.
 delete_route(Route) ->
-    RouteID = hpr_route:id(Route),
-    DevAddrEntries = ?MODULE:delete_route_devaddrs(RouteID),
-    EUIsEntries = ?MODULE:delete_route_euis(RouteID),
-    SKFEntries = ?MODULE:delete_route_skfs(RouteID),
-
-    true = ets:delete(?ETS_ROUTES, RouteID),
-    lager:info(
-        [{devaddr, DevAddrEntries}, {euis, EUIsEntries}, {skfs, SKFEntries}, {route_id, RouteID}],
-        "route deleted"
-    ),
-    ok.
+    hpr_route_storage:delete(Route).
 
 -spec lookup_route(ID :: hpr_route:id()) -> [route()].
 lookup_route(ID) ->
-    ets:lookup(?ETS_ROUTES, ID).
+    hpr_route_storage:lookup(ID).
 
 -spec insert_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
 insert_eui_pair(EUIPair) ->
@@ -238,20 +185,8 @@ delete_eui_pair(EUIPair) ->
 
 -spec lookup_eui_pair(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
     [route()].
-lookup_eui_pair(AppEUI, 0) ->
-    EUIPairs = ets:lookup(?ETS_EUI_PAIRS, {AppEUI, 0}),
-    lists:flatten([
-        ?MODULE:lookup_route(RouteID)
-     || {_, RouteID} <- EUIPairs
-    ]);
 lookup_eui_pair(AppEUI, DevEUI) ->
-    EUIPairs = ets:lookup(?ETS_EUI_PAIRS, {AppEUI, DevEUI}),
-    lists:usort(
-        lists:flatten([
-            ?MODULE:lookup_route(RouteID)
-         || {_, RouteID} <- EUIPairs
-        ]) ++ lookup_eui_pair(AppEUI, 0)
-    ).
+    hpr_eui_pair_storage:lookup(AppEUI, DevEUI).
 
 -spec insert_devaddr_range(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 insert_devaddr_range(DevAddrRange) ->
@@ -299,27 +234,18 @@ lookup_devaddr_range(DevAddr) ->
         }
     ],
     RouteIDs = ets:select(?ETS_DEVADDR_RANGES, MS),
+
     lists:usort(
         lists:flatten([
-            ?MODULE:lookup_route(RouteID)
-         || RouteID <- RouteIDs
+            Route
+         || RouteID <- RouteIDs,
+            {ok, Route} <- [?MODULE:lookup_route(RouteID)]
         ])
     ).
 
 -spec insert_skf(SKF :: hpr_skf:skf()) -> ok.
 insert_skf(SKF) ->
-    RouteID = hpr_skf:route_id(SKF),
-    MD = skf_md(RouteID, SKF),
-    case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{skf_ets = SKFETS}] ->
-            do_insert_skf(SKFETS, SKF),
-            lager:debug(MD, "updated SKF");
-        _Other ->
-            lager:error(MD, "failed to insert skf table not found ~p", [
-                _Other
-            ])
-    end,
-    ok.
+    hpr_skf_storage:insert(SKF).
 
 -spec update_skf(
     DevAddr :: non_neg_integer(),
@@ -328,40 +254,11 @@ insert_skf(SKF) ->
     MaxCopies :: non_neg_integer()
 ) -> ok.
 update_skf(DevAddr, SessionKey, RouteID, MaxCopies) ->
-    SKF = hpr_skf:new(#{
-        route_id => RouteID,
-        devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey),
-        max_copies => MaxCopies
-    }),
-    ok = insert_skf(SKF),
-    ok.
+    hpr_skf_storage:update(DevAddr, SessionKey, RouteID, MaxCopies).
 
 -spec delete_skf(SKF :: hpr_skf:skf()) -> ok.
 delete_skf(SKF) ->
-    RouteID = hpr_skf:route_id(SKF),
-    case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{skf_ets = SKFETS}] ->
-            DevAddr = hpr_skf:devaddr(SKF),
-            SessionKey = hpr_skf:session_key(SKF),
-            MaxCopies = hpr_skf:max_copies(SKF),
-
-            true = ets:delete(SKFETS, hpr_utils:hex_to_bin(SessionKey)),
-            lager:debug(
-                [
-                    {route_id, RouteID},
-                    {devaddr, hpr_utils:int_to_hex_string(DevAddr)},
-                    {session_key, SessionKey},
-                    {max_copies, MaxCopies}
-                ],
-                "deleted SKF"
-            );
-        _Other ->
-            lager:warning("failed to delete skf not found ~p for ~s", [
-                _Other, RouteID
-            ])
-    end,
-    ok.
+    hpr_skf_storage:delete(SKF).
 
 -spec lookup_skf(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
     [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
@@ -398,28 +295,6 @@ delete_all() ->
 %% Route Stream Helpers
 %% ------------------------------------------------------------------
 
--spec delete_route_devaddrs(hpr_route:id()) -> non_neg_integer().
-delete_route_devaddrs(RouteID) ->
-    MS1 = [{{'_', RouteID}, [], [true]}],
-    ets:select_delete(?ETS_DEVADDR_RANGES, MS1).
-
--spec delete_route_euis(hpr_route:id()) -> non_neg_integer().
-delete_route_euis(RouteID) ->
-    MS2 = [{{'_', RouteID}, [], [true]}],
-    ets:select_delete(?ETS_EUI_PAIRS, MS2).
-
--spec delete_route_skfs(hpr_route:id()) -> non_neg_integer().
-delete_route_skfs(RouteID) ->
-    case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{skf_ets = SKFETS}] ->
-            Size = ets:info(SKFETS, size),
-            ets:delete(SKFETS),
-            Size;
-        Other ->
-            lager:warning("failed to delete skf table ~p for ~s", [Other, RouteID]),
-            {error, Other}
-    end.
-
 -spec replace_route_euis(
     RouteID :: hpr_route:id(),
     EUIs :: list(hpr_eui_pair:eui_pair())
@@ -441,18 +316,7 @@ replace_route_devaddrs(RouteID, DevAddrRanges) ->
 -spec replace_route_skfs(hpr_route:id(), list(hpr_skf:skf())) ->
     {ok, non_neg_integer()} | {error, any()}.
 replace_route_skfs(RouteID, NewSKFs) ->
-    case ?MODULE:lookup_route(RouteID) of
-        [#hpr_route_ets{skf_ets = OldTab} = Route] ->
-            NewTab = make_skf_ets(RouteID),
-            lists:foreach(fun(SKF) -> do_insert_skf(NewTab, SKF) end, NewSKFs),
-            true = ets:insert(?ETS_ROUTES, Route#hpr_route_ets{skf_ets = NewTab}),
-
-            OldSize = ets:info(OldTab, size),
-            ets:delete(OldTab),
-            {ok, OldSize};
-        Other ->
-            {error, Other}
-    end.
+    hpr_skf_storage:replace_route_skfs(RouteID, NewSKFs).
 
 %% ------------------------------------------------------------------
 %% CLI Functions
@@ -532,24 +396,6 @@ skfs_count_for_route(RouteID) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
--spec do_insert_skf(ets:table(), hpr_skf:skf()) -> ok.
-do_insert_skf(SKFETS, SKF) ->
-    DevAddr = hpr_skf:devaddr(SKF),
-    SessionKey = hpr_skf:session_key(SKF),
-    MaxCopies = hpr_skf:max_copies(SKF),
-
-    true = ets:insert(SKFETS, {hpr_utils:hex_to_bin(SessionKey), {DevAddr, MaxCopies}}),
-    ok.
-
--spec skf_md(hpr_route:id(), hpr_skf:skf()) -> proplists:proplist().
-skf_md(RouteID, SKF) ->
-    [
-        {route_id, RouteID},
-        {devaddr, hpr_utils:int_to_hex_string(hpr_skf:devaddr(SKF))},
-        {session_key, hpr_skf:session_key(SKF)},
-        {max_copies, hpr_skf:max_copies(SKF)}
-    ].
 
 %% ------------------------------------------------------------------
 %% EUnit tests
