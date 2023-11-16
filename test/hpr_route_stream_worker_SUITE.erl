@@ -98,11 +98,16 @@ main_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(Route1ID) of
-                [RouteETS] ->
-                    1 =:= ets:info(hpr_routes_ets, size) andalso
-                        1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
-                        1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                        1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
+                {ok, RouteETS} ->
+                    One = ets:info(hpr_routes_ets, size),
+                    Two = ets:info(hpr_route_eui_pairs_ets, size),
+                    Three = ets:info(hpr_route_devaddr_ranges_ets, size),
+                    Four = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
+                    ct:print("Counts: ~p", [{One, Two, Three, Four}]),
+                    1 =:= One andalso
+                        1 =:= Two andalso
+                        1 =:= Three andalso
+                        1 =:= Four;
                 _ ->
                     false
             end
@@ -126,7 +131,7 @@ main_test(_Config) ->
         prometheus_counter:value(?METRICS_ICS_UPDATES_COUNTER, [skf, add])
     ),
 
-    [RouteETS1] = hpr_route_ets:lookup_route(Route1ID),
+    {ok, RouteETS1} = hpr_route_ets:lookup_route(Route1ID),
     SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
     %% Check that we can query route via config
@@ -199,7 +204,7 @@ main_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             case hpr_route_ets:lookup_route(Route1ID) of
-                [RouteETS] ->
+                {ok, RouteETS} ->
                     1 =:= ets:info(hpr_routes_ets, size) andalso
                         1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
                         1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
