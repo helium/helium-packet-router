@@ -13,7 +13,9 @@
     lookup_dev_eui/1,
     lookup_app_eui/1,
     lookup_for_route/1,
-    count_for_route/1
+    count_for_route/1,
+
+    delete_all/0
 ]).
 
 -define(ETS_EUI_PAIRS, hpr_route_eui_pairs_ets).
@@ -74,6 +76,11 @@ delete(EUIPair) ->
         ],
         "deleted eui pair"
     ),
+    ok.
+
+-spec delete_all() -> ok.
+delete_all() ->
+    ets:delete_all_objects(?ETS_EUI_PAIRS),
     ok.
 
 %% ------------------------------------------------------------------

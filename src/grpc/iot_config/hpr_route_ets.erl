@@ -2,7 +2,7 @@
 
 -export([
     init/0,
-         ets_keypos/0,
+    ets_keypos/0,
 
     new/3,
     route/1,
@@ -102,15 +102,10 @@ update_backoff(RouteID, Backoff) ->
 
 -spec delete_all() -> ok.
 delete_all() ->
-    ets:delete_all_objects(?ETS_DEVADDR_RANGES),
-    ets:delete_all_objects(?ETS_EUI_PAIRS),
-    lists:foreach(
-        fun(#hpr_route_ets{skf_ets = SKFETS}) ->
-            ets:delete(SKFETS)
-        end,
-        ets:tab2list(?ETS_ROUTES)
-    ),
-    ets:delete_all_objects(?ETS_ROUTES),
+    ok = hpr_devaddr_range_storage:deletee_all(),
+    ok = hpr_eui_pair_storage:delete_all(),
+    ok = hpr_skf_storage:delete_all(),
+    ok = hpr_route_storage:delete_all(),
     ok.
 
 %% ------------------------------------------------------------------
