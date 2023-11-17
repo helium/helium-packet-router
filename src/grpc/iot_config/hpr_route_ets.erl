@@ -10,23 +10,6 @@
     inc_backoff/1,
     reset_backoff/1,
 
-    insert_route/1, insert_route/2, insert_route/3,
-    delete_route/1,
-    lookup_route/1,
-
-    insert_eui_pair/1,
-    delete_eui_pair/1,
-    lookup_eui_pair/2,
-
-    insert_devaddr_range/1,
-    delete_devaddr_range/1,
-    lookup_devaddr_range/1,
-
-    insert_skf/1,
-    update_skf/4,
-    delete_skf/1,
-    lookup_skf/2,
-    select_skf/1, select_skf/2,
 
     delete_all/0
 ]).
@@ -97,7 +80,7 @@ backoff(RouteETS) ->
 -spec inc_backoff(RouteID :: hpr_route:id()) -> ok.
 inc_backoff(RouteID) ->
     Now = erlang:system_time(millisecond),
-    case ?MODULE:lookup_route(RouteID) of
+    case hpr_route_storage:lookup(RouteID) of
         {ok, #hpr_route_ets{backoff = undefined}} ->
             Backoff = backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX),
             Delay = backoff:get(Backoff),
@@ -111,7 +94,7 @@ inc_backoff(RouteID) ->
 
 -spec reset_backoff(RouteID :: hpr_route:id()) -> ok.
 reset_backoff(RouteID) ->
-    case ?MODULE:lookup_route(RouteID) of
+    case hpr_route_storage:lookup(RouteID) of
         {ok, #hpr_route_ets{backoff = undefined}} ->
             ok;
         {ok, #hpr_route_ets{backoff = _}} ->
@@ -124,84 +107,6 @@ reset_backoff(RouteID) ->
 update_backoff(RouteID, Backoff) ->
     true = ets:update_element(?ETS_ROUTES, RouteID, {5, Backoff}),
     ok.
-
--spec insert_route(Route :: hpr_route:route()) -> ok.
-insert_route(Route) ->
-    hpr_route_storage:insert(Route).
-
--spec insert_route(Route :: hpr_route:route(), SKFETS :: ets:table()) -> ok.
-insert_route(Route, SKFETS) ->
-    hpr_route_storage:insert(Route, SKFETS, undefined).
-
--spec insert_route(Route :: hpr_route:route(), SKFETS :: ets:table(), Backoff :: backoff()) -> ok.
-insert_route(Route, SKFETS, Backoff) ->
-    hpr_route_storage:insert(Route, SKFETS, Backoff).
-
--spec delete_route(Route :: hpr_route:route()) -> ok.
-delete_route(Route) ->
-    hpr_route_storage:delete(Route).
-
--spec lookup_route(ID :: hpr_route:id()) -> {ok, route()} | {error, not_found}.
-lookup_route(ID) ->
-    hpr_route_storage:lookup(ID).
-
--spec insert_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
-insert_eui_pair(EUIPair) ->
-    hpr_eui_pair_storage:insert(EUIPair).
-
--spec delete_eui_pair(EUIPair :: hpr_eui_pair:eui_pair()) -> ok.
-delete_eui_pair(EUIPair) ->
-    hpr_eui_pair_storage:delete(EUIPair).
-
--spec lookup_eui_pair(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
-    [route()].
-lookup_eui_pair(AppEUI, DevEUI) ->
-    hpr_eui_pair_storage:lookup(AppEUI, DevEUI).
-
--spec insert_devaddr_range(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
-insert_devaddr_range(DevAddrRange) ->
-    hpr_devaddr_range_storage:insert(DevAddrRange).
-
--spec delete_devaddr_range(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
-delete_devaddr_range(DevAddrRange) ->
-    hpr_devaddr_range_storage:delete(DevAddrRange).
-
--spec lookup_devaddr_range(DevAddr :: non_neg_integer()) -> [route()].
-lookup_devaddr_range(DevAddr) ->
-    hpr_devaddr_range_storage:lookup(DevAddr).
-
--spec insert_skf(SKF :: hpr_skf:skf()) -> ok.
-insert_skf(SKF) ->
-    hpr_skf_storage:insert(SKF).
-
--spec update_skf(
-    DevAddr :: non_neg_integer(),
-    SessionKey :: binary(),
-    RouteID :: hpr_route:id(),
-    MaxCopies :: non_neg_integer()
-) -> ok.
-update_skf(DevAddr, SessionKey, RouteID, MaxCopies) ->
-    hpr_skf_storage:update(DevAddr, SessionKey, RouteID, MaxCopies).
-
--spec delete_skf(SKF :: hpr_skf:skf()) -> ok.
-delete_skf(SKF) ->
-    hpr_skf_storage:delete(SKF).
-
--spec lookup_skf(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
-    [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
-lookup_skf(ETS, DevAddr) ->
-    hpr_skf_storage:lookup(ETS, DevAddr).
-
--spec select_skf(Continuation :: ets:continuation()) ->
-    {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
-select_skf(Continuation) ->
-    hpr_skf_storage:select(Continuation).
-
--spec select_skf(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
-    {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
-    | '$end_of_table'.
-select_skf(ETS, DevAddr) ->
-    hpr_skf_storage:select(ETS, DevAddr).
 
 -spec delete_all() -> ok.
 delete_all() ->

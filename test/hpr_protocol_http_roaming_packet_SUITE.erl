@@ -1431,8 +1431,8 @@ join_test_route(DevEUI, AppEUI, FlowType, RouteID0, Options) ->
     EUIPair = hpr_eui_pair:test_new(#{
         route_id => RouteID, app_eui => AppEUI, dev_eui => DevEUI
     }),
-    ok = hpr_route_ets:insert_route(Route),
-    ok = hpr_route_ets:insert_eui_pair(EUIPair).
+    ok = hpr_route_storage:insert(Route),
+    ok = hpr_eui_pair_storage:insert(EUIPair).
 
 uplink_test_route() ->
     uplink_test_route(#{id => "route1"}).
@@ -1462,12 +1462,12 @@ uplink_test_route(InputMap) ->
         },
         max_copies => 2
     }),
-    ok = hpr_route_ets:insert_route(Route),
+    ok = hpr_route_storage:insert(Route),
 
     EUIPairs = maps:get(euis, InputMap, []),
     ok = lists:foreach(
         fun(Pair) ->
-            hpr_route_ets:insert_eui_pair(hpr_eui_pair:test_new(Pair#{route_id => RouteID}))
+            hpr_eui_pair_storage:insert(hpr_eui_pair:test_new(Pair#{route_id => RouteID}))
         end,
         EUIPairs
     ),
@@ -1484,7 +1484,7 @@ uplink_test_route(InputMap) ->
     ),
     ok = lists:foreach(
         fun(Range) ->
-            hpr_route_ets:insert_devaddr_range(
+            hpr_devaddr_range_storage:insert(
                 hpr_devaddr_range:test_new(Range#{route_id => RouteID})
             )
         end,
@@ -1505,7 +1505,7 @@ downlink_test_route(FlowType) ->
         },
         max_copies => 1
     }),
-    ok = hpr_route_ets:insert_route(Route).
+    ok = hpr_route_storage:insert(Route).
 
 downlink_test_body(TransactionID, DownlinkPayload, Token, PubKeyBin) ->
     DownlinkBody = #{

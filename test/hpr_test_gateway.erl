@@ -138,9 +138,9 @@ init(
 ) ->
     #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ed25519),
     lager:info(maps:to_list(Args), "started"),
-    ok = hpr_route_ets:insert_route(Route),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
     self() ! ?CONNECT,
     PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
     case maps:get(h3_index_str, Args, false) of

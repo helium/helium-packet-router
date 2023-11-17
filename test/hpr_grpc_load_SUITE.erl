@@ -350,9 +350,9 @@ multi_buy_test(Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(Route),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     MaxHotspots = 10,
 
