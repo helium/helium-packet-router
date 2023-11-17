@@ -137,6 +137,25 @@ oui_routes(OUI) ->
      || RouteETS <- ets:tab2list(?ETS_ROUTES), OUI == hpr_route:oui(hpr_route_ets:route(RouteETS))
     ].
 
+%% ------------------------------------------------------------------
+%% CLI Functions
+%% ------------------------------------------------------------------
+
+-spec all_routes() -> list(hpr_route:route()).
+all_routes() ->
+    [hpr_route_ets:route(R) || R <- ets:tab2list(?ETS_ROUTES)].
+
+-spec all_route_ets() -> list(route()).
+all_route_ets() ->
+    ets:tab2list(?ETS_ROUTES).
+
+-spec oui_routes(OUI :: non_neg_integer()) -> list(route()).
+oui_routes(OUI) ->
+    [
+        RouteETS
+     || RouteETS <- ets:tab2list(?ETS_ROUTES), OUI == hpr_route:oui(hpr_route_ets:route(RouteETS))
+    ].
+
 %% -------------------------------------------------------------------
 %% Internal Functions
 %% -------------------------------------------------------------------
