@@ -14,20 +14,14 @@
 
 -define(ETS_ROUTES, hpr_routes_ets).
 
--record(hpr_route_ets, {
-    id :: hpr_route:id(),
-    route :: hpr_route:route(),
-    skf_ets :: ets:tid(),
-    backoff :: backoff()
-}).
-
--type backoff() :: undefined | {non_neg_integer(), backoff:backoff()}.
--type route() :: #hpr_route_ets{}.
-
 -spec init_ets() -> ok.
 init_ets() ->
     ?ETS_ROUTES = ets:new(?ETS_ROUTES, [
-        public, named_table, set, {keypos, #hpr_route_ets.id}, {read_concurrency, true}
+        public,
+        named_table,
+        set,
+        {keypos, hpr_route_ets:ets_keypos()},
+        {read_concurrency, true}
     ]),
     ok.
 
@@ -36,8 +30,8 @@ insert(Route) ->
     RouteID = hpr_route:id(Route),
     SKFETS =
         case ?MODULE:lookup(RouteID) of
-            {ok, #hpr_route_ets{skf_ets = ETS}} ->
-                ETS;
+            {ok, ExistingRoute} ->
+                hpr_route_ets:skf_ets(ExistingRoute);
             _Other ->
                 hpr_skf_storage:make_ets(RouteID)
         end,
@@ -47,19 +41,17 @@ insert(Route) ->
 insert(Route, SKFETS) ->
     ?MODULE:insert(Route, SKFETS, undefined).
 
--spec insert(Route :: hpr_route:route(), SKFETS :: ets:table(), Backoff :: backoff()) -> ok.
+-spec insert(
+    Route :: hpr_route:route(),
+    SKFETS :: ets:table(),
+    Backoff :: hpr_route_ets:backoff()
+) -> ok.
 insert(Route, SKFETS, Backoff) ->
-    RouteID = hpr_route:id(Route),
-    RouteETS = #hpr_route_ets{
-        id = RouteID,
-        route = Route,
-        skf_ets = SKFETS,
-        backoff = Backoff
-    },
+    RouteETS = hpr_route_ets:new(Route, SKFETS, Backoff),
     true = ets:insert(?ETS_ROUTES, RouteETS),
     Server = hpr_route:server(Route),
     RouteFields = [
-        {id, RouteID},
+        {id, hpr_route:id(Route)},
         {net_id, hpr_utils:net_id_display(hpr_route:net_id(Route))},
         {oui, hpr_route:oui(Route)},
         {protocol, hpr_route:protocol_type(Server)},
@@ -87,10 +79,10 @@ delete(Route) ->
     ),
     ok.
 
--spec lookup(ID :: hpr_route:id()) -> {ok, route()} | {error, not_found}.
+-spec lookup(ID :: hpr_route:id()) -> {ok, hpr_route_ets:route()} | {error, not_found}.
 lookup(ID) ->
     case ets:lookup(?ETS_ROUTES, ID) of
-        [#hpr_route_ets{} = Route] ->
+        [Route] ->
             {ok, Route};
         _Other ->
             {error, not_found}
@@ -104,11 +96,11 @@ lookup(ID) ->
 all_routes() ->
     [hpr_route_ets:route(R) || R <- ets:tab2list(?ETS_ROUTES)].
 
--spec all_route_ets() -> list(route()).
+-spec all_route_ets() -> list(hpr_route_ets:route()).
 all_route_ets() ->
     ets:tab2list(?ETS_ROUTES).
 
--spec oui_routes(OUI :: non_neg_integer()) -> list(route()).
+-spec oui_routes(OUI :: non_neg_integer()) -> list(hpr_route_ets:route()).
 oui_routes(OUI) ->
     [
         RouteETS

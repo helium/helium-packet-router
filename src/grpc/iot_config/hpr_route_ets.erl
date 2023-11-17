@@ -2,7 +2,9 @@
 
 -export([
     init/0,
+         ets_keypos/0,
 
+    new/3,
     route/1,
     skf_ets/1,
     backoff/1,
@@ -41,6 +43,19 @@ init() ->
     ok = hpr_devaddr_range_storage:init_ets(),
     ok = hpr_eui_pair_storage:init_ets(),
     ok.
+
+-spec ets_keypos() -> non_neg_integer().
+ets_keypos() ->
+    #hpr_route_ets.id.
+
+-spec new(Route :: hpr_route:route(), SKFETS :: ets:tid(), Backoff :: backoff()) -> route().
+new(Route, SKFETS, Backoff) ->
+    #hpr_route_ets{
+        id = hpr_route:id(Route),
+        route = Route,
+        skf_ets = SKFETS,
+        backoff = Backoff
+    }.
 
 -spec route(RouteETS :: route()) -> hpr_route:route().
 route(RouteETS) ->
@@ -97,7 +112,6 @@ delete_all() ->
     ),
     ets:delete_all_objects(?ETS_ROUTES),
     ok.
-
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
