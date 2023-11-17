@@ -108,7 +108,7 @@ config_cmd() ->
 config_list(["config", "ls"], [], []) ->
     Routes = lists:sort(
         fun(R1, R2) -> hpr_route:oui(R1) < hpr_route:oui(R2) end,
-        hpr_route_ets:all_routes()
+        hpr_route_storage:all_routes()
     ),
     %% | OUI | Net ID | Protocol     | Max Copies | Addr Range Cnt | EUI Cnt | Route ID                             |
     %% |-----+--------+--------------+------------+----------------+---------+--------------------------------------|
@@ -121,10 +121,9 @@ config_list(["config", "ls"], [], []) ->
             {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" Protocol ", hpr_route:protocol_type(Server)},
             {" Max Copies ", hpr_route:max_copies(Route)},
-            {" Addr Ranges Cnt ",
-                hpr_route_ets:devaddr_ranges_count_for_route(hpr_route:id(Route))},
-            {" EUIs Cnt ", hpr_route_ets:eui_pairs_count_for_route(hpr_route:id(Route))},
-            {" SKFs Cnt ", hpr_route_ets:skfs_count_for_route(hpr_route:id(Route))},
+            {" Addr Ranges Cnt ", hpr_devaddr_range_storage:count_for_route(hpr_route:id(Route))},
+            {" EUIs Cnt ", hpr_eui_pair_storage:count_for_route(hpr_route:id(Route))},
+            {" SKFs Cnt ", hpr_skf_storage:count_route(hpr_route:id(Route))},
             {" Route ID ", hpr_route:id(Route)}
         ]
     end,
@@ -135,7 +134,7 @@ config_list(_, _, _) ->
 config_oui_list(["config", "oui", OUIString], [], Flags) ->
     Options = maps:from_list(Flags),
     OUI = erlang:list_to_integer(OUIString),
-    RoutesETS = hpr_route_ets:oui_routes(OUI),
+    RoutesETS = hpr_route_storage:oui_routes(OUI),
 
     %% OUI 4
     %% ========================================================
@@ -290,7 +289,7 @@ config_skf(["config", "skf", DevAddrOrSKF], [], []) ->
                     hpr_devaddr_range_storage:lookup(DevAddr)
                 );
             SKF ->
-                RoutesETS = hpr_route_ets:all_route_ets(),
+                RoutesETS = hpr_route_storage:all_route_ets(),
                 find_skf(SKF, RoutesETS, [])
         end,
     case SKFS of
@@ -315,7 +314,7 @@ find_skf(_SKToFind, [], Acc) ->
 find_skf(SKToFind, [RouteETS | RoutesETS], Acc0) ->
     Route = hpr_route_ets:route(RouteETS),
     RouteID = hpr_route:id(Route),
-    case hpr_route_ets:skfs_for_route(RouteID) of
+    case hpr_skf_storage:lookup_route(RouteID) of
         [] ->
             find_skf(SKToFind, RoutesETS, Acc0);
         SKFs ->
@@ -375,7 +374,7 @@ do_config_eui(AppEUI, DevEUI) ->
 
 do_single_eui(app_eui, AppEUI) ->
     EUINum = erlang:list_to_integer(AppEUI, 16),
-    Found = hpr_route_ets:lookup_app_eui(EUINum),
+    Found = hpr_eui_pair_storage:lookup_app_eui(EUINum),
 
     %% ======================================================
     %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
@@ -393,7 +392,7 @@ do_single_eui(app_eui, AppEUI) ->
     c_list(Spacer ++ Info ++ EUIsInfo);
 do_single_eui(dev_eui, DevEUI) ->
     EUINum = erlang:list_to_integer(DevEUI, 16),
-    Found = hpr_route_ets:lookup_dev_eui(EUINum),
+    Found = hpr_eui_pair_storage:lookup_dev_eui(EUINum),
 
     %% ======================================================
     %% - Dev EUI :: 6081F9413229AD32 (6954113358046539058)
@@ -433,18 +432,18 @@ mk_route_info(RouteETS, #{display_euis := DisplayEUIs, display_skfs := DisplaySK
 
     DevAddrHeader = io_lib:format("- DevAddr Ranges~n", []),
     DevAddrRanges = lists:map(
-        fun format_devaddr/1, hpr_route_ets:devaddr_ranges_for_route(RouteID)
+        fun format_devaddr/1, hpr_devaddr_range_storage:lookup_for_route(RouteID)
     ),
     DevAddrInfo = [DevAddrHeader | DevAddrRanges],
 
     EUIInfo =
         case DisplayEUIs of
             false ->
-                Count = hpr_route_ets:eui_pairs_count_for_route(RouteID),
+                Count = hpr_eui_pair_storage:count_for_route(RouteID),
                 EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [Count]),
                 [EUIHeader];
             true ->
-                EUIs = hpr_route_ets:eui_pairs_for_route(RouteID),
+                EUIs = hpr_eui_pair_storage:lookup_for_route(RouteID),
                 EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [
                     erlang:length(EUIs)
                 ]),
@@ -454,13 +453,13 @@ mk_route_info(RouteETS, #{display_euis := DisplayEUIs, display_skfs := DisplaySK
     SKFInfo =
         case DisplaySKFs of
             false ->
-                SKFsCount = hpr_route_ets:skfs_count_for_route(RouteID),
+                SKFsCount = hpr_skf_storage:count_route(RouteID),
                 SKFHeader = io_lib:format(
                     "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [SKFsCount]
                 ),
                 [SKFHeader];
             true ->
-                SKFs = hpr_route_ets:skfs_for_route(RouteID),
+                SKFs = hpr_skf_storage:lookup_route(RouteID),
                 SKFHeader = io_lib:format(
                     "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [
                         erlang:length(SKFs)

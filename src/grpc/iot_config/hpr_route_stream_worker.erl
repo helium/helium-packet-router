@@ -320,8 +320,8 @@ refresh_skfs(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 SKFs when erlang:is_list(SKFs) ->
-                    Previous = hpr_route_ets:skfs_for_route(RouteID),
-                    PreviousCnt = hpr_route_ets:replace_route_skfs(RouteID, SKFs),
+                    Previous = hpr_skf_storage:lookup_route(RouteID),
+                    PreviousCnt = hpr_skf_storage:replace_route(RouteID, SKFs),
                     ct:print(
                         "route refresh skfs ~p",
                         [{{previous, PreviousCnt}, {current, length(SKFs)}}]
@@ -355,8 +355,8 @@ refresh_euis(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 EUIs when erlang:is_list(EUIs) ->
-                    Previous = hpr_route_ets:eui_pairs_for_route(RouteID),
-                    PreviousCnt = hpr_route_ets:replace_route_euis(RouteID, EUIs),
+                    Previous = hpr_eui_pair_storage:lookup_for_route(RouteID),
+                    PreviousCnt = hpr_eui_pair_storage:replace_route(RouteID, EUIs),
                     lager:info(
                         [{previous, PreviousCnt}, {current, length(EUIs)}],
                         "route refresh euis"
@@ -398,8 +398,8 @@ refresh_devaddrs(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 Devaddrs when erlang:is_list(Devaddrs) ->
-                    Previous = hpr_route_ets:devaddr_ranges_for_route(RouteID),
-                    PreviousCnt = hpr_route_ets:replace_route_devaddrs(RouteID, Devaddrs),
+                    Previous = hpr_devaddr_range_storage:lookup_for_route(RouteID),
+                    PreviousCnt = hpr_devaddr_range_storage:replace_route(RouteID, Devaddrs),
                     lager:info(
                         [{previous, PreviousCnt}, {current, length(Devaddrs)}],
                         "route refresh devaddrs"

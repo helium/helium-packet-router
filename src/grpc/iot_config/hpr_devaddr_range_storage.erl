@@ -8,7 +8,10 @@
     delete/1,
 
     delete_route/1,
-    replace_route/2
+    replace_route/2,
+
+    lookup_for_route/1,
+    count_for_route/1
 ]).
 
 -define(ETS_DEVADDR_RANGES, hpr_route_devaddr_ranges_ets).
@@ -74,6 +77,21 @@ delete(DevAddrRange) ->
         "deleted devaddr range"
     ),
     ok.
+
+%% ------------------------------------------------------------------
+%% CLI Functions
+%% ------------------------------------------------------------------
+
+-spec lookup_for_route(RouteID :: hpr_route:id()) ->
+    list({non_neg_integer(), non_neg_integer()}).
+lookup_for_route(RouteID) ->
+    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    ets:select(?ETS_DEVADDR_RANGES, MS).
+
+-spec count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
+count_for_route(RouteID) ->
+    MS = [{{'_', RouteID}, [], [true]}],
+    ets:select_count(?ETS_DEVADDR_RANGES, MS).
 
 %% -------------------------------------------------------------------
 %% Route Stream Helpers

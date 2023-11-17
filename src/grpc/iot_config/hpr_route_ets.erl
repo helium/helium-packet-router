@@ -10,36 +10,13 @@
     inc_backoff/1,
     reset_backoff/1,
 
-
     delete_all/0
-]).
-
-%% Route Stream helpers
--export([
-    replace_route_devaddrs/2,
-    replace_route_euis/2,
-    replace_route_skfs/2
-]).
-
-%% CLI exports
--export([
-    all_routes/0,
-    all_route_ets/0,
-    oui_routes/1,
-    eui_pairs_for_route/1,
-    eui_pairs_count_for_route/1,
-    lookup_dev_eui/1,
-    lookup_app_eui/1,
-    devaddr_ranges_for_route/1,
-    devaddr_ranges_count_for_route/1,
-    skfs_for_route/1,
-    skfs_count_for_route/1
 ]).
 
 -define(ETS_ROUTES, hpr_routes_ets).
 -define(ETS_EUI_PAIRS, hpr_route_eui_pairs_ets).
 -define(ETS_DEVADDR_RANGES, hpr_route_devaddr_ranges_ets).
--define(ETS_SKFS, hpr_route_skfs_ets).
+%% -define(ETS_SKFS, hpr_route_skfs_ets).
 
 -define(SKF_HEIR, hpr_sup).
 
@@ -121,105 +98,6 @@ delete_all() ->
     ets:delete_all_objects(?ETS_ROUTES),
     ok.
 
-%% ------------------------------------------------------------------
-%% Route Stream Helpers
-%% ------------------------------------------------------------------
-
--spec replace_route_euis(
-    RouteID :: hpr_route:id(),
-    EUIs :: list(hpr_eui_pair:eui_pair())
-) -> non_neg_integer().
-replace_route_euis(RouteID, EUIs) ->
-    hpr_eui_pair_storage:replace_route(RouteID, EUIs).
-
--spec replace_route_devaddrs(
-    RouteID :: hpr_route:id(),
-    DevAddrRanges :: list(hpr_devaddr_range:devaddr_range())
-) -> non_neg_integer().
-replace_route_devaddrs(RouteID, DevAddrRanges) ->
-    hpr_devaddr_range_storage:replace_route(RouteID, DevAddrRanges).
-
--spec replace_route_skfs(hpr_route:id(), list(hpr_skf:skf())) ->
-    {ok, non_neg_integer()} | {error, any()}.
-replace_route_skfs(RouteID, NewSKFs) ->
-    hpr_skf_storage:replace_route(RouteID, NewSKFs).
-
-%% ------------------------------------------------------------------
-%% CLI Functions
-%% ------------------------------------------------------------------
-
--spec all_routes() -> list(hpr_route:route()).
-all_routes() ->
-    [hpr_route_ets:route(R) || R <- ets:tab2list(?ETS_ROUTES)].
-
--spec all_route_ets() -> list(route()).
-all_route_ets() ->
-    ets:tab2list(?ETS_ROUTES).
-
--spec oui_routes(OUI :: non_neg_integer()) -> list(route()).
-oui_routes(OUI) ->
-    [
-        RouteETS
-     || RouteETS <- ets:tab2list(?ETS_ROUTES), OUI == hpr_route:oui(?MODULE:route(RouteETS))
-    ].
-
--spec lookup_dev_eui(DevEUI :: non_neg_integer()) ->
-    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
-lookup_dev_eui(DevEUI) ->
-    MS = [{{{'$1', DevEUI}, '_'}, [], [{{'$1', DevEUI}}]}],
-    ets:select(?ETS_EUI_PAIRS, MS).
-
--spec lookup_app_eui(AppEUI :: non_neg_integer()) ->
-    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
-lookup_app_eui(AppEUI) ->
-    MS = [{{{AppEUI, '$1'}, '_'}, [], [{{AppEUI, '$1'}}]}],
-    ets:select(?ETS_EUI_PAIRS, MS).
-
--spec eui_pairs_for_route(RouteID :: hpr_route:id()) ->
-    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
-eui_pairs_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
-    ets:select(?ETS_EUI_PAIRS, MS).
-
--spec eui_pairs_count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
-eui_pairs_count_for_route(RouteID) ->
-    MS = [{{'_', RouteID}, [], [true]}],
-    ets:select_count(?ETS_EUI_PAIRS, MS).
-
--spec devaddr_ranges_for_route(RouteID :: hpr_route:id()) ->
-    list({non_neg_integer(), non_neg_integer()}).
-devaddr_ranges_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
-    ets:select(?ETS_DEVADDR_RANGES, MS).
-
--spec devaddr_ranges_count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
-devaddr_ranges_count_for_route(RouteID) ->
-    MS = [{{'_', RouteID}, [], [true]}],
-    ets:select_count(?ETS_DEVADDR_RANGES, MS).
-
--spec skfs_for_route(RouteID :: hpr_route:id()) ->
-    list({
-        Key :: {Timestamp :: integer(), SessionKey :: binary()},
-        Vals :: {Devaddr :: non_neg_integer(), MaxCopies :: non_neg_integer()}
-    }).
-skfs_for_route(RouteID) ->
-    case hpr_route_storage:lookup(RouteID) of
-        {ok, RouteETS} ->
-            SKFETS = ?MODULE:skf_ets(RouteETS),
-            ets:tab2list(SKFETS);
-        {error, not_found} ->
-            []
-    end.
-
--spec skfs_count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
-skfs_count_for_route(RouteID) ->
-    case hpr_route_storage:lookup(RouteID) of
-        {ok, RouteETS} ->
-            SKFETS = ?MODULE:skf_ets(RouteETS),
-            ets:info(SKFETS, size);
-        _Other ->
-            0
-    end.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions

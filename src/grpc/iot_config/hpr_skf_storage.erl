@@ -10,7 +10,9 @@
     select/1, select/2,
 
     delete_route/1,
-    replace_route/2
+    replace_route/2,
+    lookup_route/1,
+    count_route/1
 ]).
 
 -define(ETS_SKFS, hpr_route_skfs_ets).
@@ -143,6 +145,27 @@ replace_route(RouteID, NewSKFs) ->
             {ok, OldSize};
         Other ->
             {error, Other}
+    end.
+
+-spec lookup_route(RouteID :: hpr_route:id()) ->
+    list({SessionKey :: binary(), {Devaddr :: binary(), MaxCopies :: non_neg_integer()}}).
+lookup_route(RouteID) ->
+    case hpr_route_storage:lookup(RouteID) of
+        {ok, RouteETS} ->
+            SKFETS = hpr_route_ets:skf_ets(RouteETS),
+            ets:tab2list(SKFETS);
+        {error, not_found} ->
+            []
+    end.
+
+-spec count_route(RouteID :: hpr_route:id()) -> non_neg_integer().
+count_route(RouteID) ->
+    case hpr_route_storage:lookup(RouteID) of
+        {ok, RouteETS} ->
+            SKFETS = hpr_route_ets:skf_ets(RouteETS),
+            ets:info(SKFETS, size);
+        {error, not_found} ->
+            []
     end.
 
 %% -------------------------------------------------------------------
