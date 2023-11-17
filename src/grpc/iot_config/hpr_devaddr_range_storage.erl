@@ -13,7 +13,7 @@
     lookup_for_route/1,
     count_for_route/1,
 
-delete_all/0
+    delete_all/0
 ]).
 
 -define(ETS_DEVADDR_RANGES, hpr_route_devaddr_ranges_ets).
