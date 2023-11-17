@@ -283,21 +283,21 @@ terminate(_Reason, _State) ->
         | {skf, hpr_skf:skf()}
 ) -> ok.
 process_route_stream_res(add, {route, Route}) ->
-    hpr_route_ets:insert_route(Route);
+    hpr_route_storage:insert(Route);
 process_route_stream_res(add, {eui_pair, EUIPair}) ->
-    hpr_route_ets:insert_eui_pair(EUIPair);
+    hpr_eui_pair_storage:insert(EUIPair);
 process_route_stream_res(add, {devaddr_range, DevAddrRange}) ->
-    hpr_route_ets:insert_devaddr_range(DevAddrRange);
+    hpr_devaddr_range_storage:insert(DevAddrRange);
 process_route_stream_res(add, {skf, SKF}) ->
-    hpr_route_ets:insert_skf(SKF);
+    hpr_skf_storage:insert(SKF);
 process_route_stream_res(remove, {route, Route}) ->
-    hpr_route_ets:delete_route(Route);
+    hpr_route_storage:delete(Route);
 process_route_stream_res(remove, {eui_pair, EUIPair}) ->
-    hpr_route_ets:delete_eui_pair(EUIPair);
+    hpr_eui_pair_storage:delete(EUIPair);
 process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
-    hpr_route_ets:delete_devaddr_range(DevAddrRange);
+    hpr_devaddr_range_storage:delete(DevAddrRange);
 process_route_stream_res(remove, {skf, SKF}) ->
-    hpr_route_ets:delete_skf(SKF).
+    hpr_skf_storage:delete(SKF).
 
 -spec refresh_skfs(hpr_route:id()) ->
     {ok, {Old :: list(hpr_skf:skf()), Current :: list(hpr_skf:skf())}} | {error, any()}.

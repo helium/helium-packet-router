@@ -208,12 +208,12 @@ mic_check_test(_Config) ->
         max_copies => 10
     }),
     RouteID = hpr_route:id(Route),
-    ?assertEqual(ok, hpr_route_ets:insert_route(Route)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
 
     DevAddrRange = hpr_devaddr_range:test_new(#{
         route_id => RouteID, start_addr => DevAddr, end_addr => 16#00000010
     }),
-    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange),
 
     BadSessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKFBadKeyAndRouteExitst = hpr_skf:new(#{
@@ -222,11 +222,11 @@ mic_check_test(_Config) ->
         session_key => BadSessionKey,
         max_copies => 1
     }),
-    hpr_route_ets:insert_skf(SKFBadKeyAndRouteExitst),
+    hpr_skf_storage:insert(SKFBadKeyAndRouteExitst),
 
     ok = test_utils:wait_until(
         fun() ->
-            case hpr_route_ets:lookup_route(RouteID) of
+            case hpr_route_storage:lookup(RouteID) of
                 {ok, RouteETS} ->
                     ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
@@ -240,7 +240,7 @@ mic_check_test(_Config) ->
         {error, invalid_mic}, hpr_routing:handle_packet(PacketUp(1), #{gateway => Gateway})
     ),
 
-    ok = hpr_route_ets:delete_skf(SKFBadKeyAndRouteExitst),
+    ok = hpr_skf_storage:delete(SKFBadKeyAndRouteExitst),
 
     %% TEST 4: Good key and route exist
     %% We leave old route inserted and do not delete good skf for next test
@@ -251,11 +251,11 @@ mic_check_test(_Config) ->
         session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
         max_copies => 1
     }),
-    hpr_route_ets:insert_skf(SKFGoodKeyAndRouteExitst),
+    hpr_skf_storage:insert(SKFGoodKeyAndRouteExitst),
 
     ok = test_utils:wait_until(
         fun() ->
-            case hpr_route_ets:lookup_route(RouteID) of
+            case hpr_route_storage:lookup(RouteID) of
                 {ok, RouteETS} ->
                     ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
@@ -276,11 +276,11 @@ mic_check_test(_Config) ->
         session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
         max_copies => 1
     }),
-    hpr_route_ets:insert_skf(SKFBadKey),
+    hpr_skf_storage:insert(SKFBadKey),
 
     ok = test_utils:wait_until(
         fun() ->
-            case hpr_route_ets:lookup_route(RouteID) of
+            case hpr_route_storage:lookup(RouteID) of
                 {ok, RouteETS} ->
                     ETS = hpr_route_ets:skf_ets(RouteETS),
                     2 =:= ets:info(ETS, size);
@@ -313,12 +313,12 @@ skf_max_copies_test(_Config) ->
         max_copies => 1
     }),
     RouteID = hpr_route:id(Route),
-    ?assertEqual(ok, hpr_route_ets:insert_route(Route)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
 
     DevAddrRange = hpr_devaddr_range:test_new(#{
         route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
     }),
-    ?assertEqual(ok, hpr_route_ets:insert_devaddr_range(DevAddrRange)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange)),
 
     SKF = hpr_skf:new(#{
         route_id => RouteID,
@@ -326,11 +326,11 @@ skf_max_copies_test(_Config) ->
         session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
         max_copies => 3
     }),
-    ?assertEqual(ok, hpr_route_ets:insert_skf(SKF)),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF)),
 
     ok = test_utils:wait_until(
         fun() ->
-            case hpr_route_ets:lookup_route(RouteID) of
+            case hpr_route_storage:lookup(RouteID) of
                 {ok, RouteETS} ->
                     ETS = hpr_route_ets:skf_ets(RouteETS),
                     1 =:= ets:info(ETS, size);
@@ -424,9 +424,9 @@ multi_buy_without_service_test(_Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(Route),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
@@ -574,9 +574,9 @@ multi_buy_with_service_test(_Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(Route),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
@@ -725,8 +725,8 @@ multi_buy_requests_test(_Config) ->
         hpr_devaddr_range:test_new(#{
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         }),
-    ok = hpr_route_ets:insert_route(Route),
-    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange),
+    ok = hpr_route_storage:insert(Route),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange),
 
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
@@ -873,9 +873,9 @@ active_locked_route_test(_Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(Route1),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route1),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
@@ -928,7 +928,7 @@ active_locked_route_test(_Config) ->
         active => false,
         locked => false
     }),
-    ok = hpr_route_ets:insert_route(Route2),
+    ok = hpr_route_storage:insert(Route2),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(1), #{gateway => Gateway1})),
 
     ?assertEqual([], meck:history(hpr_protocol_router)),
@@ -946,7 +946,7 @@ active_locked_route_test(_Config) ->
         active => true,
         locked => true
     }),
-    ok = hpr_route_ets:insert_route(Route3),
+    ok = hpr_route_storage:insert(Route3),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(2), #{gateway => Gateway1})),
 
     ?assertEqual([], meck:history(hpr_protocol_router)),
@@ -982,9 +982,9 @@ in_cooldown_route_test(_Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(Route),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
@@ -1027,7 +1027,7 @@ in_cooldown_route_test(_Config) ->
     ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 3)),
 
     %% We check the route and make sure that the backoff is setup properly
-    {ok, RouteETS1} = hpr_route_ets:lookup_route(RouteID),
+    {ok, RouteETS1} = hpr_route_storage:lookup(RouteID),
     {Timestamp1, Backoff1} = hpr_route_ets:backoff(RouteETS1),
     ?assert(Timestamp1 > erlang:system_time(millisecond)),
     ?assertEqual(2000, backoff:get(Backoff1)),
@@ -1040,7 +1040,7 @@ in_cooldown_route_test(_Config) ->
     ?assertEqual(3, meck:num_calls(hpr_protocol_router, send, 3)),
 
     %% The route backoff should be back to undefined
-    {ok, RouteETS2} = hpr_route_ets:lookup_route(RouteID),
+    {ok, RouteETS2} = hpr_route_storage:lookup(RouteID),
     ?assertEqual(undefined, hpr_route_ets:backoff(RouteETS2)),
 
     ?assert(meck:validate(hpr_protocol_router)),
@@ -1083,9 +1083,9 @@ success_test(_Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(Route),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
@@ -1271,9 +1271,9 @@ maybe_report_packet_test(_Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(Route),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
@@ -1334,8 +1334,8 @@ maybe_report_packet_test(_Config) ->
             route_id => BadRouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(BadRoute),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, BadDevAddrRanges),
+    ok = hpr_route_storage:insert(BadRoute),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, BadDevAddrRanges),
 
     UplinkPacketUp2 = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr, fcnt => 2
@@ -1413,12 +1413,12 @@ find_route_load_test(_Config) ->
         active => true,
         locked => false
     }),
-    ok = hpr_route_ets:insert_route(Route1),
+    ok = hpr_route_storage:insert(Route1),
 
     DevAddrRange1 = hpr_devaddr_range:test_new(#{
         route_id => Route1ID, start_addr => 16#00000000, end_addr => 16#00000002
     }),
-    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange1),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange1),
 
     SKF1 = hpr_skf:new(#{
         route_id => Route1ID,
@@ -1426,12 +1426,12 @@ find_route_load_test(_Config) ->
         session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
         max_copies => 1
     }),
-    hpr_route_ets:insert_skf(SKF1),
+    hpr_skf_storage:insert(SKF1),
 
     {Time1, Result1} = timer:tc(hpr_routing, find_routes, [PacketType, PacketUp]),
     ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Time1, Result1}]),
 
-    {ok, RouteETS1} = hpr_route_ets:lookup_route(Route1ID),
+    {ok, RouteETS1} = hpr_route_storage:lookup(Route1ID),
     SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
     timer:sleep(2000),
@@ -1446,7 +1446,7 @@ find_route_load_test(_Config) ->
                         session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
                         max_copies => 1
                     }),
-                    hpr_route_ets:insert_skf(TempSKF)
+                    hpr_skf_storage:insert(TempSKF)
                 end
             )
         end,
@@ -1488,12 +1488,12 @@ find_route_load_test(_Config) ->
         active => true,
         locked => false
     }),
-    ok = hpr_route_ets:insert_route(Route2),
+    ok = hpr_route_storage:insert(Route2),
 
     DevAddrRange2 = hpr_devaddr_range:test_new(#{
         route_id => Route2ID, start_addr => 16#00000000, end_addr => 16#00000002
     }),
-    ok = hpr_route_ets:insert_devaddr_range(DevAddrRange2),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange2),
 
     SKF2 = hpr_skf:new(#{
         route_id => Route2ID,
@@ -1501,9 +1501,9 @@ find_route_load_test(_Config) ->
         session_key => hpr_utils:bin_to_hex_string(NwkSessionKey),
         max_copies => 1
     }),
-    hpr_route_ets:insert_skf(SKF2),
+    hpr_skf_storage:insert(SKF2),
 
-    {ok, RouteETS2} = hpr_route_ets:lookup_route(Route2ID),
+    {ok, RouteETS2} = hpr_route_storage:lookup(Route2ID),
     SKFETS2 = hpr_route_ets:skf_ets(RouteETS2),
     timer:sleep(10),
     lists:foreach(
@@ -1516,7 +1516,7 @@ find_route_load_test(_Config) ->
                         session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
                         max_copies => 1
                     }),
-                    hpr_route_ets:insert_skf(TempSKF)
+                    hpr_skf_storage:insert(TempSKF)
                 end
             )
         end,
@@ -1533,7 +1533,7 @@ find_route_load_test(_Config) ->
     ct:pal("[~p:~p:~p] MARKER ~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Time4, Result4}]),
 
     ct:pal("[~p:~p:~p] MARKER ~p~n", [
-        ?MODULE, ?FUNCTION_NAME, ?LINE, hpr_route_ets:lookup_devaddr_range(DevAddr)
+        ?MODULE, ?FUNCTION_NAME, ?LINE, hpr_devaddr_range_storage:lookup(DevAddr)
     ]),
 
     % ?assert(false),
@@ -1574,9 +1574,9 @@ routing_cleanup_test(_Config) ->
             route_id => RouteID, start_addr => 16#00000000, end_addr => 16#0000000A
         })
     ],
-    ok = hpr_route_ets:insert_route(Route),
-    ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
-    ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
+    ok = hpr_route_storage:insert(Route),
+    ok = lists:foreach(fun hpr_eui_pair_storage:insert/1, EUIPairs),
+    ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun

@@ -180,7 +180,7 @@ config_oui_list(_, _, _) ->
 
 config_route(["config", "route", RouteID], [], Flags) ->
     Options = maps:from_list(Flags),
-    {ok, RouteETS} = hpr_route_ets:lookup_route(RouteID),
+    {ok, RouteETS} = hpr_route_storage:lookup(RouteID),
 
     %% ========================================================
     %% - ID         :: 48088786-5465-4115-92de-5214a88e9a75
@@ -247,26 +247,26 @@ config_route_refresh(_, _, _) ->
     usage.
 
 config_route_activate(["config", "route", "activate", RouteID], [], _Flags) ->
-    case hpr_route_ets:lookup_route(RouteID) of
+    case hpr_route_storage:lookup(RouteID) of
         {error, not_found} ->
             c_text("Route ~s not found", [RouteID]);
         {ok, RouteETS} ->
             Route0 = hpr_route_ets:route(RouteETS),
             Route1 = hpr_route:active(true, Route0),
-            ok = hpr_route_ets:insert_route(Route1),
+            ok = hpr_route_storage:insert(Route1),
             c_text("Route ~s activated", [RouteID])
     end;
 config_route_activate(_, _, _) ->
     usage.
 
 config_route_deactivate(["config", "route", "deactivate", RouteID], [], _Flags) ->
-    case hpr_route_ets:lookup_route(RouteID) of
+    case hpr_route_storage:lookup(RouteID) of
         {error, not_found} ->
             c_text("Route ~s not found", [RouteID]);
         {ok, RouteETS} ->
             Route0 = hpr_route_ets:route(RouteETS),
             Route1 = hpr_route:active(false, Route0),
-            ok = hpr_route_ets:insert_route(Route1),
+            ok = hpr_route_storage:insert(Route1),
             c_text("Route ~s deactivated", [RouteID])
     end;
 config_route_deactivate(_, _, _) ->
@@ -283,11 +283,11 @@ config_skf(["config", "skf", DevAddrOrSKF], [], []) ->
                         ETS = hpr_route_ets:skf_ets(RouteETS),
                         [
                             {DevAddr, SK, RouteID, MaxCopies}
-                         || {SK, MaxCopies} <- hpr_route_ets:lookup_skf(ETS, DevAddr)
+                         || {SK, MaxCopies} <- hpr_skf_storage:lookup(ETS, DevAddr)
                         ] ++ Acc
                     end,
                     [],
-                    hpr_route_ets:lookup_devaddr_range(DevAddr)
+                    hpr_devaddr_range_storage:lookup(DevAddr)
                 );
             SKF ->
                 RoutesETS = hpr_route_ets:all_route_ets(),
@@ -347,7 +347,7 @@ do_config_eui(AppEUI, DevEUI) ->
     AppEUINum = erlang:list_to_integer(AppEUI, 16),
     DevEUINum = erlang:list_to_integer(DevEUI, 16),
 
-    Found = hpr_route_ets:lookup_eui_pair(AppEUINum, DevEUINum),
+    Found = hpr_eui_pair_storage:lookup(AppEUINum, DevEUINum),
 
     %% ======================================================
     %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
