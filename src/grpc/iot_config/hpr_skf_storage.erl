@@ -17,6 +17,14 @@
     delete_all/0
 ]).
 
+-ifdef(TEST).
+-export([
+    test_delete_ets/0,
+    test_register_heir/0,
+    test_unregister_heir/0
+]).
+-endif.
+
 -define(ETS_SKFS, hpr_route_skfs_ets).
 
 -define(SKF_HEIR, hpr_sup).
@@ -115,9 +123,25 @@ delete_all() ->
             SKFETS = hpr_route_ets:skf_ets(Route),
             ets:delete(SKFETS)
         end,
-        hpr_route_storage:all_routes()
+        hpr_route_storage:all_route_ets()
     ),
     ok.
+
+-ifdef(TEST).
+
+-spec test_delete_ets() -> ok.
+test_delete_ets() ->
+    ?MODULE:delete_all().
+
+-spec test_register_heir() -> true.
+test_register_heir() ->
+    true = erlang:register(?SKF_HEIR, self()).
+
+-spec test_unregister_heir() -> true.
+test_unregister_heir() ->
+    true = erlang:unregister(?SKF_HEIR).
+
+-endif.
 
 %% -------------------------------------------------------------------
 %% Route Stream Functions

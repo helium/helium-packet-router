@@ -18,6 +18,10 @@
     delete_all/0
 ]).
 
+-ifdef(TEST).
+-export([test_delete_ets/0]).
+-endif.
+
 -define(ETS_EUI_PAIRS, hpr_route_eui_pairs_ets).
 
 -spec init_ets() -> ok.
@@ -82,6 +86,15 @@ delete(EUIPair) ->
 delete_all() ->
     ets:delete_all_objects(?ETS_EUI_PAIRS),
     ok.
+
+-ifdef(TEST).
+
+-spec test_delete_ets() -> ok.
+test_delete_ets() ->
+    ets:delete(?ETS_EUI_PAIRS),
+    ok.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% CLI Functions

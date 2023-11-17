@@ -102,7 +102,7 @@ update_backoff(RouteID, Backoff) ->
 
 -spec delete_all() -> ok.
 delete_all() ->
-    ok = hpr_devaddr_range_storage:deletee_all(),
+    ok = hpr_devaddr_range_storage:delete_all(),
     ok = hpr_eui_pair_storage:delete_all(),
     ok = hpr_skf_storage:delete_all(),
     ok = hpr_route_storage:delete_all(),
@@ -122,31 +122,27 @@ delete_all() ->
 
 all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
-        ?_test(test_route()),
-        ?_test(test_eui_pair()),
-        ?_test(test_devaddr_range()),
-        ?_test(test_skf()),
-        ?_test(test_select_skf()),
-        ?_test(test_delete_route()),
-        ?_test(test_delete_all())
+        {"test_route", ?_test(test_route())},
+        {"test_eui_pair", ?_test(test_eui_pair())},
+        {"test_devaddr_range", ?_test(test_devaddr_range())},
+        {"test_skf", ?_test(test_skf())},
+        {"test_select_skf", ?_test(test_select_skf())},
+        {"test_delete_route", ?_test(test_delete_route())},
+        {"test_delete_all", ?_test(test_delete_all())}
     ]}.
 
 foreach_setup() ->
-    true = erlang:register(?SKF_HEIR, self()),
+    true = hpr_skf_storage:test_register_heir(),
     ?MODULE:init(),
     ok.
 
 foreach_cleanup(ok) ->
-    ets:delete(?ETS_DEVADDR_RANGES),
-    ets:delete(?ETS_EUI_PAIRS),
-    lists:foreach(
-        fun(#hpr_route_ets{skf_ets = SKFETS}) ->
-            ets:delete(SKFETS)
-        end,
-        ets:tab2list(?ETS_ROUTES)
-    ),
-    ets:delete(?ETS_ROUTES),
-    true = erlang:unregister(?SKF_HEIR),
+    ok = hpr_devaddr_range_storage:test_delete_ets(),
+    ok = hpr_eui_pair_storage:test_delete_ets(),
+    ok = hpr_skf_storage:test_delete_ets(),
+    ok = hpr_route_storage:test_delete_ets(),
+
+    true = hpr_skf_storage:test_unregister_heir(),
     ok.
 
 test_route() ->
@@ -164,8 +160,8 @@ test_route() ->
     RouteID = hpr_route:id(Route0),
 
     %% Create
-    ?assertEqual(ok, ?MODULE:insert_route(Route0)),
-    {ok, RouteETS0} = ?MODULE:lookup_route(RouteID),
+    ?assertEqual(ok, hpr_route_storage:insert(Route0)),
+    {ok, RouteETS0} = hpr_route_storage:lookup(RouteID),
     ?assertEqual(RouteID, RouteETS0#hpr_route_ets.id),
     ?assertEqual(Route0, ?MODULE:route(RouteETS0)),
     SKFETS0 = ?MODULE:skf_ets(RouteETS0),
@@ -185,8 +181,8 @@ test_route() ->
         },
         max_copies => 22
     }),
-    ?assertEqual(ok, ?MODULE:insert_route(Route1)),
-    {ok, RouteETS1} = ?MODULE:lookup_route(RouteID),
+    ?assertEqual(ok, hpr_route_storage:insert(Route1)),
+    {ok, RouteETS1} = hpr_route_storage:lookup(RouteID),
     ?assertEqual(RouteID, RouteETS1#hpr_route_ets.id),
     ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
     SKFETS1 = ?MODULE:skf_ets(RouteETS0),
@@ -197,12 +193,12 @@ test_route() ->
 
     Backoff = {erlang:system_time(millisecond), backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX)},
     ?assertEqual(ok, ?MODULE:update_backoff(RouteID, Backoff)),
-    {ok, RouteETS2} = ?MODULE:lookup_route(RouteID),
+    {ok, RouteETS2} = hpr_route_storage:lookup(RouteID),
     ?assertEqual(Backoff, ?MODULE:backoff(RouteETS2)),
 
     %% Delete
-    ?assertEqual(ok, ?MODULE:delete_route(Route1)),
-    ?assertEqual({error, not_found}, ?MODULE:lookup_route(RouteID)),
+    ?assertEqual(ok, hpr_route_storage:delete(Route1)),
+    ?assertEqual({error, not_found}, hpr_route_storage:lookup(RouteID)),
     ?assertEqual(undefined, ets:info(SKFETS1)),
     ok.
 
@@ -235,38 +231,38 @@ test_eui_pair() ->
     EUIPair2 = hpr_eui_pair:test_new(#{route_id => RouteID1, app_eui => 2, dev_eui => 0}),
     EUIPair3 = hpr_eui_pair:test_new(#{route_id => RouteID2, app_eui => 2, dev_eui => 2}),
 
-    ?assertEqual(ok, ?MODULE:insert_route(Route1)),
-    ?assertEqual(ok, ?MODULE:insert_route(Route2)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route1)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route2)),
 
-    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair1)),
-    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair2)),
-    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair3)),
+    ?assertEqual(ok, hpr_eui_pair_storage:insert(EUIPair1)),
+    ?assertEqual(ok, hpr_eui_pair_storage:insert(EUIPair2)),
+    ?assertEqual(ok, hpr_eui_pair_storage:insert(EUIPair3)),
 
-    [RouteETS1] = ?MODULE:lookup_eui_pair(1, 1),
+    [RouteETS1] = hpr_eui_pair_storage:lookup(1, 1),
     ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
-    ?assertEqual([], ?MODULE:lookup_eui_pair(1, 2)),
-    [RouteETS2] = ?MODULE:lookup_eui_pair(2, 1),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 2)),
+    [RouteETS2] = hpr_eui_pair_storage:lookup(2, 1),
     ?assertEqual(Route1, ?MODULE:route(RouteETS2)),
-    [RouteETS3, RouteETS4] = ?MODULE:lookup_eui_pair(2, 2),
+    [RouteETS3, RouteETS4] = hpr_eui_pair_storage:lookup(2, 2),
 
     ?assertEqual(Route1, ?MODULE:route(RouteETS3)),
     ?assertEqual(Route2, ?MODULE:route(RouteETS4)),
 
     EUIPair4 = hpr_eui_pair:test_new(#{route_id => RouteID1, app_eui => 1, dev_eui => 0}),
-    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair4)),
-    [RouteETS5] = ?MODULE:lookup_eui_pair(1, 1),
+    ?assertEqual(ok, hpr_eui_pair_storage:insert(EUIPair4)),
+    [RouteETS5] = hpr_eui_pair_storage:lookup(1, 1),
     ?assertEqual(Route1, ?MODULE:route(RouteETS5)),
-    ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair1)),
-    [RouteETS6] = ?MODULE:lookup_eui_pair(1, 1),
+    ?assertEqual(ok, hpr_eui_pair_storage:delete(EUIPair1)),
+    [RouteETS6] = hpr_eui_pair_storage:lookup(1, 1),
 
     ?assertEqual(Route1, ?MODULE:route(RouteETS6)),
-    ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair4)),
-    ?assertEqual([], ?MODULE:lookup_eui_pair(1, 1)),
+    ?assertEqual(ok, hpr_eui_pair_storage:delete(EUIPair4)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 1)),
 
-    ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair2)),
-    ?assertEqual(ok, ?MODULE:delete_eui_pair(EUIPair3)),
-    ?assertEqual([], ?MODULE:lookup_eui_pair(2, 1)),
-    ?assertEqual([], ?MODULE:lookup_eui_pair(2, 2)),
+    ?assertEqual(ok, hpr_eui_pair_storage:delete(EUIPair2)),
+    ?assertEqual(ok, hpr_eui_pair_storage:delete(EUIPair3)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(2, 1)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(2, 2)),
 
     ok.
 
@@ -305,35 +301,35 @@ test_devaddr_range() ->
         route_id => RouteID2, start_addr => 16#00000001, end_addr => 16#00000003
     }),
 
-    ?assertEqual(ok, ?MODULE:insert_route(Route1)),
-    ?assertEqual(ok, ?MODULE:insert_route(Route2)),
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange1)),
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange2)),
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange3)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route1)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route2)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange1)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange2)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange3)),
 
-    [RouteETS1] = ?MODULE:lookup_devaddr_range(16#00000005),
+    [RouteETS1] = hpr_devaddr_range_storage:lookup(16#00000005),
     ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
-    [RouteETS2] = ?MODULE:lookup_devaddr_range(16#00000010),
+    [RouteETS2] = hpr_devaddr_range_storage:lookup(16#00000010),
     ?assertEqual(Route2, ?MODULE:route(RouteETS2)),
-    [RouteETS3] = ?MODULE:lookup_devaddr_range(16#0000001A),
+    [RouteETS3] = hpr_devaddr_range_storage:lookup(16#0000001A),
     ?assertEqual(Route2, ?MODULE:route(RouteETS3)),
-    [RouteETS4, RouteETS5] = ?MODULE:lookup_devaddr_range(16#00000002),
+    [RouteETS4, RouteETS5] = hpr_devaddr_range_storage:lookup(16#00000002),
     ?assertEqual(Route1, ?MODULE:route(RouteETS4)),
     ?assertEqual(Route2, ?MODULE:route(RouteETS5)),
 
     ?assertEqual(
-        ok, ?MODULE:delete_devaddr_range(DevAddrRange1)
+        ok, hpr_devaddr_range_storage:delete(DevAddrRange1)
     ),
-    ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000005)),
-    [RouteETS6] = ?MODULE:lookup_devaddr_range(16#00000002),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000005)),
+    [RouteETS6] = hpr_devaddr_range_storage:lookup(16#00000002),
     ?assertEqual(Route2, ?MODULE:route(RouteETS6)),
 
-    ?assertEqual(ok, ?MODULE:delete_devaddr_range(DevAddrRange2)),
-    ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000010)),
-    ?assertEqual([], ?MODULE:lookup_devaddr_range(16#0000001A)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:delete(DevAddrRange2)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000010)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#0000001A)),
 
-    ?assertEqual(ok, ?MODULE:delete_devaddr_range(DevAddrRange3)),
-    ?assertEqual([], ?MODULE:lookup_devaddr_range(16#00000002)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:delete(DevAddrRange3)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000002)),
 
     ok.
 
@@ -381,48 +377,52 @@ test_skf() ->
         route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2, max_copies => 2
     }),
 
-    ?assertEqual(ok, ?MODULE:insert_route(Route1)),
-    ?assertEqual(ok, ?MODULE:insert_route(Route2)),
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange1)),
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange2)),
-    ?assertEqual(ok, ?MODULE:insert_skf(SKF1)),
-    ?assertEqual(ok, ?MODULE:insert_skf(SKF2)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route1)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route2)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange1)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange2)),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF1)),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF2)),
 
-    {ok, RouteETS1} = ?MODULE:lookup_route(RouteID1),
-    {ok, RouteETS2} = ?MODULE:lookup_route(RouteID2),
+    {ok, RouteETS1} = hpr_route_storage:lookup(RouteID1),
+    {ok, RouteETS2} = hpr_route_storage:lookup(RouteID2),
     SKFETS1 = ?MODULE:skf_ets(RouteETS1),
     SKFETS2 = ?MODULE:skf_ets(RouteETS2),
 
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
-    ?assertMatch([{SK1, 1}], ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertMatch([{SK1, 1}], hpr_skf_storage:lookup(SKFETS1, DevAddr1)),
     SK2 = hpr_utils:hex_to_bin(SessionKey2),
-    ?assertMatch([{SK2, 2}], ?MODULE:lookup_skf(SKFETS2, DevAddr2)),
+    ?assertMatch([{SK2, 2}], hpr_skf_storage:lookup(SKFETS2, DevAddr2)),
 
-    ?assertEqual(ok, ?MODULE:update_skf(DevAddr1, SK1, RouteID1, 11)),
-    ?assertMatch([{SK1, 11}], ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertEqual(ok, hpr_skf_storage:update(DevAddr1, SK1, RouteID1, 11)),
+    ?assertMatch([{SK1, 11}], hpr_skf_storage:lookup(SKFETS1, DevAddr1)),
 
     SessionKey3 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
     SKF3 = hpr_skf:new(#{
         route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3, max_copies => 3
     }),
-    ?assertEqual(ok, ?MODULE:insert_skf(SKF3)),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF3)),
 
     SK3 = hpr_utils:hex_to_bin(SessionKey3),
-    ?assertEqual([{SK3, 3}, {SK1, 11}], lists:keysort(2, ?MODULE:lookup_skf(SKFETS1, DevAddr1))),
+    ?assertEqual(
+        [{SK3, 3}, {SK1, 11}], lists:keysort(2, hpr_skf_storage:lookup(SKFETS1, DevAddr1))
+    ),
 
     SKF4 = hpr_skf:new(#{
         route_id => RouteID1, devaddr => DevAddr1, session_key => SessionKey3, max_copies => 10
     }),
 
-    ?assertEqual(ok, ?MODULE:insert_skf(SKF4)),
-    ?assertEqual([{SK3, 10}, {SK1, 11}], lists:keysort(2, ?MODULE:lookup_skf(SKFETS1, DevAddr1))),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF4)),
+    ?assertEqual(
+        [{SK3, 10}, {SK1, 11}], lists:keysort(2, hpr_skf_storage:lookup(SKFETS1, DevAddr1))
+    ),
 
-    ?assertEqual(ok, ?MODULE:delete_skf(SKF1)),
-    ?assertEqual(ok, ?MODULE:delete_skf(SKF4)),
-    ?assertEqual([], ?MODULE:lookup_skf(SKFETS1, DevAddr1)),
+    ?assertEqual(ok, hpr_skf_storage:delete(SKF1)),
+    ?assertEqual(ok, hpr_skf_storage:delete(SKF4)),
+    ?assertEqual([], hpr_skf_storage:lookup(SKFETS1, DevAddr1)),
 
-    ?assertEqual(ok, ?MODULE:delete_skf(SKF2)),
-    ?assertEqual([], ?MODULE:lookup_skf(SKFETS2, DevAddr2)),
+    ?assertEqual(ok, hpr_skf_storage:delete(SKF2)),
+    ?assertEqual([], hpr_skf_storage:lookup(SKFETS2, DevAddr2)),
 
     ok.
 
@@ -440,14 +440,14 @@ test_select_skf() ->
     }),
     RouteID = hpr_route:id(Route),
 
-    ?assertEqual(ok, ?MODULE:insert_route(Route)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
 
     DevAddr = 16#00000001,
     DevAddrRange = hpr_devaddr_range:test_new(#{
         route_id => RouteID, start_addr => 16#00000001, end_addr => 16#0000000A
     }),
 
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange)),
 
     lists:foreach(
         fun(_) ->
@@ -455,19 +455,19 @@ test_select_skf() ->
             SKF = hpr_skf:new(#{
                 route_id => RouteID, devaddr => DevAddr, session_key => SessionKey, max_copies => 1
             }),
-            ?assertEqual(ok, ?MODULE:insert_skf(SKF))
+            ?assertEqual(ok, hpr_skf_storage:insert(SKF))
         end,
         lists:seq(1, 200)
     ),
 
-    [RouteETS] = ?MODULE:lookup_devaddr_range(DevAddr),
+    [RouteETS] = hpr_devaddr_range_storage:lookup(DevAddr),
     ?assertEqual(Route, ?MODULE:route(RouteETS)),
     SKFETS = ?MODULE:skf_ets(RouteETS),
-    {A, Continuation1} = ?MODULE:select_skf(SKFETS, DevAddr),
-    {B, Continuation2} = ?MODULE:select_skf(Continuation1),
-    '$end_of_table' = ?MODULE:select_skf(Continuation2),
+    {A, Continuation1} = hpr_skf_storage:select(SKFETS, DevAddr),
+    {B, Continuation2} = hpr_skf_storage:select(Continuation1),
+    '$end_of_table' = hpr_skf_storage:select(Continuation2),
 
-    ?assertEqual(lists:usort(?MODULE:lookup_skf(SKFETS, DevAddr)), lists:usort(A ++ B)),
+    ?assertEqual(lists:usort(hpr_skf_storage:lookup(SKFETS, DevAddr)), lists:usort(A ++ B)),
     ok.
 
 test_delete_route() ->
@@ -524,30 +524,30 @@ test_delete_route() ->
         route_id => RouteID2, devaddr => DevAddr2, session_key => SessionKey2, max_copies => 1
     }),
 
-    ?assertEqual(ok, ?MODULE:insert_route(Route1)),
-    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair1)),
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange1)),
-    ?assertEqual(ok, ?MODULE:insert_skf(SKF1)),
-    ?assertEqual(ok, ?MODULE:insert_route(Route2)),
-    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair2)),
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange2)),
-    ?assertEqual(ok, ?MODULE:insert_skf(SKF2)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route1)),
+    ?assertEqual(ok, hpr_eui_pair_storage:insert(EUIPair1)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange1)),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF1)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route2)),
+    ?assertEqual(ok, hpr_eui_pair_storage:insert(EUIPair2)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange2)),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF2)),
 
     ?assertEqual(2, erlang:length(ets:tab2list(?ETS_EUI_PAIRS))),
     ?assertEqual(2, erlang:length(ets:tab2list(?ETS_DEVADDR_RANGES))),
     ?assertEqual(2, erlang:length(ets:tab2list(?ETS_ROUTES))),
 
-    [RouteETS1] = ?MODULE:lookup_devaddr_range(DevAddr1),
+    [RouteETS1] = hpr_devaddr_range_storage:lookup(DevAddr1),
     ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
     SKFETS1 = ?MODULE:skf_ets(RouteETS1),
     ?assertEqual(1, erlang:length(ets:tab2list(SKFETS1))),
 
-    [RouteETS2] = ?MODULE:lookup_devaddr_range(DevAddr2),
+    [RouteETS2] = hpr_devaddr_range_storage:lookup(DevAddr2),
     ?assertEqual(Route2, ?MODULE:route(RouteETS2)),
     SKFETS2 = ?MODULE:skf_ets(RouteETS2),
     ?assertEqual(1, erlang:length(ets:tab2list(SKFETS2))),
 
-    ?assertEqual(ok, ?MODULE:delete_route(Route1)),
+    ?assertEqual(ok, hpr_route_storage:delete(Route1)),
 
     ?assertEqual([{{AppEUI2, DevEUI2}, RouteID2}], ets:tab2list(?ETS_EUI_PAIRS)),
     ?assertEqual(
@@ -581,10 +581,10 @@ test_delete_all() ->
         route_id => RouteID, devaddr => DevAddr, session_key => SessionKey, max_copies => 1
     }),
 
-    ?assertEqual(ok, ?MODULE:insert_route(Route)),
-    ?assertEqual(ok, ?MODULE:insert_eui_pair(EUIPair)),
-    ?assertEqual(ok, ?MODULE:insert_devaddr_range(DevAddrRange)),
-    ?assertEqual(ok, ?MODULE:insert_skf(SKF)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    ?assertEqual(ok, hpr_eui_pair_storage:insert(EUIPair)),
+    ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange)),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF)),
     ?assertEqual(ok, ?MODULE:delete_all()),
     ?assertEqual([], ets:tab2list(?ETS_DEVADDR_RANGES)),
     ?assertEqual([], ets:tab2list(?ETS_EUI_PAIRS)),
