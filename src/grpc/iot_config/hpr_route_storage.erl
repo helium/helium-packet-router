@@ -9,7 +9,9 @@
 
     all_routes/0,
     all_route_ets/0,
-    oui_routes/1
+    oui_routes/1,
+
+    delete_all/0
 ]).
 
 -define(ETS_ROUTES, hpr_routes_ets).
@@ -87,6 +89,11 @@ lookup(ID) ->
         _Other ->
             {error, not_found}
     end.
+
+-spec delete_all() -> ok.
+delete_all() ->
+    ets:delete_all_objects(?ETS_ROUTES),
+    ok.
 
 %% ------------------------------------------------------------------
 %% CLI Functions

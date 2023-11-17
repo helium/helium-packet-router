@@ -12,7 +12,9 @@
     delete_route/1,
     replace_route/2,
     lookup_route/1,
-    count_route/1
+    count_route/1,
+
+    delete_all/0
 ]).
 
 -define(ETS_SKFS, hpr_route_skfs_ets).
@@ -105,6 +107,17 @@ select(Continuation) ->
 select(ETS, DevAddr) ->
     MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
     ets:select(ETS, MS, 100).
+
+-spec delete_all() -> ok.
+delete_all() ->
+    lists:foreach(
+        fun(Route) ->
+            SKFETS = hpr_route_ets:skf_ets(Route),
+            ets:delete(SKFETS)
+        end,
+        hpr_route_storage:all_routes()
+    ),
+    ok.
 
 %% -------------------------------------------------------------------
 %% Route Stream Functions
