@@ -130,11 +130,11 @@ main_test(_Config) ->
     SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
     %% Check that we can query route via config
-    ?assertMatch([RouteETS1], hpr_route_storage:lookup(16#00000005)),
-    ?assertEqual([RouteETS1], hpr_route_storage:lookup(1, 12)),
-    ?assertEqual([RouteETS1], hpr_route_storage:lookup(1, 100)),
-    ?assertEqual([], hpr_route_storage:lookup(16#00000020)),
-    ?assertEqual([], hpr_route_storage:lookup(3, 3)),
+    ?assertMatch([RouteETS1], hpr_devaddr_range_storage:lookup(16#00000005)),
+    ?assertEqual([RouteETS1], hpr_eui_pair_storage:lookup(1, 12)),
+    ?assertEqual([RouteETS1], hpr_eui_pair_storage:lookup(1, 100)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000020)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
         [{SK1, 1}], hpr_skf_storage:lookup(SKFETS1, DevAddr1)
@@ -156,9 +156,9 @@ main_test(_Config) ->
         prometheus_counter:value(?METRICS_ICS_UPDATES_COUNTER, [eui_pair, remove])
     ),
 
-    ?assertEqual([], hpr_route_storage:lookup(1, 12)),
-    ?assertEqual([], hpr_route_storage:lookup(1, 100)),
-    ?assertEqual([], hpr_route_storage:lookup(3, 3)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 12)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 100)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3)),
 
     ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => remove, data => {devaddr_range, DevAddrRange1}})
@@ -170,9 +170,9 @@ main_test(_Config) ->
         end
     ),
 
-    ?assertEqual([], hpr_route_storage:lookup(16#00000005)),
-    ?assertEqual([], hpr_route_storage:lookup(16#00000006)),
-    ?assertEqual([], hpr_route_storage:lookup(16#00000020)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000005)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000006)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000020)),
 
     ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => remove, data => {skf, SessionKeyFilter}})
@@ -209,11 +209,11 @@ main_test(_Config) ->
             end
         end
     ),
-    ?assertMatch([RouteETS1], hpr_route_storage:lookup(16#00000005)),
-    ?assertEqual([RouteETS1], hpr_route_storage:lookup(1, 12)),
-    ?assertEqual([RouteETS1], hpr_route_storage:lookup(1, 100)),
-    ?assertEqual([], hpr_route_storage:lookup(16#00000020)),
-    ?assertEqual([], hpr_route_storage:lookup(3, 3)),
+    ?assertMatch([RouteETS1], hpr_devaddr_range_storage:lookup(16#00000005)),
+    ?assertEqual([RouteETS1], hpr_eui_pair_storage:lookup(1, 12)),
+    ?assertEqual([RouteETS1], hpr_eui_pair_storage:lookup(1, 100)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000020)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
         [{SK1, 1}], hpr_skf_storage:lookup(SKFETS1, DevAddr1)
@@ -233,11 +233,11 @@ main_test(_Config) ->
         end
     ),
 
-    ?assertEqual([], hpr_route_storage:lookup(16#00000005)),
-    ?assertEqual([], hpr_route_storage:lookup(1, 12)),
-    ?assertEqual([], hpr_route_storage:lookup(1, 100)),
-    ?assertEqual([], hpr_route_storage:lookup(16#00000020)),
-    ?assertEqual([], hpr_route_storage:lookup(3, 3)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000005)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 12)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 100)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000020)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3)),
 
     ok.
 
@@ -297,11 +297,11 @@ refresh_route_test(_Config) ->
     SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
 
     %% Check that we can query route via config
-    ?assertMatch([RouteETS1], hpr_route_storage:lookup(16#00000005)),
-    ?assertEqual([RouteETS1], hpr_route_storage:lookup(1, 12)),
-    ?assertEqual([RouteETS1], hpr_route_storage:lookup(1, 100)),
-    ?assertEqual([], hpr_route_storage:lookup(16#00000020)),
-    ?assertEqual([], hpr_route_storage:lookup(3, 3)),
+    ?assertMatch([RouteETS1], hpr_devaddr_range_storage:lookup(16#00000005)),
+    ?assertEqual([RouteETS1], hpr_eui_pair_storage:lookup(1, 12)),
+    ?assertEqual([RouteETS1], hpr_eui_pair_storage:lookup(1, 100)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000020)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3)),
     SK1 = hpr_utils:hex_to_bin(SessionKey1),
     ?assertMatch(
         [{SK1, 1}], hpr_skf_storage:lookup(SKFETS1, DevAddr1)
@@ -348,17 +348,17 @@ refresh_route_test(_Config) ->
     SKFETS2 = hpr_route_ets:skf_ets(RouteETS2),
 
     %% Old routing is removed
-    ?assertMatch([RouteETS2], hpr_route_storage:lookup(16#00000005)),
-    ?assertEqual([RouteETS2], hpr_route_storage:lookup(1, 12)),
-    ?assertEqual([RouteETS2], hpr_route_storage:lookup(1, 100)),
-    ?assertEqual([], hpr_route_storage:lookup(16#00000020), "always out of range"),
-    ?assertEqual([], hpr_route_storage:lookup(3, 3), "always out of range"),
+    ?assertMatch([RouteETS2], hpr_devaddr_range_storage:lookup(16#00000005)),
+    ?assertEqual([RouteETS2], hpr_eui_pair_storage:lookup(1, 12)),
+    ?assertEqual([RouteETS2], hpr_eui_pair_storage:lookup(1, 100)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000020), "always out of range"),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3), "always out of range"),
     %% ?assertMatch([], hpr_skf_storage:lookup(SKFETS2, DevAddr1)),
 
     %% New details like magic
-    ?assertMatch([RouteETS2], hpr_route_storage:lookup(16#00000008)),
-    ?assertEqual([RouteETS2], hpr_route_storage:lookup(2, 12)),
-    ?assertEqual([RouteETS2], hpr_route_storage:lookup(2, 100)),
+    ?assertMatch([RouteETS2], hpr_devaddr_range_storage:lookup(16#00000008)),
+    ?assertEqual([RouteETS2], hpr_eui_pair_storage:lookup(2, 12)),
+    ?assertEqual([RouteETS2], hpr_eui_pair_storage:lookup(2, 100)),
     SK2 = hpr_utils:hex_to_bin(SessionKey2),
     ?assertMatch(
         [{SK2, 1}], hpr_skf_storage:lookup(SKFETS2, DevAddr2)
@@ -393,11 +393,11 @@ refresh_route_test(_Config) ->
     %% Everything was removed
     {ok, RouteETS3} = hpr_route_storage:lookup(Route1ID),
     SKFETS3 = hpr_route_ets:skf_ets(RouteETS3),
-    ?assertMatch([], hpr_route_storage:lookup(16#00000005)),
-    ?assertEqual([], hpr_route_storage:lookup(1, 12)),
-    ?assertEqual([], hpr_route_storage:lookup(1, 100)),
-    ?assertEqual([], hpr_route_storage:lookup(16#00000020), "always out of range"),
-    ?assertEqual([], hpr_route_storage:lookup(3, 3), "always out of range"),
+    ?assertMatch([], hpr_devaddr_range_storage:lookup(16#00000005)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 12)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 100)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000020), "always out of range"),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3), "always out of range"),
     ?assertEqual([], hpr_skf_storage:lookup(SKFETS3, DevAddr1)),
 
     ok.

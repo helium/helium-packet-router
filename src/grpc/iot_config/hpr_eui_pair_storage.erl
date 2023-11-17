@@ -5,10 +5,15 @@
 
     insert/1,
     lookup/2,
-delete/1,
+    delete/1,
 
     delete_route/1,
-    replace_route/2
+    replace_route/2,
+
+    lookup_dev_eui/1,
+    lookup_app_eui/1,
+    lookup_for_route/1,
+    count_for_route/1
 ]).
 
 -define(ETS_EUI_PAIRS, hpr_route_eui_pairs_ets).
@@ -70,6 +75,33 @@ delete(EUIPair) ->
         "deleted eui pair"
     ),
     ok.
+
+%% ------------------------------------------------------------------
+%% CLI Functions
+%% ------------------------------------------------------------------
+
+-spec lookup_dev_eui(DevEUI :: non_neg_integer()) ->
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+lookup_dev_eui(DevEUI) ->
+    MS = [{{{'$1', DevEUI}, '_'}, [], [{{'$1', DevEUI}}]}],
+    ets:select(?ETS_EUI_PAIRS, MS).
+
+-spec lookup_app_eui(AppEUI :: non_neg_integer()) ->
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+lookup_app_eui(AppEUI) ->
+    MS = [{{{AppEUI, '$1'}, '_'}, [], [{{AppEUI, '$1'}}]}],
+    ets:select(?ETS_EUI_PAIRS, MS).
+
+-spec lookup_for_route(RouteID :: hpr_route:id()) ->
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+lookup_for_route(RouteID) ->
+    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    ets:select(?ETS_EUI_PAIRS, MS).
+
+-spec count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
+count_for_route(RouteID) ->
+    MS = [{{'_', RouteID}, [], [true]}],
+    ets:select_count(?ETS_EUI_PAIRS, MS).
 
 %% -------------------------------------------------------------------
 %% Route Stream Helpers
