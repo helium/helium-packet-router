@@ -14,6 +14,10 @@
     delete_all/0
 ]).
 
+-ifdef(TEST).
+-export([test_delete_ets/0]).
+-endif.
+
 -define(ETS_ROUTES, hpr_routes_ets).
 
 -spec init_ets() -> ok.
@@ -26,6 +30,15 @@ init_ets() ->
         {read_concurrency, true}
     ]),
     ok.
+
+-spec lookup(ID :: hpr_route:id()) -> {ok, hpr_route_ets:route()} | {error, not_found}.
+lookup(ID) ->
+    case ets:lookup(?ETS_ROUTES, ID) of
+        [Route] ->
+            {ok, Route};
+        _Other ->
+            {error, not_found}
+    end.
 
 -spec insert(Route :: hpr_route:route()) -> ok.
 insert(Route) ->
@@ -81,19 +94,19 @@ delete(Route) ->
     ),
     ok.
 
--spec lookup(ID :: hpr_route:id()) -> {ok, hpr_route_ets:route()} | {error, not_found}.
-lookup(ID) ->
-    case ets:lookup(?ETS_ROUTES, ID) of
-        [Route] ->
-            {ok, Route};
-        _Other ->
-            {error, not_found}
-    end.
-
 -spec delete_all() -> ok.
 delete_all() ->
     ets:delete_all_objects(?ETS_ROUTES),
     ok.
+
+-ifdef(TEST).
+
+-spec test_delete_ets() -> ok.
+test_delete_ets() ->
+    ets:delete(?ETS_ROUTES),
+    ok.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% CLI Functions

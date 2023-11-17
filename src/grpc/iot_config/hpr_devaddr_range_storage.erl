@@ -16,6 +16,10 @@
     delete_all/0
 ]).
 
+-ifdef(TEST).
+-export([test_delete_ets/0]).
+-endif.
+
 -define(ETS_DEVADDR_RANGES, hpr_route_devaddr_ranges_ets).
 
 -spec init_ets() -> ok.
@@ -84,6 +88,15 @@ delete(DevAddrRange) ->
 delete_all() ->
     ets:delete_all_objects(?ETS_DEVADDR_RANGES),
     ok.
+
+-ifdef(TEST).
+
+-spec test_delete_ets() -> ok.
+test_delete_ets() ->
+    ets:delete(?ETS_DEVADDR_RANGES),
+    ok.
+
+-endif.
 
 %% ------------------------------------------------------------------
 %% CLI Functions
