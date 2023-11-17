@@ -31,6 +31,24 @@ make_ets(RouteID) ->
         {heir, erlang:whereis(?SKF_HEIR), RouteID}
     ]).
 
+-spec lookup(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
+    [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
+lookup(ETS, DevAddr) ->
+    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
+    ets:select(ETS, MS).
+
+-spec select(Continuation :: ets:continuation()) ->
+    {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
+select(Continuation) ->
+    ets:select(Continuation).
+
+-spec select(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
+    {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
+    | '$end_of_table'.
+select(ETS, DevAddr) ->
+    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
+    ets:select(ETS, MS, 100).
+
 -spec insert(SKF :: hpr_skf:skf()) -> ok.
 insert(SKF) ->
     RouteID = hpr_skf:route_id(SKF),
@@ -89,24 +107,6 @@ delete(SKF) ->
             ])
     end,
     ok.
-
--spec lookup(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
-    [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
-lookup(ETS, DevAddr) ->
-    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
-    ets:select(ETS, MS).
-
--spec select(Continuation :: ets:continuation()) ->
-    {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
-select(Continuation) ->
-    ets:select(Continuation).
-
--spec select(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
-    {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
-    | '$end_of_table'.
-select(ETS, DevAddr) ->
-    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
-    ets:select(ETS, MS, 100).
 
 -spec delete_all() -> ok.
 delete_all() ->
