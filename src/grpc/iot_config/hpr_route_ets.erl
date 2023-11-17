@@ -87,6 +87,11 @@ reset_backoff(RouteID) ->
             ok
     end.
 
+-spec update_backoff(RouteID :: hpr_route:id(), Backoff :: backoff()) -> ok.
+update_backoff(RouteID, Backoff) ->
+    true = ets:update_element(?ETS_ROUTES, RouteID, {5, Backoff}),
+    ok.
+
 -spec delete_all() -> ok.
 delete_all() ->
     ok = hpr_devaddr_range_storage:delete_all(),
