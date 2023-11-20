@@ -17,7 +17,7 @@
 ]).
 
 -ifdef(TEST).
--export([test_delete_ets/0]).
+-export([test_delete_ets/0, test_size/0, test_tab_name/0]).
 -endif.
 
 -define(ETS_DEVADDR_RANGES, hpr_route_devaddr_ranges_ets).
@@ -95,6 +95,14 @@ delete_all() ->
 test_delete_ets() ->
     ets:delete(?ETS_DEVADDR_RANGES),
     ok.
+
+-spec test_size() -> non_neg_integer().
+test_size() ->
+    ets:info(?ETS_DEVADDR_RANGES, size).
+
+-spec test_tab_name() -> atom().
+test_tab_name() ->
+    ?ETS_DEVADDR_RANGES.
 
 -endif.
 
