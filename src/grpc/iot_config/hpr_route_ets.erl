@@ -8,19 +8,11 @@
     route/1,
     skf_ets/1,
     backoff/1,
-    update_backoff/2,
     inc_backoff/1,
     reset_backoff/1,
 
     delete_all/0
 ]).
-
--define(ETS_ROUTES, hpr_routes_ets).
--define(ETS_EUI_PAIRS, hpr_route_eui_pairs_ets).
--define(ETS_DEVADDR_RANGES, hpr_route_devaddr_ranges_ets).
-%% -define(ETS_SKFS, hpr_route_skfs_ets).
-
--define(SKF_HEIR, hpr_sup).
 
 -define(BACKOFF_MIN, timer:seconds(1)).
 -define(BACKOFF_MAX, timer:minutes(15)).
@@ -76,10 +68,10 @@ inc_backoff(RouteID) ->
         {ok, #hpr_route_ets{backoff = undefined}} ->
             Backoff = backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX),
             Delay = backoff:get(Backoff),
-            ?MODULE:update_backoff(RouteID, {Now + Delay, Backoff});
+            hpr_route_storage:set_backoff(RouteID, {Now + Delay, Backoff});
         {ok, #hpr_route_ets{backoff = {_, Backoff0}}} ->
             {Delay, Backoff1} = backoff:fail(Backoff0),
-            ?MODULE:update_backoff(RouteID, {Now + Delay, Backoff1});
+            hpr_route_storage:set_backoff(RouteID, {Now + Delay, Backoff1});
         {error, not_found} ->
             ok
     end.
@@ -90,15 +82,10 @@ reset_backoff(RouteID) ->
         {ok, #hpr_route_ets{backoff = undefined}} ->
             ok;
         {ok, #hpr_route_ets{backoff = _}} ->
-            ?MODULE:update_backoff(RouteID, undefined);
+            hpr_route_storage:set_backoff(RouteID, undefined);
         {error, not_found} ->
             ok
     end.
-
--spec update_backoff(RouteID :: hpr_route:id(), Backoff :: backoff()) -> ok.
-update_backoff(RouteID, Backoff) ->
-    true = ets:update_element(?ETS_ROUTES, RouteID, {5, Backoff}),
-    ok.
 
 -spec delete_all() -> ok.
 delete_all() ->
@@ -192,7 +179,7 @@ test_route() ->
     ?assertEqual(undefined, ?MODULE:backoff(RouteETS1)),
 
     Backoff = {erlang:system_time(millisecond), backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX)},
-    ?assertEqual(ok, ?MODULE:update_backoff(RouteID, Backoff)),
+    ?assertEqual(ok, hpr_route_storage:set_backoff(RouteID, Backoff)),
     {ok, RouteETS2} = hpr_route_storage:lookup(RouteID),
     ?assertEqual(Backoff, ?MODULE:backoff(RouteETS2)),
 
@@ -533,27 +520,27 @@ test_delete_route() ->
     ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange2)),
     ?assertEqual(ok, hpr_skf_storage:insert(SKF2)),
 
-    ?assertEqual(2, erlang:length(ets:tab2list(?ETS_EUI_PAIRS))),
-    ?assertEqual(2, erlang:length(ets:tab2list(?ETS_DEVADDR_RANGES))),
-    ?assertEqual(2, erlang:length(ets:tab2list(?ETS_ROUTES))),
+    ?assertEqual(2, hpr_eui_pair_storage:test_size()),
+    ?assertEqual(2, hpr_devaddr_range_storage:test_size()),
+    ?assertEqual(2, hpr_route_storage:test_size()),
 
     [RouteETS1] = hpr_devaddr_range_storage:lookup(DevAddr1),
     ?assertEqual(Route1, ?MODULE:route(RouteETS1)),
     SKFETS1 = ?MODULE:skf_ets(RouteETS1),
-    ?assertEqual(1, erlang:length(ets:tab2list(SKFETS1))),
+    ?assertEqual(1, hpr_skf_storage:test_size(SKFETS1)),
 
     [RouteETS2] = hpr_devaddr_range_storage:lookup(DevAddr2),
     ?assertEqual(Route2, ?MODULE:route(RouteETS2)),
     SKFETS2 = ?MODULE:skf_ets(RouteETS2),
-    ?assertEqual(1, erlang:length(ets:tab2list(SKFETS2))),
+    ?assertEqual(1, hpr_skf_storage:test_size(SKFETS2)),
 
     ?assertEqual(ok, hpr_route_storage:delete(Route1)),
 
-    ?assertEqual([{{AppEUI2, DevEUI2}, RouteID2}], ets:tab2list(?ETS_EUI_PAIRS)),
+    ?assertEqual([{{AppEUI2, DevEUI2}, RouteID2}], ets:tab2list(hpr_eui_pair_storage:test_tab_name())),
     ?assertEqual(
-        [{{StartAddr2, EndAddr2}, RouteID2}], ets:tab2list(?ETS_DEVADDR_RANGES)
+        [{{StartAddr2, EndAddr2}, RouteID2}], ets:tab2list(hpr_devaddr_range_storage:test_tab_name())
     ),
-    ?assertEqual([RouteETS2], ets:tab2list(?ETS_ROUTES)),
+    ?assertEqual({ok, RouteETS2}, hpr_route_storage:lookup(hpr_route:id(Route2))),
     ?assert(erlang:is_list(ets:info(SKFETS2))),
     ?assertEqual(undefined, ets:info(SKFETS1)),
     ok.
@@ -586,9 +573,9 @@ test_delete_all() ->
     ?assertEqual(ok, hpr_devaddr_range_storage:insert(DevAddrRange)),
     ?assertEqual(ok, hpr_skf_storage:insert(SKF)),
     ?assertEqual(ok, ?MODULE:delete_all()),
-    ?assertEqual([], ets:tab2list(?ETS_DEVADDR_RANGES)),
-    ?assertEqual([], ets:tab2list(?ETS_EUI_PAIRS)),
-    ?assertEqual([], ets:tab2list(?ETS_ROUTES)),
+    ?assertEqual(0, hpr_devaddr_range_storage:test_size()),
+    ?assertEqual(0, hpr_eui_pair_storage:test_size()),
+    ?assertEqual(0, hpr_route_storage:test_size()),
     ok.
 
 -endif.

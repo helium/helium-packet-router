@@ -21,7 +21,8 @@
 -export([
     test_delete_ets/0,
     test_register_heir/0,
-    test_unregister_heir/0
+    test_unregister_heir/0,
+    test_size/1
 ]).
 -endif.
 
@@ -140,6 +141,10 @@ test_register_heir() ->
 -spec test_unregister_heir() -> true.
 test_unregister_heir() ->
     true = erlang:unregister(?SKF_HEIR).
+
+-spec test_size(Tab :: ets:tab()) -> non_neg_integer().
+test_size(Tab) ->
+    ets:info(Tab, size).
 
 -endif.
 

@@ -19,7 +19,7 @@
 ]).
 
 -ifdef(TEST).
--export([test_delete_ets/0]).
+-export([test_delete_ets/0, test_size/0, test_tab_name/0]).
 -endif.
 
 -define(ETS_EUI_PAIRS, hpr_route_eui_pairs_ets).
@@ -93,6 +93,14 @@ delete_all() ->
 test_delete_ets() ->
     ets:delete(?ETS_EUI_PAIRS),
     ok.
+
+-spec test_size() -> non_neg_integer().
+test_size() ->
+    ets:info(?ETS_EUI_PAIRS, size).
+
+-spec test_tab_name() -> atom().
+test_tab_name() ->
+    ?ETS_EUI_PAIRS.
 
 -endif.
 

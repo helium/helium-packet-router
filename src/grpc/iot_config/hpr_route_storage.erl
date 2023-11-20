@@ -6,6 +6,7 @@
     insert/1, insert/2, insert/3,
     delete/1,
     lookup/1,
+    set_backoff/2,
 
     all_routes/0,
     all_route_ets/0,
@@ -15,7 +16,7 @@
 ]).
 
 -ifdef(TEST).
--export([test_delete_ets/0]).
+-export([test_delete_ets/0, test_size/0]).
 -endif.
 
 -define(ETS_ROUTES, hpr_routes_ets).
@@ -99,12 +100,21 @@ delete_all() ->
     ets:delete_all_objects(?ETS_ROUTES),
     ok.
 
+-spec set_backoff(RouteID :: hpr_route:id(), Backoff :: hpr_route_ets:backoff()) -> ok.
+set_backoff(RouteID, Backoff) ->
+    true = ets:update_element(?ETS_ROUTES, RouteID, {5, Backoff}),
+    ok.
+
 -ifdef(TEST).
 
 -spec test_delete_ets() -> ok.
 test_delete_ets() ->
     ets:delete(?ETS_ROUTES),
     ok.
+
+-spec test_size() -> non_neg_integer().
+test_size() ->
+    ets:info(?ETS_ROUTES, size).
 
 -endif.
 
