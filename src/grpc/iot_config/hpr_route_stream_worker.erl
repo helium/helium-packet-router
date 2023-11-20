@@ -139,11 +139,6 @@ handle_call({refresh_route, RouteID}, _From, State) ->
     EUIResponse = refresh_euis(RouteID),
     SKFResponse = refresh_skfs(RouteID),
 
-    ct:print(
-        "refreshing: ~s~n  D: ~p~n  E: ~p~nS: ~p",
-        [RouteID, DevaddrResponse, EUIResponse, SKFResponse]
-    ),
-
     Reply =
         case {DevaddrResponse, EUIResponse, SKFResponse} of
             {{ok, {DBefore, DAfter}}, {ok, {EBefore, EAfter}}, {ok, {SBefore, SAfter}}} ->
