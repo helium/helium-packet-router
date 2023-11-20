@@ -357,7 +357,7 @@ skf_max_copies_test(_Config) ->
         lists:seq(1, 3)
     ),
 
-    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 2)),
+    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 3)),
 
     lists:foreach(
         fun(_) ->
@@ -376,14 +376,14 @@ skf_max_copies_test(_Config) ->
         lists:seq(1, 3)
     ),
 
-    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 2)),
+    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 3)),
 
     meck:unload(hpr_protocol_http_roaming),
     ok.
 
 multi_buy_without_service_test(_Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     meck:new(hpr_packet_reporter, [passthrough]),
     meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _, _) -> ok end),
@@ -479,14 +479,16 @@ multi_buy_without_service_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
-                Route
+                Route,
+                undefined
             ]},
             ok},
     Received2 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp2,
-                Route
+                Route,
+                undefined
             ]},
             ok},
 
@@ -507,7 +509,8 @@ multi_buy_without_service_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp4,
-                Route
+                Route,
+                undefined
             ]},
             ok},
 
@@ -538,7 +541,7 @@ multi_buy_without_service_test(_Config) ->
 
 multi_buy_with_service_test(_Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     meck:new(hpr_packet_reporter, [passthrough]),
     meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _, _) -> ok end),
@@ -626,14 +629,16 @@ multi_buy_with_service_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
-                Route
+                Route,
+                undefined
             ]},
             ok},
     Received2 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp2,
-                Route
+                Route,
+                undefined
             ]},
             ok},
 
@@ -654,7 +659,8 @@ multi_buy_with_service_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp4,
-                Route
+                Route,
+                undefined
             ]},
             ok},
 
@@ -698,7 +704,7 @@ multi_buy_requests_test(_Config) ->
     end),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     MaxCopies = 3,
     DevAddr = 16#00000000,
@@ -872,7 +878,7 @@ active_locked_route_test(_Config) ->
     ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
@@ -901,7 +907,8 @@ active_locked_route_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 PacketUp0,
-                Route1
+                Route1,
+                undefined
             ]},
             ok},
 
@@ -999,25 +1006,25 @@ in_cooldown_route_test(_Config) ->
 
     %% We setup protocol router to fail every call
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> {error, not_implemented} end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> {error, not_implemented} end),
 
     %% We send first packet a call should be made to hpr_protocol_router
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(0), #{gateway => Gateway1})),
-    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 3)),
     %% We send second packet NO call should be made to hpr_protocol_router as the route would be in cooldown
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(1), #{gateway => Gateway1})),
-    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 3)),
 
     %% We wait the initial first timeout 1s
     %% Send another packet and watch another call made to hpr_protocol_router
     timer:sleep(1000),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(2), #{gateway => Gateway1})),
-    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 3)),
 
     %% We send couple more packets and check that we still only 2 calls to hpr_protocol_router
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(3), #{gateway => Gateway1})),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(4), #{gateway => Gateway1})),
-    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 3)),
 
     %% We check the route and make sure that the backoff is setup properly
     [RouteETS1] = hpr_route_ets:lookup_route(RouteID),
@@ -1027,10 +1034,10 @@ in_cooldown_route_test(_Config) ->
 
     %% Wait another time out (2s now) and reset hpr_protocol_router to return ok
     timer:sleep(2000),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
     %% Sending another packet should trigger a new call to hpr_protocol_router
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(5), #{gateway => Gateway1})),
-    ?assertEqual(3, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(3, meck:num_calls(hpr_protocol_router, send, 3)),
 
     %% The route backoff should be back to undefined
     [RouteETS2] = hpr_route_ets:lookup_route(RouteID),
@@ -1047,7 +1054,7 @@ success_test(_Config) ->
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -1089,7 +1096,8 @@ success_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
-                Route
+                Route,
+                undefined
             ]},
             ok},
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
@@ -1103,7 +1111,8 @@ success_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
-                Route
+                Route,
+                undefined
             ]},
             ok},
     ?assertEqual(
@@ -1233,7 +1242,7 @@ maybe_report_packet_test(_Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
     meck:new(hpr_packet_reporter, [passthrough]),
 
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -1275,7 +1284,8 @@ maybe_report_packet_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
-                Route
+                Route,
+                undefined
             ]},
             ok},
     ?assertEqual([Received1], meck:history(hpr_protocol_router)),
@@ -1289,7 +1299,8 @@ maybe_report_packet_test(_Config) ->
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
-                Route
+                Route,
+                undefined
             ]},
             ok},
     ?assertEqual(
@@ -1334,12 +1345,14 @@ maybe_report_packet_test(_Config) ->
     CallExpected3 =
         {hpr_protocol_router, send, [
             UplinkPacketUp2,
-            BadRoute
+            BadRoute,
+            undefined
         ]},
     CallExpected4 =
         {hpr_protocol_router, send, [
             UplinkPacketUp2,
-            Route
+            Route,
+            undefined
         ]},
 
     %% Packet is still send to both Routes
@@ -1532,7 +1545,7 @@ routing_cleanup_test(_Config) ->
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),

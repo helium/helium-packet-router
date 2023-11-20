@@ -24,10 +24,11 @@
 init_per_testcase(TestCase, Config) ->
     Suite = proplists:get_value(suite, proplists:get_value(tc_group_properties, Config)),
     BaseDir = filename:join([Suite, TestCase]),
-    BaseDirPath = filename:join([BaseDir, application:get_env(?APP, data_dir, "data")]),
+    BaseDirPath = filename:join([BaseDir, "data"]),
     ok = application:set_env(hpr, data_dir, BaseDirPath, [{persistent, true}]),
 
     ct:pal("BaseDirPath ~p", [BaseDirPath]),
+    ok = filelib:ensure_dir(BaseDirPath),
 
     FormatStr = [
         "[",
