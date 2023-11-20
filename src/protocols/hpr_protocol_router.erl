@@ -429,7 +429,7 @@ test_full() ->
     Pids = lists:map(
         fun(_X) ->
             erlang:spawn(fun() ->
-                R = ?MODULE:send(HprPacketUp, Route),
+                R = ?MODULE:send(HprPacketUp, Route, undefined),
                 Self ! {send_result, R},
                 receive
                     stop -> ok
@@ -502,7 +502,7 @@ test_cannot_locate_stream() ->
     %% So we wrap the sender in a process so we it can be killed and start the cleanup.
     SenderPid = spawn(fun() ->
         ?MODULE:register(PubKeyBin, self()),
-        ?assertEqual(ok, ?MODULE:send(HprPacketUp, Route)),
+        ?assertEqual(ok, ?MODULE:send(HprPacketUp, Route, undefined)),
         receive
             stop ->
                 Self ! stopped,

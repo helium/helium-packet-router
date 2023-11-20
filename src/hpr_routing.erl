@@ -476,6 +476,8 @@ foreach_setup() ->
     true = erlang:register(hpr_sup, self()),
     ok = hpr_route_ets:init(),
     ok = hpr_multi_buy:init(),
+    meck:new(hpr_gateway_location, [passthrough]),
+    meck:expect(hpr_gateway_location, get, fun(_) -> {error, not_implemented} end),
     ok.
 
 foreach_cleanup(ok) ->
@@ -491,6 +493,7 @@ foreach_cleanup(ok) ->
     ),
     true = ets:delete(hpr_routes_ets),
     true = erlang:unregister(hpr_sup),
+    meck:unload(hpr_gateway_location),
     ok.
 
 find_routes_for_uplink_no_skf() ->
@@ -845,7 +848,7 @@ find_routes_for_uplink_ignore_empty_skf() ->
 
 maybe_deliver_packet_to_route_locked() ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     RouteID1 = "route_id_1",
     Route1 = hpr_route:test_new(#{
@@ -870,13 +873,13 @@ maybe_deliver_packet_to_route_locked() ->
         {error, locked}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
     ),
 
-    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 3)),
     meck:unload(hpr_protocol_router),
     ok.
 
 maybe_deliver_packet_to_route_inactive() ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     RouteID1 = "route_id_1",
     Route1 = hpr_route:test_new(#{
@@ -901,13 +904,13 @@ maybe_deliver_packet_to_route_inactive() ->
         {error, inactive}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
     ),
 
-    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 3)),
     meck:unload(hpr_protocol_router),
     ok.
 
 maybe_deliver_packet_to_route_in_cooldown() ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     RouteID1 = "route_id_1",
     Route1 = hpr_route:test_new(#{
@@ -933,13 +936,13 @@ maybe_deliver_packet_to_route_in_cooldown() ->
         {error, in_cooldown}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
     ),
 
-    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 3)),
     meck:unload(hpr_protocol_router),
     ok.
 
 maybe_deliver_packet_to_route_multi_buy() ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
 
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
@@ -982,7 +985,7 @@ maybe_deliver_packet_to_route_multi_buy() ->
         {error, multi_buy}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 0)
     ),
 
-    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 2)),
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 3)),
     meck:unload(hpr_protocol_router),
     meck:unload(hpr_metrics),
     ok.
