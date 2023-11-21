@@ -19,7 +19,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    push_data/3
+    push_data/4
 ]).
 
 %% ------------------------------------------------------------------
@@ -72,10 +72,11 @@ start_link(Args) ->
 -spec push_data(
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
-    SocketDest :: socket_dest()
+    SocketDest :: socket_dest(),
+    GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
-push_data(WorkerPid, PacketUp, SocketDest) ->
-    gen_server:cast(WorkerPid, {push_data, PacketUp, SocketDest, erlang:system_time(millisecond)}).
+push_data(WorkerPid, PacketUp, SocketDest, GatewayLocation) ->
+    gen_server:cast(WorkerPid, {push_data, PacketUp, SocketDest, GatewayLocation}).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -111,15 +112,16 @@ handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(
-    {push_data, PacketUp, SocketDest, Timestamp},
+    {push_data, PacketUp, SocketDest, GatewayLocation},
     #state{
         push_data = PushData,
         socket = Socket
     } =
         State0
 ) ->
+    Timestamp = erlang:system_time(millisecond),
     ok = hpr_packet_up:md(PacketUp),
-    {Token, Payload} = packet_up_to_push_data(PacketUp, Timestamp),
+    {Token, Payload} = packet_up_to_push_data(PacketUp, Timestamp, GatewayLocation),
     State = maybe_send_pull_data(SocketDest, State0),
     {_Reply, TimerRef} = send_push_data(Token, Payload, Socket, SocketDest),
     NewPushData = maps:put(Token, {Payload, TimerRef}, PushData),
@@ -222,15 +224,33 @@ terminate(_Reason, _State = #state{socket = Socket}) ->
 
 -spec packet_up_to_push_data(
     PacketUp :: hpr_packet_up:packet(),
-    PacketTime :: non_neg_integer()
+    PacketTime :: non_neg_integer(),
+    GatewayLocation :: hpr_gateway_location:loc()
 ) ->
     {Token :: binary(), Payload :: binary()}.
-packet_up_to_push_data(Up, GatewayTime) ->
+packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
     Token = semtech_udp:token(),
     PubKeyBin = hpr_packet_up:gateway(Up),
     MAC = hpr_utils:pubkeybin_to_mac(PubKeyBin),
     B58 = erlang:list_to_binary(libp2p_crypto:bin_to_b58(PubKeyBin)),
     Name = erlang:list_to_binary(hpr_utils:gateway_name(PubKeyBin)),
+
+    BaseMeta = #{
+        gateway_id => B58,
+        gateway_name => Name,
+        regi => hpr_packet_up:region(Up)
+    },
+    Meta =
+        case GatewayLocation of
+            undefined ->
+                BaseMeta;
+            {H3Index, Lat, Long} ->
+                BaseMeta#{
+                    gateway_h3index => H3Index,
+                    gateway_lat => Lat,
+                    gateway_long => Long
+                }
+        end,
 
     Data = semtech_udp:push_data(
         Token,
@@ -251,11 +271,7 @@ packet_up_to_push_data(Up, GatewayTime) ->
             lsnr => hpr_packet_up:snr(Up),
             size => erlang:byte_size(hpr_packet_up:payload(Up)),
             data => base64:encode(hpr_packet_up:payload(Up)),
-            meta => #{
-                gateway_id => B58,
-                gateway_name => Name,
-                regi => hpr_packet_up:region(Up)
-            }
+            meta => Meta
         }
     ),
     {Token, Data}.

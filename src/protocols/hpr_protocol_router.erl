@@ -65,7 +65,7 @@ init() ->
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
     Route :: hpr_route:route(),
-    GatewayLocation :: {h3:index(), float(), float()} | undefined
+    GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
 send(PacketUp, Route, _GatewayLocation) ->
     Gateway = hpr_packet_up:gateway(PacketUp),

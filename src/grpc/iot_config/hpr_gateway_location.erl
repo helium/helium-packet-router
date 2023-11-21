@@ -29,6 +29,10 @@
     long :: float() | undefined
 }).
 
+-type loc() :: {h3:index(), float(), float()} | undefined.
+
+-export_type([loc/0]).
+
 -spec init() -> ok.
 init() ->
     ?ETS = ets:new(?ETS, [

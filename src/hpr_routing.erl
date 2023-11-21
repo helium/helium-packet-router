@@ -364,7 +364,7 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
     hpr_route:protocol(),
     PacketUp :: hpr_packet_up:packet(),
     Route :: hpr_route:route(),
-    GatewayLocation :: {h3:index(), float(), float()} | undefined
+    GatewayLocation :: hpr_gateway_location:loc()
 ) -> hpr_routing_response().
 deliver_packet({packet_router, _}, PacketUp, Route, GatewayLocation) ->
     hpr_protocol_router:send(PacketUp, Route, GatewayLocation);

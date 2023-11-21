@@ -8,6 +8,7 @@
 
 -export([
     full_test/1,
+    with_location_test/1,
     single_lns_test/1,
     multi_lns_test/1,
     single_lns_downlink_test/1,
@@ -37,6 +38,7 @@
 all() ->
     [
         full_test,
+        with_location_test,
         single_lns_test,
         multi_lns_test,
         single_lns_downlink_test,
@@ -91,6 +93,42 @@ full_test(_Config) ->
     %% PUSH_DATA
     {ok, Data} = expect_push_data(RcvSocket, router_push_data),
     ok = verify_push_data(PacketUp, Data),
+
+    ok = gen_udp:close(RcvSocket),
+    ok = gen_server:stop(GatewayPid),
+
+    ok.
+
+with_location_test(_Config) ->
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    {Route, EUIPairs, DevAddrRanges} = test_route(1777),
+    IndexString = "8828308281fffff",
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(),
+        route => Route,
+        eui_pairs => EUIPairs,
+        devaddr_ranges => DevAddrRanges,
+        h3_index_str => IndexString
+    }),
+
+    %% Send packet and route directly through interface
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
+
+    PacketUp =
+        case hpr_test_gateway:receive_send_packet(GatewayPid) of
+            {ok, EnvUp} ->
+                {packet, PUp} = hpr_envelope_up:data(EnvUp),
+                PUp;
+            {error, timeout} ->
+                ct:fail(receive_send_packet)
+        end,
+
+    %% Initial PULL_DATA
+    {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
+    %% PUSH_DATA
+    {ok, Data} = expect_push_data(RcvSocket, router_push_data),
+    ok = verify_push_data_with_location(PacketUp, Data, IndexString),
 
     ok = gen_udp:close(RcvSocket),
     ok = gen_server:stop(GatewayPid),
@@ -743,6 +781,52 @@ verify_push_data(PacketUp, PushDataBinary) ->
                         <<"regi">> => erlang:atom_to_binary(
                             hpr_packet_up:region(PacketUp)
                         )
+                    }
+                }
+            ]
+    },
+    ?assert(test_utils:match_map(MapFromPacketUp, JsonData)).
+
+verify_push_data_with_location(PacketUp, PushDataBinary, IndexString) ->
+    JsonData = semtech_udp:json_data(PushDataBinary),
+    ExpectedIndex = h3:from_string(IndexString),
+    {ExpectedLat, ExpectedLong} = h3:to_geo(ExpectedIndex),
+
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
+    MapFromPacketUp = #{
+        <<"rxpk">> =>
+            [
+                #{
+                    <<"chan">> => 0,
+                    <<"codr">> => <<"4/5">>,
+                    <<"data">> => base64:encode(hpr_packet_up:payload(PacketUp)),
+                    <<"datr">> => erlang:atom_to_binary(hpr_packet_up:datarate(PacketUp)),
+                    <<"freq">> => list_to_float(
+                        float_to_list(hpr_packet_up:frequency_mhz(PacketUp), [
+                            {decimals, 4}, compact
+                        ])
+                    ),
+                    <<"lsnr">> => hpr_packet_up:snr(PacketUp),
+                    <<"modu">> => <<"LORA">>,
+                    <<"rfch">> => 0,
+                    <<"rssi">> => hpr_packet_up:rssi(PacketUp),
+                    <<"size">> => erlang:byte_size(hpr_packet_up:payload(PacketUp)),
+                    <<"stat">> => 1,
+                    <<"time">> => fun erlang:is_binary/1,
+                    <<"tmst">> => hpr_packet_up:timestamp(PacketUp) band 16#FFFF_FFFF,
+                    <<"meta">> => #{
+                        <<"gateway_id">> => erlang:list_to_binary(
+                            libp2p_crypto:bin_to_b58(PubKeyBin)
+                        ),
+                        <<"gateway_name">> => erlang:list_to_binary(
+                            hpr_utils:gateway_name(PubKeyBin)
+                        ),
+                        <<"regi">> => erlang:atom_to_binary(
+                            hpr_packet_up:region(PacketUp)
+                        ),
+                        <<"gateway_h3index">> => ExpectedIndex,
+                        <<"gateway_lat">> => ExpectedLat,
+                        <<"gateway_long">> => ExpectedLong
                     }
                 }
             ]
