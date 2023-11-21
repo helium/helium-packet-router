@@ -32,7 +32,7 @@
     auth_headers/1
 ]).
 
--export([new_packet/2]).
+-export([new_packet/3]).
 
 -define(NO_ROAMING_AGREEMENT, <<"NoRoamingAgreement">>).
 
@@ -64,7 +64,8 @@
 
 -record(packet, {
     packet_up :: hpr_packet_up:packet(),
-    received_time :: received_time()
+    received_time :: received_time(),
+    gateway_location :: hpr_gateway_location:loc()
 }).
 -type packet() :: #packet{}.
 
@@ -81,12 +82,14 @@
 
 -spec new_packet(
     PacketUp :: hpr_packet_up:packet(),
-    ReceivedTime :: received_time()
+    ReceivedTime :: received_time(),
+    GatewayLocation :: hpr_gateway_location:loc()
 ) -> #packet{}.
-new_packet(PacketUp, ReceivedTime) ->
+new_packet(PacketUp, ReceivedTime, GatewayLocation) ->
     #packet{
         packet_up = PacketUp,
-        received_time = ReceivedTime
+        received_time = ReceivedTime,
+        gateway_location = GatewayLocation
     }.
 
 -spec make_uplink_payload(
@@ -516,7 +519,7 @@ select_best(Copies) ->
     Best.
 
 -spec gw_info(packet()) -> map().
-gw_info(#packet{packet_up = PacketUp}) ->
+gw_info(#packet{packet_up = PacketUp, gateway_location = GatewayLocation}) ->
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Region = hpr_packet_up:region(PacketUp),
 
@@ -530,7 +533,15 @@ gw_info(#packet{packet_up = PacketUp}) ->
         'SNR' => SNR,
         'DLAllowed' => true
     },
-    GW.
+    case GatewayLocation of
+        undefined ->
+            GW;
+        {_h3Index, Lat, Long} ->
+            GW#{
+                'Lat' => Lat,
+                'Lon' => Long
+            }
+    end.
 
 -spec encode_deveui(non_neg_integer()) -> binary().
 encode_deveui(Num) ->

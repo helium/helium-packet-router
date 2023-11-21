@@ -22,6 +22,7 @@
     http_async_downlink_test/1,
     http_uplink_packet_no_roaming_agreement_test/1,
     http_uplink_packet_test/1,
+    uplink_with_gateway_location_test/1,
     http_class_c_downlink_test/1,
     http_multiple_gateways_test/1,
     http_multiple_joins_same_dest_test/1,
@@ -77,6 +78,7 @@ all() ->
         http_async_downlink_test,
         http_uplink_packet_no_roaming_agreement_test,
         http_uplink_packet_test,
+        uplink_with_gateway_location_test,
         http_class_c_downlink_test,
         http_multiple_gateways_test,
         http_multiple_joins_same_dest_test,
@@ -730,6 +732,94 @@ http_uplink_packet_test(_Config) ->
                         <<"RFRegion">> => erlang:atom_to_binary(Region),
                         <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
                         <<"SNR">> => hpr_packet_up:snr(PacketUp),
+                        <<"DLAllowed">> => true,
+                        <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
+                            hpr_utils:pubkeybin_to_mac(PubKeyBin)
+                        )
+                    }
+                ]
+            }
+        }
+    ),
+
+    ?assertMatch(
+        {ok, PubKeyBin, 'US915', PacketTime, "route1"},
+        hpr_http_roaming:parse_uplink_token(Token)
+    ),
+
+    ok.
+
+uplink_with_gateway_location_test(_Config) ->
+    %% One Gateway is going to be sending all the packets.
+    #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    IndexString = "8828308281fffff",
+    ok = hpr_test_ics_gateway_service:register_gateway_location(
+        PubKeyBin,
+        IndexString
+    ),
+
+    ok = start_uplink_listener(),
+
+    SendPacketFun = fun(DevAddr) ->
+        GatewayTime = erlang:system_time(millisecond),
+        PacketUp = test_utils:uplink_packet_up(#{
+            gateway => PubKeyBin,
+            devaddr => DevAddr,
+            fcnt => 0,
+            sig_fun => SigFun,
+            timestamp => GatewayTime
+        }),
+        ok = hpr_routing:handle_packet(PacketUp, #{gateway => PubKeyBin}),
+        {ok, PacketUp, GatewayTime}
+    end,
+
+    uplink_test_route(),
+
+    {ok, PacketUp, GatewayTime} = SendPacketFun(?DEVADDR_ACTILITY),
+    Payload = hpr_packet_up:payload(PacketUp),
+    Region = hpr_packet_up:region(PacketUp),
+    PacketTime = hpr_packet_up:timestamp(PacketUp),
+    ExpectedIndex = h3:from_string(IndexString),
+    {ExpectedLat, ExpectedLong} = h3:to_geo(ExpectedIndex),
+    {
+        ok,
+        #{<<"ULMetaData">> := #{<<"FNSULToken">> := Token}},
+        _Request,
+        {200, _RespBody}
+    } = http_rcv(
+        #{
+            <<"ProtocolVersion">> => <<"1.1">>,
+            <<"SenderNSID">> => hpr_utils:sender_nsid(),
+            <<"ReceiverNSID">> => <<"test-uplink-receiver-id">>,
+            <<"DedupWindowSize">> => fun erlang:is_integer/1,
+            <<"TransactionID">> => fun erlang:is_number/1,
+            <<"SenderID">> => <<"0xC00053">>,
+            <<"ReceiverID">> => ?NET_ID_ACTILITY_BIN,
+            <<"MessageType">> => <<"PRStartReq">>,
+            <<"PHYPayload">> => hpr_http_roaming_utils:binary_to_hexstring(Payload),
+            <<"ULMetaData">> => #{
+                <<"DevAddr">> => ?DEVADDR_ACTILITY_BIN,
+                <<"DataRate">> => hpr_lorawan:datarate_to_index(
+                    Region,
+                    hpr_packet_up:datarate(PacketUp)
+                ),
+                <<"ULFreq">> => hpr_packet_up:frequency_mhz(PacketUp),
+                <<"RFRegion">> => erlang:atom_to_binary(Region),
+                <<"RecvTime">> => formatted_timestamp_within_one_second(
+                    hpr_http_roaming_utils:format_time(GatewayTime)
+                ),
+
+                <<"FNSULToken">> => fun erlang:is_binary/1,
+                <<"GWCnt">> => 1,
+                <<"GWInfo">> => [
+                    #{
+                        <<"RFRegion">> => erlang:atom_to_binary(Region),
+                        <<"RSSI">> => hpr_packet_up:rssi(PacketUp),
+                        <<"SNR">> => hpr_packet_up:snr(PacketUp),
+                        <<"Lat">> => ExpectedLat,
+                        <<"Lon">> => ExpectedLong,
                         <<"DLAllowed">> => true,
                         <<"GWID">> => hpr_http_roaming_utils:binary_to_hexstring(
                             hpr_utils:pubkeybin_to_mac(PubKeyBin)

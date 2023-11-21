@@ -76,7 +76,10 @@ start_link(Args) ->
     GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
 push_data(WorkerPid, PacketUp, SocketDest, GatewayLocation) ->
-    gen_server:cast(WorkerPid, {push_data, PacketUp, SocketDest, GatewayLocation}).
+    gen_server:cast(
+        WorkerPid,
+        {push_data, PacketUp, SocketDest, erlang:system_time(millisecond), GatewayLocation}
+    ).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -112,14 +115,13 @@ handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(
-    {push_data, PacketUp, SocketDest, GatewayLocation},
+    {push_data, PacketUp, SocketDest, Timestamp, GatewayLocation},
     #state{
         push_data = PushData,
         socket = Socket
     } =
         State0
 ) ->
-    Timestamp = erlang:system_time(millisecond),
     ok = hpr_packet_up:md(PacketUp),
     {Token, Payload} = packet_up_to_push_data(PacketUp, Timestamp, GatewayLocation),
     State = maybe_send_pull_data(SocketDest, State0),
