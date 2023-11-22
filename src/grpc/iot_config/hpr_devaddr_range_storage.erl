@@ -2,6 +2,7 @@
 
 -export([
     init_ets/0,
+         checkpoint/0,
 
     lookup/1,
     insert/1,
@@ -21,12 +22,21 @@
 -endif.
 
 -define(ETS_DEVADDR_RANGES, hpr_route_devaddr_ranges_ets).
+-define(DETS_DEVADDR_RANGES, hpr_route_devaddr_ranges_dets).
 
 -spec init_ets() -> ok.
 init_ets() ->
     ?ETS_DEVADDR_RANGES = ets:new(?ETS_DEVADDR_RANGES, [
         public, named_table, bag, {read_concurrency, true}
     ]),
+    ok = rehydrate_from_dets(),
+    ok.
+
+-spec checkpoint() -> ok.
+checkpoint() ->
+    ok = open_dets(),
+    ok = dets:from_ets(?DETS_DEVADDR_RANGES, ?ETS_DEVADDR_RANGES),
+    ok = dets:close(?DETS_DEVADDR_RANGES),
     ok.
 
 -spec lookup(DevAddr :: non_neg_integer()) -> [hpr_route_ets:route()].
@@ -138,3 +148,33 @@ replace_route(RouteID, DevAddrRanges) ->
     Removed = hpr_devaddr_range_storage:delete_route(RouteID),
     lists:foreach(fun ?MODULE:insert/1, DevAddrRanges),
     Removed.
+
+-spec rehydrate_from_dets() -> ok.
+rehydrate_from_dets() ->
+    ok = open_dets(),
+
+    case dets:to_ets(?DETS_DEVADDR_RANGES, ?ETS_DEVADDR_RANGES) of
+        {error, _Reason} ->
+            lager:error("failed ot hydrate ets: ~p", [_Reason]);
+        _ ->
+            lager:info("ets hydrated")
+    end.
+
+-spec open_dets() -> ok.
+open_dets() ->
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join([DataDir, "hpr_eui_pair_storage.dets"]),
+    ok = filelib:ensure_dir(DETSFile),
+
+    case
+        dets:open_file(?DETS_DEVADDR_RANGES, [
+            {file, DETSFile}, {type, bag}, {keypos, hpr_route_ets:ets_keypos()}
+        ])
+    of
+        {ok, _Dets} ->
+            ok;
+        {error, Reason} ->
+            Deleted = file:delete(DETSFile),
+            lager:warning("failed to open dets file ~p: ~p, deleted: ~p", [?MODULE, Reason, Deleted]),
+            rehydrate_from_dets()
+    end.

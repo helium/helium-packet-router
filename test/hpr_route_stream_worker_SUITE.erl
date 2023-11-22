@@ -3,7 +3,6 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -include("hpr_metrics.hrl").
--include("../src/grpc/autogen/iot_config_pb.hrl").
 
 -export([
     all/0,
@@ -13,7 +12,9 @@
 
 -export([
     main_test/1,
-    refresh_route_test/1
+    refresh_route_test/1,
+    stream_crash_resume_updates_test/1,
+    app_restart_rehydrate_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -29,7 +30,9 @@
 all() ->
     [
         main_test,
-        refresh_route_test
+        refresh_route_test,
+        stream_crash_resume_updates_test,
+        app_restart_rehydrate_test
     ].
 
 %%--------------------------------------------------------------------
@@ -49,6 +52,346 @@ end_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
+
+app_restart_rehydrate_test(_Config) ->
+    %% Fill up the app with a few config things.
+    ?assertMatch(
+        #{
+            route := 0,
+            eui_pair := 0,
+            devaddr_range := 0,
+            skf := 0
+        },
+        hpr_route_stream_worker:test_counts()
+    ),
+
+    CheckCounts = fun(
+        RouteID,
+        ExpectedRouteCount,
+        ExpectedEUIPairCount,
+        ExpectedDevaddrRangeCount,
+        ExpectedSKFCount
+    ) ->
+        ok = test_utils:wait_until(
+            fun() ->
+                case hpr_route_storage:lookup(RouteID) of
+                    {ok, RouteETS} ->
+                        RouteCount = ets:info(hpr_routes_ets, size),
+                        EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
+                        DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
+                        SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
+
+                        {
+                            ExpectedRouteCount =:= RouteCount andalso
+                                ExpectedEUIPairCount =:= EUIPairCount andalso
+                                ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
+                                ExpectedSKFCount =:= SKFCount,
+                            [
+                                {route_id, RouteID},
+                                {route, ExpectedRouteCount, RouteCount},
+                                {eui_pair, ExpectedEUIPairCount, EUIPairCount},
+                                {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
+                                {skf, ExpectedSKFCount, SKFCount}
+                            ]
+                        };
+                    _ ->
+                        {false, {route_not_found, RouteID}}
+                end
+            end
+        )
+    end,
+
+    %% Create a bunch of data to ingest
+    Route1ID = "7d502f32-4d58-4746-965e-001",
+    Route1 = hpr_route:test_new(#{
+        id => Route1ID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "localhost",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10
+    }),
+    EUIPair1 = hpr_eui_pair:test_new(#{
+        route_id => Route1ID, app_eui => 1, dev_eui => 0
+    }),
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
+    DevAddr1 = 16#00000001,
+    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKeyFilter1 = hpr_skf:new(#{
+        route_id => Route1ID,
+        devaddr => DevAddr1,
+        session_key => SessionKey1,
+        max_copies => 1
+    }),
+
+    hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 100})
+    ),
+    timer:sleep(100),
+
+    Updates1 = [
+        hpr_route_stream_res:test_new(#{
+            action => add, data => {eui_pair, EUIPair1}, timestamp => 100
+        }),
+        hpr_route_stream_res:test_new(#{
+            action => add, data => {devaddr_range, DevAddrRange1}, timestamp => 100
+        }),
+        hpr_route_stream_res:test_new(#{
+            action => add, data => {skf, SessionKeyFilter1}, timestamp => 100
+        })
+    ],
+    [ok = hpr_test_iot_config_service_route:stream_resp(Update) || Update <- Updates1],
+    ct:print("all updates sent"),
+    timer:sleep(timer:seconds(1)),
+
+    %% make sure all the data was received
+    %% ok = timer:sleep(150),
+    ok = CheckCounts(Route1ID, 1, 1, 1, 1),
+    ?assertMatch(
+        #{
+            route := 1,
+            eui_pair := 1,
+            devaddr_range := 1,
+            skf := 1
+        },
+        hpr_route_stream_worker:test_counts()
+    ),
+
+    %% Timestamps are inclusive, send a route update to bump the last timestamp
+    hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 150})
+    ),
+    ok = timer:sleep(150),
+    ct:print("checkpointing"),
+    %% Make sure the latest config timestamp is saved
+    ok = hpr_route_stream_worker:checkpoint(),
+
+    %% Stop the app.
+    ct:print("stopping the app"),
+    ok = application:stop(hpr),
+    %% Restart the app.
+    timer:sleep(100),
+    ct:print("starting the app"),
+    {ok, _} = application:ensure_all_started(hpr),
+    ok = test_utils:wait_until(
+        fun() ->
+            Stream = hpr_route_stream_worker:test_stream(),
+            %% {state, Stream, _Backoff} = sys:get_state(hpr_route_stream_worker),
+            Stream =/= undefined andalso
+                erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_route))
+        end,
+        20,
+        500
+    ),
+    ct:print("everything should be rehydrated"),
+    %% Make sure the config is still there.
+    ok = CheckCounts(Route1ID, 1, 1, 1, 1),
+    %% And no new updates have been received.
+    ?assertMatch(
+        #{
+            route := 0,
+            eui_pair := 0,
+            devaddr_range := 0,
+            skf := 0
+        },
+        hpr_route_stream_worker:test_counts()
+    ),
+
+    ok.
+
+stream_crash_resume_updates_test(_Config) ->
+    %% The first time the stream worker starts up, it should ingest all available config.
+    %% Then we kill it.
+    %% Then we start it up again, and it should ingest only new available config.
+
+    ?assertMatch(
+        #{
+            route := 0,
+            eui_pair := 0,
+            devaddr_range := 0,
+            skf := 0
+        },
+        hpr_route_stream_worker:test_counts()
+    ),
+
+    CheckCounts = fun(
+        RouteID,
+        ExpectedRouteCount,
+        ExpectedEUIPairCount,
+        ExpectedDevaddrRangeCount,
+        ExpectedSKFCount
+    ) ->
+        ok = test_utils:wait_until(
+            fun() ->
+                case hpr_route_storage:lookup(RouteID) of
+                    {ok, RouteETS} ->
+                        RouteCount = ets:info(hpr_routes_ets, size),
+                        EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
+                        DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
+                        SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
+
+                        {
+                            ExpectedRouteCount =:= RouteCount andalso
+                                ExpectedEUIPairCount =:= EUIPairCount andalso
+                                ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
+                                ExpectedSKFCount =:= SKFCount,
+                            [
+                                {route_id, RouteID},
+                                {route, ExpectedRouteCount, RouteCount},
+                                {eui_pair, ExpectedEUIPairCount, EUIPairCount},
+                                {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
+                                {skf, ExpectedSKFCount, SKFCount}
+                            ]
+                        };
+                    _ ->
+                        false
+                end
+            end
+        )
+    end,
+
+    %% Create a bunch of data to ingest
+    Route1ID = "7d502f32-4d58-4746-965e-001",
+    Route1 = hpr_route:test_new(#{
+        id => Route1ID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "localhost",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10
+    }),
+    EUIPair1 = hpr_eui_pair:test_new(#{
+        route_id => Route1ID, app_eui => 1, dev_eui => 0
+    }),
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
+    DevAddr1 = 16#00000001,
+    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKeyFilter1 = hpr_skf:new(#{
+        route_id => Route1ID,
+        devaddr => DevAddr1,
+        session_key => SessionKey1,
+        max_copies => 1
+    }),
+
+    Updates1 = [
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 100}),
+        hpr_route_stream_res:test_new(#{
+            action => add, data => {eui_pair, EUIPair1}, timestamp => 100
+        }),
+        hpr_route_stream_res:test_new(#{
+            action => add, data => {devaddr_range, DevAddrRange1}, timestamp => 100
+        }),
+        hpr_route_stream_res:test_new(#{
+            action => add, data => {skf, SessionKeyFilter1}, timestamp => 100
+        })
+    ],
+    [ok = hpr_test_iot_config_service_route:stream_resp(Update) || Update <- Updates1],
+
+    %% make sure all the data was received
+    %% ok = timer:sleep(150),
+    ok = CheckCounts(Route1ID, 1, 1, 1, 1),
+    ?assertMatch(
+        #{
+            route := 1,
+            eui_pair := 1,
+            devaddr_range := 1,
+            skf := 1
+        },
+        hpr_route_stream_worker:test_counts()
+    ),
+
+    %% Timestamps are inclusive, send a route update to bump the last timestamp
+    hpr_test_iot_config_service_route:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 150})
+    ),
+    ok = timer:sleep(150),
+    %% Make sure the latest config timestamp is saved
+    ok = hpr_route_stream_worker:checkpoint(),
+    %% Kill the stream worker
+    exit(whereis(hpr_route_stream_worker), kill),
+    ok = test_utils:wait_until(
+        fun() ->
+            whereis(hpr_route_stream_worker) =/= undefined andalso
+                erlang:is_process_alive(whereis(hpr_route_stream_worker)) andalso
+                hpr_route_stream_worker:test_stream() =/= undefined andalso
+                erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_route))
+        end,
+        20,
+        500
+    ),
+
+    %% Create a bunch of new data to ingest
+    Route2ID = "7d502f32-4d58-4746-965e-002",
+    Route2 = hpr_route:test_new(#{
+        id => Route2ID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "localhost",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10
+    }),
+    EUIPair2 = hpr_eui_pair:test_new(#{
+        route_id => Route2ID, app_eui => 1, dev_eui => 0
+    }),
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => Route2ID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
+    DevAddr2 = 16#00000002,
+    SessionKey2 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKeyFilter2 = hpr_skf:new(#{
+        route_id => Route2ID,
+        devaddr => DevAddr2,
+        session_key => SessionKey2,
+        max_copies => 1
+    }),
+
+    %% Send the old data, and the new data
+    Updates2 =
+        Updates1 ++
+            [
+                hpr_route_stream_res:test_new(#{
+                    action => add, data => {route, Route2}, timestamp => 200
+                }),
+                hpr_route_stream_res:test_new(#{
+                    action => add, data => {eui_pair, EUIPair2}, timestamp => 200
+                }),
+                hpr_route_stream_res:test_new(#{
+                    action => add, data => {devaddr_range, DevAddrRange2}, timestamp => 200
+                }),
+                hpr_route_stream_res:test_new(#{
+                    action => add, data => {skf, SessionKeyFilter2}, timestamp => 200
+                })
+            ],
+    [ok = hpr_test_iot_config_service_route:stream_resp(Update) || Update <- Updates2],
+
+    %% make sure only the new data was received
+    timer:sleep(timer:seconds(1)),
+    %% NOTE: we expect 2 of everything, but skfs are checked per route.
+    ok = CheckCounts(Route2ID, 2, 2, 2, 1),
+    ?assertMatch(
+        #{
+            route := 1,
+            eui_pair := 1,
+            devaddr_range := 1,
+            skf := 1
+        },
+        hpr_route_stream_worker:test_counts()
+    ),
+
+    ok.
 
 main_test(_Config) ->
     %% Let it startup
@@ -283,10 +626,28 @@ refresh_route_test(_Config) ->
         fun() ->
             case hpr_route_storage:lookup(Route1ID) of
                 {ok, RouteETS} ->
-                    1 =:= ets:info(hpr_routes_ets, size) andalso
-                        1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
-                        1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                        1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
+                    RouteCount = ets:info(hpr_routes_ets, size),
+                    EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
+                    DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
+                    SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
+
+                    ExpectedRouteCount = 1,
+                    ExpectedEUIPairCount = 1,
+                    ExpectedDevaddrRangeCount = 1,
+                    ExpectedSKFCount = 1,
+
+                    {
+                        ExpectedRouteCount =:= RouteCount andalso
+                            ExpectedEUIPairCount =:= EUIPairCount andalso
+                            ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
+                            ExpectedSKFCount =:= SKFCount,
+                        [
+                            {route, ExpectedRouteCount, RouteCount},
+                            {eui_pair, ExpectedEUIPairCount, EUIPairCount},
+                            {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
+                            {skf, ExpectedSKFCount, SKFCount}
+                        ]
+                    };
                 _ ->
                     false
             end

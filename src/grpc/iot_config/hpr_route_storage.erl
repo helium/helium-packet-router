@@ -2,6 +2,7 @@
 
 -export([
     init_ets/0,
+    checkpoint/0,
 
     insert/1, insert/2, insert/3,
     delete/1,
@@ -30,6 +31,23 @@ init_ets() ->
         {keypos, hpr_route_ets:ets_keypos()},
         {read_concurrency, true}
     ]),
+    ok = open_dets(),
+    [] = dets:traverse(
+        ?MODULE,
+        fun(RouteETS) ->
+            Route = hpr_route_ets:route(RouteETS),
+            ok = ?MODULE:insert(Route),
+            continue
+        end
+    ),
+
+    ok.
+
+-spec checkpoint() -> ok.
+checkpoint() ->
+    ok = open_dets(),
+    ok = dets:from_ets(?MODULE, ?ETS_ROUTES),
+    ok = dets:close(?MODULE),
     ok.
 
 -spec lookup(ID :: hpr_route:id()) -> {ok, hpr_route_ets:route()} | {error, not_found}.
@@ -159,3 +177,22 @@ oui_routes(OUI) ->
 %% -------------------------------------------------------------------
 %% Internal Functions
 %% -------------------------------------------------------------------
+
+-spec open_dets() -> ok.
+open_dets() ->
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join([DataDir, "hpr_routes_storage.dets"]),
+    ok = filelib:ensure_dir(DETSFile),
+
+    case
+        dets:open_file(?MODULE, [
+            {file, DETSFile}, {type, set}, {keypos, hpr_route_ets:ets_keypos()}
+        ])
+    of
+        {ok, _Dets} ->
+            ok;
+        {error, Reason} ->
+            Deleted = file:delete(DETSFile),
+            lager:warning("failed to open dets file ~p: ~p, deleted: ~p", [?MODULE, Reason, Deleted]),
+            open_dets()
+    end.

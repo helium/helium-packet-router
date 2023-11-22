@@ -61,8 +61,13 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    refresh_route/1
+    refresh_route/1,
+    checkpoint/0
 ]).
+
+-ifdef(TEST).
+-export([test_counts/0, test_stream/0]).
+-endif.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -99,9 +104,18 @@
     devaddr_added := non_neg_integer()
 }.
 
+-type counts_map() :: #{
+    route := non_neg_integer(),
+    eui_pair := non_neg_integer(),
+    skf := non_neg_integer(),
+    devaddr_range := non_neg_integer()
+}.
+
 -record(state, {
     stream :: grpcbox_client:stream() | undefined,
-    conn_backoff :: backoff:backoff()
+    conn_backoff :: backoff:backoff(),
+    counts :: counts_map(),
+    last_timestamp = 0 :: non_neg_integer()
 }).
 
 -define(SERVER, ?MODULE).
@@ -121,6 +135,22 @@ start_link(Args) ->
 refresh_route(RouteID) ->
     gen_server:call(?MODULE, {refresh_route, RouteID}, timer:seconds(120)).
 
+-spec checkpoint() -> ok.
+checkpoint() ->
+    gen_server:call(?MODULE, checkpoint).
+
+-ifdef(TEST).
+
+-spec test_counts() -> counts_map().
+test_counts() ->
+    gen_server:call(?MODULE, test_counts).
+
+-spec test_stream() -> undefined | grpcbox_client:stream().
+test_stream() ->
+    gen_server:call(?MODULE, test_stream).
+
+-endif.
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
@@ -129,10 +159,39 @@ init(Args) ->
     Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
     lager:info("starting ~p with ~p", [?MODULE, Args]),
     self() ! ?INIT_STREAM,
+
+    ok = open_dets(),
+    LastTimestamp =
+        case dets:lookup(?MODULE, timestamp) of
+            [{timestamp, T}] -> T;
+            _ -> 0
+        end,
+
     {ok, #state{
         stream = undefined,
-        conn_backoff = Backoff
+        conn_backoff = Backoff,
+        counts = #{
+            route => 0,
+            eui_pair => 0,
+            skf => 0,
+            devaddr_range => 0
+        },
+        %% last_timestamp = persistent_term:get(?MODULE, 0)
+        last_timestamp = LastTimestamp
     }}.
+
+open_dets() ->
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join(DataDir, "stream_worker.dets"),
+    ok = filelib:ensure_dir(DETSFile),
+    case dets:open_file(?MODULE, [{file, DETSFile}, {type, set}]) of
+        {ok, _DETS} ->
+            ok;
+        {error, _Reason} ->
+            Deleted = file:delete(DETSFile),
+            lager:error("failed to open dets ~p deleting file ~p", [_Reason, Deleted]),
+            open_dets()
+    end.
 
 handle_call({refresh_route, RouteID}, _From, State) ->
     DevaddrResponse = refresh_devaddrs(RouteID),
@@ -166,24 +225,40 @@ handle_call({refresh_route, RouteID}, _From, State) ->
         end,
 
     {reply, Reply, State};
+handle_call(test_counts, _From, State) ->
+    {reply, State#state.counts, State};
+handle_call(test_stream, _From, State) ->
+    {reply, State#state.stream, State};
+handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) ->
+    ok = hpr_route_storage:checkpoint(),
+    ok = hpr_eui_pair_storage:checkpoint(),
+    ok = hpr_devaddr_range_storage:checkpoint(),
+    ok = hpr_skf_storage:checkpoint(),
+    ok = open_dets(),
+    ok = dets:insert(?MODULE, {timestamp, LastTimestamp}),
+
+    %% persistent_term:put(?MODULE, LastTimestamp),
+    {reply, ok, State};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
-handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
+handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0, last_timestamp = LastTimestamp} = State) ->
     lager:info("connecting"),
     SigFun = hpr_utils:sig_fun(),
     PubKeyBin = hpr_utils:pubkey_bin(),
-    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
+
+    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin, LastTimestamp),
     SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
     StreamOptions = #{channel => ?IOT_CONFIG_CHANNEL},
+
     case helium_iot_config_route_client:stream(SignedRouteStreamReq, StreamOptions) of
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
-            ok = hpr_route_ets:delete_all(),
+            %% ok = hpr_route_ets:delete_all(),
             {noreply, State#state{
                 stream = Stream, conn_backoff = Backoff1
             }};
@@ -199,18 +274,22 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
             {noreply, State#state{conn_backoff = Backoff1}}
     end;
 %% GRPC stream callbacks
-handle_info({data, _StreamID, RouteStreamRes}, #state{} = State) ->
+handle_info({data, _StreamID, RouteStreamRes}, #state{counts = Counts0} = State) ->
     Action = hpr_route_stream_res:action(RouteStreamRes),
     Data = hpr_route_stream_res:data(RouteStreamRes),
+    Timestamp = hpr_route_stream_res:timestamp(RouteStreamRes),
     {Type, _} = Data,
     lager:debug([{action, Action}, {type, Type}], "got route stream update"),
+    Counts1 = Counts0#{Type => maps:get(Type, Counts0, 0) + 1},
     _ = erlang:spawn(
         fun() ->
+            lager:debug([{action, Action}, {type, Type}], "processing update"),
             ok = process_route_stream_res(Action, Data),
+            lager:debug([{action, Action}, {type, Type}], "done processing"),
             ok = hpr_metrics:ics_update(Type, Action)
         end
     ),
-    {noreply, State};
+    {noreply, State#state{counts = Counts1, last_timestamp = Timestamp}};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
     {noreply, State};
@@ -317,7 +396,7 @@ refresh_skfs(RouteID) ->
                 SKFs when erlang:is_list(SKFs) ->
                     Previous = hpr_skf_storage:lookup_route(RouteID),
                     PreviousCnt = hpr_skf_storage:replace_route(RouteID, SKFs),
-                    ct:print(
+                    lager:info(
                         "route refresh skfs ~p",
                         [{{previous, PreviousCnt}, {current, length(SKFs)}}]
                     ),

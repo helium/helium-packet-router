@@ -2,6 +2,7 @@
 
 -export([
     make_ets/1,
+    checkpoint/0,
 
     insert/1,
     update/4,
@@ -32,13 +33,59 @@
 
 -spec make_ets(hpr_route:id()) -> ets:tab().
 make_ets(RouteID) ->
-    ets:new(?ETS_SKFS, [
+    Ref = ets:new(?ETS_SKFS, [
         public,
         set,
         {read_concurrency, true},
         {write_concurrency, true},
         {heir, erlang:whereis(?SKF_HEIR), RouteID}
-    ]).
+    ]),
+    erlang:spawn(fun() ->
+        ct:print("made ets for ~p", [RouteID]),
+        ok = rehydrate_from_dets(RouteID, Ref)
+    end),
+    Ref.
+
+-spec checkpoint() -> ok.
+checkpoint() ->
+    lists:foreach(
+        fun(RouteETS) ->
+            Route = hpr_route_ets:route(RouteETS),
+            RouteID = hpr_route:id(Route),
+            Filename = io_lib:format("hpr_skf_~s.dets", [RouteID]),
+            ETS = hpr_route_ets:skf_ets(RouteETS),
+            ct:print("dumping ~p to ~s", [ets:info(ETS, size), Filename]),
+            ok = open_dets(Filename),
+
+            ok = dets:from_ets(Filename, ETS),
+            ok = dets:close(Filename)
+        end,
+        hpr_route_storage:all_route_ets()
+    ),
+    ok.
+
+-spec open_dets(Filename :: list()) -> ok.
+open_dets(Filename) ->
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join(DataDir, Filename),
+    ok = filelib:ensure_dir(DETSFile),
+
+    case dets:open_file(Filename, [{type, set}]) of
+        {ok, _} ->
+            lager:info("opened dets: ~s~n~n~p", [Filename, dets:info(Filename)]),
+            ok;
+        {error, _Reason} ->
+            Deleted = file:delete(DETSFile),
+            lager:warning("failed to open file ~p: ~p, deleted: ~p", [Filename, _Reason, Deleted]),
+            open_dets(Filename)
+    end.
+
+rehydrate_from_dets(RouteID, EtsRef) ->
+    Filename = io_lib:format("hpr_skf_~s.dets", [RouteID]),
+    ct:print("rehydrating ~s", [Filename]),
+    ok = open_dets(Filename),
+    _ = dets:to_ets(Filename, EtsRef),
+    ok = dets:close(Filename).
 
 -spec lookup(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
     [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
@@ -182,7 +229,6 @@ replace_route(RouteID, NewSKFs) ->
 
             OldSize = ets:info(OldTab, size),
 
-            ct:print("replace on ~s: ~p", [RouteID, [{old, OldSize}, {new, length(NewSKFs)}]]),
             ets:delete(OldTab),
             {ok, OldSize};
         Other ->

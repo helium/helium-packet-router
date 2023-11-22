@@ -233,7 +233,6 @@ b58() ->
 -spec base_data_dir() -> string().
 base_data_dir() ->
     DataDir = application:get_env(?APP, data_dir, ?DATA_DIR),
-    lager:info("base data dir ~s", [DataDir]),
     ok = filelib:ensure_dir(DataDir),
     DataDir.
 
