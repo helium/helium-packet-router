@@ -1,6 +1,6 @@
 [
     {hpr, [
-        {key, "/var/data/hpr.key"},
+        {data_dir, "/var/data"},
         {http_roaming_sender_nsid, <<"${HPR_ROAMING_SENDER_NSID}">>},
         {no_routes, [{"${HPR_PP_HOST_1}", 8080}, {"${HPR_PP_HOST_2}", 8080}]},
         {packet_reporter, #{

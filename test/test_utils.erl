@@ -24,10 +24,11 @@
 init_per_testcase(TestCase, Config) ->
     Suite = proplists:get_value(suite, proplists:get_value(tc_group_properties, Config)),
     BaseDir = filename:join([Suite, TestCase]),
-    KeyFilePath = filename:join([BaseDir, "hpr.key"]),
-    ok = application:set_env(hpr, key, KeyFilePath, [{persistent, true}]),
+    BaseDirPath = filename:join([BaseDir, "data"]),
+    ok = application:set_env(hpr, data_dir, BaseDirPath, [{persistent, true}]),
 
-    ct:pal("BaseDir ~p", [BaseDir]),
+    ct:pal("BaseDirPath ~p", [BaseDirPath]),
+    ok = filelib:ensure_dir(BaseDirPath),
 
     FormatStr = [
         "[",
@@ -90,7 +91,7 @@ init_per_testcase(TestCase, Config) ->
         fun() ->
             {state, Stream, _Backoff} = sys:get_state(hpr_route_stream_worker),
             Stream =/= undefined andalso
-                erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_route))
+                erlang:is_pid(erlang:whereis(hpr_test_ics_route_service))
         end,
         20,
         500

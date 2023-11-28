@@ -19,6 +19,9 @@
 -define(METRICS_VM_ETS_MEMORY, "hpr_vm_ets_memory").
 -define(METRICS_VM_PROC_Q, "hpr_vm_process_queue").
 -define(METRICS_ICS_UPDATES_COUNTER, "hpr_iot_config_service_updates_counter").
+-define(METRICS_ICS_GATEWAY_LOCATION_HISTOGRAM,
+    "hpr_iot_config_service_gateway_location_histogram"
+).
 
 -define(METRICS, [
     {?METRICS_GRPC_CONNECTION_GAUGE, prometheus_gauge, [], "Number of active GRPC Connections"},
@@ -36,5 +39,7 @@
     {?METRICS_FIND_ROUTES_HISTOGRAM, prometheus_histogram, [], "Find Routes"},
     {?METRICS_VM_ETS_MEMORY, prometheus_gauge, [name], "HPR ets memory"},
     {?METRICS_VM_PROC_Q, prometheus_gauge, [name], "Process queue"},
-    {?METRICS_ICS_UPDATES_COUNTER, prometheus_counter, [type, action], "ICS updates counter"}
+    {?METRICS_ICS_UPDATES_COUNTER, prometheus_counter, [type, action], "ICS updates counter"},
+    {?METRICS_ICS_GATEWAY_LOCATION_HISTOGRAM, prometheus_histogram, [status],
+        "ICS gateway location req"}
 ]).

@@ -105,7 +105,7 @@ register(PubKeyBin) ->
         {error, not_found} ->
             true = gproc:add_local_name(?REG_KEY(PubKeyBin)),
             lager:debug("register"),
-            hpr_protocol_router:register(PubKeyBin, Self),
+            ok = hpr_protocol_router:register(PubKeyBin, Self),
             ok;
         {ok, Self} ->
             lager:info("nothing to do, already registered"),
@@ -148,6 +148,8 @@ handle_register(Reg, StreamState0) ->
             {stop, StreamState0};
         true ->
             ok = ?MODULE:register(PubKeyBin),
+            %% Atttempt to get location from ICS to pre-cache data
+            _ = hpr_gateway_location:get(PubKeyBin),
             HandlerState = grpcbox_stream:stream_handler_state(StreamState0),
             StreamState1 = grpcbox_stream:stream_handler_state(
                 StreamState0, HandlerState#handler_state{pubkey_bin = PubKeyBin}
@@ -267,6 +269,8 @@ route_packet_test() ->
 route_register_test() ->
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, observe_grpc_connection, fun(_, _) -> ok end),
+    meck:new(hpr_gateway_location, [passthrough]),
+    meck:expect(hpr_gateway_location, get, fun(_) -> ok end),
     application:ensure_all_started(gproc),
 
     Self = self(),
@@ -297,6 +301,7 @@ route_register_test() ->
 
     application:stop(gproc),
     meck:unload(hpr_metrics),
+    meck:unload(hpr_gateway_location),
     ok.
 
 handle_info_test() ->

@@ -8,7 +8,7 @@
 -export([
     start_link/1,
     init/0,
-    send/2,
+    send/3,
     get_stream/3,
     remove_stream/1, remove_stream/2,
     register/2
@@ -64,9 +64,10 @@ init() ->
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
-    Route :: hpr_route:route()
+    Route :: hpr_route:route(),
+    GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
-send(PacketUp, Route) ->
+send(PacketUp, Route, _GatewayLocation) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
     LNS = hpr_route:lns(Route),
     Server = hpr_route:server(Route),
@@ -428,7 +429,7 @@ test_full() ->
     Pids = lists:map(
         fun(_X) ->
             erlang:spawn(fun() ->
-                R = ?MODULE:send(HprPacketUp, Route),
+                R = ?MODULE:send(HprPacketUp, Route, undefined),
                 Self ! {send_result, R},
                 receive
                     stop -> ok
@@ -501,7 +502,7 @@ test_cannot_locate_stream() ->
     %% So we wrap the sender in a process so we it can be killed and start the cleanup.
     SenderPid = spawn(fun() ->
         ?MODULE:register(PubKeyBin, self()),
-        ?assertEqual(ok, ?MODULE:send(HprPacketUp, Route)),
+        ?assertEqual(ok, ?MODULE:send(HprPacketUp, Route, undefined)),
         receive
             stop ->
                 Self ! stopped,

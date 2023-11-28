@@ -1,4 +1,4 @@
--module(hpr_test_iot_config_service_route).
+-module(hpr_test_ics_route_service).
 
 -behaviour(helium_iot_config_route_bhvr).
 

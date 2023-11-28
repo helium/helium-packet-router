@@ -8,6 +8,7 @@
 
 -export([
     full_test/1,
+    with_location_test/1,
     single_lns_test/1,
     multi_lns_test/1,
     single_lns_downlink_test/1,
@@ -37,6 +38,7 @@
 all() ->
     [
         full_test,
+        with_location_test,
         single_lns_test,
         multi_lns_test,
         single_lns_downlink_test,
@@ -97,6 +99,42 @@ full_test(_Config) ->
 
     ok.
 
+with_location_test(_Config) ->
+    {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
+
+    {Route, EUIPairs, DevAddrRanges} = test_route(1777),
+    IndexString = "8828308281fffff",
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(),
+        route => Route,
+        eui_pairs => EUIPairs,
+        devaddr_ranges => DevAddrRanges,
+        h3_index_str => IndexString
+    }),
+
+    %% Send packet and route directly through interface
+    ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
+
+    PacketUp =
+        case hpr_test_gateway:receive_send_packet(GatewayPid) of
+            {ok, EnvUp} ->
+                {packet, PUp} = hpr_envelope_up:data(EnvUp),
+                PUp;
+            {error, timeout} ->
+                ct:fail(receive_send_packet)
+        end,
+
+    %% Initial PULL_DATA
+    {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
+    %% PUSH_DATA
+    {ok, Data} = expect_push_data(RcvSocket, router_push_data),
+    ok = verify_push_data_with_location(PacketUp, Data, IndexString),
+
+    ok = gen_udp:close(RcvSocket),
+    ok = gen_server:stop(GatewayPid),
+
+    ok.
+
 single_lns_test(_Config) ->
     PacketUp = fake_join_up_packet(),
 
@@ -104,7 +142,7 @@ single_lns_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_protocol_gwmp:send(PacketUp, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route, undefined),
     %% Initial PULL_DATA
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket, route_pull_data),
     %% PUSH_DATA
@@ -125,17 +163,17 @@ multi_lns_test(_Config) ->
     {ok, RcvSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to route 1
-    hpr_protocol_gwmp:send(PacketUp, Route1),
+    hpr_protocol_gwmp:send(PacketUp, Route1, undefined),
     {ok, _Token, _MAC} = expect_pull_data(RcvSocket1, route1_pull_data),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data),
 
     %% Same packet to route 2
-    hpr_protocol_gwmp:send(PacketUp, Route2),
+    hpr_protocol_gwmp:send(PacketUp, Route2, undefined),
     {ok, _Token2, _MAC2} = expect_pull_data(RcvSocket2, route2_pull_data),
     {ok, _} = expect_push_data(RcvSocket2, route2_push_data),
 
     %% Another packet to route 1
-    hpr_protocol_gwmp:send(PacketUp, Route1),
+    hpr_protocol_gwmp:send(PacketUp, Route1, undefined),
     {ok, _} = expect_push_data(RcvSocket1, route1_push_data_repeat),
     ok = no_more_messages(),
 
@@ -152,7 +190,7 @@ single_lns_downlink_test(_Config) ->
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
-    _ = hpr_protocol_gwmp:send(PacketUp, Route1),
+    _ = hpr_protocol_gwmp:send(PacketUp, Route1, undefined),
 
     %% Eat the pull_data
     {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
@@ -218,7 +256,7 @@ single_lns_class_c_downlink_test(_Config) ->
     {ok, LnsSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send packet
-    _ = hpr_protocol_gwmp:send(PacketUp, Route1),
+    _ = hpr_protocol_gwmp:send(PacketUp, Route1, undefined),
 
     %% Eat the pull_data
     {ok, _Token, _MAC} = expect_pull_data(LnsSocket, downlink_test_initiate_connection),
@@ -289,7 +327,7 @@ multi_lns_downlink_test(_Config) ->
     {ok, LNSSocket2} = gen_udp:open(1778, [binary, {active, true}]),
 
     %% Send packet to LNS 1
-    _ = hpr_protocol_gwmp:send(PacketUp, Route1),
+    _ = hpr_protocol_gwmp:send(PacketUp, Route1, undefined),
     {ok, _Token, _Data} = expect_pull_data(LNSSocket1, downlink_test_initiate_connection_lns1),
     %% Receive the uplink from LNS 1 (mostly to get the return address)
     {ok, UDPWorkerAddress} =
@@ -301,7 +339,7 @@ multi_lns_downlink_test(_Config) ->
         end,
 
     %% Send packet to LNS 2
-    _ = hpr_protocol_gwmp:send(PacketUp, Route2),
+    _ = hpr_protocol_gwmp:send(PacketUp, Route2, undefined),
     {ok, _Token2, _Data2} = expect_pull_data(LNSSocket2, downlink_test_initiate_connection_lns2),
     {ok, _} = expect_push_data(LNSSocket2, route2_push_data),
 
@@ -340,12 +378,12 @@ multi_gw_single_lns_test(_Config) ->
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
     %% Send the packet from the first hotspot
-    hpr_protocol_gwmp:send(PacketUp1, Route),
+    hpr_protocol_gwmp:send(PacketUp1, Route, undefined),
     {ok, _Token, _Data} = expect_pull_data(RcvSocket, first_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, first_gw_push_data),
 
     %% Send the same packet from the second hotspot
-    hpr_protocol_gwmp:send(PacketUp2, Route),
+    hpr_protocol_gwmp:send(PacketUp2, Route, undefined),
     {ok, _Token2, _Data2} = expect_pull_data(RcvSocket, second_gw_pull_data),
     {ok, _} = expect_push_data(RcvSocket, second_gw_push_data),
 
@@ -362,7 +400,7 @@ pull_data_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_protocol_gwmp:send(PacketUp, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route, undefined),
 
     %% Initial PULL_DATA
     {ok, Token, MAC} = expect_pull_data(RcvSocket, route_pull_data),
@@ -379,7 +417,7 @@ pull_ack_test(_Config) ->
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
 
-    hpr_protocol_gwmp:send(PacketUp, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route, undefined),
 
     %% Initial PULL_DATA, grab the address and port for responding
     {ok, Token, Address, Port} =
@@ -415,7 +453,7 @@ pull_ack_test(_Config) ->
 
     %% Sending the same packet again shouldn't matter here, we only want to
     %% trigger the push_data/pull_data logic.
-    hpr_protocol_gwmp:send(PacketUp, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route, undefined),
 
     ?assertEqual(
         #{{{127, 0, 0, 1}, 1777} => acknowledged},
@@ -445,7 +483,7 @@ pull_ack_hostname_test(_Config) ->
     {Route, _, _} = test_route(TestURL, 1777),
 
     {ok, RcvSocket} = gen_udp:open(1777, [binary, {active, true}]),
-    hpr_protocol_gwmp:send(PacketUp, Route),
+    hpr_protocol_gwmp:send(PacketUp, Route, undefined),
 
     %% Initial PULL_DATA, grab the address and port for responding
     {ok, Token, Address, Port} =
@@ -516,12 +554,12 @@ region_port_redirect_test(_Config) ->
     CNPacketUp = USPacketUp#packet_router_packet_up_v1_pb{gateway = CNPubKeyBin, region = 'CN470'},
 
     %% US send packet
-    hpr_protocol_gwmp:send(USPacketUp, Route),
+    hpr_protocol_gwmp:send(USPacketUp, Route, undefined),
     {ok, _, _} = expect_pull_data(USSocket, us_redirected_pull_data),
     {ok, _} = expect_push_data(USSocket, us_redirected_push_data),
 
     %% EU send packet
-    hpr_protocol_gwmp:send(EUPacketUp, Route),
+    hpr_protocol_gwmp:send(EUPacketUp, Route, undefined),
     {ok, _, _} = expect_pull_data(EUSocket, eu_redirected_pull_data),
     {ok, _} = expect_push_data(EUSocket, eu_redirected_push_data),
 
@@ -533,7 +571,7 @@ region_port_redirect_test(_Config) ->
     end,
 
     %% Send from the last region to make sure fallback port is chosen
-    hpr_protocol_gwmp:send(CNPacketUp, Route),
+    hpr_protocol_gwmp:send(CNPacketUp, Route, undefined),
     {ok, _, _} = expect_pull_data(FallbackSocket, fallback_pull_data),
     {ok, _} = expect_push_data(FallbackSocket, fallback_push_data),
 
@@ -741,7 +779,54 @@ verify_push_data(PacketUp, PushDataBinary) ->
                             hpr_utils:gateway_name(PubKeyBin)
                         ),
                         <<"regi">> => erlang:atom_to_binary(
-                            hpr_packet_up:region(PacketUp))
+                            hpr_packet_up:region(PacketUp)
+                        )
+                    }
+                }
+            ]
+    },
+    ?assert(test_utils:match_map(MapFromPacketUp, JsonData)).
+
+verify_push_data_with_location(PacketUp, PushDataBinary, IndexString) ->
+    JsonData = semtech_udp:json_data(PushDataBinary),
+    ExpectedIndex = h3:from_string(IndexString),
+    {ExpectedLat, ExpectedLong} = h3:to_geo(ExpectedIndex),
+
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
+    MapFromPacketUp = #{
+        <<"rxpk">> =>
+            [
+                #{
+                    <<"chan">> => 0,
+                    <<"codr">> => <<"4/5">>,
+                    <<"data">> => base64:encode(hpr_packet_up:payload(PacketUp)),
+                    <<"datr">> => erlang:atom_to_binary(hpr_packet_up:datarate(PacketUp)),
+                    <<"freq">> => list_to_float(
+                        float_to_list(hpr_packet_up:frequency_mhz(PacketUp), [
+                            {decimals, 4}, compact
+                        ])
+                    ),
+                    <<"lsnr">> => hpr_packet_up:snr(PacketUp),
+                    <<"modu">> => <<"LORA">>,
+                    <<"rfch">> => 0,
+                    <<"rssi">> => hpr_packet_up:rssi(PacketUp),
+                    <<"size">> => erlang:byte_size(hpr_packet_up:payload(PacketUp)),
+                    <<"stat">> => 1,
+                    <<"time">> => fun erlang:is_binary/1,
+                    <<"tmst">> => hpr_packet_up:timestamp(PacketUp) band 16#FFFF_FFFF,
+                    <<"meta">> => #{
+                        <<"gateway_id">> => erlang:list_to_binary(
+                            libp2p_crypto:bin_to_b58(PubKeyBin)
+                        ),
+                        <<"gateway_name">> => erlang:list_to_binary(
+                            hpr_utils:gateway_name(PubKeyBin)
+                        ),
+                        <<"regi">> => erlang:atom_to_binary(
+                            hpr_packet_up:region(PacketUp)
+                        ),
+                        <<"gateway_h3index">> => ExpectedIndex,
+                        <<"gateway_lat">> => ExpectedLat,
+                        <<"gateway_long">> => ExpectedLong
                     }
                 }
             ]

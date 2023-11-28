@@ -11,13 +11,15 @@
 
 -include("hpr_http_roaming.hrl").
 
--export([send/2]).
+-export([send/3]).
 
 -spec send(
     PacketUp :: hpr_packet_up:packet(),
-    Route :: hpr_route:route()
+    Route :: hpr_route:route(),
+    GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
-send(PacketUp, Route) ->
+send(PacketUp, Route, GatewayLocation) ->
+    RecvTime = erlang:system_time(millisecond),
     WorkerKey = worker_key_from(PacketUp, Route),
     PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
@@ -35,8 +37,7 @@ send(PacketUp, Route) ->
             ),
             {error, worker_not_started};
         {ok, WorkerPid} ->
-            RecvTime = erlang:system_time(millisecond),
-            hpr_http_roaming_worker:handle_packet(WorkerPid, PacketUp, RecvTime),
+            hpr_http_roaming_worker:handle_packet(WorkerPid, PacketUp, RecvTime, GatewayLocation),
             ok
     end.
 

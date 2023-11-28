@@ -142,12 +142,22 @@ init(
     ok = lists:foreach(fun hpr_route_ets:insert_eui_pair/1, EUIPairs),
     ok = lists:foreach(fun hpr_route_ets:insert_devaddr_range/1, DevAddrRanges),
     self() ! ?CONNECT,
+    PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+    case maps:get(h3_index_str, Args, false) of
+        IndexString when is_list(IndexString) ->
+            ok = hpr_test_ics_gateway_service:register_gateway_location(
+                PubKeyBin,
+                IndexString
+            );
+        false ->
+            ok
+    end,
     {ok, #state{
         forward = Pid,
         route = Route,
         eui_pairs = EUIPairs,
         devaddr_ranges = DevAddrRanges,
-        pubkey_bin = libp2p_crypto:pubkey_to_bin(PubKey),
+        pubkey_bin = PubKeyBin,
         sig_fun = libp2p_crypto:mk_sig_fun(PrivKey)
     }}.
 
