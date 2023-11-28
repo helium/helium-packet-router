@@ -80,6 +80,7 @@ expire_locations() ->
 -spec update_location(libp2p_crypto:pubkey_bin()) ->
     {ok, h3:index(), float(), float()} | {error, any()}.
 update_location(PubKeyBin) ->
+    Start = erlang:system_time(millisecond),
     NewLoc = #location{
         gateway = PubKeyBin,
         timestamp = erlang:system_time(millisecond),
@@ -89,6 +90,7 @@ update_location(PubKeyBin) ->
     },
     case get_location_from_ics(PubKeyBin) of
         {error, Reason} ->
+            hpr_metrics:observe_gateway_location(Start, error),
             GatewauName = hpr_utils:gateway_name(PubKeyBin),
             lager:warning(
                 "fail to get_location_from_ics ~p for ~s",
@@ -97,6 +99,7 @@ update_location(PubKeyBin) ->
             ok = insert(NewLoc),
             {error, not_found};
         {ok, H3IndexString} ->
+            hpr_metrics:observe_gateway_location(Start, ok),
             H3Index = h3:from_string(H3IndexString),
             {Lat, Long} = h3:to_geo(H3Index),
             ok = insert(NewLoc#location{

@@ -187,4 +187,13 @@ main_test(_Config) ->
         end
     ),
 
+    ok = test_utils:wait_until(
+        fun() ->
+            undefined =/=
+                prometheus_histogram:value(?METRICS_ICS_GATEWAY_LOCATION_HISTOGRAM, [
+                    error
+                ])
+        end
+    ),
+
     ok.

@@ -16,7 +16,8 @@
     observe_multi_buy/2,
     observe_find_routes/1,
     observe_grpc_connection/2,
-    ics_update/2
+    ics_update/2,
+    observe_gateway_location/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -125,6 +126,17 @@ observe_grpc_connection(Type, Start) ->
 ics_update(Type, Action) ->
     _ = prometheus_counter:inc(?METRICS_ICS_UPDATES_COUNTER, [Type, Action]),
     ok.
+
+-spec observe_gateway_location(
+    Start :: non_neg_integer(),
+    Status :: ok | error
+) -> ok.
+observe_gateway_location(Start, Status) ->
+    prometheus_histogram:observe(
+        ?METRICS_ICS_GATEWAY_LOCATION_HISTOGRAM,
+        [Status],
+        erlang:system_time(millisecond) - Start
+    ).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
