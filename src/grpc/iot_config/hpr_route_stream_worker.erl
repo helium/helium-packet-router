@@ -283,9 +283,7 @@ handle_info({data, _StreamID, RouteStreamRes}, #state{counts = Counts0} = State)
     Counts1 = Counts0#{Type => maps:get(Type, Counts0, 0) + 1},
     _ = erlang:spawn(
         fun() ->
-            lager:debug([{action, Action}, {type, Type}], "processing update"),
             ok = process_route_stream_res(Action, Data),
-            lager:debug([{action, Action}, {type, Type}], "done processing"),
             ok = hpr_metrics:ics_update(Type, Action)
         end
     ),

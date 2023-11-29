@@ -28,6 +28,7 @@
 -endif.
 
 -define(ETS_SKFS, hpr_route_skfs_ets).
+-define(DETS_FILENAME(ROUTE_ID), io_lib:format("hpr_skf_~s.dets", [ROUTE_ID])).
 
 -define(SKF_HEIR, hpr_sup).
 
@@ -40,11 +41,19 @@ make_ets(RouteID) ->
         {write_concurrency, true},
         {heir, erlang:whereis(?SKF_HEIR), RouteID}
     ]),
+
     erlang:spawn(fun() ->
-        ct:print("made ets for ~p", [RouteID]),
+        lager:info("rehydrating SKF from dets: ~p", [RouteID]),
         ok = rehydrate_from_dets(RouteID, Ref)
     end),
+
     Ref.
+
+-spec dets_filename(Route :: hpr_route:id()) -> list().
+dets_filename(RouteID) ->
+    DataDir = hpr_utils:base_data_dir(),
+    Filename = ?DETS_FILENAME(RouteID),
+    filename:join([DataDir, Filename]).
 
 -spec checkpoint() -> ok.
 checkpoint() ->
@@ -52,40 +61,38 @@ checkpoint() ->
         fun(RouteETS) ->
             Route = hpr_route_ets:route(RouteETS),
             RouteID = hpr_route:id(Route),
-            Filename = io_lib:format("hpr_skf_~s.dets", [RouteID]),
-            ETS = hpr_route_ets:skf_ets(RouteETS),
-            ct:print("dumping ~p to ~s", [ets:info(ETS, size), Filename]),
-            ok = open_dets(Filename),
+            DETSFile = dets_filename(RouteID),
 
-            ok = dets:from_ets(Filename, ETS),
-            ok = dets:close(Filename)
+            ETS = hpr_route_ets:skf_ets(RouteETS),
+            with_open_dets(DETSFile, fun() -> ok = dets:from_ets(DETSFile, ETS) end)
         end,
         hpr_route_storage:all_route_ets()
     ),
     ok.
 
--spec open_dets(Filename :: list()) -> ok.
-open_dets(Filename) ->
-    DataDir = hpr_utils:base_data_dir(),
-    DETSFile = filename:join(DataDir, Filename),
-    ok = filelib:ensure_dir(DETSFile),
+-spec with_open_dets(Filename :: list(), Fn :: fun()) -> ok.
+with_open_dets(Filename, Fn) ->
+    ok = filelib:ensure_dir(Filename),
 
     case dets:open_file(Filename, [{type, set}]) of
         {ok, _} ->
-            lager:info("opened dets: ~s~n~n~p", [Filename, dets:info(Filename)]),
-            ok;
+            lager:info("opened dets: ~s~n", [Filename]),
+            Fn(),
+            dets:close(Filename);
         {error, _Reason} ->
-            Deleted = file:delete(DETSFile),
+            Deleted = file:delete(Filename),
             lager:warning("failed to open file ~p: ~p, deleted: ~p", [Filename, _Reason, Deleted]),
-            open_dets(Filename)
+            with_open_dets(Filename, Fn)
     end.
 
 rehydrate_from_dets(RouteID, EtsRef) ->
-    Filename = io_lib:format("hpr_skf_~s.dets", [RouteID]),
-    ct:print("rehydrating ~s", [Filename]),
-    ok = open_dets(Filename),
-    _ = dets:to_ets(Filename, EtsRef),
-    ok = dets:close(Filename).
+    Filename = dets_filename(RouteID),
+    with_open_dets(Filename, fun() ->
+        [] = dets:traverse(Filename, fun(SKF) ->
+            ok = do_rehydrate_insert_skf(EtsRef, SKF),
+            continue
+        end)
+    end).
 
 -spec lookup(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
     [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
@@ -267,6 +274,14 @@ do_insert_skf(SKFETS, SKF) ->
     MaxCopies = hpr_skf:max_copies(SKF),
 
     true = ets:insert(SKFETS, {hpr_utils:hex_to_bin(SessionKey), {DevAddr, MaxCopies}}),
+    ok.
+
+-spec do_rehydrate_insert_skf(
+    Table :: ets:table(),
+    Entry :: {SessionKey :: binary(), {DevAddr :: binary(), MaxCopies :: non_neg_integer()}}
+) -> ok.
+do_rehydrate_insert_skf(SKFETS, SKF) ->
+    true = ets:insert(SKFETS, SKF),
     ok.
 
 -spec skf_md(hpr_route:id(), hpr_skf:skf()) -> proplists:proplist().

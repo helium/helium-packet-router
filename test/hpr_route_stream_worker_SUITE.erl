@@ -91,7 +91,8 @@ app_restart_rehydrate_test(_Config) ->
                                 {route, ExpectedRouteCount, RouteCount},
                                 {eui_pair, ExpectedEUIPairCount, EUIPairCount},
                                 {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
-                                {skf, ExpectedSKFCount, SKFCount}
+                                {skf, ExpectedSKFCount, SKFCount},
+                                {skf_items, ets:tab2list(hpr_route_ets:skf_ets(RouteETS))}
                             ]
                         };
                     _ ->
@@ -394,6 +395,42 @@ stream_crash_resume_updates_test(_Config) ->
     ok.
 
 main_test(_Config) ->
+    CheckCounts = fun(
+        RouteID,
+        ExpectedRouteCount,
+        ExpectedEUIPairCount,
+        ExpectedDevaddrRangeCount,
+        ExpectedSKFCount
+    ) ->
+        ok = test_utils:wait_until(
+            fun() ->
+                case hpr_route_storage:lookup(RouteID) of
+                    {ok, RouteETS} ->
+                        RouteCount = ets:info(hpr_routes_ets, size),
+                        EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
+                        DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
+                        SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
+
+                        {
+                            ExpectedRouteCount =:= RouteCount andalso
+                                ExpectedEUIPairCount =:= EUIPairCount andalso
+                                ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
+                                ExpectedSKFCount =:= SKFCount,
+                            [
+                                {route_id, RouteID},
+                                {route, ExpectedRouteCount, RouteCount},
+                                {eui_pair, ExpectedEUIPairCount, EUIPairCount},
+                                {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
+                                {skf, ExpectedSKFCount, SKFCount}
+                            ]
+                        };
+                    _ ->
+                        false
+                end
+            end
+        )
+    end,
+
     %% Let it startup
     timer:sleep(500),
 
@@ -438,19 +475,20 @@ main_test(_Config) ->
     ),
 
     %% Let time to process new routes
-    ok = test_utils:wait_until(
-        fun() ->
-            case hpr_route_storage:lookup(Route1ID) of
-                {ok, RouteETS} ->
-                    1 =:= ets:info(hpr_routes_ets, size) andalso
-                        1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
-                        1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                        1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
-                _ ->
-                    false
-            end
-        end
-    ),
+    ok = CheckCounts(Route1ID, 1, 1, 1, 1),
+    %% ok = test_utils:wait_until(
+    %%     fun() ->
+    %%         case hpr_route_storage:lookup(Route1ID) of
+    %%             {ok, RouteETS} ->
+    %%                 1 =:= ets:info(hpr_routes_ets, size) andalso
+    %%                     1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
+    %%                     1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
+    %%                     1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
+    %%             _ ->
+    %%                 false
+    %%         end
+    %%     end
+    %% ),
 
     ?assertEqual(
         1,

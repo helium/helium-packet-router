@@ -20,39 +20,40 @@
 -export([test_delete_ets/0, test_size/0]).
 -endif.
 
--define(ETS_ROUTES, hpr_routes_ets).
+-define(ETS, hpr_routes_ets).
+-define(DETS, hpr_routes_dets).
 
 -spec init_ets() -> ok.
 init_ets() ->
-    ?ETS_ROUTES = ets:new(?ETS_ROUTES, [
+    ?ETS = ets:new(?ETS, [
         public,
         named_table,
         set,
         {keypos, hpr_route_ets:ets_keypos()},
         {read_concurrency, true}
     ]),
-    ok = open_dets(),
-    [] = dets:traverse(
-        ?MODULE,
-        fun(RouteETS) ->
-            Route = hpr_route_ets:route(RouteETS),
-            ok = ?MODULE:insert(Route),
-            continue
-        end
-    ),
+    with_open_dets(fun() ->
+        [] = dets:traverse(
+            ?DETS,
+            fun(RouteETS) ->
+                Route = hpr_route_ets:route(RouteETS),
+                ok = ?MODULE:insert(Route),
+                continue
+            end
+        )
+    end),
 
     ok.
 
 -spec checkpoint() -> ok.
 checkpoint() ->
-    ok = open_dets(),
-    ok = dets:from_ets(?MODULE, ?ETS_ROUTES),
-    ok = dets:close(?MODULE),
-    ok.
+    with_open_dets(fun() ->
+        ok = dets:from_ets(?DETS, ?ETS)
+    end).
 
 -spec lookup(ID :: hpr_route:id()) -> {ok, hpr_route_ets:route()} | {error, not_found}.
 lookup(ID) ->
-    case ets:lookup(?ETS_ROUTES, ID) of
+    case ets:lookup(?ETS, ID) of
         [Route] ->
             {ok, Route};
         _Other ->
@@ -82,7 +83,7 @@ insert(Route, SKFETS) ->
 ) -> ok.
 insert(Route, SKFETS, Backoff) ->
     RouteETS = hpr_route_ets:new(Route, SKFETS, Backoff),
-    true = ets:insert(?ETS_ROUTES, RouteETS),
+    true = ets:insert(?ETS, RouteETS),
     Server = hpr_route:server(Route),
     RouteFields = [
         {id, hpr_route:id(Route)},
@@ -106,7 +107,7 @@ delete(Route) ->
     EUIsEntries = hpr_eui_pair_storage:delete_route(RouteID),
     SKFEntries = hpr_skf_storage:delete_route(RouteID),
 
-    true = ets:delete(?ETS_ROUTES, RouteID),
+    true = ets:delete(?ETS, RouteID),
     lager:info(
         [{devaddr, DevAddrEntries}, {euis, EUIsEntries}, {skfs, SKFEntries}, {route_id, RouteID}],
         "route deleted"
@@ -115,24 +116,24 @@ delete(Route) ->
 
 -spec delete_all() -> ok.
 delete_all() ->
-    ets:delete_all_objects(?ETS_ROUTES),
+    ets:delete_all_objects(?ETS),
     ok.
 
 -spec set_backoff(RouteID :: hpr_route:id(), Backoff :: hpr_route_ets:backoff()) -> ok.
 set_backoff(RouteID, Backoff) ->
-    true = ets:update_element(?ETS_ROUTES, RouteID, {5, Backoff}),
+    true = ets:update_element(?ETS, RouteID, {5, Backoff}),
     ok.
 
 -ifdef(TEST).
 
 -spec test_delete_ets() -> ok.
 test_delete_ets() ->
-    ets:delete(?ETS_ROUTES),
+    ets:delete(?ETS),
     ok.
 
 -spec test_size() -> non_neg_integer().
 test_size() ->
-    ets:info(?ETS_ROUTES, size).
+    ets:info(?ETS, size).
 
 -endif.
 
@@ -142,17 +143,17 @@ test_size() ->
 
 -spec all_routes() -> list(hpr_route:route()).
 all_routes() ->
-    [hpr_route_ets:route(R) || R <- ets:tab2list(?ETS_ROUTES)].
+    [hpr_route_ets:route(R) || R <- ets:tab2list(?ETS)].
 
 -spec all_route_ets() -> list(hpr_route_ets:route()).
 all_route_ets() ->
-    ets:tab2list(?ETS_ROUTES).
+    ets:tab2list(?ETS).
 
 -spec oui_routes(OUI :: non_neg_integer()) -> list(hpr_route_ets:route()).
 oui_routes(OUI) ->
     [
         RouteETS
-     || RouteETS <- ets:tab2list(?ETS_ROUTES), OUI == hpr_route:oui(hpr_route_ets:route(RouteETS))
+     || RouteETS <- ets:tab2list(?ETS), OUI == hpr_route:oui(hpr_route_ets:route(RouteETS))
     ].
 
 %% ------------------------------------------------------------------
@@ -178,21 +179,23 @@ oui_routes(OUI) ->
 %% Internal Functions
 %% -------------------------------------------------------------------
 
--spec open_dets() -> ok.
-open_dets() ->
+with_open_dets(FN) ->
     DataDir = hpr_utils:base_data_dir(),
     DETSFile = filename:join([DataDir, "hpr_routes_storage.dets"]),
     ok = filelib:ensure_dir(DETSFile),
 
     case
-        dets:open_file(?MODULE, [
-            {file, DETSFile}, {type, set}, {keypos, hpr_route_ets:ets_keypos()}
+        dets:open_file(?DETS, [
+            {file, DETSFile}, {type, bag}, {keypos, hpr_route_ets:ets_keypos()}
         ])
     of
         {ok, _Dets} ->
-            ok;
+            lager:info("~s opened by ~p", [DETSFile, self()]),
+            FN(),
+            dets:close(?DETS);
+        %% ok;
         {error, Reason} ->
             Deleted = file:delete(DETSFile),
             lager:warning("failed to open dets file ~p: ~p, deleted: ~p", [?MODULE, Reason, Deleted]),
-            open_dets()
+            with_open_dets(FN)
     end.

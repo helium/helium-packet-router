@@ -2,7 +2,7 @@
 
 -export([
     init_ets/0,
-checkpoint/0,
+    checkpoint/0,
 
     insert/1,
     lookup/2,
@@ -40,10 +40,9 @@ init_ets() ->
 
 -spec checkpoint() -> ok.
 checkpoint() ->
-    ok = open_dets(),
-    ok = dets:from_ets(?DETS, ?ETS),
-    ok = dets:close(?DETS),
-    ok.
+    with_open_dets(fun() ->
+        ok = dets:from_ets(?DETS, ?ETS)
+    end).
 
 -spec lookup(AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()) ->
     [hpr_route_ets:route()].
@@ -165,17 +164,16 @@ replace_route(RouteID, EUIs) ->
 
 -spec rehydrate_from_dets() -> ok.
 rehydrate_from_dets() ->
-    ok = open_dets(),
+    with_open_dets(fun() ->
+        case dets:to_ets(?DETS, ?ETS) of
+            {error, _Reason} ->
+                lager:error("failed ot hydrate ets: ~p", [_Reason]);
+            _ ->
+                lager:info("ets hydrated")
+        end
+    end).
 
-    case dets:to_ets(?DETS, ?ETS) of
-        {error, _Reason} ->
-            lager:error("failed ot hydrate ets: ~p", [_Reason]);
-        _ ->
-            lager:info("ets hydrated")
-    end.
-
--spec open_dets() -> ok.
-open_dets() ->
+with_open_dets(FN) ->
     DataDir = hpr_utils:base_data_dir(),
     DETSFile = filename:join([DataDir, "hpr_eui_pair_storage.dets"]),
     ok = filelib:ensure_dir(DETSFile),
@@ -186,9 +184,11 @@ open_dets() ->
         ])
     of
         {ok, _Dets} ->
-            ok;
+            lager:info("~s opened by ~p", [DETSFile, self()]),
+            FN(),
+            dets:close(?DETS);
         {error, Reason} ->
             Deleted = file:delete(DETSFile),
             lager:warning("failed to open dets file ~p: ~p, deleted: ~p", [?MODULE, Reason, Deleted]),
-            rehydrate_from_dets()
+            with_open_dets(FN)
     end.
