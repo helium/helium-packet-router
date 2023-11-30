@@ -42,10 +42,8 @@ make_ets(RouteID) ->
         {heir, erlang:whereis(?SKF_HEIR), RouteID}
     ]),
 
-    erlang:spawn(fun() ->
-        lager:info("rehydrating SKF from dets: ~p", [RouteID]),
-        ok = rehydrate_from_dets(RouteID, Ref)
-    end),
+    lager:info("rehydrating SKF from dets: ~p", [RouteID]),
+    ok = rehydrate_from_dets(RouteID, Ref),
 
     Ref.
 
