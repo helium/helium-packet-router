@@ -29,7 +29,8 @@
         recon,
         observer_cli,
         gproc,
-        backoff
+        backoff,
+        h3
     ]},
     {included_applications, []},
     {env, []},
