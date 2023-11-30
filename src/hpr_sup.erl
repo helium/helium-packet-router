@@ -54,12 +54,12 @@ init([]) ->
     ok = filelib:ensure_dir(KeyFileName),
     ok = hpr_utils:load_key(KeyFileName),
 
-    ok = hpr_routing_cache:init_ets(),
-    ok = hpr_routing:init(),
-    ok = hpr_multi_buy:init(),
-    ok = hpr_protocol_router:init(),
-    ok = hpr_route_ets:init(),
-    ok = hpr_gateway_location:init(),
+    ok = timing("packet routing cache", fun() -> hpr_routing_cache:init_ets() end),
+    ok = timing("routing throttles", fun() -> hpr_routing:init() end),
+    ok = timing("multi buy", fun() -> hpr_multi_buy:init() end),
+    ok = timing("packet_router streams", fun() -> hpr_protocol_router:init() end),
+    ok = timing("config service", fun() -> hpr_route_ets:init() end),
+    ok = timing("gw location", fun() -> hpr_gateway_location:init() end),
 
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
     ConfigServiceConfig = application:get_env(?APP, iot_config_service, #{}),
@@ -125,3 +125,11 @@ maybe_start_channel(Config, ChannelName) ->
         _ ->
             lager:error("no host/port/transport to start ~s", [ChannelName])
     end.
+
+-spec timing(Label:: string(), Fn :: fun()) -> ok.
+timing(Label, Fn) ->
+    Start = erlang:system_time(millisecond),
+    Result = Fn(),
+    End = erlang:system_time(millisecond),
+    lager:info("~s took ~w ms", [Label, End - Start]),
+    Result.
