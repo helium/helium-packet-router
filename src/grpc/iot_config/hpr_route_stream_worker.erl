@@ -62,7 +62,8 @@
 -export([
     start_link/1,
     refresh_route/1,
-    checkpoint/0
+    checkpoint/0,
+    reset_timestamp/0
 ]).
 
 -ifdef(TEST).
@@ -120,6 +121,7 @@
 
 -define(SERVER, ?MODULE).
 -define(INIT_STREAM, init_stream).
+-define(DETS, hpr_route_stream_worker_dets).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -138,6 +140,10 @@ refresh_route(RouteID) ->
 -spec checkpoint() -> ok.
 checkpoint() ->
     gen_server:call(?MODULE, checkpoint).
+
+-spec reset_timestamp() -> ok.
+reset_timestamp() ->
+    gen_server:call(?MODULE, reset_timestamp).
 
 -ifdef(TEST).
 
@@ -162,7 +168,7 @@ init(Args) ->
 
     ok = open_dets(),
     LastTimestamp =
-        case dets:lookup(?MODULE, timestamp) of
+        case dets:lookup(?DETS, timestamp) of
             [{timestamp, T}] -> T;
             _ -> 0
         end,
@@ -176,22 +182,8 @@ init(Args) ->
             skf => 0,
             devaddr_range => 0
         },
-        %% last_timestamp = persistent_term:get(?MODULE, 0)
         last_timestamp = LastTimestamp
     }}.
-
-open_dets() ->
-    DataDir = hpr_utils:base_data_dir(),
-    DETSFile = filename:join(DataDir, "stream_worker.dets"),
-    ok = filelib:ensure_dir(DETSFile),
-    case dets:open_file(?MODULE, [{file, DETSFile}, {type, set}]) of
-        {ok, _DETS} ->
-            ok;
-        {error, _Reason} ->
-            Deleted = file:delete(DETSFile),
-            lager:error("failed to open dets ~p deleting file ~p", [_Reason, Deleted]),
-            open_dets()
-    end.
 
 handle_call({refresh_route, RouteID}, _From, State) ->
     DevaddrResponse = refresh_devaddrs(RouteID),
@@ -225,19 +217,21 @@ handle_call({refresh_route, RouteID}, _From, State) ->
         end,
 
     {reply, Reply, State};
+handle_call(reset_timestamp, _From, #state{} = State) ->
+    ok = dets:insert(?DETS, {timestamp, 0}),
+    {reply, ok, State#state{last_timestamp = 0}};
 handle_call(test_counts, _From, State) ->
     {reply, State#state.counts, State};
 handle_call(test_stream, _From, State) ->
     {reply, State#state.stream, State};
 handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) ->
+    %% We don't spawn the checkpoints to reduce the chance of continued updates causing weirdness in the DB.
     ok = hpr_route_storage:checkpoint(),
     ok = hpr_eui_pair_storage:checkpoint(),
     ok = hpr_devaddr_range_storage:checkpoint(),
     ok = hpr_skf_storage:checkpoint(),
-    ok = open_dets(),
-    ok = dets:insert(?MODULE, {timestamp, LastTimestamp}),
+    ok = dets:insert(?DETS, {timestamp, LastTimestamp}),
 
-    %% persistent_term:put(?MODULE, LastTimestamp),
     {reply, ok, State};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
@@ -258,7 +252,6 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0, last_timestamp = LastT
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
-            %% ok = hpr_route_ets:delete_all(),
             {noreply, State#state{
                 stream = Stream, conn_backoff = Backoff1
             }};
@@ -340,6 +333,7 @@ handle_info(_Msg, State) ->
 
 terminate(_Reason, _State) ->
     lager:error("terminate ~p", [_Reason]),
+    dets:close(?DETS),
     ok.
 
 %% ------------------------------------------------------------------
@@ -507,3 +501,17 @@ do_recv_from_stream(stream_finished, _Stream, Acc) ->
 do_recv_from_stream(Msg, _Stream, _Acc) ->
     lager:warning("unhandled msg from stream: ~p", [Msg]),
     {error, {unhandled_message, Msg}}.
+
+-spec open_dets() -> ok.
+open_dets() ->
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join(DataDir, "stream_worker.dets"),
+    ok = filelib:ensure_dir(DETSFile),
+    case dets:open_file(?DETS, [{file, DETSFile}, {type, set}]) of
+        {ok, _DETS} ->
+            ok;
+        {error, _Reason} ->
+            Deleted = file:delete(DETSFile),
+            lager:error("failed to open dets ~p deleting file ~p", [_Reason, Deleted]),
+            open_dets()
+    end.

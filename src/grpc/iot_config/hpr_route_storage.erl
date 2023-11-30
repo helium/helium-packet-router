@@ -186,7 +186,7 @@ with_open_dets(FN) ->
 
     case
         dets:open_file(?DETS, [
-            {file, DETSFile}, {type, bag}, {keypos, hpr_route_ets:ets_keypos()}
+            {file, DETSFile}, {type, set}, {keypos, hpr_route_ets:ets_keypos()}
         ])
     of
         {ok, _Dets} ->

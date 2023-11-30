@@ -178,11 +178,7 @@ with_open_dets(FN) ->
     DETSFile = filename:join([DataDir, "hpr_eui_pair_storage.dets"]),
     ok = filelib:ensure_dir(DETSFile),
 
-    case
-        dets:open_file(?DETS, [
-            {file, DETSFile}, {type, bag}, {keypos, hpr_route_ets:ets_keypos()}
-        ])
-    of
+    case dets:open_file(?DETS, [{file, DETSFile}, {type, set}]) of
         {ok, _Dets} ->
             lager:info("~s opened by ~p", [DETSFile, self()]),
             FN(),
