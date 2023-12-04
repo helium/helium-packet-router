@@ -107,8 +107,9 @@ get(PubKeyBin) ->
             {error, undefined};
         [#location{status = error}] ->
             {error, undefined};
-        [#location{status = requested, timestamp = T}] when T < LastHour ->
-            %% LOG
+        [#location{status = requested, timestamp = T, gateway = PubKeyBin}] when T < LastHour ->
+            GatewayName = hpr_utils:gateway_name(PubKeyBin),
+            lager:warning("got an old request for ~p ~s", [PubKeyBin, GatewayName]),
             ok = ?MODULE:update_location(PubKeyBin),
             {error, ?REQUESTED};
         [#location{status = requested}] ->
