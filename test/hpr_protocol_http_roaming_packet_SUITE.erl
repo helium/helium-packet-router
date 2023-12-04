@@ -760,6 +760,11 @@ uplink_with_gateway_location_test(_Config) ->
         IndexString
     ),
 
+    %% Trigger an update location
+    ?assertEqual(
+        {error, not_found}, hpr_gateway_location:get(PubKeyBin)
+    ),
+
     ok = start_uplink_listener(),
 
     SendPacketFun = fun(DevAddr) ->

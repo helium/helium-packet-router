@@ -13,12 +13,16 @@
     main_test/1
 ]).
 
+-define(NOT_FOUND, not_found).
+-define(REQUESTED, requested).
+
 -record(location, {
+    status :: ok | ?NOT_FOUND | error | ?REQUESTED,
     gateway :: libp2p_crypto:pubkey_bin(),
     timestamp :: non_neg_integer(),
-    h3_index :: h3:index() | undefined,
-    lat :: float() | undefined,
-    long :: float() | undefined
+    h3_index = undefined :: h3:index() | undefined,
+    lat = undefined :: float() | undefined,
+    long = undefined :: float() | undefined
 }).
 
 %%--------------------------------------------------------------------
@@ -65,8 +69,14 @@ main_test(_Config) ->
     ),
     {ExpectedLat, ExpectedLong} = h3:to_geo(ExpectedIndex),
 
-    %% Make request to get gateway location
+    %% The location update is now async
     Before = erlang:system_time(millisecond) - 1,
+    ?assertEqual(
+        {error, not_found}, hpr_gateway_location:get(PubKeyBin1)
+    ),
+    timer:sleep(15),
+
+    %% Make request to get gateway location
     ?assertEqual(
         {ok, ExpectedIndex, ExpectedLat, ExpectedLong}, hpr_gateway_location:get(PubKeyBin1)
     ),
@@ -77,6 +87,7 @@ main_test(_Config) ->
 
     %% Verify ETS data
     [ETSLocationRec] = ets:lookup(hpr_gateway_location_ets, PubKeyBin1),
+    ?assertEqual(ok, ETSLocationRec#location.status),
     ?assertEqual(PubKeyBin1, ETSLocationRec#location.gateway),
     ?assertEqual(ExpectedIndex, ETSLocationRec#location.h3_index),
     ?assertEqual(ExpectedLat, ETSLocationRec#location.lat),
@@ -86,6 +97,7 @@ main_test(_Config) ->
 
     %% Verify DETS data
     [DETSLocationRec] = dets:lookup(hpr_gateway_location_dets, PubKeyBin1),
+    ?assertEqual(ok, DETSLocationRec#location.status),
     ?assertEqual(PubKeyBin1, DETSLocationRec#location.gateway),
     ?assertEqual(ExpectedIndex, DETSLocationRec#location.h3_index),
     ?assertEqual(ExpectedLat, DETSLocationRec#location.lat),
