@@ -77,7 +77,8 @@ handle_info({ack, N}, StreamState) ->
         hpr_envelope_down:new(hpr_packet_ack:new(HandlerState#handler_state.last_phash)),
         grpcbox_stream:stream_handler_state(
             StreamState,
-            HandlerState#handler_state{last_phash = <<>>})
+            HandlerState#handler_state{last_phash = <<>>}
+        )
     );
 handle_info(?SESSION_KILL, StreamState0) ->
     lager:debug("received session kill for stream"),
@@ -278,7 +279,7 @@ route_packet_test() ->
     meck:expect(hpr_routing, handle_packet, fun(_PacketUp, _Opts) -> ok end),
 
     StreamState = grpcbox_stream:stream_handler_state(
-        #state{}, #handler_state{}
+        #state{}, #handler_state{last_phash = hpr_packet_up:phash(PacketUp)}
     ),
 
     ?assertEqual({ok, StreamState}, ?MODULE:route(EnvUp, StreamState)),
