@@ -71,10 +71,16 @@ main_test(_Config) ->
 
     %% The location update is now async
     Before = erlang:system_time(millisecond) - 1,
-    ?assertEqual(
-        {error, not_found}, hpr_gateway_location:get(PubKeyBin1)
-    ),
-    timer:sleep(15),
+
+    %% Wait until the location has been fetched
+    ok = test_utils:wait_until(fun() ->
+        case hpr_gateway_location:get(PubKeyBin1) of
+            {ok, _, _, _} ->
+                true;
+            Other ->
+                {false, Other}
+        end
+    end),
 
     %% Make request to get gateway location
     ?assertEqual(
