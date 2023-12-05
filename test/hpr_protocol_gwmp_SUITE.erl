@@ -112,6 +112,17 @@ with_location_test(_Config) ->
         h3_index_str => IndexString
     }),
 
+    %% Wait until the location has been fetched
+    PubKeyBin = hpr_test_gateway:pubkey_bin(GatewayPid),
+    ok = test_utils:wait_until(fun() ->
+        case hpr_gateway_location:get(PubKeyBin) of
+            {ok, _, _, _} ->
+                true;
+            Other ->
+                {false, Other}
+        end
+    end),
+
     %% Send packet and route directly through interface
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
 

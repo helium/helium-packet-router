@@ -129,7 +129,7 @@ ics_update(Type, Action) ->
 
 -spec observe_gateway_location(
     Start :: non_neg_integer(),
-    Status :: ok | error
+    Status :: ok | error | not_found
 ) -> ok.
 observe_gateway_location(Start, Status) ->
     prometheus_histogram:observe(

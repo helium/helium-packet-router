@@ -69,6 +69,7 @@ init([]) ->
     %% Starting config service client channel here because of the way we get
     %% .env vars into the app.
     _ = maybe_start_channel(ConfigServiceConfig, ?IOT_CONFIG_CHANNEL),
+    _ = maybe_start_channel(ConfigServiceConfig, ?LOCATION_CHANNEL),
     _ = maybe_start_channel(DownlinkServiceConfig, ?DOWNLINK_CHANNEL),
     _ = maybe_start_channel(MultiBuyServiceConfig, ?MULTI_BUY_CHANNEL),
 
@@ -83,6 +84,8 @@ init([]) ->
         ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
 
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
+
+        ?WORKER(hpr_gateway_location, [#{}]),
 
         ?WORKER(hpr_route_stream_worker, [#{}]),
 

@@ -760,6 +760,16 @@ uplink_with_gateway_location_test(_Config) ->
         IndexString
     ),
 
+    %% Trigger an update location and wait until the location has been fetched
+    ok = test_utils:wait_until(fun() ->
+        case hpr_gateway_location:get(PubKeyBin) of
+            {ok, _, _, _} ->
+                true;
+            Other ->
+                {false, Other}
+        end
+    end),
+
     ok = start_uplink_listener(),
 
     SendPacketFun = fun(DevAddr) ->

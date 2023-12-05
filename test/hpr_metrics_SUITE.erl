@@ -191,7 +191,7 @@ main_test(_Config) ->
         fun() ->
             undefined =/=
                 prometheus_histogram:value(?METRICS_ICS_GATEWAY_LOCATION_HISTOGRAM, [
-                    error
+                    not_found
                 ])
         end
     ),
