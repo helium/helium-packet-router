@@ -22,7 +22,8 @@
     started :: non_neg_integer(),
     pubkey_bin :: undefined | binary(),
     nonce :: undefined | binary(),
-    session_key :: undefined | binary()
+    session_key :: undefined | binary(),
+    last_phash = <<>> :: binary()
 }).
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
@@ -68,6 +69,14 @@ handle_info({give_away, NewPid, PubKeyBin}, StreamState) ->
     lager:info("give_away registration to ~p", [NewPid]),
     gproc:give_away({n, l, ?REG_KEY(PubKeyBin)}, NewPid),
     grpcbox_stream:send(true, hpr_envelope_down:new(undefined), StreamState);
+handle_info({ack, N}, StreamState) ->
+    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    erlang:send_after(timer:seconds(N), self(), {ack, N}),
+    grpcbox_stream:send(
+        true,
+        hpr_envelope_down:new(hpr_packet_ack:new(HandlerState#handler_state.last_phash)),
+        StreamState
+    );
 handle_info(?SESSION_KILL, StreamState0) ->
     lager:debug("received session kill for stream"),
     grpcbox_stream:send(true, hpr_envelope_down:new(undefined), StreamState0);
@@ -129,7 +138,11 @@ handle_packet(PacketUp, StreamState) ->
         stream_pid => self()
     },
     _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp, Opts], [{fullsweep_after, 0}]),
-    {ok, StreamState}.
+    {ok,
+        grpcbox_stream:stream_handler_state(
+            StreamState,
+            HandlerState#handler_state{last_phash = hpr_packet_up:phash(PacketUp)}
+        )}.
 
 -spec handle_register(Reg :: hpr_register:register(), StreamState0 :: grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()}
@@ -154,6 +167,12 @@ handle_register(Reg, StreamState0) ->
             StreamState1 = grpcbox_stream:stream_handler_state(
                 StreamState0, HandlerState#handler_state{pubkey_bin = PubKeyBin}
             ),
+            case hpr_register:packet_ack_interval(Reg) of
+                N when is_integer(N), N > 0 ->
+                    erlang:send_after(timer:seconds(N), self(), {ack, N});
+                _ ->
+                    ok
+            end,
             case hpr_register:session_capable(Reg) of
                 true ->
                     {EnvDown, StreamState2} = create_session_offer(StreamState1),
