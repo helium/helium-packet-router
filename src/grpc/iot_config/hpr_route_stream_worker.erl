@@ -274,12 +274,20 @@ handle_info({data, _StreamID, RouteStreamRes}, #state{counts = Counts0} = State)
     {Type, _} = Data,
     lager:debug([{action, Action}, {type, Type}], "got route stream update"),
     Counts1 = Counts0#{Type => maps:get(Type, Counts0, 0) + 1},
-    _ = erlang:spawn(
-        fun() ->
+    case Type of
+        %% Routes are required for many updates, we don't spawn them to make
+        %% sure everything is setup by the time updates start coming in for the route.
+        route ->
             ok = process_route_stream_res(Action, Data),
-            ok = hpr_metrics:ics_update(Type, Action)
-        end
-    ),
+            ok = hpr_metrics:ics_update(Type, Action);
+        _ ->
+            _ = erlang:spawn(
+                fun() ->
+                    ok = process_route_stream_res(Action, Data),
+                    ok = hpr_metrics:ics_update(Type, Action)
+                end
+            )
+    end,
     {noreply, State#state{counts = Counts1, last_timestamp = Timestamp}};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
