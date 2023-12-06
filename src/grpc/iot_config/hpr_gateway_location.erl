@@ -122,7 +122,13 @@ get(PubKeyBin) ->
 
 -spec update_location(libp2p_crypto:pubkey_bin()) -> ok.
 update_location(PubKeyBin) ->
-    gen_server:cast(?SERVER, {update_location, PubKeyBin}).
+    NewLoc = #location{
+        status = ?REQUESTED,
+        gateway = PubKeyBin,
+        timestamp = erlang:system_time(millisecond)
+    },
+    true = ets:insert(?ETS, NewLoc),
+    gen_server:cast(?SERVER, {update_location, NewLoc}).
 
 -spec expire_locations() -> ok.
 expire_locations() ->
@@ -142,13 +148,8 @@ init(_Args) ->
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-handle_cast({update_location, PubKeyBin}, State) ->
-    NewLoc = #location{
-        status = ?REQUESTED,
-        gateway = PubKeyBin,
-        timestamp = erlang:system_time(millisecond)
-    },
-    true = ets:insert(?ETS, NewLoc),
+handle_cast({update_location, Loc}, State) ->
+    PubKeyBin = Loc#location.gateway,
     Start = erlang:system_time(millisecond),
     case get_location_from_ics(PubKeyBin) of
         {error, ?NOT_FOUND} ->
@@ -158,7 +159,7 @@ handle_cast({update_location, PubKeyBin}, State) ->
                 "fail to get_location_from_ics ~p for ~s",
                 [?NOT_FOUND, GatewayName]
             ),
-            ok = insert(NewLoc#location{status = ?NOT_FOUND});
+            ok = insert(Loc#location{status = ?NOT_FOUND});
         {error, Reason} ->
             hpr_metrics:observe_gateway_location(Start, error),
             GatewayName = hpr_utils:gateway_name(PubKeyBin),
@@ -166,12 +167,12 @@ handle_cast({update_location, PubKeyBin}, State) ->
                 "fail to get_location_from_ics ~p for ~s",
                 [Reason, GatewayName]
             ),
-            ok = insert(NewLoc#location{status = error});
+            ok = insert(Loc#location{status = error});
         {ok, H3IndexString} ->
             hpr_metrics:observe_gateway_location(Start, ok),
             H3Index = h3:from_string(H3IndexString),
             {Lat, Long} = h3:to_geo(H3Index),
-            ok = insert(NewLoc#location{
+            ok = insert(Loc#location{
                 status = ok,
                 h3_index = H3Index,
                 lat = Lat,
