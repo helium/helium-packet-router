@@ -130,7 +130,7 @@ app_restart_rehydrate_test(_Config) ->
         max_copies => 1
     }),
 
-    hpr_test_iot_config_service_route:stream_resp(
+    hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 100})
     ),
     timer:sleep(100),
@@ -146,7 +146,7 @@ app_restart_rehydrate_test(_Config) ->
             action => add, data => {skf, SessionKeyFilter1}, timestamp => 100
         })
     ],
-    [ok = hpr_test_iot_config_service_route:stream_resp(Update) || Update <- Updates1],
+    [ok = hpr_test_ics_route_service:stream_resp(Update) || Update <- Updates1],
     ct:print("all updates sent"),
     timer:sleep(timer:seconds(1)),
 
@@ -164,7 +164,7 @@ app_restart_rehydrate_test(_Config) ->
     ),
 
     %% Timestamps are inclusive, send a route update to bump the last timestamp
-    hpr_test_iot_config_service_route:stream_resp(
+    hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 150})
     ),
     ok = timer:sleep(150),
@@ -184,7 +184,7 @@ app_restart_rehydrate_test(_Config) ->
             Stream = hpr_route_stream_worker:test_stream(),
             %% {state, Stream, _Backoff} = sys:get_state(hpr_route_stream_worker),
             Stream =/= undefined andalso
-                erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_route))
+                erlang:is_pid(erlang:whereis(hpr_test_ics_route_service))
         end,
         20,
         500
@@ -296,7 +296,7 @@ stream_crash_resume_updates_test(_Config) ->
             action => add, data => {skf, SessionKeyFilter1}, timestamp => 100
         })
     ],
-    [ok = hpr_test_iot_config_service_route:stream_resp(Update) || Update <- Updates1],
+    [ok = hpr_test_ics_route_service:stream_resp(Update) || Update <- Updates1],
 
     %% make sure all the data was received
     %% ok = timer:sleep(150),
@@ -312,7 +312,7 @@ stream_crash_resume_updates_test(_Config) ->
     ),
 
     %% Timestamps are inclusive, send a route update to bump the last timestamp
-    hpr_test_iot_config_service_route:stream_resp(
+    hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 150})
     ),
     ok = timer:sleep(150),
@@ -325,7 +325,7 @@ stream_crash_resume_updates_test(_Config) ->
             whereis(hpr_route_stream_worker) =/= undefined andalso
                 erlang:is_process_alive(whereis(hpr_route_stream_worker)) andalso
                 hpr_route_stream_worker:test_stream() =/= undefined andalso
-                erlang:is_pid(erlang:whereis(hpr_test_iot_config_service_route))
+                erlang:is_pid(erlang:whereis(hpr_test_ics_route_service))
         end,
         20,
         500
@@ -376,7 +376,7 @@ stream_crash_resume_updates_test(_Config) ->
                     action => add, data => {skf, SessionKeyFilter2}, timestamp => 200
                 })
             ],
-    [ok = hpr_test_iot_config_service_route:stream_resp(Update) || Update <- Updates2],
+    [ok = hpr_test_ics_route_service:stream_resp(Update) || Update <- Updates2],
 
     %% make sure only the new data was received
     timer:sleep(timer:seconds(1)),
