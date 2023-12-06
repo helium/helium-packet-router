@@ -63,7 +63,8 @@
     start_link/1,
     refresh_route/1,
     checkpoint/0,
-    reset_timestamp/0
+    reset_timestamp/0,
+    schedule_checkpoint/0
 ]).
 
 -ifdef(TEST).
@@ -116,7 +117,8 @@
     stream :: grpcbox_client:stream() | undefined,
     conn_backoff :: backoff:backoff(),
     counts :: counts_map(),
-    last_timestamp = 0 :: non_neg_integer()
+    last_timestamp = 0 :: non_neg_integer(),
+    checkpoint_timer_ref :: undefined | timer:tref()
 }).
 
 -define(SERVER, ?MODULE).
@@ -140,6 +142,12 @@ refresh_route(RouteID) ->
 -spec checkpoint() -> ok.
 checkpoint() ->
     gen_server:call(?MODULE, checkpoint).
+
+-spec schedule_checkpoint() -> timer:tref().
+schedule_checkpoint() ->
+    Delay = hpr_utils:get_env_int(ics_stream_worker_checkpoint_secs, 300),
+    lager:info([{timer_secs, Delay}], "scheduling checkpoint"),
+    timer:apply_after(timer:seconds(Delay), ?MODULE, checkpoint, []).
 
 -spec reset_timestamp() -> ok.
 reset_timestamp() ->
@@ -225,6 +233,8 @@ handle_call(test_counts, _From, State) ->
 handle_call(test_stream, _From, State) ->
     {reply, State#state.stream, State};
 handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) ->
+    lager:info([{timestamp, LastTimestamp}], "checkpointing configuration"),
+
     %% We don't spawn the checkpoints to reduce the chance of continued updates causing weirdness in the DB.
     ok = hpr_route_storage:checkpoint(),
     ok = hpr_eui_pair_storage:checkpoint(),
@@ -232,14 +242,27 @@ handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) -
     ok = hpr_skf_storage:checkpoint(),
     ok = dets:insert(?DETS, {timestamp, LastTimestamp}),
 
-    {reply, ok, State};
+    CheckpointTimerRef = ?MODULE:schedule_checkpoint(),
+    lager:info([{timestamp, LastTimestamp}], "checkpoint done"),
+
+    {reply, ok, State#state{checkpoint_timer_ref = CheckpointTimerRef}};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
-handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0, last_timestamp = LastTimestamp} = State) ->
+handle_info(checkpoint, #state{} = State) ->
+    ok = ?MODULE:checkpoint(),
+    {noreply, State};
+handle_info(
+    ?INIT_STREAM,
+    #state{
+        conn_backoff = Backoff0,
+        last_timestamp = LastTimestamp,
+        checkpoint_timer_ref = PreviousCheckpointTimerRef
+    } = State
+) ->
     lager:info("connecting"),
     SigFun = hpr_utils:sig_fun(),
     PubKeyBin = hpr_utils:pubkey_bin(),
@@ -252,8 +275,11 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0, last_timestamp = LastT
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
+            ok = maybe_cancel_timer(PreviousCheckpointTimerRef),
             {noreply, State#state{
-                stream = Stream, conn_backoff = Backoff1
+                stream = Stream,
+                conn_backoff = Backoff1,
+                checkpoint_timer_ref = ?MODULE:schedule_checkpoint()
             }};
         {error, undefined_channel} ->
             lager:error(
@@ -523,3 +549,10 @@ open_dets() ->
             lager:error("failed to open dets ~p deleting file ~p", [_Reason, Deleted]),
             open_dets()
     end.
+
+-spec maybe_cancel_timer(undefined | timer:tref()) -> ok.
+maybe_cancel_timer(undefined) ->
+    ok;
+maybe_cancel_timer(Timer) ->
+    _ = timer:cancel(Timer),
+    ok.
