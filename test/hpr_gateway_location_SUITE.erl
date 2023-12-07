@@ -20,7 +20,7 @@
     status :: ok | ?NOT_FOUND | error | ?REQUESTED,
     gateway :: libp2p_crypto:pubkey_bin(),
     timestamp :: non_neg_integer(),
-    h3_index = undefined :: h3:index() | undefined,
+    h3_index = undefined :: h3:h3index() | undefined,
     lat = undefined :: float() | undefined,
     long = undefined :: float() | undefined
 }).

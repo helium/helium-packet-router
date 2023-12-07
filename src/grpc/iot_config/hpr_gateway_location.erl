@@ -48,13 +48,13 @@
     status :: ok | ?NOT_FOUND | error | ?REQUESTED,
     gateway :: libp2p_crypto:pubkey_bin(),
     timestamp :: non_neg_integer(),
-    h3_index = undefined :: h3:index() | undefined,
+    h3_index = undefined :: h3:h3index() | undefined,
     lat = undefined :: float() | undefined,
     long = undefined :: float() | undefined
 }).
 
 -type state() :: #state{}.
--type loc() :: {h3:index(), float(), float()} | undefined.
+-type loc() :: {h3:h3index(), float(), float()} | undefined.
 
 -export_type([loc/0]).
 
@@ -85,7 +85,7 @@ init() ->
     {ok, _} = timer:apply_interval(?CLEANUP_INTERVAL, ?MODULE, expire_locations, []),
     ok.
 
--spec get(libp2p_crypto:pubkey_bin()) -> {ok, h3:index(), float(), float()} | {error, any()}.
+-spec get(libp2p_crypto:pubkey_bin()) -> {ok, h3:h3index(), float(), float()} | {error, any()}.
 get(PubKeyBin) ->
     Now = erlang:system_time(millisecond),
     Yesterday = Now - ?CACHE_TIME,
