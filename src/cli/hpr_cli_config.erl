@@ -155,7 +155,7 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
     %% - EUI Count (AppEUI, DevEUI) :: 2
     %% --- (010203040506070809, 010203040506070809)
     %% --- (0A0B0C0D0E0F0G0102, 0A0B0C0D0E0F0G0102)
-    %% - SKF (DevAddr, SKF, MaxCopies, Timestamp) :: 1
+    %% - SKF (DevAddr, SKF, MaxCopies) :: 1
     %% --- (00000007, 91919193DA7B33923FFBE34078000010, 2, 1689030396950)
 
     Header = io_lib:format("OUI ~p~n", [OUI]),
@@ -464,13 +464,13 @@ mk_route_info(RouteETS, #{display_euis := DisplayEUIs, display_skfs := DisplaySK
             false ->
                 SKFsCount = hpr_route_ets:skfs_count_for_route(RouteID),
                 SKFHeader = io_lib:format(
-                    "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [SKFsCount]
+                    "- SKF (DevAddr, SKF, MaxCopies) :: ~p~n", [SKFsCount]
                 ),
                 [SKFHeader];
             true ->
                 SKFs = hpr_route_ets:skfs_for_route(RouteID),
                 SKFHeader = io_lib:format(
-                    "- SKF (DevAddr, SKF, MaxCopies, Timestamp) :: ~p~n", [
+                    "- SKF (DevAddr, SKF, MaxCopies) :: ~p~n", [
                         erlang:length(SKFs)
                     ]
                 ),
@@ -512,10 +512,9 @@ format_eui({App, Dev}) ->
         hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
     ]).
 
-format_skf({{Timestamp, SKF}, {DevAddr, MaxCopies}}) ->
-    io_lib:format("  - (~s, ~s, ~w, ~w)~n", [
+format_skf({SKF, {DevAddr, MaxCopies}}) ->
+    io_lib:format("  - (~s, ~s, ~w)~n", [
         hpr_utils:int_to_hex_string(DevAddr),
         hpr_utils:bin_to_hex_string(SKF),
-        MaxCopies,
-        Timestamp * -1
+        MaxCopies
     ]).
