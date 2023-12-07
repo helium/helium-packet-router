@@ -63,8 +63,13 @@
     start_link/1,
     refresh_route/1,
     checkpoint/0,
-    reset_timestamp/0,
     schedule_checkpoint/0
+]).
+
+-export([
+    do_checkpoint/1,
+    reset_timestamp/0,
+    last_timestamp/0
 ]).
 
 -ifdef(TEST).
@@ -142,6 +147,18 @@ refresh_route(RouteID) ->
 -spec checkpoint() -> ok.
 checkpoint() ->
     gen_server:call(?MODULE, checkpoint).
+
+-spec last_timestamp() -> non_neg_integer().
+last_timestamp() ->
+    gen_server:call(?MODULE, last_timetstamp).
+
+-spec do_checkpoint(LastTimestamp :: non_neg_integer()) -> ok.
+do_checkpoint(LastTimestamp) ->
+    ok = hpr_route_storage:checkpoint(),
+    ok = hpr_eui_pair_storage:checkpoint(),
+    ok = hpr_devaddr_range_storage:checkpoint(),
+    ok = hpr_skf_storage:checkpoint(),
+    ok = dets:insert(?DETS, {timestamp, LastTimestamp}).
 
 -spec schedule_checkpoint() -> timer:tref().
 schedule_checkpoint() ->
@@ -228,6 +245,8 @@ handle_call({refresh_route, RouteID}, _From, State) ->
 handle_call(reset_timestamp, _From, #state{} = State) ->
     ok = dets:insert(?DETS, {timestamp, 0}),
     {reply, ok, State#state{last_timestamp = 0}};
+handle_call(last_timetstamp, _From, #state{last_timestamp = LastTimestamp} = State) ->
+    {reply, LastTimestamp, State};
 handle_call(test_counts, _From, State) ->
     {reply, State#state.counts, State};
 handle_call(test_stream, _From, State) ->
@@ -235,13 +254,9 @@ handle_call(test_stream, _From, State) ->
 handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) ->
     lager:info([{timestamp, LastTimestamp}], "checkpointing configuration"),
 
-    %% We don't spawn the checkpoints to reduce the chance of continued updates causing weirdness in the DB.
-    ok = hpr_route_storage:checkpoint(),
-    ok = hpr_eui_pair_storage:checkpoint(),
-    ok = hpr_devaddr_range_storage:checkpoint(),
-    ok = hpr_skf_storage:checkpoint(),
-    ok = dets:insert(?DETS, {timestamp, LastTimestamp}),
-
+    %% We don't spawn the checkpoints to reduce the chance of continued updates
+    %% causing weirdness in the DB.
+    ok = ?MODULE:do_checkpoint(LastTimestamp),
     CheckpointTimerRef = ?MODULE:schedule_checkpoint(),
     lager:info([{timestamp, LastTimestamp}], "checkpoint done"),
 
@@ -264,6 +279,7 @@ handle_info(
     } = State
 ) ->
     lager:info("connecting"),
+    ok = maybe_cancel_timer(PreviousCheckpointTimerRef),
     SigFun = hpr_utils:sig_fun(),
     PubKeyBin = hpr_utils:pubkey_bin(),
 
@@ -275,11 +291,11 @@ handle_info(
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
-            ok = maybe_cancel_timer(PreviousCheckpointTimerRef),
+            {ok, TimerRef} = ?MODULE:schedule_checkpoint(),
             {noreply, State#state{
                 stream = Stream,
                 conn_backoff = Backoff1,
-                checkpoint_timer_ref = ?MODULE:schedule_checkpoint()
+                checkpoint_timer_ref = TimerRef
             }};
         {error, undefined_channel} ->
             lager:error(
@@ -554,5 +570,5 @@ open_dets() ->
 maybe_cancel_timer(undefined) ->
     ok;
 maybe_cancel_timer(Timer) ->
-    _ = timer:cancel(Timer),
+    lager:info([{t, Timer}, {timer, timer:cancel(Timer)}], "maybe cancelling timer"),
     ok.
