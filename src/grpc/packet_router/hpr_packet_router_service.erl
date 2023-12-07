@@ -73,7 +73,7 @@ handle_info({ack, N}, StreamState) ->
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
     erlang:send_after(timer:seconds(N), self(), {ack, N}),
     grpcbox_stream:send(
-        true,
+        false,
         hpr_envelope_down:new(hpr_packet_ack:new(HandlerState#handler_state.last_phash)),
         grpcbox_stream:stream_handler_state(
             StreamState,
