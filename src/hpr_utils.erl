@@ -33,7 +33,9 @@
     sig_fun/0,
     sender_nsid/0,
     b58/0,
-    base_data_dir/0
+    base_data_dir/0,
+    %%
+    format_coord/1
 ]).
 
 -type trace() :: packet_gateway | stream_gateway | devaddr | app_eui | dev_eui.
@@ -294,6 +296,13 @@ get_device_traces(Data) ->
         end,
         Traces
     ).
+
+%% When location lat,lon need to stringified, this function makes sure they
+%% don't get stringified into scientific notation.
+-spec format_coord(float()) -> binary().
+format_coord(Coord) ->
+    erlang:float_to_binary(Coord, [{decimals, 15}]).
+
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests

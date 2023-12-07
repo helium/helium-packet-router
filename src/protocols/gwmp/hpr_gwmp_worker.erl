@@ -242,15 +242,16 @@ packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
         gateway_name => Name,
         regi => hpr_packet_up:region(Up)
     },
+    %% NOTE: everything in meta needs to be string -> string.
     Meta =
         case GatewayLocation of
             undefined ->
                 BaseMeta;
             {H3Index, Lat, Long} ->
                 BaseMeta#{
-                    gateway_h3index => H3Index,
-                    gateway_lat => Lat,
-                    gateway_long => Long
+                    gateway_h3index => erlang:integer_to_binary(H3Index),
+                    gateway_lat => hpr_utils:format_coord(Lat),
+                    gateway_long => hpr_utils:format_coord(Long)
                 }
         end,
 
