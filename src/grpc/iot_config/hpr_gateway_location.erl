@@ -5,31 +5,13 @@
 %%%-------------------------------------------------------------------
 -module(hpr_gateway_location).
 
--behaviour(gen_server).
-
 -include("hpr.hrl").
 -include("../autogen/iot_config_pb.hrl").
 
-%% ------------------------------------------------------------------
-%% API Function Exports
-%% ------------------------------------------------------------------
 -export([
-    start_link/1,
     init/0,
     get/1,
-    update_location/1,
     expire_locations/0
-]).
-
-%% ------------------------------------------------------------------
-%% gen_server Function Exports
-%% ------------------------------------------------------------------
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2
 ]).
 
 -define(SERVER, ?MODULE).
@@ -42,8 +24,6 @@
 -define(NOT_FOUND, not_found).
 -define(REQUESTED, requested).
 
--record(state, {}).
-
 -record(location, {
     status :: ok | ?NOT_FOUND | error | ?REQUESTED,
     gateway :: libp2p_crypto:pubkey_bin(),
@@ -53,18 +33,9 @@
     long = undefined :: float() | undefined
 }).
 
--type state() :: #state{}.
 -type loc() :: {h3:h3index(), float(), float()} | undefined.
 
 -export_type([loc/0]).
-
-%% ------------------------------------------------------------------
-%%% API Function Definitions
-%% ------------------------------------------------------------------
-
--spec start_link(map()) -> any().
-start_link(Args) ->
-    gen_server:start_link({local, ?SERVER}, ?SERVER, Args, []).
 
 -spec init() -> ok.
 init() ->
@@ -92,25 +63,25 @@ get(PubKeyBin) ->
     LastHour = Now - ?ERROR_CACHE_TIME,
     case ets:lookup(?ETS, PubKeyBin) of
         [] ->
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {error, ?NOT_FOUND};
         [#location{status = ok, timestamp = T, h3_index = H3Index, lat = Lat, long = Long}] when
             T < Yesterday
         ->
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {ok, H3Index, Lat, Long};
         [#location{status = _, timestamp = T}] when T < Yesterday ->
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {error, ?NOT_FOUND};
         [#location{status = error, timestamp = T}] when T < LastHour ->
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {error, undefined};
         [#location{status = error}] ->
             {error, undefined};
         [#location{status = requested, timestamp = T, gateway = PubKeyBin}] when T < LastHour ->
             GatewayName = hpr_utils:gateway_name(PubKeyBin),
             lager:warning("got an old request for ~p ~s", [PubKeyBin, GatewayName]),
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {error, ?REQUESTED};
         [#location{status = requested}] ->
             {error, ?REQUESTED};
@@ -120,16 +91,6 @@ get(PubKeyBin) ->
             {ok, H3Index, Lat, Long}
     end.
 
--spec update_location(libp2p_crypto:pubkey_bin()) -> ok.
-update_location(PubKeyBin) ->
-    NewLoc = #location{
-        status = ?REQUESTED,
-        gateway = PubKeyBin,
-        timestamp = erlang:system_time(millisecond)
-    },
-    true = ets:insert(?ETS, NewLoc),
-    gen_server:cast(?SERVER, {update_location, NewLoc}).
-
 -spec expire_locations() -> ok.
 expire_locations() ->
     Time = erlang:system_time(millisecond) - ?CACHE_TIME,
@@ -138,18 +99,18 @@ expire_locations() ->
     ]),
     lager:info("expiring ~w dets keys", [DETSDeleted]).
 
-% ------------------------------------------------------------------
-%%% gen_server Function Definitions
 %% ------------------------------------------------------------------
--spec init(map()) -> {ok, state()}.
-init(_Args) ->
-    {ok, #state{}}.
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
-handle_call(_Msg, _From, State) ->
-    {reply, ok, State}.
-
-handle_cast({update_location, Loc}, State) ->
-    PubKeyBin = Loc#location.gateway,
+-spec update_location(libp2p_crypto:pubkey_bin()) -> ok.
+update_location(PubKeyBin) ->
+    Loc = #location{
+        status = ?REQUESTED,
+        gateway = PubKeyBin,
+        timestamp = erlang:system_time(millisecond)
+    },
+    true = ets:insert(?ETS, Loc),
     Start = erlang:system_time(millisecond),
     case get_location_from_ics(PubKeyBin) of
         {error, ?NOT_FOUND} ->
@@ -178,20 +139,8 @@ handle_cast({update_location, Loc}, State) ->
                 lat = Lat,
                 long = Long
             })
-    end,
-    {noreply, State};
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+    end.
 
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-terminate(_Reason, _state) ->
-    ok.
-
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
 -spec insert(Loc :: #location{}) -> ok.
 insert(Loc) ->
     true = ets:insert(?ETS, Loc),
