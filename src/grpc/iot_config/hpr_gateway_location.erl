@@ -68,25 +68,25 @@ get(PubKeyBin) ->
     LastHour = Now - ?ERROR_CACHE_TIME,
     case ets:lookup(?ETS, PubKeyBin) of
         [] ->
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {error, ?NOT_FOUND};
         [#location{status = ok, timestamp = T, h3_index = H3Index, lat = Lat, long = Long}] when
             T < Yesterday
         ->
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {ok, H3Index, Lat, Long};
         [#location{status = _, timestamp = T}] when T < Yesterday ->
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {error, ?NOT_FOUND};
         [#location{status = error, timestamp = T}] when T < LastHour ->
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {error, undefined};
         [#location{status = error}] ->
             {error, undefined};
         [#location{status = requested, timestamp = T, gateway = PubKeyBin}] when T < LastHour ->
             GatewayName = hpr_utils:gateway_name(PubKeyBin),
             lager:warning("got an old request for ~p ~s", [PubKeyBin, GatewayName]),
-            ok = ?MODULE:update_location(PubKeyBin),
+            ok = update_location(PubKeyBin),
             {error, ?REQUESTED};
         [#location{status = requested}] ->
             {error, ?REQUESTED};
