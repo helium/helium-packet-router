@@ -14,6 +14,11 @@
             host => "${HPR_IOT_CONFIG_HOST}",
             port => "${HPR_IOT_CONFIG_PORT}"
         }},
+        {iot_location_service, #{
+            transport => "${HPR_IOT_LOCATION_TRANSPORT}",
+            host => "${HPR_IOT_LOCATION_HOST}",
+            port => "${HPR_IOT_LOCATION_PORT}"
+        }},
         {downlink_service, #{
             transport => "${HPR_DOWNLINK_SERVICE_TRANSPORT}",
             host => "${HPR_DOWNLINK_SERVICE_HOST}",

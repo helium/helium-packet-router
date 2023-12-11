@@ -63,13 +63,14 @@ init([]) ->
 
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
     ConfigServiceConfig = application:get_env(?APP, iot_config_service, #{}),
+    LocationServiceConfig = application:get_env(?APP, iot_location_service, #{}),
     DownlinkServiceConfig = application:get_env(?APP, downlink_service, #{}),
     MultiBuyServiceConfig = application:get_env(?APP, multi_buy_service, #{}),
 
     %% Starting config service client channel here because of the way we get
     %% .env vars into the app.
     _ = maybe_start_channel(ConfigServiceConfig, ?IOT_CONFIG_CHANNEL),
-    _ = maybe_start_channel(ConfigServiceConfig, ?LOCATION_CHANNEL),
+    _ = maybe_start_channel(LocationServiceConfig, ?LOCATION_CHANNEL),
     _ = maybe_start_channel(DownlinkServiceConfig, ?DOWNLINK_CHANNEL),
     _ = maybe_start_channel(MultiBuyServiceConfig, ?MULTI_BUY_CHANNEL),
 
@@ -84,8 +85,6 @@ init([]) ->
         ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
 
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
-
-        ?WORKER(hpr_gateway_location, [#{}]),
 
         ?WORKER(hpr_route_stream_worker, [#{}]),
 
