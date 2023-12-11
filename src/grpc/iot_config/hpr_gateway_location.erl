@@ -11,6 +11,7 @@
 -export([
     init/0,
     get/1,
+    update_location/1,
     expire_locations/0
 ]).
 
@@ -63,25 +64,25 @@ get(PubKeyBin) ->
     LastHour = Now - ?ERROR_CACHE_TIME,
     case ets:lookup(?ETS, PubKeyBin) of
         [] ->
-            ok = update_location(PubKeyBin),
+            ok = ?MODULE:update_location(PubKeyBin),
             {error, ?NOT_FOUND};
         [#location{status = ok, timestamp = T, h3_index = H3Index, lat = Lat, long = Long}] when
             T < Yesterday
         ->
-            ok = update_location(PubKeyBin),
+            ok = ?MODULE:update_location(PubKeyBin),
             {ok, H3Index, Lat, Long};
         [#location{status = _, timestamp = T}] when T < Yesterday ->
-            ok = update_location(PubKeyBin),
+            ok = ?MODULE:update_location(PubKeyBin),
             {error, ?NOT_FOUND};
         [#location{status = error, timestamp = T}] when T < LastHour ->
-            ok = update_location(PubKeyBin),
+            ok = ?MODULE:update_location(PubKeyBin),
             {error, undefined};
         [#location{status = error}] ->
             {error, undefined};
         [#location{status = requested, timestamp = T, gateway = PubKeyBin}] when T < LastHour ->
             GatewayName = hpr_utils:gateway_name(PubKeyBin),
             lager:warning("got an old request for ~p ~s", [PubKeyBin, GatewayName]),
-            ok = update_location(PubKeyBin),
+            ok = ?MODULE:update_location(PubKeyBin),
             {error, ?REQUESTED};
         [#location{status = requested}] ->
             {error, ?REQUESTED};
@@ -90,18 +91,6 @@ get(PubKeyBin) ->
         [#location{status = ok, h3_index = H3Index, lat = Lat, long = Long}] ->
             {ok, H3Index, Lat, Long}
     end.
-
--spec expire_locations() -> ok.
-expire_locations() ->
-    Time = erlang:system_time(millisecond) - ?CACHE_TIME,
-    DETSDeleted = dets:select_delete(?DETS, [
-        {{'_', '_', '_', '$3', '_', '_', '_'}, [{'<', '$3', Time}], [true]}
-    ]),
-    lager:info("expiring ~w dets keys", [DETSDeleted]).
-
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
 
 -spec update_location(libp2p_crypto:pubkey_bin()) -> ok.
 update_location(PubKeyBin) ->
@@ -140,6 +129,18 @@ update_location(PubKeyBin) ->
                 long = Long
             })
     end.
+
+-spec expire_locations() -> ok.
+expire_locations() ->
+    Time = erlang:system_time(millisecond) - ?CACHE_TIME,
+    DETSDeleted = dets:select_delete(?DETS, [
+        {{'_', '_', '_', '$3', '_', '_', '_'}, [{'<', '$3', Time}], [true]}
+    ]),
+    lager:info("expiring ~w dets keys", [DETSDeleted]).
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
 
 -spec insert(Loc :: #location{}) -> ok.
 insert(Loc) ->
