@@ -11,8 +11,12 @@
 -export([
     init/0,
     get/1,
-    update_location/1,
     expire_locations/0
+]).
+
+%% This is exported for "just in case"
+-export([
+    get_location_from_ics/1
 ]).
 
 -define(SERVER, ?MODULE).
@@ -92,6 +96,18 @@ get(PubKeyBin) ->
             {ok, H3Index, Lat, Long}
     end.
 
+-spec expire_locations() -> ok.
+expire_locations() ->
+    Time = erlang:system_time(millisecond) - ?CACHE_TIME,
+    DETSDeleted = dets:select_delete(?DETS, [
+        {{'_', '_', '_', '$3', '_', '_', '_'}, [{'<', '$3', Time}], [true]}
+    ]),
+    lager:info("expiring ~w dets keys", [DETSDeleted]).
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
 -spec update_location(libp2p_crypto:pubkey_bin()) -> ok.
 update_location(PubKeyBin) ->
     Loc = #location{
@@ -129,18 +145,6 @@ update_location(PubKeyBin) ->
                 long = Long
             })
     end.
-
--spec expire_locations() -> ok.
-expire_locations() ->
-    Time = erlang:system_time(millisecond) - ?CACHE_TIME,
-    DETSDeleted = dets:select_delete(?DETS, [
-        {{'_', '_', '_', '$3', '_', '_', '_'}, [{'<', '$3', Time}], [true]}
-    ]),
-    lager:info("expiring ~w dets keys", [DETSDeleted]).
-
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
 
 -spec insert(Loc :: #location{}) -> ok.
 insert(Loc) ->
