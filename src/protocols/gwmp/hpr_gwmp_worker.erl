@@ -249,7 +249,7 @@ packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
                 BaseMeta;
             {H3Index, Lat, Long} ->
                 BaseMeta#{
-                    gateway_h3index => erlang:integer_to_binary(H3Index),
+                    gateway_h3index => erlang:list_to_binary(h3:to_string(H3Index)),
                     gateway_lat => hpr_utils:format_coord(Lat),
                     gateway_long => hpr_utils:format_coord(Long)
                 }

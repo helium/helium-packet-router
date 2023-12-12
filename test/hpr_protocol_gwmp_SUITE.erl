@@ -835,7 +835,7 @@ verify_push_data_with_location(PacketUp, PushDataBinary, IndexString) ->
                         <<"regi">> => erlang:atom_to_binary(
                             hpr_packet_up:region(PacketUp)
                         ),
-                        <<"gateway_h3index">> => erlang:integer_to_binary(ExpectedIndex),
+                        <<"gateway_h3index">> => erlang:list_to_binary(IndexString),
                         <<"gateway_lat">> => hpr_utils:format_coord(ExpectedLat),
                         <<"gateway_long">> => hpr_utils:format_coord(ExpectedLong)
                     }
