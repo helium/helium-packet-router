@@ -11,13 +11,16 @@
 
 -export_type([envelope/0]).
 
--spec new(hpr_packet_down:packet() | hpr_session_offer:offer() | undefined) -> envelope().
+-spec new(hpr_packet_down:packet() | hpr_session_offer:offer() | hpr_packet_ack:ack() | undefined) ->
+    envelope().
 new(undefined) ->
     #envelope_down_v1_pb{data = undefined};
 new(#packet_router_packet_down_v1_pb{} = Packet) ->
     #envelope_down_v1_pb{data = {packet, Packet}};
 new(#packet_router_session_offer_v1_pb{} = SessionOffer) ->
-    #envelope_down_v1_pb{data = {session_offer, SessionOffer}}.
+    #envelope_down_v1_pb{data = {session_offer, SessionOffer}};
+new(#packet_router_packet_ack_v1_pb{} = Ack) ->
+    #envelope_down_v1_pb{data = {packet_ack, Ack}}.
 
 -spec data(Env :: envelope()) ->
     {packet, hpr_packet_down:packet()}

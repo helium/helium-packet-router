@@ -7,6 +7,7 @@
     gateway/1,
     signature/1,
     session_capable/1,
+    packet_ack_interval/1,
     verify/1
 ]).
 
@@ -39,6 +40,10 @@ signature(Reg) ->
 session_capable(Reg) ->
     Reg#packet_router_register_v1_pb.session_capable.
 
+-spec packet_ack_interval(Reg :: register()) -> non_neg_integer().
+packet_ack_interval(Reg) ->
+    Reg#packet_router_register_v1_pb.packet_ack_interval.
+
 -spec verify(Reg :: register()) -> boolean().
 verify(Reg) ->
     try
@@ -70,7 +75,8 @@ test_new(Map) when is_map(Map) ->
     #packet_router_register_v1_pb{
         timestamp = erlang:system_time(millisecond),
         gateway = maps:get(gateway, Map),
-        session_capable = maps:get(session_capable, Map)
+        session_capable = maps:get(session_capable, Map),
+        packet_ack_interval = maps:get(packet_ack_interval, Map, 0)
     }.
 
 -spec sign(Reg :: register(), SigFun :: fun()) -> register().
