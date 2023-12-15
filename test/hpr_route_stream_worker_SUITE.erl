@@ -14,7 +14,8 @@
     main_test/1,
     refresh_route_test/1,
     stream_crash_resume_updates_test/1,
-    app_restart_rehydrate_test/1
+    app_restart_rehydrate_test/1,
+    route_remove_delete_skf_dets_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -32,7 +33,8 @@ all() ->
         main_test,
         refresh_route_test,
         stream_crash_resume_updates_test,
-        app_restart_rehydrate_test
+        app_restart_rehydrate_test,
+        route_remove_delete_skf_dets_test
     ].
 
 %%--------------------------------------------------------------------
@@ -53,6 +55,65 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
+route_remove_delete_skf_dets_test(_Config) ->
+    #{
+        route_id := Route1ID,
+        route := Route1,
+        eui_pair := EUIPair1,
+        devaddr_range := DevAddrRange1,
+        skf := SessionKeyFilter1
+    } = test_data("7d502f32-4d58-4746-965e-001"),
+    #{
+        route_id := Route2ID,
+        route := Route2,
+        eui_pair := EUIPair2,
+        devaddr_range := DevAddrRange2,
+        skf := SessionKeyFilter2
+    } = test_data("7d502f32-4d58-4746-965e-002"),
+
+    Updates0 = [
+        {route, Route1},
+        {eui_pair, EUIPair1},
+        {devaddr_range, DevAddrRange1},
+        {skf, SessionKeyFilter1},
+        {route, Route2},
+        {eui_pair, EUIPair2},
+        {devaddr_range, DevAddrRange2},
+        {skf, SessionKeyFilter2}
+    ],
+    Updates = [
+        hpr_route_stream_res:test_new(#{
+            action => add, data => Data, timestamp => 100
+        })
+     || Data <- Updates0
+    ],
+    [ok = hpr_test_ics_route_service:stream_resp(Update) || Update <- Updates],
+    timer:sleep(20),
+
+    ok = check_config_counts(Route1ID, 2, 2, 2, 1),
+    ok = check_config_counts(Route2ID, 2, 2, 2, 1),
+
+    Route1SKFFileName = hpr_skf_storage:dets_filename(Route1ID),
+    Route2SKFFileName = hpr_skf_storage:dets_filename(Route2ID),
+
+    ?assert(filelib:is_file(Route1SKFFileName)),
+    ?assert(filelib:is_file(Route2SKFFileName)),
+
+    %% Remove a route and ensure the skf file is removed.
+    ok = hpr_test_ics_route_service:stream_resp(
+        hpr_route_stream_res:test_new(#{
+            action => remove,
+            data => {route, Route1},
+            timestamp => 200
+        })
+    ),
+
+    timer:sleep(20),
+    ?assertNot(filelib:is_file(Route1SKFFileName)),
+    ok = check_config_counts(Route2ID, 1, 1, 1, 1),
+
+    ok.
+
 app_restart_rehydrate_test(_Config) ->
     %% Fill up the app with a few config things.
     ?assertMatch(
@@ -65,70 +126,14 @@ app_restart_rehydrate_test(_Config) ->
         hpr_route_stream_worker:test_counts()
     ),
 
-    CheckCounts = fun(
-        RouteID,
-        ExpectedRouteCount,
-        ExpectedEUIPairCount,
-        ExpectedDevaddrRangeCount,
-        ExpectedSKFCount
-    ) ->
-        ok = test_utils:wait_until(
-            fun() ->
-                case hpr_route_storage:lookup(RouteID) of
-                    {ok, RouteETS} ->
-                        RouteCount = ets:info(hpr_routes_ets, size),
-                        EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
-                        DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
-                        SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
-
-                        {
-                            ExpectedRouteCount =:= RouteCount andalso
-                                ExpectedEUIPairCount =:= EUIPairCount andalso
-                                ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
-                                ExpectedSKFCount =:= SKFCount,
-                            [
-                                {route_id, RouteID},
-                                {route, ExpectedRouteCount, RouteCount},
-                                {eui_pair, ExpectedEUIPairCount, EUIPairCount},
-                                {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
-                                {skf, ExpectedSKFCount, SKFCount},
-                                {skf_items, ets:tab2list(hpr_route_ets:skf_ets(RouteETS))}
-                            ]
-                        };
-                    _ ->
-                        {false, {route_not_found, RouteID}}
-                end
-            end
-        )
-    end,
-
     %% Create a bunch of data to ingest
-    Route1ID = "7d502f32-4d58-4746-965e-001",
-    Route1 = hpr_route:test_new(#{
-        id => Route1ID,
-        net_id => 0,
-        oui => 1,
-        server => #{
-            host => "localhost",
-            port => 8080,
-            protocol => {packet_router, #{}}
-        },
-        max_copies => 10
-    }),
-    EUIPair1 = hpr_eui_pair:test_new(#{
-        route_id => Route1ID, app_eui => 1, dev_eui => 0
-    }),
-    DevAddrRange1 = hpr_devaddr_range:test_new(#{
-        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
-    }),
-    DevAddr1 = 16#00000001,
-    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SessionKeyFilter1 = hpr_skf:new(#{
-        route_id => Route1ID,
-        devaddr => DevAddr1,
-        session_key => SessionKey1,
-        max_copies => 1
-    }),
+    #{
+        route_id := Route1ID,
+        route := Route1,
+        eui_pair := EUIPair1,
+        devaddr_range := DevAddrRange1,
+        skf := SessionKeyFilter1
+    } = test_data("7d502f32-4d58-4746-965e-001"),
 
     hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 100})
@@ -152,7 +157,7 @@ app_restart_rehydrate_test(_Config) ->
 
     %% make sure all the data was received
     %% ok = timer:sleep(150),
-    ok = CheckCounts(Route1ID, 1, 1, 1, 1),
+    ok = check_config_counts(Route1ID, 1, 1, 1, 1),
     ?assertMatch(
         #{
             route := 1,
@@ -191,7 +196,7 @@ app_restart_rehydrate_test(_Config) ->
     ),
     ct:print("everything should be rehydrated"),
     %% Make sure the config is still there.
-    ok = CheckCounts(Route1ID, 1, 1, 1, 1),
+    ok = check_config_counts(Route1ID, 1, 1, 1, 1),
     %% And no new updates have been received.
     ?assertMatch(
         #{
@@ -220,69 +225,14 @@ stream_crash_resume_updates_test(_Config) ->
         hpr_route_stream_worker:test_counts()
     ),
 
-    CheckCounts = fun(
-        RouteID,
-        ExpectedRouteCount,
-        ExpectedEUIPairCount,
-        ExpectedDevaddrRangeCount,
-        ExpectedSKFCount
-    ) ->
-        ok = test_utils:wait_until(
-            fun() ->
-                case hpr_route_storage:lookup(RouteID) of
-                    {ok, RouteETS} ->
-                        RouteCount = ets:info(hpr_routes_ets, size),
-                        EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
-                        DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
-                        SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
-
-                        {
-                            ExpectedRouteCount =:= RouteCount andalso
-                                ExpectedEUIPairCount =:= EUIPairCount andalso
-                                ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
-                                ExpectedSKFCount =:= SKFCount,
-                            [
-                                {route_id, RouteID},
-                                {route, ExpectedRouteCount, RouteCount},
-                                {eui_pair, ExpectedEUIPairCount, EUIPairCount},
-                                {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
-                                {skf, ExpectedSKFCount, SKFCount}
-                            ]
-                        };
-                    _ ->
-                        false
-                end
-            end
-        )
-    end,
-
     %% Create a bunch of data to ingest
-    Route1ID = "7d502f32-4d58-4746-965e-001",
-    Route1 = hpr_route:test_new(#{
-        id => Route1ID,
-        net_id => 0,
-        oui => 1,
-        server => #{
-            host => "localhost",
-            port => 8080,
-            protocol => {packet_router, #{}}
-        },
-        max_copies => 10
-    }),
-    EUIPair1 = hpr_eui_pair:test_new(#{
-        route_id => Route1ID, app_eui => 1, dev_eui => 0
-    }),
-    DevAddrRange1 = hpr_devaddr_range:test_new(#{
-        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
-    }),
-    DevAddr1 = 16#00000001,
-    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SessionKeyFilter1 = hpr_skf:new(#{
-        route_id => Route1ID,
-        devaddr => DevAddr1,
-        session_key => SessionKey1,
-        max_copies => 1
-    }),
+    #{
+        route_id := Route1ID,
+        route := Route1,
+        eui_pair := EUIPair1,
+        devaddr_range := DevAddrRange1,
+        skf := SessionKeyFilter1
+    } = test_data("7d502f32-4d58-4746-965e-001"),
 
     Updates1 = [
         hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}, timestamp => 100}),
@@ -300,7 +250,7 @@ stream_crash_resume_updates_test(_Config) ->
 
     %% make sure all the data was received
     %% ok = timer:sleep(150),
-    ok = CheckCounts(Route1ID, 1, 1, 1, 1),
+    ok = check_config_counts(Route1ID, 1, 1, 1, 1),
     ?assertMatch(
         #{
             route := 1,
@@ -332,32 +282,13 @@ stream_crash_resume_updates_test(_Config) ->
     ),
 
     %% Create a bunch of new data to ingest
-    Route2ID = "7d502f32-4d58-4746-965e-002",
-    Route2 = hpr_route:test_new(#{
-        id => Route2ID,
-        net_id => 0,
-        oui => 1,
-        server => #{
-            host => "localhost",
-            port => 8080,
-            protocol => {packet_router, #{}}
-        },
-        max_copies => 10
-    }),
-    EUIPair2 = hpr_eui_pair:test_new(#{
-        route_id => Route2ID, app_eui => 1, dev_eui => 0
-    }),
-    DevAddrRange2 = hpr_devaddr_range:test_new(#{
-        route_id => Route2ID, start_addr => 16#00000001, end_addr => 16#0000000A
-    }),
-    DevAddr2 = 16#00000002,
-    SessionKey2 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
-    SessionKeyFilter2 = hpr_skf:new(#{
-        route_id => Route2ID,
-        devaddr => DevAddr2,
-        session_key => SessionKey2,
-        max_copies => 1
-    }),
+    #{
+        route_id := Route2ID,
+        route := Route2,
+        eui_pair := EUIPair2,
+        devaddr_range := DevAddrRange2,
+        skf := SessionKeyFilter2
+    } = test_data("7d502f32-4d58-4746-965e-002"),
 
     %% Send the old data, and the new data
     Updates2 =
@@ -381,7 +312,7 @@ stream_crash_resume_updates_test(_Config) ->
     %% make sure only the new data was received
     timer:sleep(timer:seconds(1)),
     %% NOTE: we expect 2 of everything, but skfs are checked per route.
-    ok = CheckCounts(Route2ID, 2, 2, 2, 1),
+    ok = check_config_counts(Route2ID, 2, 2, 2, 1),
     ?assertMatch(
         #{
             route := 1,
@@ -395,42 +326,6 @@ stream_crash_resume_updates_test(_Config) ->
     ok.
 
 main_test(_Config) ->
-    CheckCounts = fun(
-        RouteID,
-        ExpectedRouteCount,
-        ExpectedEUIPairCount,
-        ExpectedDevaddrRangeCount,
-        ExpectedSKFCount
-    ) ->
-        ok = test_utils:wait_until(
-            fun() ->
-                case hpr_route_storage:lookup(RouteID) of
-                    {ok, RouteETS} ->
-                        RouteCount = ets:info(hpr_routes_ets, size),
-                        EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
-                        DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
-                        SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
-
-                        {
-                            ExpectedRouteCount =:= RouteCount andalso
-                                ExpectedEUIPairCount =:= EUIPairCount andalso
-                                ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
-                                ExpectedSKFCount =:= SKFCount,
-                            [
-                                {route_id, RouteID},
-                                {route, ExpectedRouteCount, RouteCount},
-                                {eui_pair, ExpectedEUIPairCount, EUIPairCount},
-                                {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
-                                {skf, ExpectedSKFCount, SKFCount}
-                            ]
-                        };
-                    _ ->
-                        false
-                end
-            end
-        )
-    end,
-
     %% Let it startup
     timer:sleep(500),
 
@@ -475,20 +370,7 @@ main_test(_Config) ->
     ),
 
     %% Let time to process new routes
-    ok = CheckCounts(Route1ID, 1, 1, 1, 1),
-    %% ok = test_utils:wait_until(
-    %%     fun() ->
-    %%         case hpr_route_storage:lookup(Route1ID) of
-    %%             {ok, RouteETS} ->
-    %%                 1 =:= ets:info(hpr_routes_ets, size) andalso
-    %%                     1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
-    %%                     1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-    %%                     1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
-    %%             _ ->
-    %%                 false
-    %%         end
-    %%     end
-    %% ),
+    ok = check_config_counts(Route1ID, 1, 1, 1, 1),
 
     ?assertEqual(
         1,
@@ -577,19 +459,9 @@ main_test(_Config) ->
     ok = hpr_test_ics_route_service:stream_resp(
         hpr_route_stream_res:test_new(#{action => add, data => {skf, SessionKeyFilter}})
     ),
-    ok = test_utils:wait_until(
-        fun() ->
-            case hpr_route_storage:lookup(Route1ID) of
-                {ok, RouteETS} ->
-                    1 =:= ets:info(hpr_routes_ets, size) andalso
-                        1 =:= ets:info(hpr_route_eui_pairs_ets, size) andalso
-                        1 =:= ets:info(hpr_route_devaddr_ranges_ets, size) andalso
-                        1 =:= ets:info(hpr_route_ets:skf_ets(RouteETS), size);
-                _ ->
-                    false
-            end
-        end
-    ),
+
+    ok = check_config_counts(Route1ID, 1, 1, 1, 1),
+
     ?assertMatch([RouteETS1], hpr_devaddr_range_storage:lookup(16#00000005)),
     ?assertEqual([RouteETS1], hpr_eui_pair_storage:lookup(1, 12)),
     ?assertEqual([RouteETS1], hpr_eui_pair_storage:lookup(1, 100)),
@@ -660,37 +532,7 @@ refresh_route_test(_Config) ->
     ),
 
     %% Let time to process new routes
-    ok = test_utils:wait_until(
-        fun() ->
-            case hpr_route_storage:lookup(Route1ID) of
-                {ok, RouteETS} ->
-                    RouteCount = ets:info(hpr_routes_ets, size),
-                    EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
-                    DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
-                    SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
-
-                    ExpectedRouteCount = 1,
-                    ExpectedEUIPairCount = 1,
-                    ExpectedDevaddrRangeCount = 1,
-                    ExpectedSKFCount = 1,
-
-                    {
-                        ExpectedRouteCount =:= RouteCount andalso
-                            ExpectedEUIPairCount =:= EUIPairCount andalso
-                            ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
-                            ExpectedSKFCount =:= SKFCount,
-                        [
-                            {route, ExpectedRouteCount, RouteCount},
-                            {eui_pair, ExpectedEUIPairCount, EUIPairCount},
-                            {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
-                            {skf, ExpectedSKFCount, SKFCount}
-                        ]
-                    };
-                _ ->
-                    false
-            end
-        end
-    ),
+    ok = check_config_counts(Route1ID, 1, 1, 1, 1),
 
     {ok, RouteETS1} = hpr_route_storage:lookup(Route1ID),
     SKFETS1 = hpr_route_ets:skf_ets(RouteETS1),
@@ -800,3 +642,78 @@ refresh_route_test(_Config) ->
     ?assertEqual([], hpr_skf_storage:lookup(SKFETS3, DevAddr1)),
 
     ok.
+
+%% ===================================================================
+%% Helpers
+%% ===================================================================
+
+test_data(RouteID) ->
+    Route1 = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "localhost",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10
+    }),
+    EUIPair1 = hpr_eui_pair:test_new(#{
+        route_id => RouteID, app_eui => 1, dev_eui => 0
+    }),
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
+    DevAddr1 = 16#00000001,
+    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKeyFilter1 = hpr_skf:new(#{
+        route_id => RouteID,
+        devaddr => DevAddr1,
+        session_key => SessionKey1,
+        max_copies => 1
+    }),
+    #{
+        route_id => RouteID,
+        route => Route1,
+        eui_pair => EUIPair1,
+        devaddr_range => DevAddrRange1,
+        skf => SessionKeyFilter1
+    }.
+
+check_config_counts(
+    RouteID,
+    ExpectedRouteCount,
+    ExpectedEUIPairCount,
+    ExpectedDevaddrRangeCount,
+    %% NOTE: SKF are separated by Route, provide amount expected for RouteID
+    ExpectedSKFCount
+) ->
+    ok = test_utils:wait_until(
+        fun() ->
+            case hpr_route_storage:lookup(RouteID) of
+                {ok, RouteETS} ->
+                    RouteCount = ets:info(hpr_routes_ets, size),
+                    EUIPairCount = ets:info(hpr_route_eui_pairs_ets, size),
+                    DevaddrRangeCount = ets:info(hpr_route_devaddr_ranges_ets, size),
+                    SKFCount = ets:info(hpr_route_ets:skf_ets(RouteETS), size),
+
+                    {
+                        ExpectedRouteCount =:= RouteCount andalso
+                            ExpectedEUIPairCount =:= EUIPairCount andalso
+                            ExpectedDevaddrRangeCount =:= DevaddrRangeCount andalso
+                            ExpectedSKFCount =:= SKFCount,
+                        [
+                            {route_id, RouteID},
+                            {route, ExpectedRouteCount, RouteCount},
+                            {eui_pair, ExpectedEUIPairCount, EUIPairCount},
+                            {devaddr_range, ExpectedDevaddrRangeCount, DevaddrRangeCount},
+                            {skf, ExpectedSKFCount, SKFCount},
+                            {skf_items, ets:tab2list(hpr_route_ets:skf_ets(RouteETS))}
+                        ]
+                    };
+                _ ->
+                    {false, {route_not_found, RouteID}}
+            end
+        end
+    ).

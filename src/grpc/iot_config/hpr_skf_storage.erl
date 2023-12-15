@@ -3,6 +3,7 @@
 -export([
     make_ets/1,
     checkpoint/0,
+    dets_filename/1,
 
     insert/1,
     update/4,
@@ -59,7 +60,7 @@ checkpoint() ->
         fun(RouteETS) ->
             Route = hpr_route_ets:route(RouteETS),
             RouteID = hpr_route:id(Route),
-            DETSFile = dets_filename(RouteID),
+            DETSFile = ?MODULE:dets_filename(RouteID),
 
             ETS = hpr_route_ets:skf_ets(RouteETS),
             with_open_dets(DETSFile, fun() -> ok = dets:from_ets(DETSFile, ETS) end)
@@ -84,7 +85,7 @@ with_open_dets(Filename, Fn) ->
     end.
 
 rehydrate_from_dets(RouteID, EtsRef) ->
-    Filename = dets_filename(RouteID),
+    Filename = ?MODULE:dets_filename(RouteID),
     with_open_dets(Filename, fun() ->
         [] = dets:traverse(Filename, fun(SKF) ->
             ok = do_rehydrate_insert_skf(EtsRef, SKF),
@@ -211,6 +212,8 @@ delete_route(RouteID) ->
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
             Size = ets:info(SKFETS, size),
             ets:delete(SKFETS),
+            DetsFilename = ?MODULE:dets_filename(RouteID),
+            _ = file:delete(DetsFilename),
             Size;
         Other ->
             lager:warning("failed to delete skf table ~p for ~s", [Other, RouteID]),
