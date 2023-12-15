@@ -69,6 +69,8 @@
 -export([
     do_checkpoint/1,
     reset_timestamp/0,
+    checkpoint_timer/0,
+    print_next_checkpoint/0,
     last_timestamp/0
 ]).
 
@@ -123,7 +125,7 @@
     conn_backoff :: backoff:backoff(),
     counts :: counts_map(),
     last_timestamp = 0 :: non_neg_integer(),
-    checkpoint_timer_ref :: undefined | timer:tref()
+    checkpoint_timer :: undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}
 }).
 
 -define(SERVER, ?MODULE).
@@ -160,15 +162,33 @@ do_checkpoint(LastTimestamp) ->
     ok = hpr_skf_storage:checkpoint(),
     ok = dets:insert(?DETS, {timestamp, LastTimestamp}).
 
--spec schedule_checkpoint() -> timer:tref().
+-spec schedule_checkpoint() -> {TimeScheduled :: non_neg_integer(), timer:tref()}.
 schedule_checkpoint() ->
     Delay = hpr_utils:get_env_int(ics_stream_worker_checkpoint_secs, 300),
     lager:info([{timer_secs, Delay}], "scheduling checkpoint"),
-    timer:apply_after(timer:seconds(Delay), ?MODULE, checkpoint, []).
+    {ok, Timer} = timer:apply_after(timer:seconds(Delay), ?MODULE, checkpoint, []),
+    {erlang:system_time(millisecond), Timer}.
 
 -spec reset_timestamp() -> ok.
 reset_timestamp() ->
     gen_server:call(?MODULE, reset_timestamp).
+
+-spec checkpoint_timer() -> undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}.
+checkpoint_timer() ->
+    gen_server:call(?MODULE, checkpoint_timer).
+
+-spec print_next_checkpoint() -> ok.
+print_next_checkpoint() ->
+    case ?MODULE:checkpoint_timer() of
+        undefined ->
+            lager:info("Timer not active");
+        {TimeScheduled, _TimerRef} ->
+            Now = erlang:system_time(millisecond),
+            TimeLeft = Now - TimeScheduled,
+            TotalSeconds = erlang:convert_time_unit(TimeLeft, millisecond, second),
+            {_Hour, Minute, Seconds} = calendar:seconds_to_time(TotalSeconds),
+            lager:info("Running again in T- ~pm ~ps", [Minute, Seconds])
+    end.
 
 -ifdef(TEST).
 
@@ -247,6 +267,8 @@ handle_call(reset_timestamp, _From, #state{} = State) ->
     {reply, ok, State#state{last_timestamp = 0}};
 handle_call(last_timetstamp, _From, #state{last_timestamp = LastTimestamp} = State) ->
     {reply, LastTimestamp, State};
+handle_call(checkpoint_timer, _From, #state{checkpoint_timer = CheckpointTimerRef} = State) ->
+    {reply, CheckpointTimerRef, State};
 handle_call(test_counts, _From, State) ->
     {reply, State#state.counts, State};
 handle_call(test_stream, _From, State) ->
@@ -260,7 +282,7 @@ handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) -
     CheckpointTimerRef = ?MODULE:schedule_checkpoint(),
     lager:info([{timestamp, LastTimestamp}], "checkpoint done"),
 
-    {reply, ok, State#state{checkpoint_timer_ref = CheckpointTimerRef}};
+    {reply, ok, State#state{checkpoint_timer = CheckpointTimerRef}};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
@@ -275,7 +297,7 @@ handle_info(
     #state{
         conn_backoff = Backoff0,
         last_timestamp = LastTimestamp,
-        checkpoint_timer_ref = PreviousCheckpointTimerRef
+        checkpoint_timer = PreviousCheckpointTimerRef
     } = State
 ) ->
     lager:info("connecting"),
@@ -291,11 +313,11 @@ handle_info(
         {ok, Stream} ->
             lager:info("stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
-            {ok, TimerRef} = ?MODULE:schedule_checkpoint(),
+            Timer = ?MODULE:schedule_checkpoint(),
             {noreply, State#state{
                 stream = Stream,
                 conn_backoff = Backoff1,
-                checkpoint_timer_ref = TimerRef
+                checkpoint_timer = Timer
             }};
         {error, undefined_channel} ->
             lager:error(
@@ -566,9 +588,9 @@ open_dets() ->
             open_dets()
     end.
 
--spec maybe_cancel_timer(undefined | timer:tref()) -> ok.
+-spec maybe_cancel_timer(undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}) -> ok.
 maybe_cancel_timer(undefined) ->
     ok;
-maybe_cancel_timer(Timer) ->
+maybe_cancel_timer({_TimeScheduled, Timer}) ->
     lager:info([{t, Timer}, {timer, timer:cancel(Timer)}], "maybe cancelling timer"),
     ok.
