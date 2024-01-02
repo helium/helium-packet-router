@@ -215,6 +215,18 @@ delete_route(RouteID) ->
             DetsFilename = ?MODULE:dets_filename(RouteID),
             _ = file:delete(DetsFilename),
             Size;
+        {error, not_found} = Err ->
+            DetsFilename = ?MODULE:dets_filename(RouteID),
+            Deleted = file:delete(DetsFilename),
+            lager:info(
+                [
+                    {route_id, RouteID},
+                    {deleted, Deleted},
+                    {filename, DetsFilename}
+                ],
+                "route not found, skf file maybe deleted"
+            ),
+            Err;
         Other ->
             lager:warning("failed to delete skf table ~p for ~s", [Other, RouteID]),
             {error, Other}
