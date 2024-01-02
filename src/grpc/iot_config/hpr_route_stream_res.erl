@@ -33,7 +33,14 @@ data(RouteStreamRes) ->
 
 -spec timestamp(RouteStreamRes :: res()) -> non_neg_integer().
 timestamp(RouteStreamRes) ->
-    RouteStreamRes#iot_config_route_stream_res_v1_pb.timestamp.
+    %% NOTE: All requests are sent with a millisecond timestamp.
+    %% Responses have Second timestamps.
+    %% HPR speaks exclusively in millisecond.
+    erlang:convert_time_unit(
+        RouteStreamRes#iot_config_route_stream_res_v1_pb.timestamp,
+        second,
+        millisecond
+    ).
 
 %% ------------------------------------------------------------------
 %% Tests Functions
