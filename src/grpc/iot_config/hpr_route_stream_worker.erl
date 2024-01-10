@@ -71,7 +71,8 @@
     reset_timestamp/0,
     checkpoint_timer/0,
     print_next_checkpoint/0,
-    last_timestamp/0
+    last_timestamp/0,
+    reset_connection/0
 ]).
 
 -ifdef(TEST).
@@ -193,6 +194,9 @@ print_next_checkpoint() ->
     lager:info(Msg),
     Msg.
 
+-spec reset_connection() -> ok.
+reset_connection() ->
+    gen_server:call(?MODULE, reset_connection, timer:seconds(30)).
 
 -ifdef(TEST).
 
@@ -287,6 +291,8 @@ handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) -
     lager:info([{timestamp, LastTimestamp}], "checkpoint done"),
 
     {reply, ok, State#state{checkpoint_timer = CheckpointTimerRef}};
+handle_call(reset_connection, _From, State) ->
+    {stop, manual_connection_reset, ok, State};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
@@ -304,7 +310,7 @@ handle_info(
         checkpoint_timer = PreviousCheckpointTimerRef
     } = State
 ) ->
-    lager:info("connecting"),
+    lager:info([{from, LastTimestamp}], "connecting"),
     ok = maybe_cancel_timer(PreviousCheckpointTimerRef),
     SigFun = hpr_utils:sig_fun(),
     PubKeyBin = hpr_utils:pubkey_bin(),
@@ -315,7 +321,7 @@ handle_info(
 
     case helium_iot_config_route_client:stream(SignedRouteStreamReq, StreamOptions) of
         {ok, Stream} ->
-            lager:info("stream initialized"),
+            lager:info([{from, LastTimestamp}], "stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
             Timer = ?MODULE:schedule_checkpoint(),
             {noreply, State#state{
