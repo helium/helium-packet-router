@@ -177,18 +177,22 @@ reset_timestamp() ->
 checkpoint_timer() ->
     gen_server:call(?MODULE, checkpoint_timer).
 
--spec print_next_checkpoint() -> ok.
+-spec print_next_checkpoint() -> string().
 print_next_checkpoint() ->
-    case ?MODULE:checkpoint_timer() of
-        undefined ->
-            lager:info("Timer not active");
-        {TimeScheduled, _TimerRef} ->
-            Now = erlang:system_time(millisecond),
-            TimeLeft = Now - TimeScheduled,
-            TotalSeconds = erlang:convert_time_unit(TimeLeft, millisecond, second),
-            {_Hour, Minute, Seconds} = calendar:seconds_to_time(TotalSeconds),
-            lager:info("Running again in T- ~pm ~ps", [Minute, Seconds])
-    end.
+    Msg =
+        case ?MODULE:checkpoint_timer() of
+            undefined ->
+                "Timer not active";
+            {TimeScheduled, _TimerRef} ->
+                Now = erlang:system_time(millisecond),
+                TimeLeft = Now - TimeScheduled,
+                TotalSeconds = erlang:convert_time_unit(TimeLeft, millisecond, second),
+                {_Hour, Minute, Seconds} = calendar:seconds_to_time(TotalSeconds),
+                io_lib:format("Running again in T- ~pm ~ps", [Minute, Seconds])
+        end,
+    lager:info(Msg),
+    Msg.
+
 
 -ifdef(TEST).
 
