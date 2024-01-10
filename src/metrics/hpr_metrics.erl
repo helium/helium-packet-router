@@ -151,7 +151,7 @@ counts() ->
     [
         {routes, ets:info(hpr_routes_ets, size)},
         {eui_pairs, ets:info(hpr_route_eui_pairs_ets, size)},
-        {devaddr_ranges, ets:info(hpr_route_devaddr_range_ets, size)},
+        {devaddr_ranges, ets:info(hpr_route_devaddr_ranges_ets, size)},
         {skfs,
             lists:foldl(
                 fun(RouteETS, Acc) ->
