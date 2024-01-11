@@ -45,6 +45,12 @@ config_usage() ->
             "config route deactivate <route_id>          - Deactivate route\n",
             "config skf <DevAddr/Session Key>            - List all Session Key Filters for Devaddr or Session Key\n",
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
+            "\n\n",
+            "config counts - Simple Counts of Configuration\n",
+            "config checkpoint next - Time until next writing of configuration to disk\n"
+            "config checkpoint write - Write current configuration to disk\n",
+            "config checkpoint reset - Set checkpoint timestamp to beginning of time (0)\n"
+            "config reconnect - Reset connection to Configuration Service\n"
         ]
     ].
 
@@ -102,7 +108,17 @@ config_cmd() ->
                 ]}
             ],
             fun config_eui/3
-        ]
+        ],
+        [["config", "counts"], [], [], fun config_counts/3],
+        [["config", "checkpoint", "next"], [], [], fun config_checkpoint_next/3],
+        [["config", "checkpoint", "write"], [], [], fun config_checkpoint_write/3],
+        [
+            ["config", "checkpoint", "reset"],
+            [],
+            [{commit, [{longname, "commit"}, {datatype, boolean}]}],
+            fun config_checkpoint_reset/3
+        ],
+        [["config", "reconnect"], [], [], fun config_reconnect/3]
     ].
 
 config_list(["config", "ls"], [], []) ->
@@ -340,6 +356,61 @@ config_eui(["config", "eui"], [], Flags) ->
         _ -> usage
     end;
 config_eui(_, _, _) ->
+    usage.
+
+config_counts(["config", "counts"], [], []) ->
+    c_table([
+        [
+            {" Routes ", hpr_route_storage:count()},
+            {" EUI Pairs ", hpr_eui_pair_storage:count()},
+            {" SKF ", hpr_skf_storage:count()},
+            {" DevAddr Ranges ", hpr_devaddr_range_storage:count()}
+        ]
+    ]);
+config_counts(_, _, _) ->
+    usage.
+
+config_checkpoint_next(["config", "checkpoint", "next"], [], []) ->
+    Msg = hpr_route_stream_worker:print_next_checkpoint(),
+    c_text(Msg);
+config_checkpoint_next(_, _, _) ->
+    usage.
+
+config_checkpoint_write(["config", "checkpoint", "write"], [], []) ->
+    case timer:tc(fun() -> hpr_route_stream_worker:do_checkpoint(erlang:system_time(second)) end) of
+        {Time0, ok} ->
+            Time = erlang:convert_time_unit(Time0, microsecond, millisecond),
+            c_text("Wrote checkpoint in ~wms", [Time]);
+        Other ->
+            c_text("Something went wrong: ~p", [Other])
+    end;
+config_checkpoint_write(_, _, _) ->
+    usage.
+
+config_checkpoint_reset(["config", "checkpoint", "reset"], [], Flags) ->
+    Options = maps:from_list(Flags),
+    case maps:is_key(commit, Options) of
+        true ->
+            case hpr_route_stream_worker:reset_timestamp() of
+                ok ->
+                    c_text("Checkpoint reset");
+                Err ->
+                    c_text("Something went wrong:~n~p", [Err])
+            end;
+        false ->
+            c_text("Must specify --commit to reset checkpoint")
+    end;
+config_checkpoint_reset(_, _, _) ->
+    usage.
+
+config_reconnect(["config", "reconnect"], [], []) ->
+    case hpr_route_stream_worker:reset_connection() of
+        ok ->
+            c_text("Reconnected");
+        Err ->
+            c_text("Something went wrong:~n~p", [Err])
+    end;
+config_reconnect(_, _, _) ->
     usage.
 
 do_config_eui(AppEUI, DevEUI) ->
