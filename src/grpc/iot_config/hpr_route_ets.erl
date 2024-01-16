@@ -120,6 +120,12 @@ all_test_() ->
     ]}.
 
 foreach_setup() ->
+    BaseDirPath = filename:join([
+        ?MODULE,
+        erlang:integer_to_list(erlang:system_time(millisecond)),
+        "data"
+    ]),
+    ok = application:set_env(hpr, data_dir, BaseDirPath),
     true = hpr_skf_storage:test_register_heir(),
     ?MODULE:init(),
     ok.
@@ -537,9 +543,12 @@ test_delete_route() ->
 
     ?assertEqual(ok, hpr_route_storage:delete(Route1)),
 
-    ?assertEqual([{{AppEUI2, DevEUI2}, RouteID2}], ets:tab2list(hpr_eui_pair_storage:test_tab_name())),
     ?assertEqual(
-        [{{StartAddr2, EndAddr2}, RouteID2}], ets:tab2list(hpr_devaddr_range_storage:test_tab_name())
+        [{{AppEUI2, DevEUI2}, RouteID2}], ets:tab2list(hpr_eui_pair_storage:test_tab_name())
+    ),
+    ?assertEqual(
+        [{{StartAddr2, EndAddr2}, RouteID2}],
+        ets:tab2list(hpr_devaddr_range_storage:test_tab_name())
     ),
     ?assertEqual({ok, RouteETS2}, hpr_route_storage:lookup(hpr_route:id(Route2))),
     ?assert(erlang:is_list(ets:info(SKFETS2))),
