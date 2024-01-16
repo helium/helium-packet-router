@@ -226,10 +226,7 @@ delete_route(RouteID) ->
                 ],
                 "route not found, skf file maybe deleted"
             ),
-            Err;
-        Other ->
-            lager:warning("failed to delete skf table ~p for ~s", [Other, RouteID]),
-            {error, Other}
+            Err
     end.
 
 -spec replace_route(hpr_route:id(), list(hpr_skf:skf())) ->
