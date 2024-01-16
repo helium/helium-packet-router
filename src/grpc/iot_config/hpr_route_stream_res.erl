@@ -4,7 +4,8 @@
 
 -export([
     action/1,
-    data/1
+    data/1,
+    timestamp/1
 ]).
 
 -ifdef(TEST).
@@ -30,6 +31,17 @@ action(RouteStreamRes) ->
 data(RouteStreamRes) ->
     RouteStreamRes#iot_config_route_stream_res_v1_pb.data.
 
+-spec timestamp(RouteStreamRes :: res()) -> non_neg_integer().
+timestamp(RouteStreamRes) ->
+    %% NOTE: All requests are sent with a millisecond timestamp.
+    %% Responses have Second timestamps.
+    %% HPR speaks exclusively in millisecond.
+    erlang:convert_time_unit(
+        RouteStreamRes#iot_config_route_stream_res_v1_pb.timestamp,
+        second,
+        millisecond
+    ).
+
 %% ------------------------------------------------------------------
 %% Tests Functions
 %% ------------------------------------------------------------------
@@ -39,7 +51,8 @@ data(RouteStreamRes) ->
 test_new(Map) ->
     #iot_config_route_stream_res_v1_pb{
         action = maps:get(action, Map),
-        data = maps:get(data, Map)
+        data = maps:get(data, Map),
+        timestamp = maps:get(timestamp, Map, 0)
     }.
 
 -endif.

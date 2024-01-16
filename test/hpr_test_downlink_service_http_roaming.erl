@@ -24,6 +24,10 @@
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
     Self = self(),
+    case lists:member(?MODULE, erlang:registered()) of
+        false -> ok;
+        true -> erlang:unregister(?MODULE)
+    end,
     true = erlang:register(?MODULE, self()),
     PubKeyBin = hpr_utils:pubkey_bin(),
     lager:notice("init ~p @ ~p with signer ~p", [?MODULE, Self, PubKeyBin]),

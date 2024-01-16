@@ -89,7 +89,8 @@ init_per_testcase(TestCase, Config) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            {state, Stream, _Backoff} = sys:get_state(hpr_route_stream_worker),
+            Stream = hpr_route_stream_worker:test_stream(),
+            %% {state, Stream, _Backoff} = sys:get_state(hpr_route_stream_worker),
             Stream =/= undefined andalso
                 erlang:is_pid(erlang:whereis(hpr_test_ics_route_service))
         end,

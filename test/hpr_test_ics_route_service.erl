@@ -31,11 +31,17 @@
     stream_resp/1
 ]).
 
+-record(stream_handler_state, {since = 0 :: non_neg_integer()}).
+
 -spec init(atom(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 init(RPC, StreamState) ->
     case RPC of
         stream ->
             Self = self(),
+            case lists:member(?MODULE, erlang:registered()) of
+                false -> ok;
+                true -> erlang:unregister(?MODULE)
+            end,
             true = erlang:register(?MODULE, self()),
             lager:notice("init ~p @ ~p", [?MODULE, Self]);
         _ ->
@@ -45,8 +51,19 @@ init(RPC, StreamState) ->
 
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({stream_resp, RouteStreamResp}, StreamState) ->
-    lager:notice("got RouteStreamResp ~p", [RouteStreamResp]),
-    grpcbox_stream:send(false, RouteStreamResp, StreamState);
+    %% If the timestamp of the message is after `since`, send the update.
+    #stream_handler_state{since = Since} = grpcbox_stream:stream_handler_state(StreamState),
+    Timestamp = hpr_route_stream_res:timestamp(RouteStreamResp),
+    MD = [{since, Since}, {timestamp, Timestamp}],
+    %% ct:print("got RouteStreamResp ~p~n~p", [RouteStreamResp, MD]),
+    case Since =< Timestamp of
+        true ->
+            lager:notice("sending RouteStreamResp ~p", [MD ++ [RouteStreamResp]]),
+            grpcbox_stream:send(false, RouteStreamResp, StreamState);
+        false ->
+            lager:notice("ignoring RouteStreamResp ~p", [MD ++ [RouteStreamResp]]),
+            StreamState
+    end;
 handle_info(_Msg, StreamState) ->
     StreamState.
 
@@ -70,7 +87,10 @@ stream(RouteStreamReq, StreamState) ->
         false ->
             {grpc_error, {grpcbox_stream:code_to_status(7), <<"PERMISSION_DENIED">>}};
         true ->
-            {ok, StreamState}
+            {ok,
+                grpcbox_stream:stream_handler_state(StreamState, #stream_handler_state{
+                    since = hpr_route_stream_req:since(RouteStreamReq)
+                })}
     end.
 
 get_euis(GetEUIsReq, StreamState) ->

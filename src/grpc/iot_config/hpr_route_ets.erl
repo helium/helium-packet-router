@@ -33,6 +33,7 @@
 init() ->
     ok = hpr_route_storage:init_ets(),
     ok = hpr_devaddr_range_storage:init_ets(),
+    %% SKF hydration is handled by route hydration
     ok = hpr_eui_pair_storage:init_ets(),
     ok.
 

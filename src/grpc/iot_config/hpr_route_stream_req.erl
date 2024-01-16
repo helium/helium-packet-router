@@ -3,11 +3,12 @@
 -include("../autogen/iot_config_pb.hrl").
 
 -export([
-    new/1,
+    new/1, new/2,
     timestamp/1,
     signer/1,
     signature/1,
     sign/2,
+    since/1,
     verify/1
 ]).
 
@@ -17,9 +18,14 @@
 
 -spec new(Signer :: libp2p_crypto:pubkey_bin()) -> req().
 new(Signer) ->
+    new(Signer, 0).
+
+-spec new(Signer :: libp2p_crypto:pubkey_bin(), Since :: non_neg_integer()) -> req().
+new(Signer, Since) ->
     #iot_config_route_stream_req_v1_pb{
         signer = Signer,
-        timestamp = erlang:system_time(millisecond)
+        timestamp = erlang:system_time(millisecond),
+        since = Since
     }.
 
 -spec timestamp(RouteStreamReq :: req()) -> non_neg_integer().
@@ -40,6 +46,10 @@ sign(RouteStreamReq, SigFun) ->
         RouteStreamReq, iot_config_route_stream_req_v1_pb
     ),
     RouteStreamReq#iot_config_route_stream_req_v1_pb{signature = SigFun(EncodedRouteStreamReq)}.
+
+-spec since(RouteStreamReq :: req()) -> non_neg_integer().
+since(RouteStreamReq) ->
+    RouteStreamReq#iot_config_route_stream_req_v1_pb.since.
 
 -spec verify(RouteStreamReq :: req()) -> boolean().
 verify(RouteStreamReq) ->

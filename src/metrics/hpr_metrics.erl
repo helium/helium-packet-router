@@ -20,6 +20,10 @@
     observe_gateway_location/2
 ]).
 
+-export([
+    counts/0
+]).
+
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
 %% ------------------------------------------------------------------
@@ -139,6 +143,29 @@ observe_gateway_location(Start, Status) ->
     ).
 
 %% ------------------------------------------------------------------
+%% CLI Function Definitions
+%% ------------------------------------------------------------------
+
+-spec counts() -> proplists:proplist().
+counts() ->
+    [
+        {routes, ets:info(hpr_routes_ets, size)},
+        {eui_pairs, ets:info(hpr_route_eui_pairs_ets, size)},
+        {devaddr_ranges, ets:info(hpr_route_devaddr_ranges_ets, size)},
+        {skfs,
+            lists:foldl(
+                fun(RouteETS, Acc) ->
+                    case ets:info(hpr_route_ets:skf_ets(RouteETS), size) of
+                        undefined -> Acc;
+                        N -> N + Acc
+                    end
+                end,
+                0,
+                ets:tab2list(hpr_routes_ets)
+            )}
+    ].
+
+%% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 init(_Args) ->
@@ -212,6 +239,7 @@ declare_metrics() ->
         end,
         ?METRICS
     ).
+
 
 -spec record_routes() -> ok.
 record_routes() ->
