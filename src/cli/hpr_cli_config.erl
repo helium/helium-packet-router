@@ -45,6 +45,12 @@ config_usage() ->
             "config route deactivate <route_id>          - Deactivate route\n",
             "config skf <DevAddr/Session Key>            - List all Session Key Filters for Devaddr or Session Key\n",
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
+            "\n\n",
+            "config counts                       - Simple Counts of Configuration\n",
+            "config checkpoint next              - Time until next writing of configuration to disk\n"
+            "config checkpoint write             - Write current configuration to disk\n",
+            "config checkpoint reset [--commit]  - Set checkpoint timestamp to beginning of time (0)\n"
+            "config reconnect [--commit]         - Reset connection to Configuration Service\n"
         ]
     ].
 
@@ -102,13 +108,28 @@ config_cmd() ->
                 ]}
             ],
             fun config_eui/3
+        ],
+        [["config", "counts"], [], [], fun config_counts/3],
+        [["config", "checkpoint", "next"], [], [], fun config_checkpoint_next/3],
+        [["config", "checkpoint", "write"], [], [], fun config_checkpoint_write/3],
+        [
+            ["config", "checkpoint", "reset"],
+            [],
+            [{commit, [{longname, "commit"}, {datatype, boolean}]}],
+            fun config_checkpoint_reset/3
+        ],
+        [
+            ["config", "reconnect"],
+            [],
+            [{commit, [{longname, "commit"}, {datatype, boolean}]}],
+            fun config_reconnect/3
         ]
     ].
 
 config_list(["config", "ls"], [], []) ->
     Routes = lists:sort(
         fun(R1, R2) -> hpr_route:oui(R1) < hpr_route:oui(R2) end,
-        hpr_route_ets:all_routes()
+        hpr_route_storage:all_routes()
     ),
     %% | OUI | Net ID | Protocol     | Max Copies | Addr Range Cnt | EUI Cnt | Route ID                             |
     %% |-----+--------+--------------+------------+----------------+---------+--------------------------------------|
@@ -121,10 +142,9 @@ config_list(["config", "ls"], [], []) ->
             {" Net ID ", hpr_utils:net_id_display(hpr_route:net_id(Route))},
             {" Protocol ", hpr_route:protocol_type(Server)},
             {" Max Copies ", hpr_route:max_copies(Route)},
-            {" Addr Ranges Cnt ",
-                hpr_route_ets:devaddr_ranges_count_for_route(hpr_route:id(Route))},
-            {" EUIs Cnt ", hpr_route_ets:eui_pairs_count_for_route(hpr_route:id(Route))},
-            {" SKFs Cnt ", hpr_route_ets:skfs_count_for_route(hpr_route:id(Route))},
+            {" Addr Ranges Cnt ", hpr_devaddr_range_storage:count_for_route(hpr_route:id(Route))},
+            {" EUIs Cnt ", hpr_eui_pair_storage:count_for_route(hpr_route:id(Route))},
+            {" SKFs Cnt ", hpr_skf_storage:count_route(hpr_route:id(Route))},
             {" Route ID ", hpr_route:id(Route)}
         ]
     end,
@@ -135,7 +155,7 @@ config_list(_, _, _) ->
 config_oui_list(["config", "oui", OUIString], [], Flags) ->
     Options = maps:from_list(Flags),
     OUI = erlang:list_to_integer(OUIString),
-    RoutesETS = hpr_route_ets:oui_routes(OUI),
+    RoutesETS = hpr_route_storage:oui_routes(OUI),
 
     %% OUI 4
     %% ========================================================
@@ -180,7 +200,7 @@ config_oui_list(_, _, _) ->
 
 config_route(["config", "route", RouteID], [], Flags) ->
     Options = maps:from_list(Flags),
-    RoutesETS = hpr_route_ets:lookup_route(RouteID),
+    {ok, RouteETS} = hpr_route_storage:lookup(RouteID),
 
     %% ========================================================
     %% - ID         :: 48088786-5465-4115-92de-5214a88e9a75
@@ -209,15 +229,7 @@ config_route(["config", "route", RouteID], [], Flags) ->
         display_skfs => maps:is_key(display_skfs, Options)
     },
 
-    c_list(
-        lists:foldl(
-            fun(RouteETS, Lines) ->
-                Lines ++ [Spacer | mk_route_info(RouteETS, DisplayOptions)]
-            end,
-            [],
-            RoutesETS
-        )
-    );
+    c_list([Spacer | mk_route_info(RouteETS, DisplayOptions)]);
 config_route(_, _, _) ->
     usage.
 
@@ -255,26 +267,26 @@ config_route_refresh(_, _, _) ->
     usage.
 
 config_route_activate(["config", "route", "activate", RouteID], [], _Flags) ->
-    case hpr_route_ets:lookup_route(RouteID) of
-        [] ->
+    case hpr_route_storage:lookup(RouteID) of
+        {error, not_found} ->
             c_text("Route ~s not found", [RouteID]);
-        [RouteETS] ->
+        {ok, RouteETS} ->
             Route0 = hpr_route_ets:route(RouteETS),
             Route1 = hpr_route:active(true, Route0),
-            ok = hpr_route_ets:insert_route(Route1),
+            ok = hpr_route_storage:insert(Route1),
             c_text("Route ~s activated", [RouteID])
     end;
 config_route_activate(_, _, _) ->
     usage.
 
 config_route_deactivate(["config", "route", "deactivate", RouteID], [], _Flags) ->
-    case hpr_route_ets:lookup_route(RouteID) of
-        [] ->
+    case hpr_route_storage:lookup(RouteID) of
+        {error, not_found} ->
             c_text("Route ~s not found", [RouteID]);
-        [RouteETS] ->
+        {ok, RouteETS} ->
             Route0 = hpr_route_ets:route(RouteETS),
             Route1 = hpr_route:active(false, Route0),
-            ok = hpr_route_ets:insert_route(Route1),
+            ok = hpr_route_storage:insert(Route1),
             c_text("Route ~s deactivated", [RouteID])
     end;
 config_route_deactivate(_, _, _) ->
@@ -291,14 +303,14 @@ config_skf(["config", "skf", DevAddrOrSKF], [], []) ->
                         ETS = hpr_route_ets:skf_ets(RouteETS),
                         [
                             {DevAddr, SK, RouteID, MaxCopies}
-                         || {SK, MaxCopies} <- hpr_route_ets:lookup_skf(ETS, DevAddr)
+                         || {SK, MaxCopies} <- hpr_skf_storage:lookup(ETS, DevAddr)
                         ] ++ Acc
                     end,
                     [],
-                    hpr_route_ets:lookup_devaddr_range(DevAddr)
+                    hpr_devaddr_range_storage:lookup(DevAddr)
                 );
             SKF ->
-                RoutesETS = hpr_route_ets:all_route_ets(),
+                RoutesETS = hpr_route_storage:all_route_ets(),
                 find_skf(SKF, RoutesETS, [])
         end,
     case SKFS of
@@ -323,7 +335,7 @@ find_skf(_SKToFind, [], Acc) ->
 find_skf(SKToFind, [RouteETS | RoutesETS], Acc0) ->
     Route = hpr_route_ets:route(RouteETS),
     RouteID = hpr_route:id(Route),
-    case hpr_route_ets:skfs_for_route(RouteID) of
+    case hpr_skf_storage:lookup_route(RouteID) of
         [] ->
             find_skf(SKToFind, RoutesETS, Acc0);
         SKFs ->
@@ -351,11 +363,65 @@ config_eui(["config", "eui"], [], Flags) ->
 config_eui(_, _, _) ->
     usage.
 
+config_counts(["config", "counts"], [], []) ->
+    Counts = hpr_metrics:counts(),
+    c_table([
+        [
+            {" Routes ", proplists:get_value(routes, Counts)},
+            {" EUI Pairs ", proplists:get_value(eui_pairs, Counts)},
+            {" SKF ", proplists:get_value(skfs, Counts)},
+            {" DevAddr Ranges ", proplists:get_value(devaddr_ranges, Counts)}
+        ]
+    ]);
+config_counts(_, _, _) ->
+    usage.
+
+config_checkpoint_next(["config", "checkpoint", "next"], [], []) ->
+    Msg = hpr_route_stream_worker:print_next_checkpoint(),
+    c_text(Msg);
+config_checkpoint_next(_, _, _) ->
+    usage.
+
+config_checkpoint_write(["config", "checkpoint", "write"], [], []) ->
+    case timer:tc(fun() -> hpr_route_stream_worker:do_checkpoint(erlang:system_time(second)) end) of
+        {Time0, ok} ->
+            Time = erlang:convert_time_unit(Time0, microsecond, millisecond),
+            c_text("Wrote checkpoint in ~wms", [Time]);
+        Other ->
+            c_text("Something went wrong: ~p", [Other])
+    end;
+config_checkpoint_write(_, _, _) ->
+    usage.
+
+config_checkpoint_reset(["config", "checkpoint", "reset"], [], Flags) ->
+    Options = maps:from_list(Flags),
+    case maps:is_key(commit, Options) of
+        true ->
+            ok = hpr_route_stream_worker:reset_timestamp(),
+            c_text("Checkpoint reset");
+        false ->
+            c_text("Must specify --commit to reset checkpoint")
+    end;
+config_checkpoint_reset(_, _, _) ->
+    usage.
+
+config_reconnect(["config", "reconnect"], [], Flags) ->
+    Options = maps:from_list(Flags),
+    case maps:is_key(commit, Options) of
+        true ->
+            ok = hpr_route_stream_worker:reset_connection(),
+            c_text("Reconnected");
+        false ->
+            c_text("Must specify --commit to reset connection")
+    end;
+config_reconnect(_, _, _) ->
+    usage.
+
 do_config_eui(AppEUI, DevEUI) ->
     AppEUINum = erlang:list_to_integer(AppEUI, 16),
     DevEUINum = erlang:list_to_integer(DevEUI, 16),
 
-    Found = hpr_route_ets:lookup_eui_pair(AppEUINum, DevEUINum),
+    Found = hpr_eui_pair_storage:lookup(AppEUINum, DevEUINum),
 
     %% ======================================================
     %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
@@ -383,7 +449,7 @@ do_config_eui(AppEUI, DevEUI) ->
 
 do_single_eui(app_eui, AppEUI) ->
     EUINum = erlang:list_to_integer(AppEUI, 16),
-    Found = hpr_route_ets:lookup_app_eui(EUINum),
+    Found = hpr_eui_pair_storage:lookup_app_eui(EUINum),
 
     %% ======================================================
     %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
@@ -401,7 +467,7 @@ do_single_eui(app_eui, AppEUI) ->
     c_list(Spacer ++ Info ++ EUIsInfo);
 do_single_eui(dev_eui, DevEUI) ->
     EUINum = erlang:list_to_integer(DevEUI, 16),
-    Found = hpr_route_ets:lookup_dev_eui(EUINum),
+    Found = hpr_eui_pair_storage:lookup_dev_eui(EUINum),
 
     %% ======================================================
     %% - Dev EUI :: 6081F9413229AD32 (6954113358046539058)
@@ -441,18 +507,18 @@ mk_route_info(RouteETS, #{display_euis := DisplayEUIs, display_skfs := DisplaySK
 
     DevAddrHeader = io_lib:format("- DevAddr Ranges~n", []),
     DevAddrRanges = lists:map(
-        fun format_devaddr/1, hpr_route_ets:devaddr_ranges_for_route(RouteID)
+        fun format_devaddr/1, hpr_devaddr_range_storage:lookup_for_route(RouteID)
     ),
     DevAddrInfo = [DevAddrHeader | DevAddrRanges],
 
     EUIInfo =
         case DisplayEUIs of
             false ->
-                Count = hpr_route_ets:eui_pairs_count_for_route(RouteID),
+                Count = hpr_eui_pair_storage:count_for_route(RouteID),
                 EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [Count]),
                 [EUIHeader];
             true ->
-                EUIs = hpr_route_ets:eui_pairs_for_route(RouteID),
+                EUIs = hpr_eui_pair_storage:lookup_for_route(RouteID),
                 EUIHeader = io_lib:format("- EUI (AppEUI, DevEUI) :: ~p~n", [
                     erlang:length(EUIs)
                 ]),
@@ -462,13 +528,13 @@ mk_route_info(RouteETS, #{display_euis := DisplayEUIs, display_skfs := DisplaySK
     SKFInfo =
         case DisplaySKFs of
             false ->
-                SKFsCount = hpr_route_ets:skfs_count_for_route(RouteID),
+                SKFsCount = hpr_skf_storage:count_route(RouteID),
                 SKFHeader = io_lib:format(
                     "- SKF (DevAddr, SKF, MaxCopies) :: ~p~n", [SKFsCount]
                 ),
                 [SKFHeader];
             true ->
-                SKFs = hpr_route_ets:skfs_for_route(RouteID),
+                SKFs = hpr_skf_storage:lookup_route(RouteID),
                 SKFHeader = io_lib:format(
                     "- SKF (DevAddr, SKF, MaxCopies) :: ~p~n", [
                         erlang:length(SKFs)

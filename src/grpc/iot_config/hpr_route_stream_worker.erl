@@ -61,8 +61,23 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    refresh_route/1
+    refresh_route/1,
+    checkpoint/0,
+    schedule_checkpoint/0
 ]).
+
+-export([
+    do_checkpoint/1,
+    reset_timestamp/0,
+    checkpoint_timer/0,
+    print_next_checkpoint/0,
+    last_timestamp/0,
+    reset_connection/0
+]).
+
+-ifdef(TEST).
+-export([test_counts/0, test_stream/0]).
+-endif.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -99,13 +114,24 @@
     devaddr_added := non_neg_integer()
 }.
 
+-type counts_map() :: #{
+    route := non_neg_integer(),
+    eui_pair := non_neg_integer(),
+    skf := non_neg_integer(),
+    devaddr_range := non_neg_integer()
+}.
+
 -record(state, {
     stream :: grpcbox_client:stream() | undefined,
-    conn_backoff :: backoff:backoff()
+    conn_backoff :: backoff:backoff(),
+    counts :: counts_map(),
+    last_timestamp = 0 :: non_neg_integer(),
+    checkpoint_timer :: undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}
 }).
 
 -define(SERVER, ?MODULE).
 -define(INIT_STREAM, init_stream).
+-define(DETS, hpr_route_stream_worker_dets).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -121,6 +147,69 @@ start_link(Args) ->
 refresh_route(RouteID) ->
     gen_server:call(?MODULE, {refresh_route, RouteID}, timer:seconds(120)).
 
+-spec checkpoint() -> ok.
+checkpoint() ->
+    gen_server:call(?MODULE, checkpoint).
+
+-spec last_timestamp() -> non_neg_integer().
+last_timestamp() ->
+    gen_server:call(?MODULE, last_timetstamp).
+
+-spec do_checkpoint(LastTimestamp :: non_neg_integer()) -> ok.
+do_checkpoint(LastTimestamp) ->
+    ok = hpr_route_storage:checkpoint(),
+    ok = hpr_eui_pair_storage:checkpoint(),
+    ok = hpr_devaddr_range_storage:checkpoint(),
+    ok = hpr_skf_storage:checkpoint(),
+    ok = dets:insert(?DETS, {timestamp, LastTimestamp}).
+
+-spec schedule_checkpoint() -> {TimeScheduled :: non_neg_integer(), timer:tref()}.
+schedule_checkpoint() ->
+    Delay = hpr_utils:get_env_int(ics_stream_worker_checkpoint_secs, 300),
+    lager:info([{timer_secs, Delay}], "scheduling checkpoint"),
+    {ok, Timer} = timer:apply_after(timer:seconds(Delay), ?MODULE, checkpoint, []),
+    {erlang:system_time(millisecond), Timer}.
+
+-spec reset_timestamp() -> ok.
+reset_timestamp() ->
+    gen_server:call(?MODULE, reset_timestamp).
+
+-spec checkpoint_timer() -> undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}.
+checkpoint_timer() ->
+    gen_server:call(?MODULE, checkpoint_timer).
+
+-spec print_next_checkpoint() -> string().
+print_next_checkpoint() ->
+    Msg =
+        case ?MODULE:checkpoint_timer() of
+            undefined ->
+                "Timer not active";
+            {TimeScheduled, _TimerRef} ->
+                Now = erlang:system_time(millisecond),
+                TimeLeft = Now - TimeScheduled,
+                TotalSeconds = erlang:convert_time_unit(TimeLeft, millisecond, second),
+                {_Hour, Minute, Seconds} = calendar:seconds_to_time(TotalSeconds),
+                io_lib:format("Running again in T- ~pm ~ps", [Minute, Seconds])
+        end,
+    lager:info(Msg),
+    Msg.
+
+-spec reset_connection() -> ok.
+reset_connection() ->
+    gen_server:call(?MODULE, reset_connection, timer:seconds(30)).
+
+-ifdef(TEST).
+
+-spec test_counts() -> counts_map().
+test_counts() ->
+    gen_server:call(?MODULE, test_counts).
+
+-spec test_stream() -> undefined | grpcbox_client:stream().
+test_stream() ->
+    gen_server:call(?MODULE, test_stream).
+
+-endif.
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
@@ -129,9 +218,24 @@ init(Args) ->
     Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
     lager:info("starting ~p with ~p", [?MODULE, Args]),
     self() ! ?INIT_STREAM,
+
+    ok = open_dets(),
+    LastTimestamp =
+        case dets:lookup(?DETS, timestamp) of
+            [{timestamp, T}] -> T;
+            _ -> 0
+        end,
+
     {ok, #state{
         stream = undefined,
-        conn_backoff = Backoff
+        conn_backoff = Backoff,
+        counts = #{
+            route => 0,
+            eui_pair => 0,
+            skf => 0,
+            devaddr_range => 0
+        },
+        last_timestamp = LastTimestamp
     }}.
 
 handle_call({refresh_route, RouteID}, _From, State) ->
@@ -166,26 +270,64 @@ handle_call({refresh_route, RouteID}, _From, State) ->
         end,
 
     {reply, Reply, State};
+handle_call(reset_timestamp, _From, #state{} = State) ->
+    ok = dets:insert(?DETS, {timestamp, 0}),
+    {reply, ok, State#state{last_timestamp = 0}};
+handle_call(last_timetstamp, _From, #state{last_timestamp = LastTimestamp} = State) ->
+    {reply, LastTimestamp, State};
+handle_call(checkpoint_timer, _From, #state{checkpoint_timer = CheckpointTimerRef} = State) ->
+    {reply, CheckpointTimerRef, State};
+handle_call(test_counts, _From, State) ->
+    {reply, State#state.counts, State};
+handle_call(test_stream, _From, State) ->
+    {reply, State#state.stream, State};
+handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) ->
+    lager:info([{timestamp, LastTimestamp}], "checkpointing configuration"),
+
+    %% We don't spawn the checkpoints to reduce the chance of continued updates
+    %% causing weirdness in the DB.
+    ok = ?MODULE:do_checkpoint(LastTimestamp),
+    CheckpointTimerRef = ?MODULE:schedule_checkpoint(),
+    lager:info([{timestamp, LastTimestamp}], "checkpoint done"),
+
+    {reply, ok, State#state{checkpoint_timer = CheckpointTimerRef}};
+handle_call(reset_connection, _From, State) ->
+    {stop, manual_connection_reset, ok, State};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
 handle_cast(Msg, State) ->
     {stop, {unimplemented_cast, Msg}, State}.
 
-handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
-    lager:info("connecting"),
+handle_info(checkpoint, #state{} = State) ->
+    ok = ?MODULE:checkpoint(),
+    {noreply, State};
+handle_info(
+    ?INIT_STREAM,
+    #state{
+        conn_backoff = Backoff0,
+        last_timestamp = LastTimestamp,
+        checkpoint_timer = PreviousCheckpointTimerRef
+    } = State
+) ->
+    lager:info([{from, LastTimestamp}], "connecting"),
+    ok = maybe_cancel_timer(PreviousCheckpointTimerRef),
     SigFun = hpr_utils:sig_fun(),
     PubKeyBin = hpr_utils:pubkey_bin(),
-    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin),
+
+    RouteStreamReq = hpr_route_stream_req:new(PubKeyBin, LastTimestamp),
     SignedRouteStreamReq = hpr_route_stream_req:sign(RouteStreamReq, SigFun),
     StreamOptions = #{channel => ?IOT_CONFIG_CHANNEL},
+
     case helium_iot_config_route_client:stream(SignedRouteStreamReq, StreamOptions) of
         {ok, Stream} ->
-            lager:info("stream initialized"),
+            lager:info([{from, LastTimestamp}], "stream initialized"),
             {_, Backoff1} = backoff:succeed(Backoff0),
-            ok = hpr_route_ets:delete_all(),
+            Timer = ?MODULE:schedule_checkpoint(),
             {noreply, State#state{
-                stream = Stream, conn_backoff = Backoff1
+                stream = Stream,
+                conn_backoff = Backoff1,
+                checkpoint_timer = Timer
             }};
         {error, undefined_channel} ->
             lager:error(
@@ -199,18 +341,28 @@ handle_info(?INIT_STREAM, #state{conn_backoff = Backoff0} = State) ->
             {noreply, State#state{conn_backoff = Backoff1}}
     end;
 %% GRPC stream callbacks
-handle_info({data, _StreamID, RouteStreamRes}, #state{} = State) ->
+handle_info({data, _StreamID, RouteStreamRes}, #state{counts = Counts0} = State) ->
     Action = hpr_route_stream_res:action(RouteStreamRes),
     Data = hpr_route_stream_res:data(RouteStreamRes),
+    Timestamp = hpr_route_stream_res:timestamp(RouteStreamRes),
     {Type, _} = Data,
     lager:debug([{action, Action}, {type, Type}], "got route stream update"),
-    _ = erlang:spawn(
-        fun() ->
+    Counts1 = Counts0#{Type => maps:get(Type, Counts0, 0) + 1},
+    case Type of
+        %% Routes are required for many updates, we don't spawn them to make
+        %% sure everything is setup by the time updates start coming in for the route.
+        route ->
             ok = process_route_stream_res(Action, Data),
-            ok = hpr_metrics:ics_update(Type, Action)
-        end
-    ),
-    {noreply, State};
+            ok = hpr_metrics:ics_update(Type, Action);
+        _ ->
+            _ = erlang:spawn(
+                fun() ->
+                    ok = process_route_stream_res(Action, Data),
+                    ok = hpr_metrics:ics_update(Type, Action)
+                end
+            )
+    end,
+    {noreply, State#state{counts = Counts1, last_timestamp = Timestamp}};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
     {noreply, State};
@@ -263,6 +415,7 @@ handle_info(_Msg, State) ->
 
 terminate(_Reason, _State) ->
     lager:error("terminate ~p", [_Reason]),
+    dets:close(?DETS),
     ok.
 
 %% ------------------------------------------------------------------
@@ -278,21 +431,21 @@ terminate(_Reason, _State) ->
         | {skf, hpr_skf:skf()}
 ) -> ok.
 process_route_stream_res(add, {route, Route}) ->
-    hpr_route_ets:insert_route(Route);
+    hpr_route_storage:insert(Route);
 process_route_stream_res(add, {eui_pair, EUIPair}) ->
-    hpr_route_ets:insert_eui_pair(EUIPair);
+    hpr_eui_pair_storage:insert(EUIPair);
 process_route_stream_res(add, {devaddr_range, DevAddrRange}) ->
-    hpr_route_ets:insert_devaddr_range(DevAddrRange);
+    hpr_devaddr_range_storage:insert(DevAddrRange);
 process_route_stream_res(add, {skf, SKF}) ->
-    hpr_route_ets:insert_skf(SKF);
+    hpr_skf_storage:insert(SKF);
 process_route_stream_res(remove, {route, Route}) ->
-    hpr_route_ets:delete_route(Route);
+    hpr_route_storage:delete(Route);
 process_route_stream_res(remove, {eui_pair, EUIPair}) ->
-    hpr_route_ets:delete_eui_pair(EUIPair);
+    hpr_eui_pair_storage:delete(EUIPair);
 process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
-    hpr_route_ets:delete_devaddr_range(DevAddrRange);
+    hpr_devaddr_range_storage:delete(DevAddrRange);
 process_route_stream_res(remove, {skf, SKF}) ->
-    hpr_route_ets:delete_skf(SKF).
+    hpr_skf_storage:delete(SKF).
 
 -spec refresh_skfs(hpr_route:id()) ->
     {ok, {Old :: list(hpr_skf:skf()), Current :: list(hpr_skf:skf())}} | {error, any()}.
@@ -315,11 +468,11 @@ refresh_skfs(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 SKFs when erlang:is_list(SKFs) ->
-                    Previous = hpr_route_ets:skfs_for_route(RouteID),
-                    PreviousCnt = hpr_route_ets:replace_route_skfs(RouteID, SKFs),
+                    Previous = hpr_skf_storage:lookup_route(RouteID),
+                    PreviousCnt = hpr_skf_storage:replace_route(RouteID, SKFs),
                     lager:info(
-                        [{previous, PreviousCnt}, {current, length(SKFs)}],
-                        "route refresh skfs"
+                        "route refresh skfs ~p",
+                        [{{previous, PreviousCnt}, {current, length(SKFs)}}]
                     ),
                     {ok, {Previous, SKFs}}
             end;
@@ -350,8 +503,8 @@ refresh_euis(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 EUIs when erlang:is_list(EUIs) ->
-                    Previous = hpr_route_ets:eui_pairs_for_route(RouteID),
-                    PreviousCnt = hpr_route_ets:replace_route_euis(RouteID, EUIs),
+                    Previous = hpr_eui_pair_storage:lookup_for_route(RouteID),
+                    PreviousCnt = hpr_eui_pair_storage:replace_route(RouteID, EUIs),
                     lager:info(
                         [{previous, PreviousCnt}, {current, length(EUIs)}],
                         "route refresh euis"
@@ -393,8 +546,8 @@ refresh_devaddrs(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 Devaddrs when erlang:is_list(Devaddrs) ->
-                    Previous = hpr_route_ets:devaddr_ranges_for_route(RouteID),
-                    PreviousCnt = hpr_route_ets:replace_route_devaddrs(RouteID, Devaddrs),
+                    Previous = hpr_devaddr_range_storage:lookup_for_route(RouteID),
+                    PreviousCnt = hpr_devaddr_range_storage:replace_route(RouteID, Devaddrs),
                     lager:info(
                         [{previous, PreviousCnt}, {current, length(Devaddrs)}],
                         "route refresh devaddrs"
@@ -430,3 +583,24 @@ do_recv_from_stream(stream_finished, _Stream, Acc) ->
 do_recv_from_stream(Msg, _Stream, _Acc) ->
     lager:warning("unhandled msg from stream: ~p", [Msg]),
     {error, {unhandled_message, Msg}}.
+
+-spec open_dets() -> ok.
+open_dets() ->
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join(DataDir, "stream_worker.dets"),
+    ok = filelib:ensure_dir(DETSFile),
+    case dets:open_file(?DETS, [{file, DETSFile}, {type, set}]) of
+        {ok, _DETS} ->
+            ok;
+        {error, _Reason} ->
+            Deleted = file:delete(DETSFile),
+            lager:error("failed to open dets ~p deleting file ~p", [_Reason, Deleted]),
+            open_dets()
+    end.
+
+-spec maybe_cancel_timer(undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}) -> ok.
+maybe_cancel_timer(undefined) ->
+    ok;
+maybe_cancel_timer({_TimeScheduled, Timer}) ->
+    lager:info([{t, Timer}, {timer, timer:cancel(Timer)}], "maybe cancelling timer"),
+    ok.
