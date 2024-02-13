@@ -19,7 +19,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    push_data/4
+    push_data/5
 ]).
 
 %% ------------------------------------------------------------------
@@ -73,12 +73,13 @@ start_link(Args) ->
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
     SocketDest :: socket_dest(),
+    Timestamp :: non_neg_integer(),
     GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
-push_data(WorkerPid, PacketUp, SocketDest, GatewayLocation) ->
+push_data(WorkerPid, PacketUp, SocketDest, Timestamp, GatewayLocation) ->
     gen_server:cast(
         WorkerPid,
-        {push_data, PacketUp, SocketDest, erlang:system_time(millisecond), GatewayLocation}
+        {push_data, PacketUp, SocketDest, Timestamp, GatewayLocation}
     ).
 
 %% ------------------------------------------------------------------
@@ -240,7 +241,8 @@ packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
     BaseMeta = #{
         gateway_id => B58,
         gateway_name => Name,
-        regi => hpr_packet_up:region(Up)
+        regi => hpr_packet_up:region(Up),
+        hpr_time_ms => GatewayTime
     },
     %% NOTE: everything in meta needs to be string -> string.
     Meta =

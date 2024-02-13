@@ -34,7 +34,7 @@ init() ->
 -spec handle_packet(PacketUp :: hpr_packet_up:packet(), Opts :: map()) ->
     hpr_routing_response().
 handle_packet(PacketUp, Opts) ->
-    Start = erlang:system_time(millisecond),
+    Timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond)),
     ok = hpr_packet_up:md(PacketUp, Opts),
     lager:debug("received packet"),
     SessionKey = maps:get(session_key, Opts, undefined),
@@ -50,10 +50,10 @@ handle_packet(PacketUp, Opts) ->
     case execute_checks(PacketUp, Checks) of
         {error, _Reason} = Error ->
             lager:debug("packet failed verification: ~p", [_Reason]),
-            hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
+            hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Timestamp),
             Error;
         ok ->
-            do_handle_packet(PacketUp, Start)
+            do_handle_packet(PacketUp, Timestamp)
     end.
 
 -spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
@@ -70,32 +70,34 @@ find_routes({uplink, {_Type, DevAddr}}, PacketUp) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
--spec do_handle_packet(hpr_packet_up:packet(), Start :: non_neg_integer()) -> ok | {error, any()}.
-do_handle_packet(PacketUp, Start) ->
+-spec do_handle_packet(hpr_packet_up:packet(), Timestamp :: non_neg_integer()) ->
+    ok | {error, any()}.
+do_handle_packet(PacketUp, Timestamp) ->
     Hash = hpr_packet_up:phash(PacketUp),
     PacketUpType = hpr_packet_up:type(PacketUp),
     case hpr_routing_cache:lookup(Hash) of
         new ->
-            establish_routing(PacketUp, Start);
+            establish_routing(PacketUp, Timestamp);
         no_routes ->
-            ok = maybe_deliver_no_routes(PacketUp),
-            hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
+            ok = maybe_deliver_no_routes(PacketUp, Timestamp),
+            hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Timestamp),
             ok;
         {route, RoutesETS} ->
-            route_packet(PacketUp, RoutesETS, Start),
+            route_packet(PacketUp, RoutesETS, Timestamp),
             ok;
         {locked, RoutingEntry} ->
-            hpr_routing_cache:queue(RoutingEntry, {PacketUp, Start});
+            hpr_routing_cache:queue(RoutingEntry, {PacketUp, Timestamp});
         {error, _Reason} = Error ->
-            hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Start),
+            hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Timestamp),
             Error
     end.
 
--spec establish_routing(hpr_packet_up:packet(), Start :: non_neg_integer()) -> ok | {error, any()}.
-establish_routing(PacketUp, Start) ->
-    case hpr_routing_cache:lock(PacketUp, Start) of
+-spec establish_routing(hpr_packet_up:packet(), Timestamp :: non_neg_integer()) ->
+    ok | {error, any()}.
+establish_routing(PacketUp, Timestamp) ->
+    case hpr_routing_cache:lock(PacketUp, Timestamp) of
         {error, already_locked} ->
-            do_handle_packet(PacketUp, Start);
+            do_handle_packet(PacketUp, Timestamp);
         {ok, RoutingEntry} ->
             PacketUpType = hpr_packet_up:type(PacketUp),
             case ?MODULE:find_routes(PacketUpType, PacketUp) of
@@ -104,14 +106,14 @@ establish_routing(PacketUp, Start) ->
                     Error;
                 {ok, []} ->
                     ok = hpr_routing_cache:no_routes(RoutingEntry),
-                    ok = maybe_deliver_no_routes(PacketUp),
-                    hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Start),
+                    ok = maybe_deliver_no_routes(PacketUp, Timestamp),
+                    hpr_metrics:observe_packet_up(PacketUpType, ok, 0, Timestamp),
                     ok;
                 {ok, RoutesETS} ->
                     Queued = hpr_routing_cache:routes(RoutingEntry, RoutesETS),
                     lists:foreach(
-                        fun({QueuedPacket, QueuedStart}) ->
-                            route_packet(QueuedPacket, RoutesETS, QueuedStart)
+                        fun({QueuedPacket, QueuedTimestamp}) ->
+                            route_packet(QueuedPacket, RoutesETS, QueuedTimestamp)
                         end,
                         lists:reverse(Queued)
                     ),
@@ -122,18 +124,18 @@ establish_routing(PacketUp, Start) ->
 -spec route_packet(
     PacketUp :: hpr_packet_up:packet(),
     [{RouteETS :: hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}],
-    StartTime :: non_neg_integer()
+    Timestamp :: non_neg_integer()
 ) -> ok.
-route_packet(PacketUp, RoutesETS, Start) ->
+route_packet(PacketUp, RoutesETS, Timestamp) ->
     PacketUpType = hpr_packet_up:type(PacketUp),
-    {Routed, IsFree} = maybe_deliver_packet_to_routes(PacketUp, RoutesETS),
+    {Routed, IsFree} = maybe_deliver_packet_to_routes(PacketUp, RoutesETS, Timestamp),
     ok = maybe_report_packet(
         PacketUpType,
         [hpr_route_ets:route(RouteETS) || {RouteETS, _} <- RoutesETS],
         Routed,
         IsFree,
         PacketUp,
-        Start
+        Timestamp
     ),
     N = erlang:length(RoutesETS),
     lager:debug(
@@ -141,7 +143,7 @@ route_packet(PacketUp, RoutesETS, Start) ->
         "~w routes and delivered to ~w routes",
         [N, Routed]
     ),
-    hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Start).
+    hpr_metrics:observe_packet_up(PacketUpType, ok, Routed, Timestamp).
 
 -spec find_routes_for_uplink(PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
     {ok, routes()} | {error, invalid_mic}.
@@ -245,8 +247,11 @@ check_skfs(Payload, [{SessionKey, MaxCopies} | SKFs]) ->
             {ok, MaxCopies}
     end.
 
--spec maybe_deliver_no_routes(PacketUp :: hpr_packet_up:packet()) -> ok.
-maybe_deliver_no_routes(PacketUp) ->
+-spec maybe_deliver_no_routes(
+    PacketUp :: hpr_packet_up:packet(),
+    Timestamp :: non_neg_integer()
+) -> ok.
+maybe_deliver_no_routes(PacketUp, Timestamp) ->
     case application:get_env(?APP, no_routes, []) of
         [] ->
             lager:debug("no routes not set");
@@ -257,7 +262,7 @@ maybe_deliver_no_routes(PacketUp) ->
             lists:foreach(
                 fun({Host, Port}) ->
                     Route = hpr_route:new_packet_router(Host, Port),
-                    hpr_protocol_router:send(PacketUp, Route, undefined)
+                    hpr_protocol_router:send(PacketUp, Route, Timestamp, undefined)
                 end,
                 HostsAndPorts
             )
@@ -265,20 +270,21 @@ maybe_deliver_no_routes(PacketUp) ->
 
 -spec maybe_deliver_packet_to_routes(
     PacketUp :: hpr_packet_up:packet(),
-    RoutesETS :: [{hpr_route_ets:route(), non_neg_integer()}]
+    RoutesETS :: [{hpr_route_ets:route(), non_neg_integer()}],
+    Timestamp :: non_neg_integer()
 ) -> {non_neg_integer(), boolean()}.
-maybe_deliver_packet_to_routes(PacketUp, RoutesETS) ->
+maybe_deliver_packet_to_routes(PacketUp, RoutesETS, Timestamp) ->
     case erlang:length(RoutesETS) of
         1 ->
             [{RouteETS, SKFMaxCopies}] = RoutesETS,
-            case maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) of
+            case maybe_deliver_packet_to_route(PacketUp, RouteETS, Timestamp, SKFMaxCopies) of
                 {ok, IsFree} -> {1, IsFree};
                 {error, _} -> {0, false}
             end;
         X when X > 1 ->
             MaybeDelivered = hpr_utils:pmap(
                 fun({RouteETS, SKFMaxCopies}) ->
-                    maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies)
+                    maybe_deliver_packet_to_route(PacketUp, RouteETS, Timestamp, SKFMaxCopies)
                 end,
                 RoutesETS
             ),
@@ -299,9 +305,10 @@ maybe_deliver_packet_to_routes(PacketUp, RoutesETS) ->
 -spec maybe_deliver_packet_to_route(
     PacketUp :: hpr_packet_up:packet(),
     RouteETS :: hpr_route_ets:route(),
+    Timestamp :: non_neg_integer(),
     SKFMaxCopies :: non_neg_integer()
 ) -> {ok, boolean()} | {error, any()}.
-maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
+maybe_deliver_packet_to_route(PacketUp, RouteETS, Timestamp, SKFMaxCopies) ->
     Route = hpr_route_ets:route(RouteETS),
     RouteMD = hpr_route:md(Route),
     BackoffTimestamp =
@@ -318,8 +325,10 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
         {false, _, _} ->
             lager:debug(RouteMD, "not sending, route inactive"),
             {error, inactive};
-        {_, _, Timestamp} when Timestamp > Now ->
-            lager:debug(RouteMD, "not sending, route in cooldown, back in ~wms", [Timestamp - Now]),
+        {_, _, BackoffTimestamp} when BackoffTimestamp > Now ->
+            lager:debug(RouteMD, "not sending, route in cooldown, back in ~wms", [
+                BackoffTimestamp - Now
+            ]),
             {error, in_cooldown};
         {true, false, _} ->
             Server = hpr_route:server(Route),
@@ -345,7 +354,7 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
                             {ok, H3Index, Lat, Long} ->
                                 {H3Index, Lat, Long}
                         end,
-                    case deliver_packet(Protocol, PacketUp, Route, GatewayLocation) of
+                    case deliver_packet(Protocol, PacketUp, Route, Timestamp, GatewayLocation) of
                         {error, Reason} = Error ->
                             lager:warning(RouteMD, "error ~p", [Reason]),
                             ok = hpr_route_ets:inc_backoff(RouteID),
@@ -364,15 +373,16 @@ maybe_deliver_packet_to_route(PacketUp, RouteETS, SKFMaxCopies) ->
     hpr_route:protocol(),
     PacketUp :: hpr_packet_up:packet(),
     Route :: hpr_route:route(),
+    Timestamp :: non_neg_integer(),
     GatewayLocation :: hpr_gateway_location:loc()
 ) -> hpr_routing_response().
-deliver_packet({packet_router, _}, PacketUp, Route, GatewayLocation) ->
-    hpr_protocol_router:send(PacketUp, Route, GatewayLocation);
-deliver_packet({gwmp, _}, PacketUp, Route, GatewayLocation) ->
-    hpr_protocol_gwmp:send(PacketUp, Route, GatewayLocation);
-deliver_packet({http_roaming, _}, PacketUp, Route, GatewayLocation) ->
-    hpr_protocol_http_roaming:send(PacketUp, Route, GatewayLocation);
-deliver_packet(_OtherProtocol, _PacketUp, _Route, _GatewayLocation) ->
+deliver_packet({packet_router, _}, PacketUp, Route, Timestamp, GatewayLocation) ->
+    hpr_protocol_router:send(PacketUp, Route, Timestamp, GatewayLocation);
+deliver_packet({gwmp, _}, PacketUp, Route, Timestamp, GatewayLocation) ->
+    hpr_protocol_gwmp:send(PacketUp, Route, Timestamp, GatewayLocation);
+deliver_packet({http_roaming, _}, PacketUp, Route, Timestamp, GatewayLocation) ->
+    hpr_protocol_http_roaming:send(PacketUp, Route, Timestamp, GatewayLocation);
+deliver_packet(_OtherProtocol, _PacketUp, _Route, _Timestamp, _GatewayLocation) ->
     lager:warning([{protocol, _OtherProtocol}], "protocol unimplemented").
 
 -spec maybe_report_packet(
@@ -848,7 +858,7 @@ find_routes_for_uplink_ignore_empty_skf() ->
 
 maybe_deliver_packet_to_route_locked() ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     RouteID1 = "route_id_1",
     Route1 = hpr_route:test_new(#{
@@ -870,16 +880,17 @@ maybe_deliver_packet_to_route_locked() ->
     {ok, RouteETS1} = hpr_route_storage:lookup(RouteID1),
 
     ?assertEqual(
-        {error, locked}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {error, locked},
+        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
     ),
 
-    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 4)),
     meck:unload(hpr_protocol_router),
     ok.
 
 maybe_deliver_packet_to_route_inactive() ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     RouteID1 = "route_id_1",
     Route1 = hpr_route:test_new(#{
@@ -901,16 +912,17 @@ maybe_deliver_packet_to_route_inactive() ->
     {ok, RouteETS1} = hpr_route_storage:lookup(RouteID1),
 
     ?assertEqual(
-        {error, inactive}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {error, inactive},
+        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
     ),
 
-    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 4)),
     meck:unload(hpr_protocol_router),
     ok.
 
 maybe_deliver_packet_to_route_in_cooldown() ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     RouteID1 = "route_id_1",
     Route1 = hpr_route:test_new(#{
@@ -933,16 +945,17 @@ maybe_deliver_packet_to_route_in_cooldown() ->
     {ok, RouteETS1} = hpr_route_storage:lookup(RouteID1),
 
     ?assertEqual(
-        {error, in_cooldown}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {error, in_cooldown},
+        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
     ),
 
-    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(0, meck:num_calls(hpr_protocol_router, send, 4)),
     meck:unload(hpr_protocol_router),
     ok.
 
 maybe_deliver_packet_to_route_multi_buy() ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
@@ -969,23 +982,27 @@ maybe_deliver_packet_to_route_multi_buy() ->
     {ok, RouteETS1} = hpr_route_storage:lookup(RouteID1),
     %% Packet 1 accepted using SKF Multi buy 1 (counter 1)
     ?assertEqual(
-        {ok, true}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {ok, true},
+        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
     ),
     %% Packet 2 refused using SKF Multi buy 1 (counter 2)
     ?assertEqual(
-        {error, multi_buy}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 1)
+        {error, multi_buy},
+        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 1)
     ),
 
     %% Packet 3 accepted using route multi buy 3 (counter 3)
     ?assertEqual(
-        {ok, true}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 0)
+        {ok, true},
+        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 0)
     ),
     %% Packet 4 refused using route multi buy 3 (counter 4)
     ?assertEqual(
-        {error, multi_buy}, maybe_deliver_packet_to_route(PacketUp, RouteETS1, 0)
+        {error, multi_buy},
+        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 0)
     ),
 
-    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 4)),
     meck:unload(hpr_protocol_router),
     meck:unload(hpr_metrics),
     ok.
