@@ -238,6 +238,7 @@ packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
     Name = erlang:list_to_binary(hpr_utils:gateway_name(PubKeyBin)),
 
     BaseMeta = #{
+        network => <<"helium_iot">>,
         gateway_id => B58,
         gateway_name => Name,
         regi => hpr_packet_up:region(Up)
