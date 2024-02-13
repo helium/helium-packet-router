@@ -227,11 +227,11 @@ terminate(_Reason, _State = #state{socket = Socket}) ->
 
 -spec packet_up_to_push_data(
     PacketUp :: hpr_packet_up:packet(),
-    PacketTime :: non_neg_integer(),
+    Timestamp :: non_neg_integer(),
     GatewayLocation :: hpr_gateway_location:loc()
 ) ->
     {Token :: binary(), Payload :: binary()}.
-packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
+packet_up_to_push_data(Up, Timestamp, GatewayLocation) ->
     Token = semtech_udp:token(),
     PubKeyBin = hpr_packet_up:gateway(Up),
     MAC = hpr_utils:pubkeybin_to_mac(PubKeyBin),
@@ -242,7 +242,7 @@ packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
         gateway_id => B58,
         gateway_name => Name,
         regi => hpr_packet_up:region(Up),
-        hpr_time_ms => GatewayTime
+        hpr_time_ms => Timestamp
     },
     %% NOTE: everything in meta needs to be string -> string.
     Meta =
@@ -262,7 +262,7 @@ packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
         MAC,
         #{
             time => iso8601:format(
-                calendar:system_time_to_universal_time(GatewayTime, millisecond)
+                calendar:system_time_to_universal_time(Timestamp, millisecond)
             ),
             tmst => hpr_packet_up:timestamp(Up) band 16#FFFF_FFFF,
             freq => hpr_packet_up:frequency_mhz(Up),
