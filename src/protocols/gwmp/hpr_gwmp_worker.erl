@@ -241,8 +241,7 @@ packet_up_to_push_data(Up, Timestamp, GatewayLocation) ->
     BaseMeta = #{
         gateway_id => B58,
         gateway_name => Name,
-        regi => hpr_packet_up:region(Up),
-        hpr_time_ms => Timestamp
+        regi => hpr_packet_up:region(Up)
     },
     %% NOTE: everything in meta needs to be string -> string.
     Meta =
@@ -257,13 +256,16 @@ packet_up_to_push_data(Up, Timestamp, GatewayLocation) ->
                 }
         end,
 
+    %% calendar strips milliseconds, add them back for formatting.
+    {Date, {Hour, Min, Sec0}} = calendar:system_time_to_universal_time(Timestamp, millisecond),
+    Sec = Sec0 + (Timestamp rem 1000 / 1000),
+    ISOTime = iso8601:format({Date, {Hour, Min, Sec}}),
+
     Data = semtech_udp:push_data(
         Token,
         MAC,
         #{
-            time => iso8601:format(
-                calendar:system_time_to_universal_time(Timestamp, millisecond)
-            ),
+            time => ISOTime,
             tmst => hpr_packet_up:timestamp(Up) band 16#FFFF_FFFF,
             freq => hpr_packet_up:frequency_mhz(Up),
             rfch => 0,
