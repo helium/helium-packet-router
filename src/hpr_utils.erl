@@ -3,7 +3,6 @@
 -include("hpr.hrl").
 
 -define(HPR_PUBKEY_BIN, hpr_pubkey_bin).
--define(HPR_SENDER_NSID, hpr_sender_nsid).
 -define(HPR_B58, hpr_b58).
 -define(HPR_SIG_FUN, hpr_sig_fun).
 
@@ -31,7 +30,6 @@
     load_key/1,
     pubkey_bin/0,
     sig_fun/0,
-    sender_nsid/0,
     b58/0,
     base_data_dir/0,
     %%
@@ -204,14 +202,6 @@ load_key(KeyFileName) ->
     B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
     ok = persistent_term:put(?HPR_PUBKEY_BIN, PubKeyBin),
 
-    %% Keep as binary for http protocol jsx encoding/decoding
-    SenderNSID =
-        case application:get_env(hpr, http_roaming_sender_nsid, erlang:list_to_binary(B58)) of
-            <<"">> -> erlang:list_to_binary(B58);
-            Val -> Val
-        end,
-    ok = persistent_term:put(?HPR_SENDER_NSID, SenderNSID),
-
     ok = persistent_term:put(?HPR_B58, B58),
     ok = persistent_term:put(?HPR_SIG_FUN, SigFun),
     ok = persistent_term:put(?HPR_KEY, Key).
@@ -223,10 +213,6 @@ pubkey_bin() ->
 -spec sig_fun() -> libp2p_crypto:sig_fun().
 sig_fun() ->
     persistent_term:get(?HPR_SIG_FUN, undefined).
-
--spec sender_nsid() -> string().
-sender_nsid() ->
-    persistent_term:get(?HPR_SENDER_NSID, undefined).
 
 -spec b58() -> binary().
 b58() ->

@@ -158,39 +158,17 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
         {error, _} = Err ->
             lager:error("dowlink handle message error ~p", [Err]),
             {500, <<"An error occurred">>};
-        {join_accept, {PubKeyBin, PacketDown}, {PRStartNotif, RouteID}} ->
-            case hpr_route_storage:lookup(RouteID) of
-                {error, not_found} ->
-                    lager:warning([{route_id, RouteID}], "join_accept for non-existent route");
-                {ok, RouteETS} ->
-                    lager:debug(
-                        [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                        "sending downlink"
-                    ),
-                    Route = hpr_route_ets:route(RouteETS),
-                    Endpoint = hpr_route:lns(Route),
-                    Headers = hpr_http_roaming:auth_headers(Route),
+        {join_accept, {PubKeyBin, PacketDown}} ->
+            lager:debug(
+                [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
+                "sending downlink"
+            ),
 
-                    case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
-                        ok ->
-                            _ = hackney:post(
-                                Endpoint,
-                                Headers,
-                                jsx:encode(PRStartNotif),
-                                [with_body]
-                            ),
-                            {200, <<"downlink sent: 1">>};
-                        {error, not_found} ->
-                            _ = hackney:post(
-                                Endpoint,
-                                Headers,
-                                jsx:encode(PRStartNotif#{
-                                    'Result' => #{'ResultCode' => <<"XmitFailed">>}
-                                }),
-                                [with_body]
-                            ),
-                            {404, <<"Not Found">>}
-                    end
+            case hpr_packet_router_service:send_packet_down(PubKeyBin, PacketDown) of
+                ok ->
+                    {200, <<"downlink sent: 1">>};
+                {error, not_found} ->
+                    {404, <<"Not Found">>}
             end;
         {downlink, PayloadResponse, {PubKeyBin, PacketDown}, RouteID} ->
             case hpr_route_storage:lookup(RouteID) of
