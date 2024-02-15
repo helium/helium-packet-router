@@ -42,10 +42,11 @@ route(eos, StreamState) ->
     lager:debug("received eos for stream"),
     {stop, StreamState};
 route(EnvUp, StreamState) ->
+    Timestamp = erlang:system_time(millisecond),
     lager:debug("got env up ~p", [EnvUp]),
     try hpr_envelope_up:data(EnvUp) of
         {packet, PacketUp} ->
-            handle_packet(PacketUp, StreamState);
+            handle_packet(PacketUp, Timestamp, StreamState);
         {register, Reg} ->
             handle_register(Reg, StreamState);
         {session_init, SessionInit} ->
@@ -131,14 +132,19 @@ register(PubKeyBin) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
--spec handle_packet(PacketUp :: hpr_packet_up:packet(), StreamState0 :: grpcbox_stream:t()) ->
+-spec handle_packet(
+    PacketUp :: hpr_packet_up:packet(),
+    Timestamp :: non_neg_integer(),
+    StreamState0 :: grpcbox_stream:t()
+) ->
     {ok, grpcbox_stream:t()}.
-handle_packet(PacketUp, StreamState) ->
+handle_packet(PacketUp, Timestamp, StreamState) ->
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
     Opts = #{
         session_key => HandlerState#handler_state.session_key,
         gateway => HandlerState#handler_state.pubkey_bin,
-        stream_pid => self()
+        stream_pid => self(),
+        timestamp => Timestamp
     },
     _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp, Opts], [{fullsweep_after, 0}]),
     {ok,

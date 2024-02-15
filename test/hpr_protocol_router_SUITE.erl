@@ -109,7 +109,7 @@ connection_refused_test(_Config) ->
 
     ?assertEqual(
         {error, {shutdown, econnrefused}},
-        hpr_protocol_router:send(PacketUp, Route, undefined)
+        hpr_protocol_router:send(PacketUp, Route, erlang:system_time(millisecond), undefined)
     ),
 
     ok.

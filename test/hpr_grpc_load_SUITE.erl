@@ -418,7 +418,7 @@ send_packet_via_protocol(Sleep, Route, PubKeyBin, SigFun, X) ->
         devaddr => 16#00000000,
         data => crypto:strong_rand_bytes(16)
     }),
-    hpr_protocol_router:send(PacketUp, Route),
+    hpr_protocol_router:send(PacketUp, Route, erlang:system_time(millisecond)),
     timer:sleep(Sleep),
     send_packet_via_protocol(Sleep, Route, PubKeyBin, SigFun, X - 1).
 

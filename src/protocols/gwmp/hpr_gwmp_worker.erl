@@ -19,7 +19,7 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    push_data/4
+    push_data/5
 ]).
 
 %% ------------------------------------------------------------------
@@ -73,12 +73,13 @@ start_link(Args) ->
     WorkerPid :: pid(),
     PacketUp :: hpr_packet_up:packet(),
     SocketDest :: socket_dest(),
+    Timestamp :: non_neg_integer(),
     GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
-push_data(WorkerPid, PacketUp, SocketDest, GatewayLocation) ->
+push_data(WorkerPid, PacketUp, SocketDest, Timestamp, GatewayLocation) ->
     gen_server:cast(
         WorkerPid,
-        {push_data, PacketUp, SocketDest, erlang:system_time(millisecond), GatewayLocation}
+        {push_data, PacketUp, SocketDest, Timestamp, GatewayLocation}
     ).
 
 %% ------------------------------------------------------------------
@@ -226,11 +227,11 @@ terminate(_Reason, _State = #state{socket = Socket}) ->
 
 -spec packet_up_to_push_data(
     PacketUp :: hpr_packet_up:packet(),
-    PacketTime :: non_neg_integer(),
+    Timestamp :: non_neg_integer(),
     GatewayLocation :: hpr_gateway_location:loc()
 ) ->
     {Token :: binary(), Payload :: binary()}.
-packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
+packet_up_to_push_data(Up, Timestamp, GatewayLocation) ->
     Token = semtech_udp:token(),
     PubKeyBin = hpr_packet_up:gateway(Up),
     MAC = hpr_utils:pubkeybin_to_mac(PubKeyBin),
@@ -256,13 +257,16 @@ packet_up_to_push_data(Up, GatewayTime, GatewayLocation) ->
                 }
         end,
 
+    %% calendar strips milliseconds, add them back for formatting.
+    {Date, {Hour, Min, Sec0}} = calendar:system_time_to_universal_time(Timestamp, millisecond),
+    Sec = Sec0 + (Timestamp rem 1000 / 1000),
+    ISOTime = iso8601:format({Date, {Hour, Min, Sec}}),
+
     Data = semtech_udp:push_data(
         Token,
         MAC,
         #{
-            time => iso8601:format(
-                calendar:system_time_to_universal_time(GatewayTime, millisecond)
-            ),
+            time => ISOTime,
             tmst => hpr_packet_up:timestamp(Up) band 16#FFFF_FFFF,
             freq => hpr_packet_up:frequency_mhz(Up),
             rfch => 0,

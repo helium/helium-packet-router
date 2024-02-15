@@ -357,7 +357,7 @@ skf_max_copies_test(_Config) ->
         lists:seq(1, 3)
     ),
 
-    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 3)),
+    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 4)),
 
     lists:foreach(
         fun(_) ->
@@ -376,14 +376,14 @@ skf_max_copies_test(_Config) ->
         lists:seq(1, 3)
     ),
 
-    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 3)),
+    ?assertEqual(3, meck:num_calls(hpr_protocol_http_roaming, send, 4)),
 
     meck:unload(hpr_protocol_http_roaming),
     ok.
 
 multi_buy_without_service_test(_Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     meck:new(hpr_packet_reporter, [passthrough]),
     meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _, _) -> ok end),
@@ -470,9 +470,19 @@ multi_buy_without_service_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway1})),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2, #{gateway => Gateway2})),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3, #{gateway => Gateway3})),
+    Timestamp1 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp1, #{timestamp => Timestamp1, gateway => Gateway1})
+    ),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp2, #{timestamp => Timestamp1, gateway => Gateway2})
+    ),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp3, #{timestamp => Timestamp1, gateway => Gateway3})
+    ),
 
     Self = self(),
     Received1 =
@@ -480,6 +490,7 @@ multi_buy_without_service_test(_Config) ->
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
                 Route,
+                Timestamp1,
                 undefined
             ]},
             ok},
@@ -488,6 +499,7 @@ multi_buy_without_service_test(_Config) ->
             {hpr_protocol_router, send, [
                 UplinkPacketUp2,
                 Route,
+                Timestamp1,
                 undefined
             ]},
             ok},
@@ -503,13 +515,18 @@ multi_buy_without_service_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4, #{gateway => Gateway3})),
+    Timestamp2 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp4, #{timestamp => Timestamp2, gateway => Gateway3})
+    ),
 
     Received3 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp4,
                 Route,
+                Timestamp2,
                 undefined
             ]},
             ok},
@@ -541,7 +558,7 @@ multi_buy_without_service_test(_Config) ->
 
 multi_buy_with_service_test(_Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     meck:new(hpr_packet_reporter, [passthrough]),
     meck:expect(hpr_packet_reporter, report_packet, fun(_, _, _, _) -> ok end),
@@ -620,9 +637,19 @@ multi_buy_with_service_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway1})),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2, #{gateway => Gateway2})),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp3, #{gateway => Gateway3})),
+    Timestamp1 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp1, #{timestamp => Timestamp1, gateway => Gateway1})
+    ),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp2, #{timestamp => Timestamp1, gateway => Gateway2})
+    ),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp3, #{timestamp => Timestamp1, gateway => Gateway3})
+    ),
 
     Self = self(),
     Received1 =
@@ -630,6 +657,7 @@ multi_buy_with_service_test(_Config) ->
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
                 Route,
+                Timestamp1,
                 undefined
             ]},
             ok},
@@ -638,6 +666,7 @@ multi_buy_with_service_test(_Config) ->
             {hpr_protocol_router, send, [
                 UplinkPacketUp2,
                 Route,
+                Timestamp1,
                 undefined
             ]},
             ok},
@@ -653,13 +682,18 @@ multi_buy_with_service_test(_Config) ->
         nwk_session_key => NwkSessionKey
     }),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp4, #{gateway => Gateway3})),
+    Timestamp2 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp4, #{timestamp => Timestamp2, gateway => Gateway3})
+    ),
 
     Received3 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp4,
                 Route,
+                Timestamp2,
                 undefined
             ]},
             ok},
@@ -704,7 +738,7 @@ multi_buy_requests_test(_Config) ->
     end),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     MaxCopies = 3,
     DevAddr = 16#00000000,
@@ -878,7 +912,7 @@ active_locked_route_test(_Config) ->
     ok = lists:foreach(fun hpr_devaddr_range_storage:insert/1, DevAddrRanges),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
@@ -900,7 +934,10 @@ active_locked_route_test(_Config) ->
 
     PacketUp0 = PacketUp(0),
 
-    ?assertEqual(ok, hpr_routing:handle_packet(PacketUp0, #{gateway => Gateway1})),
+    Timestamp1 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok, hpr_routing:handle_packet(PacketUp0, #{timestamp => Timestamp1, gateway => Gateway1})
+    ),
 
     Self = self(),
     Received1 =
@@ -908,6 +945,7 @@ active_locked_route_test(_Config) ->
             {hpr_protocol_router, send, [
                 PacketUp0,
                 Route1,
+                Timestamp1,
                 undefined
             ]},
             ok},
@@ -1006,25 +1044,25 @@ in_cooldown_route_test(_Config) ->
 
     %% We setup protocol router to fail every call
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> {error, not_implemented} end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> {error, not_implemented} end),
 
     %% We send first packet a call should be made to hpr_protocol_router
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(0), #{gateway => Gateway1})),
-    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 4)),
     %% We send second packet NO call should be made to hpr_protocol_router as the route would be in cooldown
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(1), #{gateway => Gateway1})),
-    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(1, meck:num_calls(hpr_protocol_router, send, 4)),
 
     %% We wait the initial first timeout 1s
     %% Send another packet and watch another call made to hpr_protocol_router
     timer:sleep(1000),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(2), #{gateway => Gateway1})),
-    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 4)),
 
     %% We send couple more packets and check that we still only 2 calls to hpr_protocol_router
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(3), #{gateway => Gateway1})),
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(4), #{gateway => Gateway1})),
-    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 4)),
 
     %% We check the route and make sure that the backoff is setup properly
     {ok, RouteETS1} = hpr_route_storage:lookup(RouteID),
@@ -1034,10 +1072,10 @@ in_cooldown_route_test(_Config) ->
 
     %% Wait another time out (2s now) and reset hpr_protocol_router to return ok
     timer:sleep(2000),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
     %% Sending another packet should trigger a new call to hpr_protocol_router
     ?assertEqual(ok, hpr_routing:handle_packet(PacketUp(5), #{gateway => Gateway1})),
-    ?assertEqual(3, meck:num_calls(hpr_protocol_router, send, 3)),
+    ?assertEqual(3, meck:num_calls(hpr_protocol_router, send, 4)),
 
     %% The route backoff should be back to undefined
     {ok, RouteETS2} = hpr_route_storage:lookup(RouteID),
@@ -1054,7 +1092,7 @@ success_test(_Config) ->
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -1090,13 +1128,18 @@ success_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, #{gateway => Gateway})),
+    Timestamp1 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(JoinPacketUpValid, #{timestamp => Timestamp1, gateway => Gateway})
+    ),
 
     Received1 =
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
                 Route,
+                Timestamp1,
                 undefined
             ]},
             ok},
@@ -1105,13 +1148,19 @@ success_test(_Config) ->
     UplinkPacketUp = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp, #{gateway => Gateway})),
+    Timestamp2 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp, #{timestamp => Timestamp2, gateway => Gateway})
+    ),
 
     Received2 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp,
                 Route,
+
+                Timestamp2,
                 undefined
             ]},
             ok},
@@ -1242,7 +1291,7 @@ maybe_report_packet_test(_Config) ->
     meck:new(hpr_protocol_router, [passthrough]),
     meck:new(hpr_packet_reporter, [passthrough]),
 
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),
@@ -1278,13 +1327,18 @@ maybe_report_packet_test(_Config) ->
     JoinPacketUpValid = test_utils:join_packet_up(#{
         gateway => Gateway, sig_fun => SigFun
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(JoinPacketUpValid, #{gateway => Gateway})),
+    Timestamp1 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(JoinPacketUpValid, #{timestamp => Timestamp1, gateway => Gateway})
+    ),
 
     Received1 =
         {Self,
             {hpr_protocol_router, send, [
                 JoinPacketUpValid,
                 Route,
+                Timestamp1,
                 undefined
             ]},
             ok},
@@ -1293,13 +1347,18 @@ maybe_report_packet_test(_Config) ->
     UplinkPacketUp1 = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr, fcnt => 1
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp1, #{gateway => Gateway})),
+    Timestamp2 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp1, #{timestamp => Timestamp2, gateway => Gateway})
+    ),
 
     Received2 =
         {Self,
             {hpr_protocol_router, send, [
                 UplinkPacketUp1,
                 Route,
+                Timestamp2,
                 undefined
             ]},
             ok},
@@ -1340,18 +1399,24 @@ maybe_report_packet_test(_Config) ->
     UplinkPacketUp2 = test_utils:uplink_packet_up(#{
         gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr, fcnt => 2
     }),
-    ?assertEqual(ok, hpr_routing:handle_packet(UplinkPacketUp2, #{gateway => Gateway})),
+    Timestamp3 = erlang:system_time(millisecond),
+    ?assertEqual(
+        ok,
+        hpr_routing:handle_packet(UplinkPacketUp2, #{timestamp => Timestamp3, gateway => Gateway})
+    ),
 
     CallExpected3 =
         {hpr_protocol_router, send, [
             UplinkPacketUp2,
             BadRoute,
+            Timestamp3,
             undefined
         ]},
     CallExpected4 =
         {hpr_protocol_router, send, [
             UplinkPacketUp2,
             Route,
+            Timestamp3,
             undefined
         ]},
 
@@ -1545,7 +1610,7 @@ routing_cleanup_test(_Config) ->
     Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
 
     meck:new(hpr_protocol_router, [passthrough]),
-    meck:expect(hpr_protocol_router, send, fun(_, _, _) -> ok end),
+    meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
     DevAddr = 16#00000000,
     {ok, NetID} = lora_subnet:parse_netid(DevAddr, big),

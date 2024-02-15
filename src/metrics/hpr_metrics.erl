@@ -240,7 +240,6 @@ declare_metrics() ->
         ?METRICS
     ).
 
-
 -spec record_routes() -> ok.
 record_routes() ->
     case ets:info(hpr_routes_ets, size) of

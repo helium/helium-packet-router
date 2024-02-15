@@ -128,7 +128,7 @@ maybe_start_channel(Config, ChannelName) ->
             lager:error("no host/port/transport to start ~s", [ChannelName])
     end.
 
--spec timing(Label:: string(), Fn :: fun()) -> ok.
+-spec timing(Label :: string(), Fn :: fun()) -> ok.
 timing(Label, Fn) ->
     Start = erlang:system_time(millisecond),
     Result = Fn(),
