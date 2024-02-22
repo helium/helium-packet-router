@@ -251,6 +251,7 @@ maybe_deliver_no_routes(PacketUp) ->
         [] ->
             lager:debug("no routes not set");
         HostsAndPorts ->
+            lager:debug("delivering to no route"),
             %% NOTE: Fallback routes will always be packet_router protocol.
             %% Don't go through reporting logic when sending to roaming.
             %% State channels are still in use over there.
