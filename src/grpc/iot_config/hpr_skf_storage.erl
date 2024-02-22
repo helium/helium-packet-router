@@ -235,7 +235,13 @@ replace_route(RouteID, NewSKFs) ->
     case hpr_route_storage:lookup(RouteID) of
         {ok, RouteETS} ->
             OldTab = hpr_route_ets:skf_ets(RouteETS),
-            NewTab = make_ets(RouteID),
+            NewTab = ets:new(?ETS_SKFS, [
+                public,
+                set,
+                {read_concurrency, true},
+                {write_concurrency, true},
+                {heir, erlang:whereis(?SKF_HEIR), RouteID}
+            ]),
             lists:foreach(fun(SKF) -> do_insert_skf(NewTab, SKF) end, NewSKFs),
 
             ok = hpr_route_storage:insert(
@@ -246,7 +252,7 @@ replace_route(RouteID, NewSKFs) ->
 
             OldSize = ets:info(OldTab, size),
 
-            ets:delete(OldTab),
+            true = ets:delete(OldTab),
             {ok, OldSize};
         Other ->
             {error, Other}
