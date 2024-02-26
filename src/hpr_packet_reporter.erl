@@ -167,16 +167,22 @@ terminate(_Reason, #state{current_packets = Packets}) ->
 -spec encode_packet(
     Packet :: hpr_packet_up:packet(),
     Route :: hpr_route:route(),
-    IsFree0 :: boolean(),
+    IsFree :: boolean(),
     ReceivedTime :: non_neg_integer()
 ) -> binary().
-encode_packet(Packet, Route, IsFree0, ReceivedTime) ->
+encode_packet(Packet, Route, true = IsFree, ReceivedTime) ->
+    EncodedPacket = hpr_packet_report:encode(
+        hpr_packet_report:new(Packet, Route, IsFree, ReceivedTime)
+    ),
+    PacketSize = erlang:size(EncodedPacket),
+    <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>;
+encode_packet(Packet, Route, false, ReceivedTime) ->
     NetID = hpr_route:net_id(Route),
     NetIDStr = hpr_utils:int_to_hex_string(NetID),
     FreeNetIDs = application:get_env(?APP, ?HPR_FREE_NET_IDS, []),
-    IsFree1 = IsFree0 orelse lists:member(NetIDStr, FreeNetIDs),
+    IsFree = lists:member(NetIDStr, FreeNetIDs),
     EncodedPacket = hpr_packet_report:encode(
-        hpr_packet_report:new(Packet, Route, IsFree1, ReceivedTime)
+        hpr_packet_report:new(Packet, Route, IsFree, ReceivedTime)
     ),
     PacketSize = erlang:size(EncodedPacket),
     <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>.
