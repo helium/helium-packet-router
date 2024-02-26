@@ -40,6 +40,8 @@ config_usage() ->
             "config route <route_id>                     - Info for route\n",
             "    [--display_euis] default: false (EUIs not included)\n",
             "    [--display_skfs] default: false (SKFs not included)\n",
+            "config route refresh_all                    - Refresh all routes\n",
+            "    [--ignore_empty_route] default: false (do not update routes that are locally empty)\n",
             "config route refresh <route_id>             - Refresh route\n",
             "config route activate <route_id>            - Activate route\n",
             "config route deactivate <route_id>          - Deactivate route\n",
@@ -74,6 +76,12 @@ config_cmd() ->
                 {display_skfs, [{longname, "display_skfs"}, {datatype, boolean}]}
             ],
             fun config_route/3
+        ],
+        [
+            ["config", "route", "refresh_all"],
+            [],
+            [{ignore_empty_route, [{longname, "ignore_empty_route"}, {datatype, boolean}]}],
+            fun config_route_refresh_all/3
         ],
         [
             ["config", "route", "refresh", '*'],
@@ -231,6 +239,75 @@ config_route(["config", "route", RouteID], [], Flags) ->
 
     c_list([Spacer | mk_route_info(RouteETS, DisplayOptions)]);
 config_route(_, _, _) ->
+    usage.
+
+config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
+    Options = maps:from_list(Flags),
+    IgnoreEmptyRoute = maps:is_key(ignore_empty_route, Options),
+    erlang:spawn(fun() ->
+        List = lists:filtermap(
+            fun(RouteETS) ->
+                RouteID = hpr_route:id(hpr_route_ets:route(RouteETS)),
+                SKFETS = hpr_route_ets:skf_ets(RouteETS),
+                Size = ets:info(SKFETS, size),
+                case IgnoreEmptyRoute andalso Size == 0 of
+                    false -> {true, {RouteID, Size}};
+                    true -> false
+                end
+            end,
+            hpr_route_storage:all_route_ets()
+        ),
+        Sorted = lists:sort(fun({_, A}, {_, B}) -> A > B end, List),
+        RouteIDs = [ID || {ID, _} <- Sorted],
+        Total = erlang:length(RouteIDs),
+        TimeIt = fun(Func) ->
+            {Time0, Val} = timer:tc(Func),
+            Time = erlang:convert_time_unit(Time0, microsecond, millisecond),
+            lager:info("took ~pms", [Time]),
+            Val
+        end,
+        Refresh = fun({Idx, ID}) ->
+            lager:info("~p/~p===========================================================", [
+                Idx, Total
+            ]),
+            TimeIt(fun() ->
+                try hpr_route_stream_worker:refresh_route(ID) of
+                    {ok, Map} ->
+                        lager:info("| Type | Before | After | Removed | Added |"),
+                        lager:info("|------|--------|-------|---------|-------|"),
+                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                            eui,
+                            maps:get(eui_before, Map),
+                            maps:get(eui_after, Map),
+                            maps:get(eui_removed, Map),
+                            maps:get(eui_added, Map)
+                        ]),
+                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                            skf,
+                            maps:get(skf_before, Map),
+                            maps:get(skf_after, Map),
+                            maps:get(skf_removed, Map),
+                            maps:get(skf_added, Map)
+                        ]),
+                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                            addr,
+                            maps:get(devaddr_before, Map),
+                            maps:get(devaddr_after, Map),
+                            maps:get(devaddr_removed, Map),
+                            maps:get(devaddr_added, Map)
+                        ]);
+                    {error, _R} ->
+                        lager:info("ERROR ~p", [_R])
+                catch
+                    _E:_R ->
+                        lager:info("CRASHED ~p", [_R])
+                end
+            end)
+        end,
+        [Refresh(ID) || ID <- lists:zip(lists:seq(1, Total), RouteIDs)]
+    end),
+    c_text("command spawned, look at logs");
+config_route_refresh_all(_, _, _) ->
     usage.
 
 config_route_refresh(["config", "route", "refresh", RouteID], [], _Flags) ->
