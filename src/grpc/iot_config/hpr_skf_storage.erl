@@ -29,7 +29,9 @@
 -endif.
 
 -define(ETS_SKFS, hpr_route_skfs_ets).
--define(DETS_FILENAME(ROUTE_ID), io_lib:format("hpr_skf_~s.dets", [ROUTE_ID])).
+%% Version 1: {SessionKey :: binary(), {Devaddr :: binary(), MaxCopies :: non_neg_integer()}}
+%% Version 2: {{SessionKey :: binary(), Devaddr :: binary()}, MaxCopies :: non_neg_integer()}
+-define(DETS_FILENAME(ROUTE_ID), io_lib:format("hpr_skf_~s_v2.dets", [ROUTE_ID])).
 
 -define(SKF_HEIR, hpr_sup).
 
@@ -72,7 +74,6 @@ checkpoint() ->
 -spec with_open_dets(Filename :: list(), Fn :: fun()) -> ok.
 with_open_dets(Filename, Fn) ->
     ok = filelib:ensure_dir(Filename),
-
     case dets:open_file(Filename, [{type, set}]) of
         {ok, _} ->
             lager:info("opened dets: ~s~n", [Filename]),
@@ -87,8 +88,8 @@ with_open_dets(Filename, Fn) ->
 rehydrate_from_dets(RouteID, EtsRef) ->
     Filename = ?MODULE:dets_filename(RouteID),
     with_open_dets(Filename, fun() ->
-        [] = dets:traverse(Filename, fun(SKF) ->
-            ok = do_rehydrate_insert_skf(EtsRef, SKF),
+        [] = dets:traverse(Filename, fun(Entry) ->
+            true = ets:insert(EtsRef, Entry),
             continue
         end)
     end).
@@ -96,7 +97,7 @@ rehydrate_from_dets(RouteID, EtsRef) ->
 -spec lookup(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
     [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
 lookup(ETS, DevAddr) ->
-    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
+    MS = [{{{'$1', DevAddr}, '$2'}, [], [{{'$1', '$2'}}]}],
     ets:select(ETS, MS).
 
 -spec select(Continuation :: ets:continuation()) ->
@@ -108,7 +109,7 @@ select(Continuation) ->
     {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
     | '$end_of_table'.
 select(ETS, DevAddr) ->
-    MS = [{{'$1', {DevAddr, '$2'}}, [], [{{'$1', '$2'}}]}],
+    MS = [{{{'$1', DevAddr}, '$2'}, [], [{{'$1', '$2'}}]}],
     ets:select(ETS, MS, 100).
 
 -spec insert(SKF :: hpr_skf:skf()) -> ok.
@@ -118,7 +119,7 @@ insert(SKF) ->
     case hpr_route_storage:lookup(RouteID) of
         {ok, RouteETS} ->
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
-            do_insert_skf(SKFETS, SKF),
+            ok = do_insert_skf(SKFETS, SKF),
             lager:debug(MD, "updated SKF");
         _Other ->
             lager:error(MD, "failed to insert skf table not found ~p", [
@@ -153,7 +154,7 @@ delete(SKF) ->
             MaxCopies = hpr_skf:max_copies(SKF),
 
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
-            true = ets:delete(SKFETS, hpr_utils:hex_to_bin(SessionKey)),
+            true = ets:delete(SKFETS, {hpr_utils:hex_to_bin(SessionKey), DevAddr}),
             lager:debug(
                 [
                     {route_id, RouteID},
@@ -242,7 +243,7 @@ replace_route(RouteID, NewSKFs) ->
                 {write_concurrency, true},
                 {heir, erlang:whereis(?SKF_HEIR), RouteID}
             ]),
-            lists:foreach(fun(SKF) -> do_insert_skf(NewTab, SKF) end, NewSKFs),
+            lists:foreach(fun(SKF) -> ok = do_insert_skf(NewTab, SKF) end, NewSKFs),
 
             ok = hpr_route_storage:insert(
                 hpr_route_ets:route(RouteETS),
@@ -259,7 +260,7 @@ replace_route(RouteID, NewSKFs) ->
     end.
 
 -spec lookup_route(RouteID :: hpr_route:id()) ->
-    list({SessionKey :: binary(), {Devaddr :: binary(), MaxCopies :: non_neg_integer()}}).
+    list({{SessionKey :: binary(), Devaddr :: binary()}, MaxCopies :: non_neg_integer()}).
 lookup_route(RouteID) ->
     case hpr_route_storage:lookup(RouteID) of
         {ok, RouteETS} ->
@@ -289,15 +290,7 @@ do_insert_skf(SKFETS, SKF) ->
     SessionKey = hpr_skf:session_key(SKF),
     MaxCopies = hpr_skf:max_copies(SKF),
 
-    true = ets:insert(SKFETS, {hpr_utils:hex_to_bin(SessionKey), {DevAddr, MaxCopies}}),
-    ok.
-
--spec do_rehydrate_insert_skf(
-    Table :: ets:table(),
-    Entry :: {SessionKey :: binary(), {DevAddr :: binary(), MaxCopies :: non_neg_integer()}}
-) -> ok.
-do_rehydrate_insert_skf(SKFETS, SKF) ->
-    true = ets:insert(SKFETS, SKF),
+    true = ets:insert(SKFETS, {{hpr_utils:hex_to_bin(SessionKey), DevAddr}, MaxCopies}),
     ok.
 
 -spec skf_md(hpr_route:id(), hpr_skf:skf()) -> proplists:proplist().

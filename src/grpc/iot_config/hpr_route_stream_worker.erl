@@ -448,7 +448,11 @@ process_route_stream_res(remove, {skf, SKF}) ->
     hpr_skf_storage:delete(SKF).
 
 -spec refresh_skfs(hpr_route:id()) ->
-    {ok, {Old :: list(hpr_skf:skf()), Current :: list(hpr_skf:skf())}} | {error, any()}.
+    {ok, {
+        Old :: list({{SessionKey :: binary(), Devaddr :: binary()}, MaxCopies :: non_neg_integer()}),
+        Current :: list(hpr_skf:skf())
+    }}
+    | {error, any()}.
 refresh_skfs(RouteID) ->
     SKFReq = #iot_config_route_skf_list_req_v1_pb{
         route_id = RouteID,
