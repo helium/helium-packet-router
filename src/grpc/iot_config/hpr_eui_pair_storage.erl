@@ -25,6 +25,9 @@
 
 -define(ETS, hpr_route_eui_pairs_ets).
 -define(DETS, hpr_route_eui_pairs_dets).
+
+%% Version 1: dets is a set
+%% Version 2: dets is a bag
 -define(DETS_FILENAME, "hpr_eui_pair_storage_v2.dets").
 
 -spec init_ets() -> ok.
