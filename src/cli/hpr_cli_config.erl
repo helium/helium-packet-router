@@ -253,8 +253,8 @@ config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
                 SKFETS = hpr_route_ets:skf_ets(RouteETS),
                 Size = ets:info(SKFETS, size),
                 case Size > Min of
-                    false -> {true, {RouteID, Size}};
-                    true -> false
+                    true -> {true, {RouteID, Size}};
+                    false -> false
                 end
             end,
             hpr_route_storage:all_route_ets()
