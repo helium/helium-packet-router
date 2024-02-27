@@ -41,7 +41,7 @@ config_usage() ->
             "    [--display_euis] default: false (EUIs not included)\n",
             "    [--display_skfs] default: false (SKFs not included)\n",
             "config route refresh_all                    - Refresh all routes\n",
-            "    [--ignore_empty_route] default: false (do not update routes that are locally empty)\n",
+            "    [--minimum] default: 1 (need a minimum of 1 SKFs ro be updated)\n",
             "config route refresh <route_id>             - Refresh route\n",
             "config route activate <route_id>            - Activate route\n",
             "config route deactivate <route_id>          - Deactivate route\n",
@@ -80,7 +80,9 @@ config_cmd() ->
         [
             ["config", "route", "refresh_all"],
             [],
-            [{ignore_empty_route, [{longname, "ignore_empty_route"}, {datatype, boolean}]}],
+            [
+                {minimum, [{longname, "minimum"}, {datatype, integer}]}
+            ],
             fun config_route_refresh_all/3
         ],
         [
@@ -243,14 +245,14 @@ config_route(_, _, _) ->
 
 config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
     Options = maps:from_list(Flags),
-    IgnoreEmptyRoute = maps:is_key(ignore_empty_route, Options),
+    Min = maps:is_key(minimum, Options, 1),
     erlang:spawn(fun() ->
         List = lists:filtermap(
             fun(RouteETS) ->
                 RouteID = hpr_route:id(hpr_route_ets:route(RouteETS)),
                 SKFETS = hpr_route_ets:skf_ets(RouteETS),
                 Size = ets:info(SKFETS, size),
-                case IgnoreEmptyRoute andalso Size == 0 of
+                case Size > Min of
                     false -> {true, {RouteID, Size}};
                     true -> false
                 end
