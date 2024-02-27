@@ -25,6 +25,7 @@
 
 -define(ETS, hpr_route_eui_pairs_ets).
 -define(DETS, hpr_route_eui_pairs_dets).
+-define(DETS_FILENAME, "hpr_eui_pair_storage_v2.dets").
 
 -spec init_ets() -> ok.
 init_ets() ->
@@ -175,10 +176,10 @@ rehydrate_from_dets() ->
 
 with_open_dets(FN) ->
     DataDir = hpr_utils:base_data_dir(),
-    DETSFile = filename:join([DataDir, "hpr_eui_pair_storage.dets"]),
+    DETSFile = filename:join([DataDir, ?DETS_FILENAME]),
     ok = filelib:ensure_dir(DETSFile),
 
-    case dets:open_file(?DETS, [{file, DETSFile}, {type, set}]) of
+    case dets:open_file(?DETS, [{file, DETSFile}, {type, bag}]) of
         {ok, _Dets} ->
             lager:info("~s opened by ~p", [DETSFile, self()]),
             FN(),
