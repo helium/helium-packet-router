@@ -442,6 +442,112 @@ config_eui(["config", "eui"], [], Flags) ->
 config_eui(_, _, _) ->
     usage.
 
+do_config_eui(AppEUI, DevEUI) ->
+    AppEUINum = erlang:list_to_integer(AppEUI, 16),
+    DevEUINum = erlang:list_to_integer(DevEUI, 16),
+
+    Found = hpr_eui_pair_storage:lookup(AppEUINum, DevEUINum),
+
+    %% ======================================================
+    %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
+    %% - Dev EUI :: D52B4AD7C7D613C5 (15360453244708328389)
+    %% - Routes  :: 1 (OUI, Route ID)
+    %%   -- (60, "7c3071f8-b4ae-11ed-becd-7f254cab7af3")
+    %%
+
+    Spacer = [io_lib:format("========================================================~n", [])],
+    Info = [
+        io_lib:format("- App EUI :: ~p (~p)~n", [AppEUI, AppEUINum]),
+        io_lib:format("- Dev EUI :: ~p (~p)~n", [DevEUI, DevEUINum]),
+        io_lib:format("- Routes  :: ~p (OUI, Route ID)~n", [erlang:length(Found)])
+    ],
+
+    Routes = lists:map(
+        fun(RouteETS) ->
+            Route = hpr_route_ets:route(RouteETS),
+            io_lib:format("  -- (~p, ~p)~n", [hpr_route:oui(Route), hpr_route:id(Route)])
+        end,
+        Found
+    ),
+
+    c_list(Spacer ++ Info ++ Routes).
+
+do_single_eui(app_eui, AppEUI) ->
+    EUINum = erlang:list_to_integer(AppEUI, 16),
+    Found = lists:foldl(
+        fun({App, Dev, RouteID}, Acc) ->
+            EUIs = maps:get(RouteID, Acc, []),
+            maps:put(RouteID, [{App, Dev} | EUIs], Acc)
+        end,
+        #{},
+        hpr_eui_pair_storage:lookup_app_eui(EUINum)
+    ),
+
+    %% ======================================================
+    %% - App EUI  :: 6081F9413229AD32 (6954113358046539058) found in X Routes
+    %% - Route ID :: 817aaade-562a-99aa-8757-235e5f2e148e
+    %% - Count    :: 1 (AppEUI, DevEUI)
+    %%   -- (6081F9413229AD32, 0102030405060708)
+    %%
+    Spacer = [
+        io_lib:format("========================================================~n", []),
+        io_lib:format("- App EUI  :: ~s (~p) found in ~p Routes ~n", [
+            AppEUI, EUINum, maps:size(Found)
+        ])
+    ],
+    Info =
+        maps:fold(
+            fun(RouteID, EUIs, Acc) ->
+                Acc ++
+                    [
+                        io_lib:format("- Route ID :: ~p~n", [RouteID]),
+                        io_lib:format("- Count    :: ~p (AppEUI, DevEUI)~n", [erlang:length(EUIs)])
+                    ] ++
+                    lists:map(fun format_eui/1, EUIs)
+            end,
+            [],
+            Found
+        ),
+    c_list(Spacer ++ Info);
+do_single_eui(dev_eui, DevEUI) ->
+    EUINum = erlang:list_to_integer(DevEUI, 16),
+    Found = lists:foldl(
+        fun({App, Dev, RouteID}, Acc) ->
+            EUIs = maps:get(RouteID, Acc, []),
+            maps:put(RouteID, [{App, Dev} | EUIs], Acc)
+        end,
+        #{},
+        hpr_eui_pair_storage:lookup_dev_eui(EUINum)
+    ),
+
+    %% ======================================================
+    %% - Dev EUI :: 6081F9413229AD32 (6954113358046539058) found in X Routes
+    %% - Route ID :: 817aaade-562a-99aa-8757-235e5f2e148e
+    %% - Count    :: 1 (AppEUI, DevEUI)
+    %%   -- (6081F9413229AD32, 0102030405060708)
+    %%
+
+    Spacer = [
+        io_lib:format("========================================================~n", []),
+        io_lib:format("- App EUI  :: ~s (~p) found in ~p Routes ~n", [
+            DevEUI, EUINum, maps:size(Found)
+        ])
+    ],
+    Info =
+        maps:fold(
+            fun(RouteID, EUIs, Acc) ->
+                Acc ++
+                    [
+                        io_lib:format("- Route ID :: ~p~n", [RouteID]),
+                        io_lib:format("- Count    :: ~p (AppEUI, DevEUI)~n", [erlang:length(EUIs)])
+                    ] ++
+                    lists:map(fun format_eui/1, EUIs)
+            end,
+            [],
+            Found
+        ),
+    c_list(Spacer ++ Info).
+
 config_counts(["config", "counts"], [], []) ->
     Counts = hpr_metrics:counts(),
     c_table([
@@ -495,73 +601,6 @@ config_reconnect(["config", "reconnect"], [], Flags) ->
     end;
 config_reconnect(_, _, _) ->
     usage.
-
-do_config_eui(AppEUI, DevEUI) ->
-    AppEUINum = erlang:list_to_integer(AppEUI, 16),
-    DevEUINum = erlang:list_to_integer(DevEUI, 16),
-
-    Found = hpr_eui_pair_storage:lookup(AppEUINum, DevEUINum),
-
-    %% ======================================================
-    %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
-    %% - Dev EUI :: D52B4AD7C7D613C5 (15360453244708328389)
-    %% - Routes  :: 1 (OUI, Route ID)
-    %%   -- (60, "7c3071f8-b4ae-11ed-becd-7f254cab7af3")
-    %%
-
-    Spacer = [io_lib:format("========================================================~n", [])],
-    Info = [
-        io_lib:format("- App EUI :: ~p (~p)~n", [AppEUI, AppEUINum]),
-        io_lib:format("- Dev EUI :: ~p (~p)~n", [DevEUI, DevEUINum]),
-        io_lib:format("- Routes  :: ~p (OUI, Route ID)~n", [erlang:length(Found)])
-    ],
-
-    Routes = lists:map(
-        fun(RouteETS) ->
-            Route = hpr_route_ets:route(RouteETS),
-            io_lib:format("  -- (~p, ~p)~n", [hpr_route:oui(Route), hpr_route:id(Route)])
-        end,
-        Found
-    ),
-
-    c_list(Spacer ++ Info ++ Routes).
-
-do_single_eui(app_eui, AppEUI) ->
-    EUINum = erlang:list_to_integer(AppEUI, 16),
-    Found = hpr_eui_pair_storage:lookup_app_eui(EUINum),
-
-    %% ======================================================
-    %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
-    %% - Count  :: 1 (AppEUI, DevEUI)
-    %%   -- (6081F9413229AD32, 0102030405060708)
-    %%
-
-    Spacer = [io_lib:format("========================================================~n", [])],
-    Info = [
-        io_lib:format("- App EUI :: ~p (~p)~n", [AppEUI, EUINum]),
-        io_lib:format("- Count   :: ~p (AppEUI, DevEUI)~n", [erlang:length(Found)])
-    ],
-
-    EUIsInfo = lists:map(fun format_eui/1, Found),
-    c_list(Spacer ++ Info ++ EUIsInfo);
-do_single_eui(dev_eui, DevEUI) ->
-    EUINum = erlang:list_to_integer(DevEUI, 16),
-    Found = hpr_eui_pair_storage:lookup_dev_eui(EUINum),
-
-    %% ======================================================
-    %% - Dev EUI :: 6081F9413229AD32 (6954113358046539058)
-    %% - Count  :: 1 (AppEUI, DevEUI)
-    %%   -- (0102030405060708, 6081F9413229AD32)
-    %%
-
-    Spacer = [io_lib:format("========================================================~n", [])],
-    Info = [
-        io_lib:format("- Dev EUI :: ~p (~p)~n", [DevEUI, EUINum]),
-        io_lib:format("- Count   :: ~p (AppEUI, DevEUI)~n", [erlang:length(Found)])
-    ],
-
-    EUIsInfo = lists:map(fun format_eui/1, Found),
-    c_list(Spacer ++ Info ++ EUIsInfo).
 
 %%--------------------------------------------------------------------
 %% Helpers

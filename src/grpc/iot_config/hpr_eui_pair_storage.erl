@@ -128,15 +128,15 @@ test_tab_name() ->
 %% ------------------------------------------------------------------
 
 -spec lookup_dev_eui(DevEUI :: non_neg_integer()) ->
-    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer(), RouteID :: string()}).
 lookup_dev_eui(DevEUI) ->
-    MS = [{{{'$1', DevEUI}, '_'}, [], [{{'$1', DevEUI}}]}],
+    MS = [{{{'$1', DevEUI}, '$2'}, [], [{{'$1', DevEUI, '$2'}}]}],
     ets:select(?ETS, MS).
 
 -spec lookup_app_eui(AppEUI :: non_neg_integer()) ->
-    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer(), RouteID :: string()}).
 lookup_app_eui(AppEUI) ->
-    MS = [{{{AppEUI, '$1'}, '_'}, [], [{{AppEUI, '$1'}}]}],
+    MS = [{{{AppEUI, '$1'}, '$2'}, [], [{{AppEUI, '$1', '$2'}}]}],
     ets:select(?ETS, MS).
 
 -spec lookup_for_route(RouteID :: hpr_route:id()) ->
