@@ -245,7 +245,7 @@ config_route(_, _, _) ->
 
 config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
     Options = maps:from_list(Flags),
-    Min = maps:is_key(minimum, Options, 1),
+    Min = maps:get(minimum, Options, 1),
     erlang:spawn(fun() ->
         List = lists:filtermap(
             fun(RouteETS) ->
