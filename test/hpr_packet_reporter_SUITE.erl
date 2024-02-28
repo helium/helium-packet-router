@@ -181,8 +181,7 @@ free_net_ids_test(_Config) ->
     %% Send N packets
     N = 100,
     OUI = 1,
-    %% "C00053"
-    NetID = 12582995,
+    NetID = 16#C00053,
     Route = hpr_route:test_new(#{
         id => "test-route",
         oui => OUI,

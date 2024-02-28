@@ -178,9 +178,8 @@ encode_packet(Packet, Route, true = IsFree, ReceivedTime) ->
     <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>;
 encode_packet(Packet, Route, false, ReceivedTime) ->
     NetID = hpr_route:net_id(Route),
-    NetIDStr = hpr_utils:int_to_hex_string(NetID),
     FreeNetIDs = application:get_env(?APP, ?HPR_FREE_NET_IDS, []),
-    IsFree = lists:member(NetIDStr, FreeNetIDs),
+    IsFree = lists:member(NetID, FreeNetIDs),
     EncodedPacket = hpr_packet_report:encode(
         hpr_packet_report:new(Packet, Route, IsFree, ReceivedTime)
     ),

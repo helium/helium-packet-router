@@ -2,7 +2,7 @@
     {hpr, [
         {data_dir, "/var/data"},
         %% See https://github.com/helium/HIP/blob/main/0102-helium-educational-lns.md
-        {hpr_free_net_ids, ["C00053"]},
+        {hpr_free_net_ids, [16#C00053]},
         {http_roaming_sender_nsid, <<"${HPR_ROAMING_SENDER_NSID}">>},
         {no_routes, [{"${HPR_PP_HOST_1}", 8080}, {"${HPR_PP_HOST_2}", 8080}]},
         {packet_reporter, #{
