@@ -51,8 +51,9 @@ config_usage() ->
             "config counts                       - Simple Counts of Configuration\n",
             "config checkpoint next              - Time until next writing of configuration to disk\n"
             "config checkpoint write             - Write current configuration to disk\n",
-            "config checkpoint reset [--commit]  - Set checkpoint timestamp to beginning of time (0)\n"
-            "config reconnect [--commit]         - Reset connection to Configuration Service\n"
+            "config reset checkpoint [--commit]  - Set checkpoint timestamp to beginning of time (0)\n",
+            "config reset stream [--commit]      - Reset stream to Configuration Service\n",
+            "config reset channel [--commit]     - Reset channel to Configuration Service\n"
         ]
     ].
 
@@ -123,16 +124,22 @@ config_cmd() ->
         [["config", "checkpoint", "next"], [], [], fun config_checkpoint_next/3],
         [["config", "checkpoint", "write"], [], [], fun config_checkpoint_write/3],
         [
-            ["config", "checkpoint", "reset"],
+            ["config", "reset", "checkpoint"],
             [],
             [{commit, [{longname, "commit"}, {datatype, boolean}]}],
-            fun config_checkpoint_reset/3
+            fun config_reset/3
         ],
         [
-            ["config", "reconnect"],
+            ["config", "reset", "stream"],
             [],
             [{commit, [{longname, "commit"}, {datatype, boolean}]}],
-            fun config_reconnect/3
+            fun config_reset/3
+        ],
+        [
+            ["config", "reset", "channel"],
+            [],
+            [{commit, [{longname, "commit"}, {datatype, boolean}]}],
+            fun config_reset/3
         ]
     ].
 
@@ -578,28 +585,28 @@ config_checkpoint_write(["config", "checkpoint", "write"], [], []) ->
 config_checkpoint_write(_, _, _) ->
     usage.
 
-config_checkpoint_reset(["config", "checkpoint", "reset"], [], Flags) ->
-    Options = maps:from_list(Flags),
-    case maps:is_key(commit, Options) of
-        true ->
-            ok = hpr_route_stream_worker:reset_timestamp(),
-            c_text("Checkpoint reset");
-        false ->
-            c_text("Must specify --commit to reset checkpoint")
-    end;
-config_checkpoint_reset(_, _, _) ->
-    usage.
 
-config_reconnect(["config", "reconnect"], [], Flags) ->
+config_reset(["config", "reset", ResetType], [], Flags) ->
     Options = maps:from_list(Flags),
     case maps:is_key(commit, Options) of
         true ->
-            ok = hpr_route_stream_worker:reset_channel(),
-            c_text("Reconnected");
+            case ResetType of
+                "checkpoint" ->
+                    ok = hpr_route_stream_worker:reset_timestamp(),
+                    c_text("Checkpoint reset");
+                "channel" ->
+                    ok = hpr_route_channel_worker:reset_channel(),
+                    c_text("New Channel");
+                "stream" ->
+                    ok = hpr_route_stream_worker:reset_stream(),
+                    c_text("New Stream");
+                _ ->
+                    c_text("cannot reset ~s", [ResetType])
+            end;
         false ->
-            c_text("Must specify --commit to reset connection")
+            c_text("Must specify --commit to reset ~s", [ResetType])
     end;
-config_reconnect(_, _, _) ->
+config_reset(_, _, _) ->
     usage.
 
 %%--------------------------------------------------------------------
