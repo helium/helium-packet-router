@@ -1,6 +1,7 @@
 # Helium Packet Router
 
 ## [Routing](docs/routing.md)
+## [Playbook](docs/playbook.md)
 
 ## Releases
 As releases are tagged on github, debian packages will be automatically built

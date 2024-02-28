@@ -19,3 +19,4 @@ rebar3.crashdump
 src/grpc/autogen
 *~
 .env
+hpr_route_ets/

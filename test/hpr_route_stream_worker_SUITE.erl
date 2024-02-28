@@ -14,6 +14,8 @@
     main_test/1,
     refresh_route_test/1,
     stream_crash_resume_updates_test/1,
+    reset_stream_test/1,
+    reset_channel_test/1,
     app_restart_rehydrate_test/1,
     route_remove_delete_skf_dets_test/1
 ]).
@@ -33,6 +35,8 @@ all() ->
         main_test,
         refresh_route_test,
         stream_crash_resume_updates_test,
+        reset_stream_test,
+        reset_channel_test,
         app_restart_rehydrate_test,
         route_remove_delete_skf_dets_test
     ].
@@ -211,8 +215,26 @@ app_restart_rehydrate_test(_Config) ->
     ok.
 
 stream_crash_resume_updates_test(_Config) ->
+    stream_resume_test_runner(
+        fun() ->
+            true = exit(whereis(hpr_route_stream_worker), kill),
+            ok
+        end
+    ).
+
+reset_stream_test(_Config) ->
+    stream_resume_test_runner(
+        fun() -> hpr_route_stream_worker:reset_stream() end
+    ).
+
+reset_channel_test(_Config) ->
+    stream_resume_test_runner(
+        fun() -> hpr_route_stream_worker:reset_channel() end
+    ).
+
+stream_resume_test_runner(ResetFn) ->
     %% The first time the stream worker starts up, it should ingest all available config.
-    %% Then we kill it.
+    %% Then we stop the stream somehow `ResetFun()'.
     %% Then we start it up again, and it should ingest only new available config.
 
     ?assertMatch(
@@ -268,18 +290,44 @@ stream_crash_resume_updates_test(_Config) ->
     ok = timer:sleep(150),
     %% Make sure the latest config timestamp is saved
     ok = hpr_route_stream_worker:checkpoint(),
-    %% Kill the stream worker
-    exit(whereis(hpr_route_stream_worker), kill),
+
+    %% Kill the stream worker ==================================================
+    ok = ResetFn(),
+    %% =========================================================================
+
     ok = test_utils:wait_until(
         fun() ->
-            whereis(hpr_route_stream_worker) =/= undefined andalso
-                erlang:is_process_alive(whereis(hpr_route_stream_worker)) andalso
-                hpr_route_stream_worker:test_stream() =/= undefined andalso
-                erlang:is_pid(erlang:whereis(hpr_test_ics_route_service))
+            WorkerAlive =
+                case erlang:whereis(hpr_route_stream_worker) of
+                    undefined -> false;
+                    Pid0 when erlang:is_pid(Pid0) -> erlang:is_process_alive(Pid0)
+                end,
+
+            %% hpr_route_stream_worker may not be alive
+            TestStream = catch hpr_route_stream_worker:test_stream(),
+
+            TestServiceAlive =
+                case erlang:whereis(hpr_test_ics_route_service) of
+                    undefined -> false;
+                    Pid1 when erlang:is_pid(Pid1) -> erlang:is_process_alive(Pid1)
+                end,
+
+            {
+                WorkerAlive andalso
+                    TestStream =/= undefined andalso
+                    TestServiceAlive,
+                [
+                    {worker_alive, WorkerAlive},
+                    {test_stream, TestStream},
+                    {route_service, TestServiceAlive}
+                ]
+            }
         end,
         20,
         500
     ),
+    %% Give the new worker a little bit of time init with the config service.
+    ok = timer:sleep(150),
 
     %% Create a bunch of new data to ingest
     #{
@@ -713,7 +761,8 @@ check_config_counts(
                         ]
                     };
                 _ ->
-                    {false, {route_not_found, RouteID}}
+                    {false, {route_not_found, RouteID},
+                        {all_routes, [hpr_route_storage:all_routes()]}}
             end
         end
     ).

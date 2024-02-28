@@ -26,6 +26,10 @@
 -define(ETS, hpr_route_eui_pairs_ets).
 -define(DETS, hpr_route_eui_pairs_dets).
 
+%% Version 1: dets is a set
+%% Version 2: dets is a bag
+-define(DETS_FILENAME, "hpr_eui_pair_storage_v2.dets").
+
 -spec init_ets() -> ok.
 init_ets() ->
     ?ETS = ets:new(?ETS, [
@@ -124,15 +128,15 @@ test_tab_name() ->
 %% ------------------------------------------------------------------
 
 -spec lookup_dev_eui(DevEUI :: non_neg_integer()) ->
-    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer(), RouteID :: string()}).
 lookup_dev_eui(DevEUI) ->
-    MS = [{{{'$1', DevEUI}, '_'}, [], [{{'$1', DevEUI}}]}],
+    MS = [{{{'$1', DevEUI}, '$2'}, [], [{{'$1', DevEUI, '$2'}}]}],
     ets:select(?ETS, MS).
 
 -spec lookup_app_eui(AppEUI :: non_neg_integer()) ->
-    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer()}).
+    list({AppEUI :: non_neg_integer(), DevEUI :: non_neg_integer(), RouteID :: string()}).
 lookup_app_eui(AppEUI) ->
-    MS = [{{{AppEUI, '$1'}, '_'}, [], [{{AppEUI, '$1'}}]}],
+    MS = [{{{AppEUI, '$1'}, '$2'}, [], [{{AppEUI, '$1', '$2'}}]}],
     ets:select(?ETS, MS).
 
 -spec lookup_for_route(RouteID :: hpr_route:id()) ->
@@ -175,10 +179,10 @@ rehydrate_from_dets() ->
 
 with_open_dets(FN) ->
     DataDir = hpr_utils:base_data_dir(),
-    DETSFile = filename:join([DataDir, "hpr_eui_pair_storage.dets"]),
+    DETSFile = filename:join([DataDir, ?DETS_FILENAME]),
     ok = filelib:ensure_dir(DETSFile),
 
-    case dets:open_file(?DETS, [{file, DETSFile}, {type, set}]) of
+    case dets:open_file(?DETS, [{file, DETSFile}, {type, bag}]) of
         {ok, _Dets} ->
             lager:info("~s opened by ~p", [DETSFile, self()]),
             FN(),

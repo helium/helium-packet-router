@@ -68,11 +68,12 @@
 
 -export([
     do_checkpoint/1,
-    reset_timestamp/0,
     checkpoint_timer/0,
     print_next_checkpoint/0,
     last_timestamp/0,
-    reset_connection/0
+    reset_timestamp/0,
+    reset_channel/0,
+    reset_stream/0
 ]).
 
 -ifdef(TEST).
@@ -145,7 +146,7 @@ start_link(Args) ->
 
 -spec refresh_route(hpr_route:id()) -> {ok, refresh_map()} | {error, any()}.
 refresh_route(RouteID) ->
-    gen_server:call(?MODULE, {refresh_route, RouteID}, timer:seconds(120)).
+    gen_server:call(?MODULE, {refresh_route, RouteID}, timer:seconds(300)).
 
 -spec checkpoint() -> ok.
 checkpoint() ->
@@ -170,10 +171,6 @@ schedule_checkpoint() ->
     {ok, Timer} = timer:apply_after(timer:seconds(Delay), ?MODULE, checkpoint, []),
     {erlang:system_time(millisecond), Timer}.
 
--spec reset_timestamp() -> ok.
-reset_timestamp() ->
-    gen_server:call(?MODULE, reset_timestamp).
-
 -spec checkpoint_timer() -> undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}.
 checkpoint_timer() ->
     gen_server:call(?MODULE, checkpoint_timer).
@@ -194,9 +191,17 @@ print_next_checkpoint() ->
     lager:info(Msg),
     Msg.
 
--spec reset_connection() -> ok.
-reset_connection() ->
-    gen_server:call(?MODULE, reset_connection, timer:seconds(30)).
+-spec reset_timestamp() -> ok.
+reset_timestamp() ->
+    gen_server:call(?MODULE, reset_timestamp).
+
+-spec reset_channel() -> ok.
+reset_channel() ->
+    gen_server:call(?MODULE, reset_channel, timer:seconds(30)).
+
+-spec reset_stream() -> ok.
+reset_stream() ->
+    gen_server:call(?MODULE, reset_stream, timer:seconds(30)).
 
 -ifdef(TEST).
 
@@ -229,12 +234,7 @@ init(Args) ->
     {ok, #state{
         stream = undefined,
         conn_backoff = Backoff,
-        counts = #{
-            route => 0,
-            eui_pair => 0,
-            skf => 0,
-            devaddr_range => 0
-        },
+        counts = new_counts(),
         last_timestamp = LastTimestamp
     }}.
 
@@ -270,9 +270,6 @@ handle_call({refresh_route, RouteID}, _From, State) ->
         end,
 
     {reply, Reply, State};
-handle_call(reset_timestamp, _From, #state{} = State) ->
-    ok = dets:insert(?DETS, {timestamp, 0}),
-    {reply, ok, State#state{last_timestamp = 0}};
 handle_call(last_timetstamp, _From, #state{last_timestamp = LastTimestamp} = State) ->
     {reply, LastTimestamp, State};
 handle_call(checkpoint_timer, _From, #state{checkpoint_timer = CheckpointTimerRef} = State) ->
@@ -291,8 +288,30 @@ handle_call(checkpoint, _From, #state{last_timestamp = LastTimestamp} = State) -
     lager:info([{timestamp, LastTimestamp}], "checkpoint done"),
 
     {reply, ok, State#state{checkpoint_timer = CheckpointTimerRef}};
-handle_call(reset_connection, _From, State) ->
-    {stop, manual_connection_reset, ok, State};
+%% Resets
+handle_call(reset_timestamp, _From, #state{} = State) ->
+    ok = dets:insert(?DETS, {timestamp, 0}),
+    {reply, ok, State#state{last_timestamp = 0}};
+handle_call(reset_channel, _From, #state{} = State) ->
+    %% Attempt to signal to the other side we're going down.
+    Stopped = grpcbox_channel:stop(?IOT_CONFIG_CHANNEL),
+    lager:info("channel stopped ~w", [Stopped]),
+
+    Config = application:get_env(?APP, ?IOT_CONFIG_SERVICE, #{}),
+    Started = hpr_sup:maybe_start_channel(Config, ?IOT_CONFIG_CHANNEL),
+    lager:info("channel started ~w", [Started]),
+
+    self() ! ?INIT_STREAM,
+
+    {reply, ok, State#state{stream = undefined, counts = new_counts()}};
+handle_call(reset_stream, _From, #state{stream = Stream} = State) ->
+    %% Attempt to signal to the other side we're going down.
+    Stopped = grpcbox_client:close_send(Stream),
+    lager:info("stream stopped ~w", [Stopped]),
+
+    self() ! ?INIT_STREAM,
+
+    {reply, ok, State#state{stream = undefined, counts = new_counts()}};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
@@ -413,9 +432,14 @@ handle_info(_Msg, State) ->
     lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{checkpoint_timer = CheckpointTimer, stream = Stream} = _State) ->
     lager:error("terminate ~p", [_Reason]),
+    maybe_cancel_timer(CheckpointTimer),
     dets:close(?DETS),
+    case Stream of
+        undefined -> ok;
+        _ -> grpcbox_client:close_send(Stream)
+    end,
     ok.
 
 %% ------------------------------------------------------------------
@@ -448,7 +472,11 @@ process_route_stream_res(remove, {skf, SKF}) ->
     hpr_skf_storage:delete(SKF).
 
 -spec refresh_skfs(hpr_route:id()) ->
-    {ok, {Old :: list(hpr_skf:skf()), Current :: list(hpr_skf:skf())}} | {error, any()}.
+    {ok, {
+        Old :: list({{SessionKey :: binary(), Devaddr :: binary()}, MaxCopies :: non_neg_integer()}),
+        Current :: list(hpr_skf:skf())
+    }}
+    | {error, any()}.
 refresh_skfs(RouteID) ->
     SKFReq = #iot_config_route_skf_list_req_v1_pb{
         route_id = RouteID,
@@ -604,3 +632,12 @@ maybe_cancel_timer(undefined) ->
 maybe_cancel_timer({_TimeScheduled, Timer}) ->
     lager:info([{t, Timer}, {timer, timer:cancel(Timer)}], "maybe cancelling timer"),
     ok.
+
+-spec new_counts() -> map().
+new_counts() ->
+    #{
+        route => 0,
+        eui_pair => 0,
+        skf => 0,
+        devaddr_range => 0
+    }.

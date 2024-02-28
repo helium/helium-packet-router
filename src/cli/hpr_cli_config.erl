@@ -40,6 +40,8 @@ config_usage() ->
             "config route <route_id>                     - Info for route\n",
             "    [--display_euis] default: false (EUIs not included)\n",
             "    [--display_skfs] default: false (SKFs not included)\n",
+            "config route refresh_all                    - Refresh all routes\n",
+            "    [--minimum] default: 1 (need a minimum of 1 SKFs ro be updated)\n",
             "config route refresh <route_id>             - Refresh route\n",
             "config route activate <route_id>            - Activate route\n",
             "config route deactivate <route_id>          - Deactivate route\n",
@@ -49,8 +51,9 @@ config_usage() ->
             "config counts                       - Simple Counts of Configuration\n",
             "config checkpoint next              - Time until next writing of configuration to disk\n"
             "config checkpoint write             - Write current configuration to disk\n",
-            "config checkpoint reset [--commit]  - Set checkpoint timestamp to beginning of time (0)\n"
-            "config reconnect [--commit]         - Reset connection to Configuration Service\n"
+            "config reset checkpoint [--commit]  - Set checkpoint timestamp to beginning of time (0)\n",
+            "config reset stream [--commit]      - Reset stream to Configuration Service\n",
+            "config reset channel [--commit]     - Reset channel to Configuration Service\n"
         ]
     ].
 
@@ -74,6 +77,14 @@ config_cmd() ->
                 {display_skfs, [{longname, "display_skfs"}, {datatype, boolean}]}
             ],
             fun config_route/3
+        ],
+        [
+            ["config", "route", "refresh_all"],
+            [],
+            [
+                {minimum, [{longname, "minimum"}, {datatype, integer}]}
+            ],
+            fun config_route_refresh_all/3
         ],
         [
             ["config", "route", "refresh", '*'],
@@ -113,16 +124,22 @@ config_cmd() ->
         [["config", "checkpoint", "next"], [], [], fun config_checkpoint_next/3],
         [["config", "checkpoint", "write"], [], [], fun config_checkpoint_write/3],
         [
-            ["config", "checkpoint", "reset"],
+            ["config", "reset", "checkpoint"],
             [],
             [{commit, [{longname, "commit"}, {datatype, boolean}]}],
-            fun config_checkpoint_reset/3
+            fun config_reset/3
         ],
         [
-            ["config", "reconnect"],
+            ["config", "reset", "stream"],
             [],
             [{commit, [{longname, "commit"}, {datatype, boolean}]}],
-            fun config_reconnect/3
+            fun config_reset/3
+        ],
+        [
+            ["config", "reset", "channel"],
+            [],
+            [{commit, [{longname, "commit"}, {datatype, boolean}]}],
+            fun config_reset/3
         ]
     ].
 
@@ -233,6 +250,75 @@ config_route(["config", "route", RouteID], [], Flags) ->
 config_route(_, _, _) ->
     usage.
 
+config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
+    Options = maps:from_list(Flags),
+    Min = maps:get(minimum, Options, 1),
+    erlang:spawn(fun() ->
+        List = lists:filtermap(
+            fun(RouteETS) ->
+                RouteID = hpr_route:id(hpr_route_ets:route(RouteETS)),
+                SKFETS = hpr_route_ets:skf_ets(RouteETS),
+                Size = ets:info(SKFETS, size),
+                case Size >= Min of
+                    true -> {true, {RouteID, Size}};
+                    false -> false
+                end
+            end,
+            hpr_route_storage:all_route_ets()
+        ),
+        Sorted = lists:sort(fun({_, A}, {_, B}) -> A > B end, List),
+        RouteIDs = [ID || {ID, _} <- Sorted],
+        Total = erlang:length(RouteIDs),
+        TimeIt = fun(Func) ->
+            {Time0, Val} = timer:tc(Func),
+            Time = erlang:convert_time_unit(Time0, microsecond, millisecond),
+            lager:info("took ~pms", [Time]),
+            Val
+        end,
+        Refresh = fun({Idx, ID}) ->
+            lager:info("~p/~p===========================================================", [
+                Idx, Total
+            ]),
+            TimeIt(fun() ->
+                try hpr_route_stream_worker:refresh_route(ID) of
+                    {ok, Map} ->
+                        lager:info("| Type | Before | After | Removed | Added |"),
+                        lager:info("|------|--------|-------|---------|-------|"),
+                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                            eui,
+                            maps:get(eui_before, Map),
+                            maps:get(eui_after, Map),
+                            maps:get(eui_removed, Map),
+                            maps:get(eui_added, Map)
+                        ]),
+                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                            skf,
+                            maps:get(skf_before, Map),
+                            maps:get(skf_after, Map),
+                            maps:get(skf_removed, Map),
+                            maps:get(skf_added, Map)
+                        ]),
+                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                            addr,
+                            maps:get(devaddr_before, Map),
+                            maps:get(devaddr_after, Map),
+                            maps:get(devaddr_removed, Map),
+                            maps:get(devaddr_added, Map)
+                        ]);
+                    {error, _R} ->
+                        lager:info("ERROR ~p", [_R])
+                catch
+                    _E:_R ->
+                        lager:info("CRASHED ~p", [_R])
+                end
+            end)
+        end,
+        [Refresh(ID) || ID <- lists:zip(lists:seq(1, Total), RouteIDs)]
+    end),
+    c_text("command spawned, look at logs");
+config_route_refresh_all(_, _, _) ->
+    usage.
+
 config_route_refresh(["config", "route", "refresh", RouteID], [], _Flags) ->
     case hpr_route_stream_worker:refresh_route(RouteID) of
         {ok, RefreshMap} ->
@@ -340,7 +426,7 @@ find_skf(SKToFind, [RouteETS | RoutesETS], Acc0) ->
             find_skf(SKToFind, RoutesETS, Acc0);
         SKFs ->
             Acc1 = lists:filtermap(
-                fun({SK, {DevAddr, MaxCopies}}) ->
+                fun({{SK, DevAddr}, MaxCopies}) ->
                     case SK =:= SKToFind of
                         true ->
                             {true, {DevAddr, SK, RouteID, MaxCopies}};
@@ -361,60 +447,6 @@ config_eui(["config", "eui"], [], Flags) ->
         _ -> usage
     end;
 config_eui(_, _, _) ->
-    usage.
-
-config_counts(["config", "counts"], [], []) ->
-    Counts = hpr_metrics:counts(),
-    c_table([
-        [
-            {" Routes ", proplists:get_value(routes, Counts)},
-            {" EUI Pairs ", proplists:get_value(eui_pairs, Counts)},
-            {" SKF ", proplists:get_value(skfs, Counts)},
-            {" DevAddr Ranges ", proplists:get_value(devaddr_ranges, Counts)}
-        ]
-    ]);
-config_counts(_, _, _) ->
-    usage.
-
-config_checkpoint_next(["config", "checkpoint", "next"], [], []) ->
-    Msg = hpr_route_stream_worker:print_next_checkpoint(),
-    c_text(Msg);
-config_checkpoint_next(_, _, _) ->
-    usage.
-
-config_checkpoint_write(["config", "checkpoint", "write"], [], []) ->
-    case timer:tc(fun() -> hpr_route_stream_worker:do_checkpoint(erlang:system_time(second)) end) of
-        {Time0, ok} ->
-            Time = erlang:convert_time_unit(Time0, microsecond, millisecond),
-            c_text("Wrote checkpoint in ~wms", [Time]);
-        Other ->
-            c_text("Something went wrong: ~p", [Other])
-    end;
-config_checkpoint_write(_, _, _) ->
-    usage.
-
-config_checkpoint_reset(["config", "checkpoint", "reset"], [], Flags) ->
-    Options = maps:from_list(Flags),
-    case maps:is_key(commit, Options) of
-        true ->
-            ok = hpr_route_stream_worker:reset_timestamp(),
-            c_text("Checkpoint reset");
-        false ->
-            c_text("Must specify --commit to reset checkpoint")
-    end;
-config_checkpoint_reset(_, _, _) ->
-    usage.
-
-config_reconnect(["config", "reconnect"], [], Flags) ->
-    Options = maps:from_list(Flags),
-    case maps:is_key(commit, Options) of
-        true ->
-            ok = hpr_route_stream_worker:reset_connection(),
-            c_text("Reconnected");
-        false ->
-            c_text("Must specify --commit to reset connection")
-    end;
-config_reconnect(_, _, _) ->
     usage.
 
 do_config_eui(AppEUI, DevEUI) ->
@@ -449,40 +481,132 @@ do_config_eui(AppEUI, DevEUI) ->
 
 do_single_eui(app_eui, AppEUI) ->
     EUINum = erlang:list_to_integer(AppEUI, 16),
-    Found = hpr_eui_pair_storage:lookup_app_eui(EUINum),
+    Found = lists:foldl(
+        fun({App, Dev, RouteID}, Acc) ->
+            EUIs = maps:get(RouteID, Acc, []),
+            maps:put(RouteID, [{App, Dev} | EUIs], Acc)
+        end,
+        #{},
+        hpr_eui_pair_storage:lookup_app_eui(EUINum)
+    ),
 
     %% ======================================================
-    %% - App EUI :: 6081F9413229AD32 (6954113358046539058)
-    %% - Count  :: 1 (AppEUI, DevEUI)
+    %% - App EUI  :: 6081F9413229AD32 (6954113358046539058) found in X Routes
+    %% - Route ID :: 817aaade-562a-99aa-8757-235e5f2e148e
+    %% - Count    :: 1 (AppEUI, DevEUI)
+    %%   -- (6081F9413229AD32, 0102030405060708)
+    %%
+    Spacer = [
+        io_lib:format("========================================================~n", []),
+        io_lib:format("- App EUI  :: ~s (~p) found in ~p Routes ~n", [
+            AppEUI, EUINum, maps:size(Found)
+        ])
+    ],
+    Info =
+        maps:fold(
+            fun(RouteID, EUIs, Acc) ->
+                Acc ++
+                    [
+                        io_lib:format("- Route ID :: ~p~n", [RouteID]),
+                        io_lib:format("- Count    :: ~p (AppEUI, DevEUI)~n", [erlang:length(EUIs)])
+                    ] ++
+                    lists:map(fun format_eui/1, EUIs)
+            end,
+            [],
+            Found
+        ),
+    c_list(Spacer ++ Info);
+do_single_eui(dev_eui, DevEUI) ->
+    EUINum = erlang:list_to_integer(DevEUI, 16),
+    Found = lists:foldl(
+        fun({App, Dev, RouteID}, Acc) ->
+            EUIs = maps:get(RouteID, Acc, []),
+            maps:put(RouteID, [{App, Dev} | EUIs], Acc)
+        end,
+        #{},
+        hpr_eui_pair_storage:lookup_dev_eui(EUINum)
+    ),
+
+    %% ======================================================
+    %% - Dev EUI :: 6081F9413229AD32 (6954113358046539058) found in X Routes
+    %% - Route ID :: 817aaade-562a-99aa-8757-235e5f2e148e
+    %% - Count    :: 1 (AppEUI, DevEUI)
     %%   -- (6081F9413229AD32, 0102030405060708)
     %%
 
-    Spacer = [io_lib:format("========================================================~n", [])],
-    Info = [
-        io_lib:format("- App EUI :: ~p (~p)~n", [AppEUI, EUINum]),
-        io_lib:format("- Count   :: ~p (AppEUI, DevEUI)~n", [erlang:length(Found)])
+    Spacer = [
+        io_lib:format("========================================================~n", []),
+        io_lib:format("- App EUI  :: ~s (~p) found in ~p Routes ~n", [
+            DevEUI, EUINum, maps:size(Found)
+        ])
     ],
+    Info =
+        maps:fold(
+            fun(RouteID, EUIs, Acc) ->
+                Acc ++
+                    [
+                        io_lib:format("- Route ID :: ~p~n", [RouteID]),
+                        io_lib:format("- Count    :: ~p (AppEUI, DevEUI)~n", [erlang:length(EUIs)])
+                    ] ++
+                    lists:map(fun format_eui/1, EUIs)
+            end,
+            [],
+            Found
+        ),
+    c_list(Spacer ++ Info).
 
-    EUIsInfo = lists:map(fun format_eui/1, Found),
-    c_list(Spacer ++ Info ++ EUIsInfo);
-do_single_eui(dev_eui, DevEUI) ->
-    EUINum = erlang:list_to_integer(DevEUI, 16),
-    Found = hpr_eui_pair_storage:lookup_dev_eui(EUINum),
+config_counts(["config", "counts"], [], []) ->
+    Counts = hpr_metrics:counts(),
+    c_table([
+        [
+            {" Routes ", proplists:get_value(routes, Counts)},
+            {" EUI Pairs ", proplists:get_value(eui_pairs, Counts)},
+            {" SKF ", proplists:get_value(skfs, Counts)},
+            {" DevAddr Ranges ", proplists:get_value(devaddr_ranges, Counts)}
+        ]
+    ]);
+config_counts(_, _, _) ->
+    usage.
 
-    %% ======================================================
-    %% - Dev EUI :: 6081F9413229AD32 (6954113358046539058)
-    %% - Count  :: 1 (AppEUI, DevEUI)
-    %%   -- (0102030405060708, 6081F9413229AD32)
-    %%
+config_checkpoint_next(["config", "checkpoint", "next"], [], []) ->
+    Msg = hpr_route_stream_worker:print_next_checkpoint(),
+    c_text(Msg);
+config_checkpoint_next(_, _, _) ->
+    usage.
 
-    Spacer = [io_lib:format("========================================================~n", [])],
-    Info = [
-        io_lib:format("- Dev EUI :: ~p (~p)~n", [DevEUI, EUINum]),
-        io_lib:format("- Count   :: ~p (AppEUI, DevEUI)~n", [erlang:length(Found)])
-    ],
+config_checkpoint_write(["config", "checkpoint", "write"], [], []) ->
+    case timer:tc(fun() -> hpr_route_stream_worker:do_checkpoint(erlang:system_time(second)) end) of
+        {Time0, ok} ->
+            Time = erlang:convert_time_unit(Time0, microsecond, millisecond),
+            c_text("Wrote checkpoint in ~wms", [Time]);
+        Other ->
+            c_text("Something went wrong: ~p", [Other])
+    end;
+config_checkpoint_write(_, _, _) ->
+    usage.
 
-    EUIsInfo = lists:map(fun format_eui/1, Found),
-    c_list(Spacer ++ Info ++ EUIsInfo).
+config_reset(["config", "reset", ResetType], [], Flags) ->
+    Options = maps:from_list(Flags),
+    case maps:is_key(commit, Options) of
+        true ->
+            case ResetType of
+                "checkpoint" ->
+                    ok = hpr_route_stream_worker:reset_timestamp(),
+                    c_text("Checkpoint reset");
+                "channel" ->
+                    ok = hpr_route_stream_worker:reset_channel(),
+                    c_text("New Channel");
+                "stream" ->
+                    ok = hpr_route_stream_worker:reset_stream(),
+                    c_text("New Stream");
+                _ ->
+                    c_text("cannot reset ~s", [ResetType])
+            end;
+        false ->
+            c_text("Must specify --commit to reset ~s", [ResetType])
+    end;
+config_reset(_, _, _) ->
+    usage.
 
 %%--------------------------------------------------------------------
 %% Helpers
@@ -578,7 +702,7 @@ format_eui({App, Dev}) ->
         hpr_utils:int_to_hex_string(App), hpr_utils:int_to_hex_string(Dev)
     ]).
 
-format_skf({SKF, {DevAddr, MaxCopies}}) ->
+format_skf({{SKF, DevAddr}, MaxCopies}) ->
     io_lib:format("  - (~s, ~s, ~w)~n", [
         hpr_utils:int_to_hex_string(DevAddr),
         hpr_utils:bin_to_hex_string(SKF),
