@@ -64,7 +64,7 @@ init([]) ->
     ok = timing("gw location", fun() -> hpr_gateway_location:init() end),
 
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
-    ConfigServiceConfig = application:get_env(?APP, iot_config_service, #{}),
+    ConfigServiceConfig = application:get_env(?APP, ?IOT_CONFIG_SERVICE, #{}),
     LocationServiceConfig = application:get_env(?APP, iot_location_service, #{}),
     DownlinkServiceConfig = application:get_env(?APP, downlink_service, #{}),
     MultiBuyServiceConfig = application:get_env(?APP, multi_buy_service, #{}),

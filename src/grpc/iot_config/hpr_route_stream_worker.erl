@@ -297,7 +297,7 @@ handle_call(reset_channel, _From, #state{} = State) ->
     Stopped = grpcbox_channel:stop(?IOT_CONFIG_CHANNEL),
     lager:info("channel stopped ~w", [Stopped]),
 
-    Config = application:get_env(?APP, iot_config_service, #{}),
+    Config = application:get_env(?APP, ?IOT_CONFIG_SERVICE, #{}),
     Started = hpr_sup:maybe_start_channel(Config, ?IOT_CONFIG_CHANNEL),
     lager:info("channel started ~w", [Started]),
 
