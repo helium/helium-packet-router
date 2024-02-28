@@ -313,8 +313,8 @@ stream_resume_test_runner(ResetFn) ->
                 end,
 
             {
-                WorkerAlive,
-                TestStream =/= undefined andalso
+                WorkerAlive andalso
+                    TestStream =/= undefined andalso
                     TestServiceAlive,
                 [
                     {worker_alive, WorkerAlive},
