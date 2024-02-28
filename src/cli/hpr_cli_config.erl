@@ -282,8 +282,8 @@ config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
             TimeIt(fun() ->
                 try hpr_route_stream_worker:refresh_route(ID) of
                     {ok, Map} ->
-                        lager:info("| Type | Before | After | Removed | Added |"),
-                        lager:info("|------|--------|-------|---------|-------|"),
+                        lager:info("| Type | Before  |  After  | Removed |  Added  |"),
+                        lager:info("|------|---------|---------|---------|---------|"),
                         lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
                             eui,
                             maps:get(eui_before, Map),
