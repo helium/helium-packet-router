@@ -297,23 +297,29 @@ stream_resume_test_runner(ResetFn) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            One = whereis(hpr_route_stream_worker),
-            Two = erlang:is_process_alive(One),
+            WorkerAlive =
+                case erlang:whereis(hpr_route_stream_worker) of
+                    undefined -> false;
+                    Pid0 when erlang:is_pid(Pid0) -> erlang:is_process_alive(Pid0)
+                end,
+
             %% hpr_route_stream_worker may not be alive
-            Three = catch hpr_route_stream_worker:test_stream(),
-            Four = erlang:whereis(hpr_test_ics_route_service),
-            Five = erlang:is_process_alive(Four),
+            TestStream = catch hpr_route_stream_worker:test_stream(),
+
+            TestServiceAlive =
+                case erlang:whereis(hpr_test_ics_route_service) of
+                    undefined -> false;
+                    Pid1 when erlang:is_pid(Pid1) -> erlang:is_process_alive(Pid1)
+                end,
 
             {
-                One =/= undefined andalso
-                    Two andalso
-                    Three =/= undefined andalso
-                    erlang:is_pid(Four) andalso
-                    Five,
+                WorkerAlive,
+                TestStream =/= undefined andalso
+                    TestServiceAlive,
                 [
-                    {stream_worker_pid, One},
-                    {test_stream, Three},
-                    {route_service, Four}
+                    {worker_alive, WorkerAlive},
+                    {test_stream, TestStream},
+                    {route_service, TestServiceAlive}
                 ]
             }
         end,
