@@ -594,7 +594,7 @@ config_reconnect(["config", "reconnect"], [], Flags) ->
     Options = maps:from_list(Flags),
     case maps:is_key(commit, Options) of
         true ->
-            ok = hpr_route_stream_worker:reset_connection(),
+            ok = hpr_route_stream_worker:reset_channel(),
             c_text("Reconnected");
         false ->
             c_text("Must specify --commit to reset connection")
