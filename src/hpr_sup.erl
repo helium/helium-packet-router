@@ -13,6 +13,8 @@
 
 -export([init/1]).
 
+-export([maybe_start_channel/2]).
+
 -define(SERVER, ?MODULE).
 
 -define(SUP(I, Args), #{
