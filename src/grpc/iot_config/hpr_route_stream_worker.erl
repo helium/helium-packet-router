@@ -432,10 +432,14 @@ handle_info(_Msg, State) ->
     lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.
 
-terminate(_Reason, #state{checkpoint_timer = CheckpointTimer} = _State) ->
+terminate(_Reason, #state{checkpoint_timer = CheckpointTimer, stream = Stream} = _State) ->
     lager:error("terminate ~p", [_Reason]),
     maybe_cancel_timer(CheckpointTimer),
     dets:close(?DETS),
+    case Stream of
+        undefined -> ok;
+        _ -> grpcbox_client:close_send(Stream)
+    end,
     ok.
 
 %% ------------------------------------------------------------------
