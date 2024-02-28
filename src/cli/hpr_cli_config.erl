@@ -585,7 +585,6 @@ config_checkpoint_write(["config", "checkpoint", "write"], [], []) ->
 config_checkpoint_write(_, _, _) ->
     usage.
 
-
 config_reset(["config", "reset", ResetType], [], Flags) ->
     Options = maps:from_list(Flags),
     case maps:is_key(commit, Options) of
