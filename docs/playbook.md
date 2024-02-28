@@ -8,8 +8,9 @@ When HPR stops receiving updates from ICS (IOT Config Service) it means that no 
 
 1. If updates started coming in again on their own run the command `hpr config route refresh_all` to make sure that we have all updates for each route.
 2. If still no updates are coming in:
-   1. Run `hpr config reconnect --commit` this will reset the connection to ICS.
-   2. if `1` fails restart HPR service
+   1. Run `hpr config reset stream --commit`, this will create a new stream to ICS over the same connection.
+   2. Run `hpr config reset channel --commit`, this will create a new connectdion to ICS and then a new stream.
+   3. If neither of those work, restart the HPR service
 
 *Notes:*
 - *When updates stop it is hard to know if connection went down or if load balancer is doing something weird.*
@@ -53,6 +54,7 @@ config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair
 config counts                       - Simple Counts of Configuration
 config checkpoint next              - Time until next writing of configuration to disk
 config checkpoint write             - Write current configuration to disk
-config checkpoint reset [--commit]  - Set checkpoint timestamp to beginning of time (0)
-config reconnect [--commit]         - Reset connection to Configuration Service
+config reset checkpoint [--commit]  - Set checkpoint timestamp to beginning of time (0)
+config reset stream [--commit]      - Reset stream to Configuration Service
+config reset channel [--commit]     - Reset channel to Configuration Service
 ```
