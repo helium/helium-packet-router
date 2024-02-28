@@ -14,6 +14,8 @@
     main_test/1,
     refresh_route_test/1,
     stream_crash_resume_updates_test/1,
+    reset_stream_test/1,
+    reset_channel_test/1,
     app_restart_rehydrate_test/1,
     route_remove_delete_skf_dets_test/1
 ]).
@@ -33,6 +35,8 @@ all() ->
         main_test,
         refresh_route_test,
         stream_crash_resume_updates_test,
+        reset_stream_test,
+        reset_channel_test,
         app_restart_rehydrate_test,
         route_remove_delete_skf_dets_test
     ].
@@ -211,8 +215,26 @@ app_restart_rehydrate_test(_Config) ->
     ok.
 
 stream_crash_resume_updates_test(_Config) ->
+    stream_resume_test_runner(
+        fun() ->
+            true = exit(whereis(hpr_route_stream_worker), kill),
+            ok
+        end
+    ).
+
+reset_stream_test(_Config) ->
+    stream_resume_test_runner(
+        fun() -> hpr_route_stream_worker:reset_stream() end
+    ).
+
+reset_channel_test(_Config) ->
+    stream_resume_test_runner(
+        fun() -> hpr_route_stream_worker:reset_channel() end
+    ).
+
+stream_resume_test_runner(ResetFn) ->
     %% The first time the stream worker starts up, it should ingest all available config.
-    %% Then we kill it.
+    %% Then we stop the stream somehow `ResetFun()'.
     %% Then we start it up again, and it should ingest only new available config.
 
     ?assertMatch(
@@ -268,8 +290,11 @@ stream_crash_resume_updates_test(_Config) ->
     ok = timer:sleep(150),
     %% Make sure the latest config timestamp is saved
     ok = hpr_route_stream_worker:checkpoint(),
-    %% Kill the stream worker
-    exit(whereis(hpr_route_stream_worker), kill),
+
+    %% Kill the stream worker ==================================================
+    ok = ResetFn(),
+    %% =========================================================================
+
     ok = test_utils:wait_until(
         fun() ->
             whereis(hpr_route_stream_worker) =/= undefined andalso
