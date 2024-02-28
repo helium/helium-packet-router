@@ -595,7 +595,7 @@ config_reset(["config", "reset", ResetType], [], Flags) ->
                     ok = hpr_route_stream_worker:reset_timestamp(),
                     c_text("Checkpoint reset");
                 "channel" ->
-                    ok = hpr_route_channel_worker:reset_channel(),
+                    ok = hpr_route_stream_worker:reset_channel(),
                     c_text("New Channel");
                 "stream" ->
                     ok = hpr_route_stream_worker:reset_stream(),
