@@ -42,7 +42,7 @@ config route <route_id>                     - Info for route
     [--display_euis] default: false (EUIs not included)
     [--display_skfs] default: false (SKFs not included)
 config route refresh_all                    - Refresh all routes
-    [--ignore_empty_route] default: false (do not update routes that are locally empty)
+    [--minimum] default: 1 (need a minimum of 1 SKFs ro be updated)
 config route refresh <route_id>             - Refresh route
 config route activate <route_id>            - Activate route
 config route deactivate <route_id>          - Deactivate route
