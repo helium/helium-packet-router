@@ -297,10 +297,23 @@ stream_resume_test_runner(ResetFn) ->
 
     ok = test_utils:wait_until(
         fun() ->
-            whereis(hpr_route_stream_worker) =/= undefined andalso
-                erlang:is_process_alive(whereis(hpr_route_stream_worker)) andalso
-                hpr_route_stream_worker:test_stream() =/= undefined andalso
-                erlang:is_pid(erlang:whereis(hpr_test_ics_route_service))
+            One = whereis(hpr_route_stream_worker),
+            Two = erlang:is_process_alive(One),
+            %% hpr_route_stream_worker may not be alive
+            Three = catch hpr_route_stream_worker:test_stream(),
+            Four = erlang:whereis(hpr_test_ics_route_service),
+
+            {
+                One =/= undefined andalso
+                    Two andalso
+                    Three =/= undefined andalso
+                    erlang:is_pid(Four),
+                [
+                    {stream_worker_pid, One},
+                    {test_stream, Three},
+                    {route_service, Four}
+                ]
+            }
         end,
         20,
         500
@@ -738,7 +751,8 @@ check_config_counts(
                         ]
                     };
                 _ ->
-                    {false, {route_not_found, RouteID}}
+                    {false, {route_not_found, RouteID},
+                        {all_routes, [hpr_route_storage:all_routes()]}}
             end
         end
     ).
