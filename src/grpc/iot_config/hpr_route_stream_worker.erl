@@ -234,12 +234,7 @@ init(Args) ->
     {ok, #state{
         stream = undefined,
         conn_backoff = Backoff,
-        counts = #{
-            route => 0,
-            eui_pair => 0,
-            skf => 0,
-            devaddr_range => 0
-        },
+        counts = new_counts(),
         last_timestamp = LastTimestamp
     }}.
 
@@ -302,13 +297,13 @@ handle_call(reset_channel, _From, #state{} = State) ->
     Stopped = grpcbox_channel:stop(?IOT_CONFIG_CHANNEL),
     lager:info("channel stopped ~w", [Stopped]),
 
-    Config = application:get_env(?APP, iot_config_channel, #{}),
+    Config = application:get_env(?APP, iot_config_service, #{}),
     Started = hpr_sup:maybe_start_channel(Config, ?IOT_CONFIG_CHANNEL),
     lager:info("channel started ~w", [Started]),
 
     self() ! ?INIT_STREAM,
 
-    {reply, ok, State#state{stream = undefined}};
+    {reply, ok, State#state{stream = undefined, counts = new_counts()}};
 handle_call(reset_stream, _From, #state{stream = Stream} = State) ->
     %% Attempt to signal to the other side we're going down.
     Stopped = grpcbox_client:close_send(Stream),
@@ -316,7 +311,7 @@ handle_call(reset_stream, _From, #state{stream = Stream} = State) ->
 
     self() ! ?INIT_STREAM,
 
-    {reply, ok, State#state{stream = undefined}};
+    {reply, ok, State#state{stream = undefined, counts = new_counts()}};
 handle_call(Msg, _From, State) ->
     {stop, {unimplemented_call, Msg}, State}.
 
@@ -633,3 +628,12 @@ maybe_cancel_timer(undefined) ->
 maybe_cancel_timer({_TimeScheduled, Timer}) ->
     lager:info([{t, Timer}, {timer, timer:cancel(Timer)}], "maybe cancelling timer"),
     ok.
+
+-spec new_counts() -> map().
+new_counts() ->
+    #{
+        route => 0,
+        eui_pair => 0,
+        skf => 0,
+        devaddr_range => 0
+    }.
