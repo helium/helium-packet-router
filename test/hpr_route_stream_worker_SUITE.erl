@@ -320,6 +320,8 @@ stream_resume_test_runner(ResetFn) ->
         20,
         500
     ),
+    %% Give the new worker a little bit of time init with the config service.
+    ok = timer:sleep(150),
 
     %% Create a bunch of new data to ingest
     #{
