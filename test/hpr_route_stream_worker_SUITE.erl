@@ -302,12 +302,14 @@ stream_resume_test_runner(ResetFn) ->
             %% hpr_route_stream_worker may not be alive
             Three = catch hpr_route_stream_worker:test_stream(),
             Four = erlang:whereis(hpr_test_ics_route_service),
+            Five = erlang:is_process_alive(Four),
 
             {
                 One =/= undefined andalso
                     Two andalso
                     Three =/= undefined andalso
-                    erlang:is_pid(Four),
+                    erlang:is_pid(Four) andalso
+                    Five,
                 [
                     {stream_worker_pid, One},
                     {test_stream, Three},
