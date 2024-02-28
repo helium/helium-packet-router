@@ -8,3 +8,5 @@
 -define(MULTI_BUY_CHANNEL, multi_buy_channel).
 
 -define(HPR_KEY, hpr_key).
+
+-define(HPR_FREE_NET_IDS, hpr_free_net_ids).

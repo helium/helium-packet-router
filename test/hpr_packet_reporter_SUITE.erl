@@ -21,7 +21,8 @@
 ]).
 
 -export([
-    upload_test/1
+    upload_test/1,
+    free_net_ids_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -36,7 +37,8 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        upload_test
+        upload_test,
+        free_net_ids_test
     ].
 
 %%--------------------------------------------------------------------
@@ -114,6 +116,92 @@ upload_test(_Config) ->
                 Packet, Route, false, Time
             ),
             hpr_packet_report:new(Packet, Route, false, Time)
+        end,
+        lists:seq(1, N)
+    ),
+
+    %% Wait until packets are all in state
+    ok = test_utils:wait_until(
+        fun() ->
+            State = sys:get_state(hpr_packet_reporter),
+            N == erlang:length(erlang:element(7, State))
+        end
+    ),
+
+    State = sys:get_state(hpr_packet_reporter),
+    AWSClient = hpr_packet_reporter:get_client(State),
+    Bucket = hpr_packet_reporter:get_bucket(State),
+
+    %% Check that bucket is still empty
+    {ok, #{<<"ListBucketResult">> := ListBucketResult0}, _} = aws_s3:list_objects(
+        AWSClient, Bucket
+    ),
+    ?assertNot(maps:is_key(<<"Contents">>, ListBucketResult0)),
+
+    %% Force upload
+    hpr_packet_reporter ! upload,
+
+    %% Wait unitl bucket report not empty
+    ok = test_utils:wait_until(
+        fun() ->
+            {ok, #{<<"ListBucketResult">> := ListBucketResult}, _} = aws_s3:list_objects(
+                AWSClient, Bucket
+            ),
+            maps:is_key(<<"Contents">>, ListBucketResult)
+        end
+    ),
+
+    %% Check file name
+    {ok, #{<<"ListBucketResult">> := #{<<"Contents">> := Contents}}, _} = aws_s3:list_objects(
+        AWSClient, Bucket
+    ),
+    FileName = maps:get(<<"Key">>, Contents),
+    [Prefix, Timestamp, Ext] = binary:split(FileName, <<".">>, [global]),
+    ?assertEqual(<<"packetreport">>, Prefix),
+    ?assert(erlang:binary_to_integer(Timestamp) < erlang:system_time(millisecond)),
+    ?assert(
+        erlang:binary_to_integer(Timestamp) > erlang:system_time(millisecond) - timer:seconds(2)
+    ),
+    ?assertEqual(<<"gz">>, Ext),
+
+    %% Get file content and check that all packets are there
+    {ok, #{<<"Body">> := Compressed}, _} = aws_s3:get_object(AWSClient, Bucket, FileName),
+    ExtractedPackets = extract_packets(Compressed),
+    ?assertEqual(lists:sort(ExpectedPackets), lists:sort(ExtractedPackets)),
+
+    timer:sleep(100),
+    ?assertNotEqual(
+        undefined,
+        prometheus_histogram:value(?METRICS_PACKET_REPORT_HISTOGRAM, [ok])
+    ),
+
+    ok.
+
+free_net_ids_test(_Config) ->
+    %% Send N packets
+    N = 100,
+    OUI = 1,
+    NetID = 16#C00053,
+    Route = hpr_route:test_new(#{
+        id => "test-route",
+        oui => OUI,
+        net_id => NetID,
+        devaddr_ranges => [],
+        euis => [],
+        max_copies => 1,
+        nonce => 1,
+        server => #{host => "example.com", port => 8080, protocol => undefined}
+    }),
+    ExpectedPackets = lists:map(
+        fun(X) ->
+            Time = erlang:system_time(millisecond),
+            Packet = test_utils:uplink_packet_up(#{rssi => X}),
+            %% No reported free here
+            hpr_packet_reporter:report_packet(
+                Packet, Route, false, Time
+            ),
+            %% Should be after checking NetID
+            hpr_packet_report:new(Packet, Route, true, Time)
         end,
         lists:seq(1, N)
     ),

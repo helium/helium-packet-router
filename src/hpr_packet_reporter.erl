@@ -2,6 +2,8 @@
 
 -behaviour(gen_server).
 
+-include("hpr.hrl").
+
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
@@ -164,13 +166,22 @@ terminate(_Reason, #state{current_packets = Packets}) ->
 
 -spec encode_packet(
     Packet :: hpr_packet_up:packet(),
-    PacketRoute :: hpr_route:route(),
+    Route :: hpr_route:route(),
     IsFree :: boolean(),
     ReceivedTime :: non_neg_integer()
 ) -> binary().
-encode_packet(Packet, PacketRoute, IsFree, ReceivedTime) ->
+encode_packet(Packet, Route, true = IsFree, ReceivedTime) ->
     EncodedPacket = hpr_packet_report:encode(
-        hpr_packet_report:new(Packet, PacketRoute, IsFree, ReceivedTime)
+        hpr_packet_report:new(Packet, Route, IsFree, ReceivedTime)
+    ),
+    PacketSize = erlang:size(EncodedPacket),
+    <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>;
+encode_packet(Packet, Route, false, ReceivedTime) ->
+    NetID = hpr_route:net_id(Route),
+    FreeNetIDs = application:get_env(?APP, ?HPR_FREE_NET_IDS, []),
+    IsFree = lists:member(NetID, FreeNetIDs),
+    EncodedPacket = hpr_packet_report:encode(
+        hpr_packet_report:new(Packet, Route, IsFree, ReceivedTime)
     ),
     PacketSize = erlang:size(EncodedPacket),
     <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>.
