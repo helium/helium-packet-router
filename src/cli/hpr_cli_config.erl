@@ -282,23 +282,23 @@ config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
             TimeIt(fun() ->
                 try hpr_route_stream_worker:refresh_route(ID) of
                     {ok, Map} ->
-                        lager:info("| Type | Before | After | Removed | Added |"),
-                        lager:info("|------|--------|-------|---------|-------|"),
-                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                        lager:info("| Type | Before  |  After  | Removed |  Added  |"),
+                        lager:info("|------|---------|---------|---------|---------|"),
+                        lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
                             eui,
                             maps:get(eui_before, Map),
                             maps:get(eui_after, Map),
                             maps:get(eui_removed, Map),
                             maps:get(eui_added, Map)
                         ]),
-                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                        lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
                             skf,
                             maps:get(skf_before, Map),
                             maps:get(skf_after, Map),
                             maps:get(skf_removed, Map),
                             maps:get(skf_added, Map)
                         ]),
-                        lager:info("| ~4w | ~6w | ~5w | ~7w | ~5w |", [
+                        lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
                             addr,
                             maps:get(devaddr_before, Map),
                             maps:get(devaddr_after, Map),

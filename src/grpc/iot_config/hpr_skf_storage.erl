@@ -289,8 +289,13 @@ do_insert_skf(SKFETS, SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
     MaxCopies = hpr_skf:max_copies(SKF),
-
-    true = ets:insert(SKFETS, {{hpr_utils:hex_to_bin(SessionKey), DevAddr}, MaxCopies}),
+    try hpr_utils:hex_to_bin(SessionKey) of
+        SessionKeyBin ->
+            true = ets:insert(SKFETS, {{SessionKeyBin, DevAddr}, MaxCopies})
+    catch
+        _E:_R ->
+            lager:warning("failed to insert ~p ~p", [{{SessionKey, DevAddr}, MaxCopies}, _R])
+    end,
     ok.
 
 -spec skf_md(hpr_route:id(), hpr_skf:skf()) -> proplists:proplist().
