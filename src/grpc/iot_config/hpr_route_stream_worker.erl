@@ -502,7 +502,9 @@ refresh_skfs(RouteID) ->
                         "route refresh skfs ~p",
                         [{{previous, PreviousCnt}, {current, length(SKFs)}}]
                     ),
-                    {ok, {Previous, SKFs}}
+                    {ok, {Previous, SKFs}};
+                Err ->
+                    Err
             end;
         {error, _} = Err ->
             lager:error([{route_id, RouteID}, Err], "failed to refresh route skfs"),
