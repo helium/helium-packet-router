@@ -8,11 +8,6 @@
 
 -export([register_cli/0]).
 
--export([pierre/1]).
-
-pierre(Min) ->
-    config_route_refresh_all(["config", "route", "refresh_all"], [], [{minimum, Min}]).
-
 register_cli() ->
     register_all_usage(),
     register_all_cmds().
