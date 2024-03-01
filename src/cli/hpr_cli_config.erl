@@ -8,6 +8,11 @@
 
 -export([register_cli/0]).
 
+-export([pierre/1]).
+
+pierre(Min) ->
+    config_route_refresh_all(["config", "route", "refresh_all"], [], [{minimum, Min}]).
+
 register_cli() ->
     register_all_usage(),
     register_all_cmds().
@@ -253,7 +258,7 @@ config_route(_, _, _) ->
 config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
     Options = maps:from_list(Flags),
     Min = maps:get(minimum, Options, 1),
-    erlang:spawn(fun() ->
+    Pid = erlang:spawn(fun() ->
         List = lists:filtermap(
             fun(RouteETS) ->
                 RouteID = hpr_route:id(hpr_route_ets:route(RouteETS)),
@@ -269,55 +274,75 @@ config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
         Sorted = lists:sort(fun({_, A}, {_, B}) -> A > B end, List),
         RouteIDs = [ID || {ID, _} <- Sorted],
         Total = erlang:length(RouteIDs),
-        TimeIt = fun(Func) ->
-            {Time0, Val} = timer:tc(Func),
-            Time = erlang:convert_time_unit(Time0, microsecond, millisecond),
-            lager:info("took ~pms", [Time]),
-            Val
-        end,
-        Refresh = fun({Idx, ID}) ->
-            lager:info("~p/~p===========================================================", [
-                Idx, Total
-            ]),
-            TimeIt(fun() ->
-                try hpr_route_stream_worker:refresh_route(ID) of
-                    {ok, Map} ->
-                        lager:info("| Type | Before  |  After  | Removed |  Added  |"),
-                        lager:info("|------|---------|---------|---------|---------|"),
-                        lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
-                            eui,
-                            maps:get(eui_before, Map),
-                            maps:get(eui_after, Map),
-                            maps:get(eui_removed, Map),
-                            maps:get(eui_added, Map)
-                        ]),
-                        lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
-                            skf,
-                            maps:get(skf_before, Map),
-                            maps:get(skf_after, Map),
-                            maps:get(skf_removed, Map),
-                            maps:get(skf_added, Map)
-                        ]),
-                        lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
-                            addr,
-                            maps:get(devaddr_before, Map),
-                            maps:get(devaddr_after, Map),
-                            maps:get(devaddr_removed, Map),
-                            maps:get(devaddr_added, Map)
-                        ]);
-                    {error, _R} ->
-                        lager:info("ERROR ~p", [_R])
-                catch
-                    _E:_R ->
-                        lager:info("CRASHED ~p", [_R])
-                end
-            end)
-        end,
-        [Refresh(ID) || ID <- lists:zip(lists:seq(1, Total), RouteIDs)]
+        lager:info("Found ~p routes to update", [Total]),
+        route_refresh_all(
+            Total, RouteIDs, backoff:init(timer:seconds(1), timer:minutes(1))
+        )
     end),
-    c_text("command spawned, look at logs");
+    c_text("command spawned @ ~p, look at logs and tail hpr_cli_config", [Pid]);
 config_route_refresh_all(_, _, _) ->
     usage.
+
+route_refresh_all(_Total, [], _Backoff0) ->
+    lager:info("All done!");
+route_refresh_all(Total, [RouteID | T] = RouteIDs, Backoff0) ->
+    CurrTotal = erlang:length(RouteIDs),
+    IDX = Total - CurrTotal + 1,
+    lager:info("~p/~p===== ~s =====", [
+        IDX, Total, RouteID
+    ]),
+    Start = erlang:system_time(millisecond),
+    case try_refresh_route(RouteID) of
+        ok ->
+            End = erlang:system_time(millisecond),
+            lager:info("took ~pms", [End - Start]),
+            {_, Backoff1} = backoff:succeed(Backoff0),
+            route_refresh_all(Total, T, Backoff1);
+        error ->
+            End = erlang:system_time(millisecond),
+            lager:info("took ~pms", [End - Start]),
+            {Delay, Backoff1} = backoff:fail(Backoff0),
+            lager:info("sleeping ~pms", [Delay]),
+            timer:sleep(Delay),
+            route_refresh_all(Total, RouteIDs, Backoff1)
+    end,
+    ok.
+
+try_refresh_route(RouteID) ->
+    try hpr_route_stream_worker:refresh_route(RouteID) of
+        {ok, Map} ->
+            lager:info("| Type | Before  |  After  | Removed |  Added  |"),
+            lager:info("|------|---------|---------|---------|---------|"),
+            lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
+                eui,
+                maps:get(eui_before, Map),
+                maps:get(eui_after, Map),
+                maps:get(eui_removed, Map),
+                maps:get(eui_added, Map)
+            ]),
+            lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
+                skf,
+                maps:get(skf_before, Map),
+                maps:get(skf_after, Map),
+                maps:get(skf_removed, Map),
+                maps:get(skf_added, Map)
+            ]),
+            lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
+                addr,
+                maps:get(devaddr_before, Map),
+                maps:get(devaddr_after, Map),
+                maps:get(devaddr_removed, Map),
+                maps:get(devaddr_added, Map)
+            ]),
+            ok;
+        {error, _R} ->
+            lager:info("ERROR ~p", [_R]),
+            error
+    catch
+        _E:_R ->
+            lager:info("CRASHED ~p", [_R]),
+            error
+    end.
 
 config_route_refresh(["config", "route", "refresh", RouteID], [], _Flags) ->
     case hpr_route_stream_worker:refresh_route(RouteID) of
