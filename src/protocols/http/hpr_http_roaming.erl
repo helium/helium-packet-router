@@ -59,7 +59,7 @@
 -type region() :: atom().
 -type token() :: binary().
 
--define(TOKEN_SEP, <<",">>).
+-define(TOKEN_SEP, <<"::">>).
 
 -record(packet, {
     packet_up :: hpr_packet_up:packet(),
