@@ -29,7 +29,8 @@
     http_multiple_gateways_single_shot_test/1,
     http_overlapping_devaddr_test/1,
     http_uplink_packet_late_test/1,
-    http_auth_header_test/1
+    http_auth_header_test/1,
+    token_test/1
 ]).
 
 %% Elli callback functions
@@ -84,18 +85,23 @@ all() ->
         http_multiple_joins_same_dest_test,
         http_multiple_gateways_single_shot_test,
         http_overlapping_devaddr_test,
-        http_auth_header_test
+        http_auth_header_test,
+        token_test
     ].
 
 %%--------------------------------------------------------------------
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
+init_per_testcase(token_test, Config) ->
+    Config;
 init_per_testcase(TestCase, Config) ->
     test_utils:init_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
+end_per_testcase(token_test, Config) ->
+    Config;
 end_per_testcase(TestCase, Config) ->
     test_utils:end_per_testcase(TestCase, Config).
 
@@ -1344,9 +1350,49 @@ http_auth_header_test(_Config) ->
 
     ok.
 
+token_test(_Config) ->
+    lists:foreach(
+        fun(_) ->
+            #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+            PubKeyBin = libp2p_crypto:pubkey_to_bin(PubKey),
+            Region = 'US915',
+            Time = erlang:system_time(millisecond),
+            RouteID = uuid_to_string(uuid4()),
+
+            Token = hpr_http_roaming:make_uplink_token(
+                PubKeyBin,
+                Region,
+                Time,
+                RouteID
+            ),
+            ct:pal("PubKeyBin = ~p~n", [PubKeyBin]),
+            ct:pal("Time = ~p~n", [Time]),
+            ct:pal("Token = ~p~n", [Token]),
+            ct:pal("RouteID = ~p~n", [RouteID]),
+
+            ?assertEqual(
+                {ok, PubKeyBin, Region, Time, RouteID}, hpr_http_roaming:parse_uplink_token(Token)
+            )
+        end,
+        lists:seq(1, 50000)
+    ),
+    ok.
+
 %% ------------------------------------------------------------------
 %% Fixture Helpers
 %% ------------------------------------------------------------------
+
+uuid4() ->
+    <<U0:32, U1:16, _:4, U2:12, _:2, U3:30, U4:32>> = crypto:strong_rand_bytes(16),
+    <<U0:32, U1:16, 4:4, U2:12, 2#10:2, U3:30, U4:32>>.
+
+uuid_to_string(<<U0:32, U1:16, U2:16, U3:16, U4:48>>) ->
+    lists:flatten(
+        io_lib:format(
+            "~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b",
+            [U0, U1, U2, U3, U4]
+        )
+    ).
 
 join_test_route(DevEUI, AppEUI, FlowType, RouteID) ->
     join_test_route(DevEUI, AppEUI, FlowType, RouteID, #{}).
