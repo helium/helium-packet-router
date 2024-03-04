@@ -59,7 +59,7 @@
 -type region() :: atom().
 -type token() :: binary().
 
--define(TOKEN_SEP, <<"::">>).
+-define(TOKEN_SEP, <<",">>).
 
 -record(packet, {
     packet_up :: hpr_packet_up:packet(),
@@ -419,10 +419,10 @@ rx2_from_dlmetadata(_, _, _, _) ->
 ) -> token().
 make_uplink_token(PubKeyBin, Region, PacketTime, RouteID) ->
     Parts = [
-        PubKeyBin,
         erlang:atom_to_binary(Region),
         erlang:integer_to_binary(PacketTime),
-        RouteID
+        RouteID,
+        PubKeyBin
     ],
     Token0 = lists:join(?TOKEN_SEP, Parts),
     Token1 = erlang:iolist_to_binary(Token0),
@@ -435,14 +435,27 @@ parse_uplink_token(<<"0x", Token/binary>>) ->
     parse_uplink_token(Token);
 parse_uplink_token(Token) ->
     Bin = binary:decode_hex(Token),
-    case binary:split(Bin, ?TOKEN_SEP, [global]) of
+    case do_token_split(Bin, []) of
         [PubKeyBin, RegionBin, PacketTimeBin, RouteIDBin] ->
             Region = erlang:binary_to_existing_atom(RegionBin),
             PacketTime = erlang:binary_to_integer(PacketTimeBin),
             RouteID = erlang:binary_to_list(RouteIDBin),
             {ok, PubKeyBin, Region, PacketTime, RouteID};
         _ ->
-            {error, malformed_token}
+            {error, {malformed_token, Token}}
+    end.
+
+%% We collect all the parts of the token, and know the rest is the pubkeybin.
+%% Note the parts are re-ordered before being returned.
+-spec do_token_split(binary(), list(binary())) -> list(binary()).
+do_token_split(PubKeyBin, [RouteIDBin, PacketTimeBin, RegionBin]) ->
+    [PubKeyBin, RegionBin, PacketTimeBin, RouteIDBin];
+do_token_split(Bin, Parts) ->
+    case binary:split(Bin, ?TOKEN_SEP) of
+        [Part, Rest] ->
+            do_token_split(Rest, [Part | Parts]);
+        [Part] ->
+            do_token_split(<<>>, [Part | Parts])
     end.
 
 -spec auth_headers(Route :: hpr_route:route()) -> proplists:proplist().
