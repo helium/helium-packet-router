@@ -4,7 +4,7 @@
         %% See https://github.com/helium/HIP/blob/main/0102-helium-educational-lns.md
         {hpr_free_net_ids, [16#C00053]},
         {http_roaming_sender_nsid, <<"${HPR_ROAMING_SENDER_NSID}">>},
-        {no_routes, [{"${HPR_PP_HOST_1}", 8080}, {"${HPR_PP_HOST_2}", 8080}]},
+        {no_routes, []},
         {packet_reporter, #{
             aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
             aws_bucket_region => <<"${HPR_PACKET_REPORTER_AWS_BUCKET_REGION}">>,
