@@ -271,9 +271,13 @@ do_get_all_routes() ->
     ),
     Res.
 
-do_sync_all_routes([]) ->
+do_sync_all_routes([], []) ->
     ok;
-do_sync_all_routes([Route | Routes]) ->
+do_sync_all_routes([], [Route | LeftoverRoutes]) ->
+    ct:print("removing leftover route: ~p", [{route_id, hpr_route:id(Route)}]),
+    ok = hpr_route_storage:delete(Route),
+    do_sync_all_routes([], LeftoverRoutes);
+do_sync_all_routes([Route | Routes], ExistingRoutes) ->
     RouteID = hpr_route:id(Route),
     case hpr_route_storage:lookup(RouteID) of
         {ok, Route} ->
@@ -285,14 +289,19 @@ do_sync_all_routes([Route | Routes]) ->
             refresh_euis(RouteID),
             refresh_skfs(RouteID)
     end,
-    do_sync_all_routes(Routes).
+    do_sync_all_routes(Routes, remove_route(Route, ExistingRoutes)).
+
+remove_route(Target, RouteList) ->
+    ID = hpr_route:id(Target),
+    lists:filter(fun(R) -> hpr_route:id(R) =/= ID end, RouteList).
 
 handle_call(get_all_routes, _From, State) ->
     Routes = do_get_all_routes(),
     {reply, {ok, Routes}, State};
 handle_call(sync_routes, _From, State) ->
     Routes = do_get_all_routes(),
-    do_sync_all_routes(Routes),
+    ExistingRoutes = hpr_route_storage:all_routes(),
+    do_sync_all_routes(Routes, ExistingRoutes),
     {reply, ok, State};
 handle_call({refresh_route, RouteID}, _From, State) ->
     DevaddrResponse = refresh_devaddrs(RouteID),

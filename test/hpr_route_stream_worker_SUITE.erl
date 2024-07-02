@@ -18,7 +18,8 @@
     reset_channel_test/1,
     app_restart_rehydrate_test/1,
     route_remove_delete_skf_dets_test/1,
-    sync_new_route_test/1
+    sync_new_route_test/1,
+    sync_remove_route_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -40,7 +41,8 @@ all() ->
         reset_channel_test,
         app_restart_rehydrate_test,
         route_remove_delete_skf_dets_test,
-        sync_new_route_test
+        sync_new_route_test,
+        sync_remove_route_test
     ].
 
 %%--------------------------------------------------------------------
@@ -550,6 +552,8 @@ sync_new_route_test(_Config) ->
         hpr_org:test_new(#{oui => 2})
     ]),
 
+    %% Route does not exist locally. It will be added when
+    %% hpr_route_stream_worker:sync_routes() is called.
     RouteID = "7d502f32-4d58-4746-965e-001",
     Route = hpr_route:test_new(#{
         id => RouteID,
@@ -584,6 +588,63 @@ sync_new_route_test(_Config) ->
     SK1 = hpr_utils:hex_to_bin(SessionKey),
     SKFEts = hpr_route_ets:skf_ets(RouteETS),
     ?assertEqual([{SK1, 1}], hpr_skf_storage:lookup(SKFEts, DevAddr)),
+
+    ok.
+
+sync_remove_route_test(_Config) ->
+    application:set_env(hpr, test_org_service_orgs, [
+        hpr_org:test_new(#{oui => 1}),
+        hpr_org:test_new(#{oui => 2})
+    ]),
+
+    Route1ID = "7d502f32-4d58-4746-965e-001",
+    Route1 = hpr_route:test_new(#{
+        id => Route1ID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "localhost",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10
+    }),
+    EUIPair1 = hpr_eui_pair:test_new(#{route_id => Route1ID, app_eui => 1, dev_eui => 0}),
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
+    DevAddr1 = 16#00000001,
+    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKeyFilter1 = hpr_skf:new(#{
+        route_id => Route1ID, devaddr => DevAddr1, session_key => SessionKey1, max_copies => 1
+    }),
+
+    ok = hpr_test_ics_route_service:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}})
+    ),
+    ok = hpr_test_ics_route_service:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
+    ),
+    ok = hpr_test_ics_route_service:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {devaddr_range, DevAddrRange1}})
+    ),
+    ok = hpr_test_ics_route_service:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {skf, SessionKeyFilter1}})
+    ),
+    ok = check_config_counts(Route1ID, 1, 1, 1, 1),
+
+    %% Ensure nothing is meant to come back from the config service when syncing.
+    application:set_env(hpr, test_route_list, []),
+    application:set_env(hpr, test_route_get_euis, []),
+    application:set_env(hpr, test_route_get_devaddr_ranges, []),
+    application:set_env(hpr, test_route_list_skfs, []),
+
+    %% Syncing Routes removes the route that no longer exists
+    ok = hpr_route_stream_worker:sync_routes(),
+    ?assertEqual({error, not_found}, hpr_route_storage:lookup(Route1ID)),
+    ?assertEqual([], hpr_devaddr_range_storage:lookup(DevAddr1)),
+    ?assertEqual([], hpr_eui_pair_storage:lookup(1, 12)),
+    ?assertEqual([], hpr_skf_storage:lookup_route(Route1ID)),
 
     ok.
 
