@@ -471,43 +471,48 @@ process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
 process_route_stream_res(remove, {skf, SKF}) ->
     hpr_skf_storage:delete(SKF).
 
--spec refresh_skfs(hpr_route:id()) ->
+-spec refresh_devaddrs(hpr_route:id()) ->
     {ok, {
-        Old :: list({{SessionKey :: binary(), Devaddr :: binary()}, MaxCopies :: non_neg_integer()}),
-        Current :: list(hpr_skf:skf())
+        Old :: list(hpr_devaddr_range:devaddr_range()),
+        Current :: list(hpr_devaddr_range:devaddr_range())
     }}
     | {error, any()}.
-refresh_skfs(RouteID) ->
-    SKFReq = #iot_config_route_skf_list_req_v1_pb{
+refresh_devaddrs(RouteID) ->
+    DevaddrReq = #iot_config_route_get_devaddr_ranges_req_v1_pb{
         route_id = RouteID,
         timestamp = erlang:system_time(millisecond),
         signer = hpr_utils:pubkey_bin()
     },
     SigFun = hpr_utils:sig_fun(),
-    EncodedReq = iot_config_pb:encode_msg(SKFReq),
-    Signed = SKFReq#iot_config_route_skf_list_req_v1_pb{signature = SigFun(EncodedReq)},
-
+    EncodedReq = iot_config_pb:encode_msg(DevaddrReq),
+    Signed = DevaddrReq#iot_config_route_get_devaddr_ranges_req_v1_pb{
+        signature = SigFun(EncodedReq)
+    },
     case
-        helium_iot_config_route_client:list_skfs(
+        helium_iot_config_route_client:get_devaddr_ranges(
             Signed,
             #{channel => ?IOT_CONFIG_CHANNEL}
         )
     of
         {ok, Stream} ->
             case recv_from_stream(Stream) of
-                SKFs when erlang:is_list(SKFs) ->
-                    Previous = hpr_skf_storage:lookup_route(RouteID),
-                    PreviousCnt = hpr_skf_storage:replace_route(RouteID, SKFs),
+                Devaddrs when erlang:is_list(Devaddrs) ->
+                    PreviousDevaddrs = hpr_devaddr_range_storage:lookup_for_route(RouteID),
+                    PreviousCnt = hpr_devaddr_range_storage:replace_route(RouteID, Devaddrs),
                     lager:info(
-                        "route refresh skfs ~p",
-                        [{{previous, PreviousCnt}, {current, length(SKFs)}}]
+                        [{previous, PreviousCnt}, {current, length(Devaddrs)}],
+                        "route refresh devaddrs"
                     ),
-                    {ok, {Previous, SKFs}};
+                    Devaddrs1 = [
+                        {hpr_devaddr_range:start_addr(Range), hpr_devaddr_range:end_addr(Range)}
+                     || Range <- Devaddrs
+                    ],
+                    {ok, {PreviousDevaddrs, Devaddrs1}};
                 Err ->
                     Err
             end;
-        {error, _} = Err ->
-            lager:error([{route_id, RouteID}, Err], "failed to refresh route skfs"),
+        {error, _E} = Err ->
+            lager:error([{route_id, RouteID}, Err], "failed to refresh route devaddrs"),
             Err
     end.
 
@@ -533,14 +538,14 @@ refresh_euis(RouteID) ->
         {ok, Stream} ->
             case recv_from_stream(Stream) of
                 EUIs when erlang:is_list(EUIs) ->
-                    Previous = hpr_eui_pair_storage:lookup_for_route(RouteID),
+                    PreviousEUIS = hpr_eui_pair_storage:lookup_for_route(RouteID),
                     PreviousCnt = hpr_eui_pair_storage:replace_route(RouteID, EUIs),
                     lager:info(
                         [{previous, PreviousCnt}, {current, length(EUIs)}],
                         "route refresh euis"
                     ),
                     EUIs0 = [{hpr_eui_pair:app_eui(EUI), hpr_eui_pair:dev_eui(EUI)} || EUI <- EUIs],
-                    {ok, {Previous, EUIs0}};
+                    {ok, {PreviousEUIS, EUIs0}};
                 Err ->
                     Err
             end;
@@ -549,49 +554,44 @@ refresh_euis(RouteID) ->
             Err
     end.
 
--spec refresh_devaddrs(hpr_route:id()) ->
+-spec refresh_skfs(hpr_route:id()) ->
     {ok, {
-        Old :: list(hpr_devaddr_range:devaddr_range()),
-        Current :: list(hpr_devaddr_range:devaddr_range())
+        Old :: list({{SessionKey :: binary(), Devaddr :: binary()}, MaxCopies :: non_neg_integer()}),
+        Current :: list(hpr_skf:skf())
     }}
     | {error, any()}.
-refresh_devaddrs(RouteID) ->
-    DevaddrReq = #iot_config_route_get_devaddr_ranges_req_v1_pb{
+refresh_skfs(RouteID) ->
+    SKFReq = #iot_config_route_skf_list_req_v1_pb{
         route_id = RouteID,
         timestamp = erlang:system_time(millisecond),
         signer = hpr_utils:pubkey_bin()
     },
     SigFun = hpr_utils:sig_fun(),
-    EncodedReq = iot_config_pb:encode_msg(DevaddrReq),
-    Signed = DevaddrReq#iot_config_route_get_devaddr_ranges_req_v1_pb{
-        signature = SigFun(EncodedReq)
-    },
+    EncodedReq = iot_config_pb:encode_msg(SKFReq),
+    Signed = SKFReq#iot_config_route_skf_list_req_v1_pb{signature = SigFun(EncodedReq)},
 
     case
-        helium_iot_config_route_client:get_devaddr_ranges(
+        helium_iot_config_route_client:list_skfs(
             Signed,
             #{channel => ?IOT_CONFIG_CHANNEL}
         )
     of
         {ok, Stream} ->
             case recv_from_stream(Stream) of
-                Devaddrs when erlang:is_list(Devaddrs) ->
-                    Previous = hpr_devaddr_range_storage:lookup_for_route(RouteID),
-                    PreviousCnt = hpr_devaddr_range_storage:replace_route(RouteID, Devaddrs),
+                SKFs when erlang:is_list(SKFs) ->
+                    PreviousSKFs = hpr_skf_storage:lookup_route(RouteID),
+                    % An error should not happen here as we only take routes that are in ETS already
+                    {ok, PreviousCnt} = hpr_skf_storage:replace_route(RouteID, SKFs),
                     lager:info(
-                        [{previous, PreviousCnt}, {current, length(Devaddrs)}],
-                        "route refresh devaddrs"
+                        "route refresh skfs ~p",
+                        [{{previous, PreviousCnt}, {current, length(SKFs)}}]
                     ),
-                    Devaddrs1 = [
-                        {hpr_devaddr_range:start_addr(Range), hpr_devaddr_range:end_addr(Range)}
-                     || Range <- Devaddrs
-                    ],
-                    {ok, {Previous, Devaddrs1}};
+                    {ok, {PreviousSKFs, SKFs}};
                 Err ->
                     Err
             end;
-        {error, _E} = Err ->
-            lager:error([{route_id, RouteID}, Err], "failed to refresh route devaddrs"),
+        {error, _} = Err ->
+            lager:error([{route_id, RouteID}, Err], "failed to refresh route skfs"),
             Err
     end.
 
