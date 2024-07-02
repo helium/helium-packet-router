@@ -62,8 +62,6 @@
 -export([
     start_link/1,
     refresh_route/1,
-    get_all_routes/0,
-    sync_routes/0,
     checkpoint/0,
     schedule_checkpoint/0
 ]).
@@ -149,14 +147,6 @@ start_link(Args) ->
 -spec refresh_route(hpr_route:id()) -> {ok, refresh_map()} | {error, any()}.
 refresh_route(RouteID) ->
     gen_server:call(?MODULE, {refresh_route, RouteID}, timer:seconds(300)).
-
--spec get_all_routes() -> ok.
-get_all_routes() ->
-    gen_server:call(?MODULE, get_all_routes, timer:seconds(120)).
-
--spec sync_routes() -> ok.
-sync_routes() ->
-    gen_server:call(?MODULE, sync_routes, timer:seconds(120)).
 
 -spec checkpoint() -> ok.
 checkpoint() ->
@@ -248,61 +238,6 @@ init(Args) ->
         last_timestamp = LastTimestamp
     }}.
 
-do_get_all_routes() ->
-    {ok, OrgList, _Meta} = helium_iot_config_org_client:list(
-        hpr_org:list_req(),
-        #{channel => ?IOT_CONFIG_CHANNEL}
-    ),
-
-    PubKeyBin = hpr_utils:pubkey_bin(),
-    SigFun = hpr_utils:sig_fun(),
-
-    Res = lists:flatmap(
-        fun(Oui) ->
-            ListReq = hpr_route_list_req:new(PubKeyBin, Oui),
-            SignedReq = hpr_route_list_req:sign(ListReq, SigFun),
-            {ok, RouteListRes, _Meta2} = helium_iot_config_route_client:list(
-                SignedReq,
-                #{channel => ?IOT_CONFIG_CHANNEL}
-            ),
-            hpr_route_list_res:routes(RouteListRes)
-        end,
-        hpr_org:list_res_ouis(OrgList)
-    ),
-    Res.
-
-do_sync_all_routes([], []) ->
-    ok;
-do_sync_all_routes([], [Route | LeftoverRoutes]) ->
-    ct:print("removing leftover route: ~p", [{route_id, hpr_route:id(Route)}]),
-    ok = hpr_route_storage:delete(Route),
-    do_sync_all_routes([], LeftoverRoutes);
-do_sync_all_routes([Route | Routes], ExistingRoutes) ->
-    RouteID = hpr_route:id(Route),
-    case hpr_route_storage:lookup(RouteID) of
-        {ok, Route} ->
-            lager:info([{route_id, RouteID}], "doing nothing, route already exists");
-        {error, not_found} ->
-            lager:info([{route_id, RouteID}], "syncing new route"),
-            hpr_route_storage:insert(Route),
-            refresh_devaddrs(RouteID),
-            refresh_euis(RouteID),
-            refresh_skfs(RouteID)
-    end,
-    do_sync_all_routes(Routes, remove_route(Route, ExistingRoutes)).
-
-remove_route(Target, RouteList) ->
-    ID = hpr_route:id(Target),
-    lists:filter(fun(R) -> hpr_route:id(R) =/= ID end, RouteList).
-
-handle_call(get_all_routes, _From, State) ->
-    Routes = do_get_all_routes(),
-    {reply, {ok, Routes}, State};
-handle_call(sync_routes, _From, State) ->
-    Routes = do_get_all_routes(),
-    ExistingRoutes = hpr_route_storage:all_routes(),
-    do_sync_all_routes(Routes, ExistingRoutes),
-    {reply, ok, State};
 handle_call({refresh_route, RouteID}, _From, State) ->
     DevaddrResponse = refresh_devaddrs(RouteID),
     EUIResponse = refresh_euis(RouteID),
