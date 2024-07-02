@@ -17,7 +17,8 @@
     reset_stream_test/1,
     reset_channel_test/1,
     app_restart_rehydrate_test/1,
-    route_remove_delete_skf_dets_test/1
+    route_remove_delete_skf_dets_test/1,
+    sync_new_route_test/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -38,7 +39,8 @@ all() ->
         reset_stream_test,
         reset_channel_test,
         app_restart_rehydrate_test,
-        route_remove_delete_skf_dets_test
+        route_remove_delete_skf_dets_test,
+        sync_new_route_test
     ].
 
 %%--------------------------------------------------------------------
@@ -539,6 +541,49 @@ main_test(_Config) ->
     ?assertEqual([], hpr_eui_pair_storage:lookup(1, 100)),
     ?assertEqual([], hpr_devaddr_range_storage:lookup(16#00000020)),
     ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3)),
+
+    ok.
+
+sync_new_route_test(_Config) ->
+    application:set_env(hpr, test_org_service_orgs, [
+        hpr_org:test_new(#{oui => 1}),
+        hpr_org:test_new(#{oui => 2})
+    ]),
+
+    RouteID = "7d502f32-4d58-4746-965e-001",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "localhost",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10
+    }),
+    EUIPair = hpr_eui_pair:test_new(#{route_id => RouteID, app_eui => 1, dev_eui => 0}),
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
+    DevAddr = 16#00000001,
+    SessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKeyFilter = hpr_skf:new(#{
+        route_id => RouteID, devaddr => DevAddr, session_key => SessionKey, max_copies => 1
+    }),
+    ok = application:set_env(hpr, test_route_list, [Route]),
+    ok = application:set_env(hpr, test_route_get_euis, [EUIPair]),
+    ok = application:set_env(hpr, test_route_get_devaddr_ranges, [DevAddrRange]),
+    ok = application:set_env(hpr, test_route_list_skfs, [SessionKeyFilter]),
+
+    ok = hpr_route_stream_worker:sync_routes(),
+    {ok, RouteETS} = hpr_route_storage:lookup(RouteID),
+
+    ?assertEqual([RouteETS], hpr_devaddr_range_storage:lookup(16#00000005)),
+    ?assertEqual([RouteETS], hpr_eui_pair_storage:lookup(1, 12)),
+    SK1 = hpr_utils:hex_to_bin(SessionKey),
+    SKFEts = hpr_route_ets:skf_ets(RouteETS),
+    ?assertEqual([{SK1, 1}], hpr_skf_storage:lookup(SKFEts, DevAddr)),
 
     ok.
 

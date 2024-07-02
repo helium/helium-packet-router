@@ -67,8 +67,35 @@ handle_info({stream_resp, RouteStreamResp}, StreamState) ->
 handle_info(_Msg, StreamState) ->
     StreamState.
 
-list(_Ctx, _Msg) ->
-    {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
+list(Ctx, RouteListReq) ->
+    Encoded = iot_config_pb:encode_msg(RouteListReq#iot_config_route_list_req_v1_pb{
+        signature = <<>>
+    }),
+    try
+        libp2p_crypto:verify(
+            Encoded,
+            RouteListReq#iot_config_route_list_req_v1_pb.signature,
+            libp2p_crypto:bin_to_pubkey(RouteListReq#iot_config_route_list_req_v1_pb.signer)
+        )
+    of
+        false ->
+            {grpc_error, {grpcbox_stream:code_to_status(7), <<"PERMISSION_DENIED">>}};
+        true ->
+            Oui = RouteListReq#iot_config_route_list_req_v1_pb.oui,
+            TestRoutes = application:get_env(hpr, test_route_list, []),
+            OuiRoutes = lists:filter(fun(Route) -> hpr_route:oui(Route) == Oui end, TestRoutes),
+            RouteList = #iot_config_route_list_res_v1_pb{
+                routes = OuiRoutes,
+                timestamp = erlang:system_time(millisecond),
+                signer = <<>>,
+                signature = <<>>
+            },
+            {ok, RouteList, Ctx}
+    catch
+        A:B:C ->
+            ct:print("hpr test route service list route error: ~n~p~n~p~n~p", [A, B, C]),
+            {grpc_error, {grpcbox_stream:code_to_status(7), <<"PERMISSION_DENIED">>}}
+    end.
 
 get(_Ctx, _Msg) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
