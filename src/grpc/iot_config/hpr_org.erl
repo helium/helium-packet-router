@@ -3,11 +3,6 @@
 -include("../autogen/iot_config_pb.hrl").
 
 -export([
-    list_req/0,
-    list_res_ouis/1
-]).
-
--export([
     oui/1,
     owner/1,
     payer/1,
@@ -42,17 +37,6 @@ delegate_keys(Org) ->
 -spec locked(Org :: org()) -> boolean().
 locked(Org) ->
     Org#iot_config_org_v1_pb.locked.
-
-%% ------------------------------------------------------------------
-%% Org Service
-%% ------------------------------------------------------------------
--spec list_req() -> #iot_config_org_list_req_v1_pb{}.
-list_req() ->
-    #iot_config_org_list_req_v1_pb{}.
-
--spec list_res_ouis(#iot_config_org_list_res_v1_pb{}) -> [non_neg_integer()].
-list_res_ouis(#iot_config_org_list_res_v1_pb{orgs = Orgs}) ->
-    lists:map(fun(Org) -> ?MODULE:oui(Org) end, Orgs).
 
 %% ------------------------------------------------------------------
 %% Tests Functions

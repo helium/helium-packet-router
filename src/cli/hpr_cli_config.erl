@@ -429,7 +429,8 @@ config_route_deactivate(_, _, _) ->
 
 config_route_remove(["config", "route", "remove", RouteID], [], []) ->
     case hpr_route_storage:lookup(RouteID) of
-        {ok, Route} ->
+        {ok, RouteETS} ->
+            Route = hpr_route_ets:route(RouteETS),
             hpr_route_storage:delete(Route),
             c_text("Deleted Route: ~p", [RouteID]);
         {error, not_found} ->
@@ -799,13 +800,13 @@ format_skf({{SKF, DevAddr}, MaxCopies}) ->
 -spec get_api_routes() -> list(hpr_route:route()).
 get_api_routes() ->
     {ok, OrgList, _Meta} = helium_iot_config_org_client:list(
-        hpr_org:list_req(),
+        hpr_org_list_req:new(),
         #{channel => ?IOT_CONFIG_CHANNEL}
     ),
 
     lists:flatmap(
         fun(OUI) -> get_api_routes_for_oui(OUI) end,
-        hpr_org:list_res_ouis(OrgList)
+        hpr_org_list_res:org_ouis(OrgList)
     ).
 
 -spec get_api_routes_for_oui(OUI :: non_neg_integer()) -> list(hpr_route:route()).

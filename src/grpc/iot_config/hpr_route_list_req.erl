@@ -4,6 +4,12 @@
 
 -export([
     new/2,
+    timestamp/1,
+    signer/1,
+    signature/1
+]).
+
+-export([
     sign/2,
     verify/1
 ]).
@@ -17,6 +23,18 @@ new(Signer, Oui) ->
         timestamp = erlang:system_time(millisecond),
         signer = Signer
     }.
+
+-spec timestamp(Req :: req()) -> non_neg_integer().
+timestamp(Req) ->
+     Req#iot_config_route_list_req_v1_pb.timestamp.
+
+-spec signer(Req:: req()) -> binary().
+signer(Req) ->
+     Req#iot_config_route_list_req_v1_pb.signer.
+
+-spec signature(Req:: req()) -> binary().
+signature(Req) ->
+     Req#iot_config_route_list_req_v1_pb.signature.
 
 -spec sign(RouteListReq :: req(), SigFun :: fun()) -> req().
 sign(RouteListReq, SigFun) ->
