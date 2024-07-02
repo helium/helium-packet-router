@@ -2,14 +2,13 @@
 
 -behaviour(helium_packet_router_packet_bhvr).
 
--export([export_ips/0]).
+-export([ip_key/0]).
 
 -export([
     init/2,
     route/2,
     handle_info/2
 ]).
-
 -export([
     send_packet_down/2,
     locate/1,
@@ -29,29 +28,8 @@
     last_phash = <<>> :: binary()
 }).
 
-export_ips() ->
-    List = lists:map(
-        fun({_Pid, {IP, PubKeyBin}}) ->
-            B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
-            Name = hpr_utils:gateway_name(B58),
-            io:format("Hotspot ~p (~p) connected via ~p (~p)~n", [Name, B58, IP, _Pid]),
-            #{
-                key => binary:list_to_bin(B58),
-                name => binary:list_to_bin(Name),
-                ip => binary:list_to_bin(IP)
-            }
-        end,
-        gproc:lookup_local_properties({hpr_packet_router_service, ip})
-    ),
-    Json = jsx:encode(List),
-    case file:open("/tmp/hotspot_ip.json", [write]) of
-        {ok, File} ->
-            file:write(File, Json),
-            file:close(File),
-            ok;
-        {error, Reason} ->
-            {error, Reason}
-    end.
+-spec ip_key() -> ?IP_KEY.
+ip_key() -> ?IP_KEY.
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_Rpc, StreamState) ->
