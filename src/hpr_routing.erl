@@ -8,7 +8,7 @@
     find_routes/2
 ]).
 
--define(MAX_JOIN_REQ, 999).
+-define(MAX_JOIN_REQ, 50).
 
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
