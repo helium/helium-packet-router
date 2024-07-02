@@ -2,6 +2,8 @@
 
 -behaviour(helium_packet_router_packet_bhvr).
 
+-export([export_ips/0]).
+
 -export([
     init/2,
     route/2,
@@ -15,6 +17,7 @@
 ]).
 
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
+-define(IP_KEY, {?MODULE, ip}).
 -define(SESSION_TIMER, timer:minutes(35)).
 -define(SESSION_KILL, session_kill).
 
@@ -25,6 +28,30 @@
     session_key :: undefined | binary(),
     last_phash = <<>> :: binary()
 }).
+
+export_ips() ->
+    List = lists:map(
+        fun({_Pid, {IP, PubKeyBin}}) ->
+            B58 = libp2p_crypto:bin_to_b58(PubKeyBin),
+            Name = hpr_utils:gateway_name(B58),
+            io:format("Hotspot ~p (~p) connected via ~p (~p)~n", [Name, B58, IP, _Pid]),
+            #{
+                key => binary:list_to_bin(B58),
+                name => binary:list_to_bin(Name),
+                ip => binary:list_to_bin(IP)
+            }
+        end,
+        gproc:lookup_local_properties({hpr_packet_router_service, ip})
+    ),
+    Json = jsx:encode(List),
+    case file:open("/tmp/hotspot_ip.json", [write]) of
+        {ok, File} ->
+            file:write(File, Json),
+            file:close(File),
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_Rpc, StreamState) ->
@@ -159,6 +186,7 @@ handle_packet(PacketUp, Timestamp, StreamState) ->
     | {stop, grpcbox_stream:t()}.
 handle_register(Reg, StreamState0) ->
     PubKeyBin = hpr_register:gateway(Reg),
+    ok = record_ip(StreamState0, PubKeyBin),
     lager:md([{stream_gateway, hpr_utils:gateway_name(PubKeyBin)}]),
     case hpr_register:verify(Reg) of
         false ->
@@ -238,6 +266,33 @@ create_session_offer(StreamState0) ->
 schedule_session_kill() ->
     erlang:send_after(?SESSION_TIMER, self(), ?SESSION_KILL),
     ok.
+
+-spec record_ip(StreamState :: grpcbox_stream:t(), PubKeyBin :: libp2p_crypto:pubkey_bin()) -> ok.
+record_ip(StreamState, PubKeyBin) ->
+    case get_ip_port(StreamState) of
+        {ok, IP} ->
+            true = gproc:add_local_property(?IP_KEY, {IP, PubKeyBin}),
+            lager:debug("IP recorded ~p for ~p", [IP, PubKeyBin]);
+        {error, _R} ->
+            lager:warning("failed to get IP for ~p : ~p", [PubKeyBin, _R])
+    end.
+
+-spec get_ip_port(StreamState :: grpcbox_stream:t()) -> {ok, string()} | {error, any()}.
+get_ip_port(StreamState) ->
+    try
+        {_, Socket} = element(4, StreamState),
+        case inet:peername(Socket) of
+            {ok, {IP, Port}} ->
+                IPString = inet_parse:ntoa(IP),
+                {ok, lists:concat([IPString, ":", integer_to_list(Port)])};
+            {error, Reason} ->
+                {error, Reason}
+        end
+    catch
+        C:E:S ->
+            lager:debug("ERROR ~p ~p ~p", [C, E, S]),
+            {error, E}
+    end.
 
 %% ------------------------------------------------------------------
 %% EUnit tests
