@@ -333,6 +333,7 @@ route_register_test() ->
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> ok end),
     application:ensure_all_started(gproc),
+    application:ensure_all_started(lager),
 
     Self = self(),
     #{secret := PrivKey, public := PubKey} = libp2p_crypto:generate_keys(ed25519),
@@ -361,6 +362,7 @@ route_register_test() ->
     ?assertEqual(Pid, gproc:lookup_local_name(?REG_KEY(Gateway))),
 
     application:stop(gproc),
+    application:stop(lager),
     meck:unload(hpr_metrics),
     meck:unload(hpr_gateway_location),
     ok.
