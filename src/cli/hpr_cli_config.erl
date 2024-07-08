@@ -6,7 +6,22 @@
 
 -behavior(clique_handler).
 
+-include("hpr.hrl").
+
 -export([register_cli/0]).
+
+-export([
+    get_api_routes/0,
+    get_api_routes_for_oui/1
+]).
+
+-ifdef(TEST).
+
+-export([
+    config_route_sync/3
+]).
+
+-endif.
 
 register_cli() ->
     register_all_usage(),
@@ -42,9 +57,11 @@ config_usage() ->
             "    [--display_skfs] default: false (SKFs not included)\n",
             "config route refresh_all                    - Refresh all routes\n",
             "    [--minimum] default: 1 (need a minimum of 1 SKFs ro be updated)\n",
-            "config route refresh <route_id>             - Refresh route\n",
+            "config route refresh <route_id>             - Refresh route's EUIs, SKFs, DevAddrRanges\n",
             "config route activate <route_id>            - Activate route\n",
             "config route deactivate <route_id>          - Deactivate route\n",
+            "config route remove <route_id>              - Delete all remnants of a route\n",
+            "config route sync [--oui=<oui>]             - Fetch all Routes from Config Service, creating new, removing old\n"
             "config skf <DevAddr/Session Key>            - List all Session Key Filters for Devaddr or Session Key\n",
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
             "\n\n",
@@ -103,6 +120,18 @@ config_cmd() ->
             [],
             [],
             fun config_route_deactivate/3
+        ],
+        [
+            ["config", "route", "remove", '*'],
+            [],
+            [],
+            fun config_route_remove/3
+        ],
+        [
+            ["config", "route", "sync"],
+            [],
+            [{oui, [{shortname, "o"}, {longname, "oui"}]}],
+            fun config_route_sync/3
         ],
         [["config", "skf", '*'], [], [], fun config_skf/3],
         [
@@ -396,6 +425,45 @@ config_route_deactivate(["config", "route", "deactivate", RouteID], [], _Flags) 
             c_text("Route ~s deactivated", [RouteID])
     end;
 config_route_deactivate(_, _, _) ->
+    usage.
+
+config_route_remove(["config", "route", "remove", RouteID], [], []) ->
+    case hpr_route_storage:lookup(RouteID) of
+        {ok, RouteETS} ->
+            Route = hpr_route_ets:route(RouteETS),
+            hpr_route_storage:delete(Route),
+            c_text("Deleted Route: ~p", [RouteID]);
+        {error, not_found} ->
+            c_text("Could not find ~p", [RouteID])
+    end;
+config_route_remove(_, _, _) ->
+    usage.
+
+config_route_sync(["config", "route", "sync"], [], Flags) ->
+    Updates =
+        case maps:from_list(Flags) of
+            #{oui := OUI0} ->
+                OUI = erlang:list_to_integer(OUI0, 10),
+                APIRoutes = get_api_routes_for_oui(OUI),
+                ExistingRoutes = hpr_route_storage:oui_routes(OUI),
+                sync_routes(APIRoutes, ExistingRoutes);
+            #{} ->
+                APIRoutes = get_api_routes(),
+                ExistingRoutes = hpr_route_storage:all_routes(),
+                sync_routes(APIRoutes, ExistingRoutes)
+        end,
+
+    FormatRoute = fun(Route) ->
+        io_lib:format(" - ~s OUI=~p~n", [hpr_route:id(Route), hpr_route:oui(Route)])
+    end,
+    Added = lists:map(FormatRoute, maps:get(added, Updates, [])),
+    Removed = lists:map(FormatRoute, maps:get(removed, Updates, [])),
+
+    c_list(
+        [io_lib:format("=== Added (~p) ===~n", [length(Added)])] ++ Added ++
+            [io_lib:format("=== Removed (~p) ===~n", [length(Removed)])] ++ Removed
+    );
+config_route_sync(_, _, _) ->
     usage.
 
 config_skf(["config", "skf", DevAddrOrSKF], [], []) ->
@@ -728,3 +796,81 @@ format_skf({{SKF, DevAddr}, MaxCopies}) ->
         hpr_utils:bin_to_hex_string(SKF),
         MaxCopies
     ]).
+
+-spec get_api_routes() -> list(hpr_route:route()).
+get_api_routes() ->
+    {ok, OrgList, _Meta} = helium_iot_config_org_client:list(
+        hpr_org_list_req:new(),
+        #{channel => ?IOT_CONFIG_CHANNEL}
+    ),
+
+    lists:flatmap(
+        fun(OUI) -> get_api_routes_for_oui(OUI) end,
+        hpr_org_list_res:org_ouis(OrgList)
+    ).
+
+-spec get_api_routes_for_oui(OUI :: non_neg_integer()) -> list(hpr_route:route()).
+get_api_routes_for_oui(OUI) ->
+    PubKeyBin = hpr_utils:pubkey_bin(),
+    SigFun = hpr_utils:sig_fun(),
+
+    ListReq = hpr_route_list_req:new(PubKeyBin, OUI),
+    SignedReq = hpr_route_list_req:sign(ListReq, SigFun),
+    {ok, RouteListRes, _Meta} = helium_iot_config_route_client:list(
+        SignedReq,
+        #{channel => ?IOT_CONFIG_CHANNEL}
+    ),
+    hpr_route_list_res:routes(RouteListRes).
+
+-spec sync_routes(
+    APIRoutes :: list(hpr_route:route()),
+    ExistingRoutes :: list(hpr_route:route())
+) -> #{added => list(hpr_route:route()), removed => list(hpr_route:route())}.
+sync_routes(APIRoutes, ExistingRoutes) ->
+    sync_routes(APIRoutes, ExistingRoutes, #{added => [], removed => []}).
+
+-spec sync_routes(
+    APIRoutes :: list(hpr_route:route()),
+    ExistingRoutes :: list(hpr_route:route()),
+    Updates :: map()
+) -> #{added => list(hpr_route:route()), removed => list(hpr_route:route())}.
+sync_routes([], [], Updates) ->
+    Updates;
+sync_routes([], [Route | LeftoverRoutes], #{removed := RemovedRoutes} = Updates) ->
+    RouteID = hpr_route:id(Route),
+    lager:info([{route_id, RouteID}], "removing leftover route: ~p"),
+    ok = hpr_route_storage:delete(Route),
+    sync_routes(
+        [],
+        LeftoverRoutes,
+        Updates#{removed => [Route | RemovedRoutes]}
+    );
+sync_routes([Route | Routes], ExistingRoutes, #{added := AddedRoutes} = Updates) ->
+    RouteID = hpr_route:id(Route),
+    case hpr_route_storage:lookup(RouteID) of
+        {ok, _Route} ->
+            lager:info([{route_id, RouteID}], "doing nothing, route already exists"),
+            sync_routes(
+                Routes,
+                remove_route(Route, ExistingRoutes),
+                Updates
+            );
+        {error, not_found} ->
+            lager:info([{route_id, RouteID}], "syncing new route"),
+            ok = hpr_route_storage:insert(Route),
+            hpr_route_stream_worker:refresh_route(hpr_route:id(Route)),
+
+            sync_routes(
+                Routes,
+                remove_route(Route, ExistingRoutes),
+                Updates#{added => [Route | AddedRoutes]}
+            )
+    end.
+
+-spec remove_route(
+    Target :: hpr_route:route(),
+    Coll :: list(hpr_route:route())
+) -> list(hpr_route:route()).
+remove_route(Target, RouteList) ->
+    ID = hpr_route:id(Target),
+    lists:filter(fun(R) -> hpr_route:id(R) =/= ID end, RouteList).

@@ -725,7 +725,9 @@ test_data(RouteID) ->
         route_id => RouteID,
         route => Route1,
         eui_pair => EUIPair1,
+        devaddr => DevAddr1,
         devaddr_range => DevAddrRange1,
+        session_key => SessionKey1,
         skf => SessionKeyFilter1
     }.
 
