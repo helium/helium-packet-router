@@ -1023,7 +1023,9 @@ maybe_deliver_packet_to_route_multi_buy() ->
     %% Packet 4 refused using route multi buy 3 (counter 4)
     ?assertEqual(
         {error, multi_buy},
-        maybe_deliver_packet_to_route(PacketUp, RouteETS1, erlang:system_time(millisecond), 0)
+        maybe_deliver_packet_to_route(
+            hpr_packet_up:type(PacketUp), PacketUp, RouteETS1, erlang:system_time(millisecond), 0
+        )
     ),
 
     ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 4)),
