@@ -442,7 +442,7 @@ pull_ack_test(_Config) ->
     ?assert(erlang:is_binary(Token)),
 
     %% There is an outstanding pull_data
-    {ok, WorkerPid} = hpr_gwmp_sup:lookup_worker(PubKeyBin),
+    {ok, WorkerPid} = lookup_worker(PubKeyBin),
     ?assertEqual(
         1,
         maps:size(element(5, sys:get_state(WorkerPid))),
@@ -508,7 +508,7 @@ pull_ack_hostname_test(_Config) ->
     ?assert(erlang:is_binary(Token)),
 
     %% There is an outstanding pull_data
-    {ok, WorkerPid} = hpr_gwmp_sup:lookup_worker(PubKeyBin),
+    {ok, WorkerPid} = lookup_worker(PubKeyBin),
     ?assertEqual(
         1,
         maps:size(element(5, sys:get_state(WorkerPid))),
@@ -635,6 +635,15 @@ gateway_disconnect_test(_Config) ->
 %% ===================================================================
 %% Helpers
 %% ===================================================================
+
+-spec lookup_worker(Key :: binary()) -> {ok, pid()} | {error, not_found}.
+lookup_worker(Key) ->
+    case gproc:lookup_local_name({hpr_protocol_gwmp, Key}) of
+        Pid when is_pid(Pid) ->
+            {ok, Pid};
+        undefined ->
+            {error, not_found}
+    end.
 
 test_route(Port) ->
     test_route("127.0.0.1", Port).

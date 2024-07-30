@@ -11,12 +11,10 @@
 -export([
     start_link/0,
     init/1,
-    maybe_start_worker/2,
-    lookup_worker/1
+    maybe_start_worker/1
 ]).
 
 -define(UDP_WORKER, hpr_gwmp_worker).
--define(ETS, hpr_gwmp_sup_ets).
 
 -define(WORKER(I), #{
     id => I,
@@ -40,31 +38,13 @@
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
--spec maybe_start_worker(WorkerKey :: binary(), Args :: map()) -> {ok, pid()} | {error, any()}.
-maybe_start_worker(WorkerKey, Args) ->
-    case ets:lookup(?ETS, WorkerKey) of
-        [] ->
-            start_worker(WorkerKey, Args);
-        [{WorkerKey, Pid}] ->
-            case erlang:is_process_alive(Pid) of
-                true ->
-                    {ok, Pid};
-                false ->
-                    _ = ets:delete(?ETS, WorkerKey),
-                    start_worker(WorkerKey, Args)
-            end
-    end.
-
--spec lookup_worker(PubKeyBin :: binary()) -> {ok, pid()} | {error, not_found}.
-lookup_worker(WorkerKey) ->
-    case ets:lookup(?ETS, WorkerKey) of
-        [] ->
-            {error, not_found};
-        [{WorkerKey, Pid}] ->
-            case erlang:is_process_alive(Pid) of
-                true -> {ok, Pid};
-                false -> {error, not_found}
-            end
+-spec maybe_start_worker(Args :: map()) -> {ok, pid()} | {error, any()}.
+maybe_start_worker(#{key := Key} = Args) ->
+    case gproc:lookup_local_name(Key) of
+        Pid when is_pid(Pid) ->
+            {ok, Pid};
+        undefined ->
+            supervisor:start_child(?MODULE, [Args])
     end.
 
 %%====================================================================
@@ -72,29 +52,8 @@ lookup_worker(WorkerKey) ->
 %%====================================================================
 
 init([]) ->
-    ?ETS = ets:new(?ETS, [public, named_table, set]),
     {ok, {?FLAGS, [?WORKER(?UDP_WORKER)]}}.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
-
--spec start_worker(PubKeyBin :: binary(), Args :: map()) ->
-    {ok, pid()} | {error, any()}.
-start_worker(PubKeyBin, Args) ->
-    ChildArgs = maps:merge(
-        #{pubkeybin => PubKeyBin},
-        Args
-    ),
-    case supervisor:start_child(?MODULE, [ChildArgs]) of
-        {error, Err} ->
-            {error, Err};
-        {ok, Pid} = OK ->
-            case ets:insert_new(?ETS, {PubKeyBin, Pid}) of
-                true ->
-                    OK;
-                false ->
-                    supervisor:terminate_child(?UDP_WORKER, Pid),
-                    maybe_start_worker(PubKeyBin, Args)
-            end
-    end.
