@@ -29,12 +29,12 @@ send(PacketUp, Route, Timestamp, GatewayLocation) ->
             key => WorkerKey, protocol => Protocol, net_id => hpr_route:net_id(Route)
         })
     of
-        {error, worker_not_started, _} = Err ->
+        {error, Reason} = Err ->
             lager:error(
                 "failed to start http connector for ~s: ~p",
-                [hpr_utils:gateway_name(PubKeyBin), Err]
+                [hpr_utils:gateway_name(PubKeyBin), Reason]
             ),
-            {error, worker_not_started};
+            Err;
         {ok, WorkerPid} ->
             hpr_http_roaming_worker:handle_packet(WorkerPid, PacketUp, Timestamp, GatewayLocation),
             ok
