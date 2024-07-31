@@ -8,4 +8,4 @@
 
 -spec new() -> req().
 new() ->
-     #iot_config_org_list_req_v1_pb{}.
+    #iot_config_org_list_req_v1_pb{}.

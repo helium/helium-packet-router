@@ -86,9 +86,11 @@ push_data(WorkerPid, PacketUp, SocketDest, Timestamp, GatewayLocation) ->
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
-init(#{pubkeybin := PubKeyBin} = Args) ->
+init(#{key := Key, pubkeybin := PubKeyBin} = Args) ->
     process_flag(trap_exit, true),
     lager:info("~p init with ~p", [?SERVER, Args]),
+
+    true = gproc:add_local_name(Key),
 
     PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 

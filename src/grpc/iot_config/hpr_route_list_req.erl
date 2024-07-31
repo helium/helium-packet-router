@@ -26,15 +26,15 @@ new(Signer, Oui) ->
 
 -spec timestamp(Req :: req()) -> non_neg_integer().
 timestamp(Req) ->
-     Req#iot_config_route_list_req_v1_pb.timestamp.
+    Req#iot_config_route_list_req_v1_pb.timestamp.
 
--spec signer(Req:: req()) -> binary().
+-spec signer(Req :: req()) -> binary().
 signer(Req) ->
-     Req#iot_config_route_list_req_v1_pb.signer.
+    Req#iot_config_route_list_req_v1_pb.signer.
 
--spec signature(Req:: req()) -> binary().
+-spec signature(Req :: req()) -> binary().
 signature(Req) ->
-     Req#iot_config_route_list_req_v1_pb.signature.
+    Req#iot_config_route_list_req_v1_pb.signature.
 
 -spec sign(RouteListReq :: req(), SigFun :: fun()) -> req().
 sign(RouteListReq, SigFun) ->

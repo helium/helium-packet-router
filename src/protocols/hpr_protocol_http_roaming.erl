@@ -20,37 +20,31 @@
     GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
 send(PacketUp, Route, Timestamp, GatewayLocation) ->
-    WorkerKey = worker_key_from(PacketUp, Route),
-    PubKeyBin = hpr_packet_up:gateway(PacketUp),
     Protocol = protocol_from(Route),
+    WorkerKey = worker_key_from(PacketUp, Protocol),
+    PubKeyBin = hpr_packet_up:gateway(PacketUp),
     %% start worker
     case
-        hpr_http_roaming_sup:maybe_start_worker(
-            WorkerKey,
-            #{protocol => Protocol, net_id => hpr_route:net_id(Route)}
-        )
+        hpr_http_roaming_sup:maybe_start_worker(#{
+            key => WorkerKey, protocol => Protocol, net_id => hpr_route:net_id(Route)
+        })
     of
-        {error, worker_not_started, _} = Err ->
+        {error, Reason} = Err ->
             lager:error(
                 "failed to start http connector for ~s: ~p",
-                [hpr_utils:gateway_name(PubKeyBin), Err]
+                [hpr_utils:gateway_name(PubKeyBin), Reason]
             ),
-            {error, worker_not_started};
+            Err;
         {ok, WorkerPid} ->
             hpr_http_roaming_worker:handle_packet(WorkerPid, PacketUp, Timestamp, GatewayLocation),
             ok
     end.
 
--spec worker_key_from(hpr_packet_up:packet(), hpr_route:route()) ->
+-spec worker_key_from(PacketUp :: hpr_packet_up:packet(), Protocol :: #http_protocol{}) ->
     hpr_http_roaming_sup:worker_key().
-worker_key_from(PacketUp, Route) ->
-    %% get phash
+worker_key_from(PacketUp, Protocol) ->
     Phash = hpr_packet_up:phash(PacketUp),
-    NetId = hpr_route:net_id(Route),
-
-    %% get protocol
-    Protocol = protocol_from(Route),
-    {Phash, Protocol, NetId}.
+    {?MODULE, Protocol#http_protocol.route_id, Phash}.
 
 -spec protocol_from(hpr_route:route()) -> hpr_http_roaming_sup:http_protocol().
 protocol_from(Route) ->
@@ -62,7 +56,6 @@ protocol_from(Route) ->
         end,
     AuthHeader = hpr_route:http_auth_header(Route),
     ReceiverNSID = hpr_route:http_receiver_nsid(Route),
-
     #http_protocol{
         route_id = hpr_route:id(Route),
         flow_type = FlowType,

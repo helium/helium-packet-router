@@ -83,9 +83,11 @@ init(Args) ->
             auth_header = Auth,
             receiver_nsid = ReceiverNSID
         },
-        net_id := NetID
+        net_id := NetID,
+        key := Key
     } = Args,
     lager:debug("~p init with ~p", [?MODULE, Args]),
+    true = gproc:add_local_name(Key),
     {ok, #state{
         net_id = NetID,
         route_id = RouteID,

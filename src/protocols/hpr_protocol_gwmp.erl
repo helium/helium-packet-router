@@ -10,7 +10,8 @@
 ) -> ok | {error, any()}.
 send(PacketUp, Route, Timestamp, GatewayLocation) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
-    case hpr_gwmp_sup:maybe_start_worker(Gateway, #{}) of
+    Key = {?MODULE, Gateway},
+    case hpr_gwmp_sup:maybe_start_worker(#{key => Key, pubkeybin => Gateway}) of
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
         {ok, Pid} ->
