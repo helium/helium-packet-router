@@ -87,31 +87,35 @@ push_data(WorkerPid, PacketUp, SocketDest, Timestamp, GatewayLocation) ->
 %% ------------------------------------------------------------------
 
 init(#{key := Key, pubkeybin := PubKeyBin} = Args) ->
-    process_flag(trap_exit, true),
     lager:info("~p init with ~p", [?SERVER, Args]),
 
-    true = gproc:add_local_name(Key),
+    try gproc:add_local_name(Key) of
+        true ->
+            PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
 
-    PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
+            lager:md([
+                {packet_gateway, hpr_utils:gateway_name(PubKeyBin)},
+                {gateway_mac, hpr_utils:gateway_mac(PubKeyBin)},
+                {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
+            ]),
 
-    lager:md([
-        {packet_gateway, hpr_utils:gateway_name(PubKeyBin)},
-        {gateway_mac, hpr_utils:gateway_mac(PubKeyBin)},
-        {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
-    ]),
+            {ok, Socket} = gen_udp:open(0, [binary, {active, true}]),
 
-    {ok, Socket} = gen_udp:open(0, [binary, {active, true}]),
+            _ = erlang:send_after(500, self(), {monitor_stream, 0}),
 
-    _ = erlang:send_after(500, self(), {monitor_stream, 0}),
-
-    %% NOTE: Pull data is sent at the first push_data to
-    %% initiate the connection and allow downlinks to start
-    %% flowing.
-    {ok, #state{
-        pubkeybin = PubKeyBin,
-        socket = Socket,
-        pull_data_timer = PullDataTimer
-    }}.
+            %% NOTE: Pull data is sent at the first push_data to
+            %% initiate the connection and allow downlinks to start
+            %% flowing.
+            {ok, #state{
+                pubkeybin = PubKeyBin,
+                socket = Socket,
+                pull_data_timer = PullDataTimer
+            }}
+    catch
+        % This will only catch a bad registration
+        error:badarg ->
+            {stop, already_registered}
+    end.
 
 -spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
 handle_call(Msg, _From, State) ->
