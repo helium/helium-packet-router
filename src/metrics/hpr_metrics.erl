@@ -384,7 +384,7 @@ name_to_pid(Name) ->
     try erlang:list_to_pid(Name) of
         Pid -> Pid
     catch
-        _ ->
+        _E:_R ->
             erlang:whereis(erlang:list_to_atom(Name))
     end.
 
