@@ -87,17 +87,23 @@ init(Args) ->
         key := Key
     } = Args,
     lager:debug("~p init with ~p", [?MODULE, Args]),
-    true = gproc:add_local_name(Key),
-    {ok, #state{
-        net_id = NetID,
-        route_id = RouteID,
-        address = Address,
-        transaction_id = next_transaction_id(),
-        send_data_timer = DedupeTimeout,
-        flow_type = FlowType,
-        auth_header = Auth,
-        receiver_nsid = ReceiverNSID
-    }}.
+    try gproc:add_local_name(Key) of
+        true ->
+            {ok, #state{
+                net_id = NetID,
+                route_id = RouteID,
+                address = Address,
+                transaction_id = next_transaction_id(),
+                send_data_timer = DedupeTimeout,
+                flow_type = FlowType,
+                auth_header = Auth,
+                receiver_nsid = ReceiverNSID
+            }}
+    catch
+        % This will only catch a bad registration
+        error:badarg ->
+            {stop, already_registered}
+    end.
 
 handle_call(_Msg, _From, State) ->
     lager:warning("rcvd unknown call msg: ~p from: ~p", [_Msg, _From]),
