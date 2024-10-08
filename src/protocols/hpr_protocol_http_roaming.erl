@@ -20,21 +20,31 @@
     GatewayLocation :: hpr_gateway_location:loc()
 ) -> ok | {error, any()}.
 send(PacketUp, Route, Timestamp, GatewayLocation) ->
+    send(PacketUp, Route, Timestamp, GatewayLocation, 3).
+
+-spec send(
+    PacketUp :: hpr_packet_up:packet(),
+    Route :: hpr_route:route(),
+    Timestamp :: non_neg_integer(),
+    GatewayLocation :: hpr_gateway_location:loc(),
+    Retry :: non_neg_integer()
+) -> ok | {error, any()}.
+send(_PacketUp, _Route, _Timestamp, _GatewayLocation, 0) ->
+    {error, {roaming_sup_err, max_retries}};
+send(PacketUp, Route, Timestamp, GatewayLocation, Retry) ->
     Protocol = protocol_from(Route),
     WorkerKey = worker_key_from(PacketUp, Protocol),
-    PubKeyBin = hpr_packet_up:gateway(PacketUp),
     %% start worker
     case
         hpr_http_roaming_sup:maybe_start_worker(#{
             key => WorkerKey, protocol => Protocol, net_id => hpr_route:net_id(Route)
         })
     of
-        {error, Reason} = Err ->
-            lager:error(
-                "failed to start http connector for ~s: ~p",
-                [hpr_utils:gateway_name(PubKeyBin), Reason]
-            ),
-            Err;
+        {error, already_registered} ->
+            timer:sleep(2),
+            send(PacketUp, Route, Timestamp, GatewayLocation, Retry - 1);
+        {error, Reason} ->
+            {error, {roaming_sup_err, Reason}};
         {ok, WorkerPid} ->
             hpr_http_roaming_worker:handle_packet(WorkerPid, PacketUp, Timestamp, GatewayLocation),
             ok
