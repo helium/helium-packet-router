@@ -256,7 +256,7 @@ handle_prstart_ans(#{
 }) ->
     NetID = hpr_http_roaming_utils:hexstring_to_int(SenderID),
 
-    lager:info("stop buying [net_id: ~p] [reason: no roaming agreement]", [NetID]),
+    lager:debug("stop buying [net_id: ~p] [reason: no roaming agreement]", [NetID]),
 
     ok;
 handle_prstart_ans(#{
@@ -265,13 +265,13 @@ handle_prstart_ans(#{
     <<"SenderID">> := SenderID
 }) ->
     %% Catchall for properly formatted messages with results we don't yet support
-    lager:info(
+    lager:debug(
         "[result: ~p] [sender: ~p] [description: ~p]",
         [ResultCode, SenderID, maps:get(<<"Description">>, Result, "No Description")]
     ),
     ok;
 handle_prstart_ans(Res) ->
-    lager:error("unrecognized prstart_ans: ~p", [Res]),
+    lager:warning("unrecognized prstart_ans: ~p", [Res]),
     throw({bad_response, Res}).
 
 -spec handle_xmitdata_req(xmitdata_req()) ->
