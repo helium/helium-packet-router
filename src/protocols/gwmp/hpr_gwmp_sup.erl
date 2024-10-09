@@ -27,8 +27,8 @@
 
 -define(FLAGS, #{
     strategy => simple_one_for_one,
-    intensity => 3,
-    period => 60
+    intensity => 100,
+    period => 1
 }).
 
 %%====================================================================
@@ -38,7 +38,7 @@
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
--spec maybe_start_worker(Args :: map()) -> {ok, pid()} | {error, any()}.
+-spec maybe_start_worker(Args :: map()) -> {ok, pid() | undefined} | {error, any()}.
 maybe_start_worker(#{key := Key} = Args) ->
     case gproc:lookup_local_name(Key) of
         Pid when is_pid(Pid) ->

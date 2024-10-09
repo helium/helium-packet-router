@@ -87,17 +87,17 @@ push_data(WorkerPid, PacketUp, SocketDest, Timestamp, GatewayLocation) ->
 %% ------------------------------------------------------------------
 
 init(#{key := Key, pubkeybin := PubKeyBin} = Args) ->
-    lager:info("~p init with ~p", [?SERVER, Args]),
+    lager:debug("~p init with ~p", [?SERVER, Args]),
+
+    lager:md([
+        {packet_gateway, hpr_utils:gateway_name(PubKeyBin)},
+        {gateway_mac, hpr_utils:gateway_mac(PubKeyBin)},
+        {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
+    ]),
 
     try gproc:add_local_name(Key) of
         true ->
             PullDataTimer = maps:get(pull_data_timer, Args, ?PULL_DATA_TIMER),
-
-            lager:md([
-                {packet_gateway, hpr_utils:gateway_name(PubKeyBin)},
-                {gateway_mac, hpr_utils:gateway_mac(PubKeyBin)},
-                {pubkey, libp2p_crypto:bin_to_b58(PubKeyBin)}
-            ]),
 
             {ok, Socket} = gen_udp:open(0, [binary, {active, true}]),
 
@@ -114,7 +114,8 @@ init(#{key := Key, pubkeybin := PubKeyBin} = Args) ->
     catch
         % This will only catch a bad registration
         error:badarg ->
-            {stop, already_registered}
+            lager:waring("already registered", []),
+            ignore
     end.
 
 -spec handle_call(Msg, _From, #state{}) -> {stop, {unimplemented_call, Msg}, #state{}}.
@@ -144,14 +145,14 @@ handle_info({monitor_stream, AttemptCnt}, #state{pubkeybin = PubKeyBin} = State)
     MD = [{attempt, AttemptCnt}],
     case {AttemptCnt, hpr_packet_router_service:locate(PubKeyBin)} of
         {_, {ok, Pid}} ->
-            lager:info(MD, "monitor stream success"),
+            lager:debug(MD, "monitor stream success"),
             _ = erlang:monitor(process, Pid, [{tag, {'DOWN', PubKeyBin}}]),
             {noreply, State};
         {?MONITOR_STREAM_MAX_ATTEMPT, _} ->
-            lager:info(MD, "monitor stream failed at max attempt"),
-            {stop, max_monitor_attempt, State};
+            lager:warning(MD, "monitor stream failed at max attempt"),
+            {stop, normal, State};
         {_, {error, not_found}} ->
-            lager:info(MD, "monitor stream failed"),
+            lager:debug(MD, "monitor stream failed"),
             erlang:send_after(?MONITOR_STREAM_TIMEOUT, self(), {monitor_stream, AttemptCnt + 1}),
             {noreply, State}
     end;
@@ -163,7 +164,7 @@ handle_info(
         {noreply, _} = NoReply -> NoReply
     catch
         _E:_R ->
-            lager:error("failed to handle UDP packet ~p/~p", [_E, _R]),
+            lager:warning("failed to handle UDP packet ~p/~p", [_E, _R]),
             {noreply, State}
     end;
 handle_info(
@@ -211,6 +212,7 @@ handle_info(
     lager:debug("gateway stream ~p went down: ~p waiting ~wms", [_Pid, _ExitReason, ?CLEANUP_TIME]),
     _ = erlang:send_after(?CLEANUP_TIME, self(), ?CLEANUP),
     {noreply, State};
+% TODO: Maybe shutdown right away?
 handle_info(?CLEANUP, #state{pubkeybin = PubKeyBin} = State) ->
     case hpr_packet_router_service:locate(PubKeyBin) of
         {error, _Reason} ->

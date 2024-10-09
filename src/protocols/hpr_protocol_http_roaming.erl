@@ -34,17 +34,18 @@ send(_PacketUp, _Route, _Timestamp, _GatewayLocation, 0) ->
 send(PacketUp, Route, Timestamp, GatewayLocation, Retry) ->
     Protocol = protocol_from(Route),
     WorkerKey = worker_key_from(PacketUp, Protocol),
-    %% start worker
     case
         hpr_http_roaming_sup:maybe_start_worker(#{
             key => WorkerKey, protocol => Protocol, net_id => hpr_route:net_id(Route)
         })
     of
-        {error, already_registered} ->
-            timer:sleep(2),
-            send(PacketUp, Route, Timestamp, GatewayLocation, Retry - 1);
         {error, Reason} ->
             {error, {roaming_sup_err, Reason}};
+        % This should only happen when a hotspot connects and spams us with
+        % mutliple packets for same LNS
+        {ok, undefined} ->
+            timer:sleep(2),
+            send(PacketUp, Route, Timestamp, GatewayLocation, Retry - 1);
         {ok, WorkerPid} ->
             hpr_http_roaming_worker:handle_packet(WorkerPid, PacketUp, Timestamp, GatewayLocation),
             ok

@@ -102,7 +102,8 @@ init(Args) ->
     catch
         % This will only catch a bad registration
         error:badarg ->
-            {stop, already_registered}
+            lager:waring("already registered", []),
+            ignore
     end.
 
 handle_call(_Msg, _From, State) ->
