@@ -24,13 +24,13 @@ send(PacketUp, Route, Timestamp, GatewayLocation, Retry) ->
     Gateway = hpr_packet_up:gateway(PacketUp),
     Key = {?MODULE, Gateway},
     case hpr_gwmp_sup:maybe_start_worker(#{key => Key, pubkeybin => Gateway}) of
-        % This should only happen when a hotspot connects and spams us with
-        % mutliple packet for same LNS
-        {error, already_registered} ->
-            timer:sleep(2),
-            send(PacketUp, Route, Timestamp, GatewayLocation, Retry - 1);
         {error, Reason} ->
             {error, {gwmp_sup_err, Reason}};
+        % This should only happen when a hotspot connects and spams us with
+        % mutliple packets for same LNS
+        {ok, undefined} ->
+            timer:sleep(2),
+            send(PacketUp, Route, Timestamp, GatewayLocation, Retry - 1);
         {ok, Pid} ->
             Region = hpr_packet_up:region(PacketUp),
             Dest = hpr_route:gwmp_region_lns(Region, Route),
