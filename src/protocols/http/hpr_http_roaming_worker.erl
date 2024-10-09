@@ -102,7 +102,7 @@ init(Args) ->
     catch
         % This will only catch a bad registration
         error:badarg ->
-            lager:waring("already registered", []),
+            lager:warning("already registered", []),
             ignore
     end.
 
