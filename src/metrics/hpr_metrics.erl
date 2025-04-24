@@ -377,7 +377,7 @@ record_queues() ->
 -spec record_devices() -> ok.
 record_devices() ->
     Count = hpr_device_stats:run(),
-    _ = prometheus_gauge:set(?METRICS_EUI_PAIRS_GAUGE, [], Count),
+    _ = prometheus_gauge:set(?METRICS_DEVICE_GAUGE, [], Count),
     ok.
 
 -spec get_pid_name(pid()) -> list().
