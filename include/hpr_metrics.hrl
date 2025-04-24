@@ -22,6 +22,7 @@
 -define(METRICS_ICS_GATEWAY_LOCATION_HISTOGRAM,
     "hpr_iot_config_service_gateway_location_histogram"
 ).
+-define(METRICS_DEVICE_GAUGE, "hpr_device_gauge").
 
 -define(METRICS, [
     {?METRICS_GRPC_CONNECTION_GAUGE, prometheus_gauge, [], "Number of active GRPC Connections"},
@@ -41,5 +42,6 @@
     {?METRICS_VM_PROC_Q, prometheus_gauge, [name], "Process queue"},
     {?METRICS_ICS_UPDATES_COUNTER, prometheus_counter, [type, action], "ICS updates counter"},
     {?METRICS_ICS_GATEWAY_LOCATION_HISTOGRAM, prometheus_histogram, [status],
-        "ICS gateway location req"}
+        "ICS gateway location req"},
+    {?METRICS_DEVICE_GAUGE, prometheus_gauge, [], "Approximate number of devices"}
 ]).

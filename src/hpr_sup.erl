@@ -57,6 +57,7 @@ init([]) ->
     ok = hpr_utils:load_key(KeyFileName),
 
     ok = timing("packet routing cache", fun() -> hpr_routing_cache:init_ets() end),
+    ok = timing("device stats", fun() -> hpr_device_stats:init() end),
     ok = timing("routing throttles", fun() -> hpr_routing:init() end),
     ok = timing("multi buy", fun() -> hpr_multi_buy:init() end),
     ok = timing("packet_router streams", fun() -> hpr_protocol_router:init() end),
