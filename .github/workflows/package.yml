@@ -17,10 +17,12 @@ jobs:
           access_token: ${{ github.token }}
 
       - name: deps
-        run: apt update && apt install --yes autoconf automake bison gcc libc6-dev binutils libbz2-dev curl libdbus-1-dev flex git libgmp10 libgmp-dev libsodium-dev libtool liblz4-dev libssl1.1 libssl-dev pkgconf bash protobuf-compiler sed tar wget vim zip ruby
+        run: |
+          apt update &&
+          apt install --yes autoconf automake bison gcc libc6-dev binutils libbz2-dev curl libdbus-1-dev flex git libgmp10 libgmp-dev libsodium-dev libtool liblz4-dev libssl1.1 libssl-dev pkgconf bash protobuf-compiler sed tar wget vim zip ruby
 
       - name: install cmake
-        uses: lukka/get-cmake@latest
+        uses: lukka/get-cmake@v3.31.4
 
       - name: fpm install
         run: gem install fpm
