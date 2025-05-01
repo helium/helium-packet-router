@@ -19,6 +19,7 @@ init() ->
         public,
         named_table,
         set,
+        {keypos, #entry.key},
         {write_concurrency, true}
     ]),
     ok.
@@ -71,12 +72,20 @@ foreach_cleanup(ok) ->
     ok.
 
 test_update_run() ->
-    Key = <<>>,
-    ?MODULE:update(Key),
-    ?MODULE:update(Key),
-    ?MODULE:update(Key),
+    Key1 = <<>>,
+    ?MODULE:update(Key1),
+    ?MODULE:update(Key1),
+    ?MODULE:update(Key1),
+
     ?assertEqual(1, ?MODULE:run()),
     ?assertEqual(1, ?MODULE:run()),
+
+    Key2 = <<"key2">>,
+    ?MODULE:update(Key2),
+
+    ?assertEqual(2, ?MODULE:run()),
+    ?assertEqual(2, ?MODULE:run()),
+
     ok.
 
 -endif.
