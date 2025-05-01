@@ -182,15 +182,18 @@ handle_cast(_Msg, State) ->
 
 handle_info(?METRICS_TICK, State) ->
     lager:debug("running metrics"),
-    _ = erlang:spawn(
-        fun() ->
-            ok = record_grpc_connections(),
-            ok = record_routes(),
-            ok = record_eui_pairs(),
-            ok = record_skfs(),
-            ok = record_ets(),
-            ok = record_queues()
-        end
+    ToRun = [
+        fun record_grpc_connections/0,
+        fun record_routes/0,
+        fun record_eui_pairs/0,
+        fun record_skfs/0,
+        fun record_ets/0,
+        fun record_queues/0,
+        fun record_devices/0
+    ],
+    lists:foreach(
+        fun(Fun) -> erlang:spawn(Fun) end,
+        ToRun
     ),
     _ = schedule_next_tick(),
     {noreply, State};
@@ -369,6 +372,12 @@ record_queues() ->
         end,
         maps:to_list(NewQs)
     ),
+    ok.
+
+-spec record_devices() -> ok.
+record_devices() ->
+    Count = hpr_device_stats:run(),
+    _ = prometheus_gauge:set(?METRICS_DEVICE_GAUGE, [], Count),
     ok.
 
 -spec get_pid_name(pid()) -> list().

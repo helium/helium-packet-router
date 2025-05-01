@@ -179,8 +179,11 @@ find_routes_for_uplink(
         empty ->
             EmptyRoutes1 =
                 case hpr_route:ignore_empty_skf(Route) of
-                    true -> EmptyRoutes;
-                    false -> [RouteETS | EmptyRoutes]
+                    true ->
+                        EmptyRoutes;
+                    false ->
+                        _ = hpr_device_stats:update(DevAddr),
+                        [RouteETS | EmptyRoutes]
                 end,
             find_routes_for_uplink(
                 PacketUp,
@@ -197,7 +200,8 @@ find_routes_for_uplink(
                 EmptyRoutes,
                 SelectedRoutes
             );
-        {ok, SKFMaxCopies} ->
+        {ok, SessionKey, SKFMaxCopies} ->
+            _ = hpr_device_stats:update(SessionKey),
             find_routes_for_uplink(
                 PacketUp,
                 DevAddr,
@@ -210,35 +214,32 @@ find_routes_for_uplink(
 -spec check_route_skfs(
     PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer(), ets:table()
 ) ->
-    empty | false | {ok, non_neg_integer()}.
+    empty | false | {ok, binary(), non_neg_integer()}.
 check_route_skfs(PacketUp, DevAddr, SKFETS) ->
     case hpr_skf_storage:select(SKFETS, DevAddr) of
         '$end_of_table' ->
             empty;
         Continuation ->
             Payload = hpr_packet_up:payload(PacketUp),
-            case check_route_skfs(Payload, Continuation) of
-                false -> false;
-                {ok, MaxCopies} -> {ok, MaxCopies}
-            end
+            check_route_skfs(Payload, Continuation)
     end.
 
 -spec check_route_skfs(
     Payload :: binary(),
     '$end_of_table' | {[{binary(), integer(), non_neg_integer()}], ets:continuation()}
-) -> false | {ok, non_neg_integer()}.
+) -> false | {ok, binary(), non_neg_integer()}.
 check_route_skfs(_Payload, '$end_of_table') ->
     false;
 check_route_skfs(Payload, {SKFs, Continuation}) ->
     case check_skfs(Payload, SKFs) of
         false ->
             check_route_skfs(Payload, hpr_skf_storage:select(Continuation));
-        {ok, _MaxCopies} = OK ->
+        {ok, _SK, _MaxCopies} = OK ->
             OK
     end.
 
 -spec check_skfs(Payload :: binary(), [{binary(), non_neg_integer()}]) ->
-    false | {ok, non_neg_integer()}.
+    false | {ok, binary(), non_neg_integer()}.
 check_skfs(_Payload, []) ->
     false;
 check_skfs(Payload, [{SessionKey, MaxCopies} | SKFs]) ->
@@ -246,7 +247,7 @@ check_skfs(Payload, [{SessionKey, MaxCopies} | SKFs]) ->
         false ->
             check_skfs(Payload, SKFs);
         true ->
-            {ok, MaxCopies}
+            {ok, SessionKey, MaxCopies}
     end.
 
 -spec maybe_deliver_no_routes(
