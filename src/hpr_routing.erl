@@ -499,6 +499,7 @@ foreach_setup() ->
     true = erlang:register(hpr_sup, self()),
     ok = hpr_route_ets:init(),
     ok = hpr_multi_buy:init(),
+    ok = hpr_device_stats:init(),
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> {error, not_implemented} end),
     ok.
@@ -507,6 +508,7 @@ foreach_cleanup(ok) ->
     true = ets:delete(hpr_multi_buy_ets),
     true = ets:delete(hpr_route_devaddr_ranges_ets),
     true = ets:delete(hpr_route_eui_pairs_ets),
+    true = ets:delete(hpr_device_stats_ets),
     lists:foreach(
         fun(RouteETS) ->
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
