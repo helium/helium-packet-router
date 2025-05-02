@@ -3,6 +3,14 @@
 ## [Routing](docs/routing.md)
 ## [Playbook](docs/playbook.md)
 
+## Shortcomings
+
+### Missed downlink on gateway reconnect
+
+There is a potential issue where HPR may fail to transmit a downlink correctly if a gateway reconnects and is load-balanced to a different server.  
+This scenario should be **relatively rare**, as hotspots typically reconnect only every 30 minutes.
+See [this issue](https://github.com/helium/helium-packet-router/issues/267) for more details.
+
 ## Releases
 As releases are tagged on github, debian packages will be automatically built
 and uploaded to a [repo here][1].
