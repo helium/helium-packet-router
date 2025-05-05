@@ -801,7 +801,8 @@ verify_push_data(PacketUp, PushDataBinary) ->
                         ),
                         <<"regi">> => erlang:atom_to_binary(
                             hpr_packet_up:region(PacketUp)
-                        )
+                        ),
+                        <<"hpr_timestamp_ms">> => fun erlang:is_integer/1
                     }
                 }
             ]
@@ -848,7 +849,8 @@ verify_push_data_with_location(PacketUp, PushDataBinary, IndexString) ->
                         ),
                         <<"gateway_h3index">> => erlang:list_to_binary(IndexString),
                         <<"gateway_lat">> => hpr_utils:format_coord(ExpectedLat),
-                        <<"gateway_long">> => hpr_utils:format_coord(ExpectedLong)
+                        <<"gateway_long">> => hpr_utils:format_coord(ExpectedLong),
+                        <<"hpr_timestamp_ms">> => fun erlang:is_integer/1
                     }
                 }
             ]
