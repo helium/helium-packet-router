@@ -1,14 +1,11 @@
 name: Tests
 
 on:
-  push:
-    branches: '*'
   pull_request:
-    branches: main
-  # Run every day at midnight PST (0800 UTC)
-  # https://crontab.guru/#0_8_*_*_*
-  schedule:
-    - cron: '0 8 * * *'
+    branches: ["main"]
+  push:
+    branches: ["main"]
+    tags: ["*"]
   workflow_dispatch:
 
 jobs:
@@ -184,11 +181,13 @@ jobs:
       - name: localstack
         run: | 
           curl 'http://localstack:4566/health'
-          pip install awscli-local[ver1]
+          python3 -m venv /tmp/venv
+          . /tmp/venv/bin/activate
+          pip install --no-cache-dir awscli-local[ver1]
           aws configure set aws_access_key_id testkey
           aws configure set aws_secret_access_key testsecret
           aws configure set default.region us-east-1
-          aws s3 mb s3://test-bucket --endpoint-url=http://localstack:4566
+          aws --endpoint-url=http://localstack:4566 s3 mb s3://test-bucket
       - name: rust
         uses: actions-rs/toolchain@v1
         with:
