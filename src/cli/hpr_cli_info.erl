@@ -37,13 +37,15 @@ info_usage() ->
             "\n\n",
             "info key       - Print HPR's Public Key\n"
             "info ips       - Export all connected hotspots IPs to /tmp/hotspot_ip.json\n"
+            "info netids    - Export net ids stats as json to /tmp/net_ids.json\n"
         ]
     ].
 
 info_cmd() ->
     [
         [["info", "key"], [], [], fun info_key/3],
-        [["info", "ips"], [], [], fun info_ips/3]
+        [["info", "ips"], [], [], fun info_ips/3],
+        [["info", "netids"], [], [], fun info_netids/3]
     ].
 
 info_key(["info", "key"], [], []) ->
@@ -75,6 +77,28 @@ info_ips(["info", "ips"], [], []) ->
             c_text("Failed to export ~p", [Reason])
     end;
 info_ips(_, _, _) ->
+    usage.
+
+info_netids(["info", "netids"], [], []) ->
+    List = lists:map(
+        fun({NetID, Count}) ->
+            #{
+                net_id => NetID,
+                count => Count
+            }
+        end,
+        hpr_netid_stats:export()
+    ),
+    Json = jsx:encode(List),
+    case file:open("/tmp/net_ids.json", [write]) of
+        {ok, File} ->
+            file:write(File, Json),
+            file:close(File),
+            c_text("Exported to /tmp/net_ids.json");
+        {error, Reason} ->
+            c_text("Failed to export ~p", [Reason])
+    end;
+info_netids(_, _, _) ->
     usage.
 
 %%--------------------------------------------------------------------

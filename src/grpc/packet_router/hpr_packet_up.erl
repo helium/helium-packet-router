@@ -19,6 +19,7 @@
     encode/1,
     decode/1,
     type/1,
+    net_id/1,
     md/1, md/2
 ]).
 
@@ -165,6 +166,24 @@ type(Packet) ->
             {undefined, FType};
         _ ->
             {undefined, 0}
+    end.
+
+-spec net_id(Packet :: packet()) -> {ok, lora_subnet:net_id()} | {error, any()}.
+net_id(Packet) ->
+    case ?MODULE:payload(Packet) of
+        <<?JOIN_REQUEST:3, _:5, _AppEUI:64/integer-unsigned-little,
+            _DevEUI:64/integer-unsigned-little, _DevNonce:2/binary, _MIC:4/binary>> ->
+            {error, join};
+        (<<FType:3, _:5, DevAddr:32/integer-unsigned-little, _ADR:1, _ADRACKReq:1, _ACK:1, _RFU:1,
+            FOptsLen:4, _FCnt:16/little-unsigned-integer, _FOpts:FOptsLen/binary,
+            PayloadAndMIC/binary>>) when
+            (FType == ?UNCONFIRMED_UP orelse FType == ?CONFIRMED_UP) andalso
+                %% MIC is 4 bytes, so the binary must be at least that long
+                erlang:byte_size(PayloadAndMIC) >= 4
+        ->
+            lora_subnet:parse_netid(DevAddr, little);
+        _ ->
+            {error, undefined}
     end.
 
 -spec md(PacketUp :: packet()) -> ok.
