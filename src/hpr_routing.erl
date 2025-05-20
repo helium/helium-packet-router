@@ -55,6 +55,7 @@ handle_packet(PacketUp, Opts) ->
             hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Timestamp),
             Error;
         ok ->
+            ok = hpr_netid_stats:maybe_report_net_id(PacketUp),
             do_handle_packet(PacketUp, Timestamp)
     end.
 
@@ -500,6 +501,7 @@ foreach_setup() ->
     ok = hpr_route_ets:init(),
     ok = hpr_multi_buy:init(),
     ok = hpr_device_stats:init(),
+    ok = hpr_netid_stats:init(),
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> {error, not_implemented} end),
     ok.
@@ -509,6 +511,7 @@ foreach_cleanup(ok) ->
     true = ets:delete(hpr_route_devaddr_ranges_ets),
     true = ets:delete(hpr_route_eui_pairs_ets),
     true = ets:delete(hpr_device_stats_ets),
+    true = ets:delete(hpr_netid_stats_ets),
     lists:foreach(
         fun(RouteETS) ->
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
