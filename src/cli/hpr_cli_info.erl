@@ -83,7 +83,8 @@ info_netids(["info", "netids"], [], []) ->
     List = lists:map(
         fun({NetID, Count}) ->
             #{
-                net_id => hpr_utils:net_id_display(NetID),
+                net_id_str => hpr_utils:net_id_display(NetID),
+                net_id_int => NetID,
                 count => Count
             }
         end,
