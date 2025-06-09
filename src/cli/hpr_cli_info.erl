@@ -67,7 +67,7 @@ info_ips(["info", "ips"], [], []) ->
         end,
         gproc:lookup_local_properties(hpr_packet_router_service:ip_key())
     ),
-    Json = jsx:encode(List),
+    Json = jsx:encode(List, [{indent, 2}]),
     case file:open("/tmp/hotspot_ip.json", [write]) of
         {ok, File} ->
             file:write(File, Json),
@@ -83,14 +83,14 @@ info_netids(["info", "netids"], [], []) ->
     List = lists:map(
         fun({NetID, Count}) ->
             #{
-                net_id_str => hpr_utils:net_id_display(NetID),
+                net_id_str => erlang:list_to_binary(hpr_utils:net_id_display(NetID)),
                 net_id_int => NetID,
                 count => Count
             }
         end,
         hpr_netid_stats:export()
     ),
-    Json = jsx:encode(List),
+    Json = jsx:encode(List, [{indent, 2}]),
     case file:open("/tmp/net_ids.json", [write]) of
         {ok, File} ->
             file:write(File, Json),
