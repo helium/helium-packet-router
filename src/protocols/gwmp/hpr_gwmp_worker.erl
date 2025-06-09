@@ -250,8 +250,7 @@ packet_up_to_push_data(Up, Timestamp, GatewayLocation) ->
         network => <<"helium_iot">>,
         gateway_id => B58,
         gateway_name => Name,
-        regi => hpr_packet_up:region(Up),
-        hpr_timestamp_ms => Timestamp
+        regi => hpr_packet_up:region(Up)
     },
     %% NOTE: everything in meta needs to be string -> string.
     Meta =
