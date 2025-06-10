@@ -251,7 +251,7 @@ packet_up_to_push_data(Up, Timestamp, GatewayLocation) ->
         gateway_id => B58,
         gateway_name => Name,
         regi => hpr_packet_up:region(Up),
-        hpr_timestamp_ms => Timestamp
+        hpr_timestamp_ms => erlang:integer_to_binary(Timestamp)
     },
     %% NOTE: everything in meta needs to be string -> string.
     Meta =
