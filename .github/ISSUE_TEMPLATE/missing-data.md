@@ -14,7 +14,7 @@ A clear and concise description of what the bug is.
 
 ## Please provide the following
 - Route ID (ex: uuid)
-- Lora Region (ex: US915)
+- Frequency Plan (ex: US915, AS923-1, etc)
 - Country
 - Device EUI (if applicable)
 
