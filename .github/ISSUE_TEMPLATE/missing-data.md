@@ -19,7 +19,7 @@ A clear and concise description of what the bug is.
 - Device EUI (if applicable)
 
 **⚠️ DO NOT POST**
-- BOTH device's AppEUI or DevEUI
+- BOTH of a device's AppEUI and DevEUI
 - Device session keys (NwkSKey)
 - Device addresses
 - Wallet info
