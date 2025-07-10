@@ -20,7 +20,7 @@ A clear and concise description of what the bug is.
 
 **⚠️ DO NOT POST**
 - BOTH device's  APP EUI / DEV EUI
-- Device session keys (or SKF)
+- Device session keys (NwkSKey)
 - Device addresses
 - Wallet info
 
