@@ -259,12 +259,6 @@ handle_call({refresh_route, RouteID}, _From, State) ->
 
     Reply =
         case {DevaddrResponse, EUIResponse, SKFResponse} of
-            {{error, _} = Err, _, _} ->
-                Err;
-            {_, {error, _} = Err, _} ->
-                Err;
-            {_, _, {error, _} = Err} ->
-                Err;
             {{ok, {DBefore, DAfter}}, {ok, {EBefore, EAfter}}, {ok, {SBefore, SAfter}}} ->
                 LenSAfter = length(SAfter),
                 LenDAfter = length(DAfter),
@@ -290,6 +284,12 @@ handle_call({refresh_route, RouteID}, _From, State) ->
                             devaddr_added => length(DAfter -- DBefore)
                         }}
                 end;
+            {{error, _} = Err, _, _} ->
+                Err;
+            {_, {error, _} = Err, _} ->
+                Err;
+            {_, _, {error, _} = Err} ->
+                Err;
             Other ->
                 {error, {unexpected_response, Other}}
         end,
