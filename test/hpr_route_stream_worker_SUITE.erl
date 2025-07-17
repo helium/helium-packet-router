@@ -13,6 +13,7 @@
 -export([
     main_test/1,
     refresh_route_test/1,
+    refresh_route_with_retry_test/1,
     stream_crash_resume_updates_test/1,
     reset_stream_test/1,
     reset_channel_test/1,
@@ -34,6 +35,7 @@ all() ->
     [
         main_test,
         refresh_route_test,
+        refresh_route_with_retry_test,
         stream_crash_resume_updates_test,
         reset_stream_test,
         reset_channel_test,
@@ -689,6 +691,64 @@ refresh_route_test(_Config) ->
     ?assertEqual([], hpr_eui_pair_storage:lookup(3, 3), "always out of range"),
     ?assertEqual([], hpr_skf_storage:lookup(SKFETS3, DevAddr1)),
 
+    ok.
+
+refresh_route_with_retry_test(_Config) ->
+    %% Create route and send them from server
+    Route1ID = "7d502f32-4d58-4746-965e-002",
+    Route1 = hpr_route:test_new(#{
+        id => Route1ID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "localhost",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 10
+    }),
+    EUIPair1 = hpr_eui_pair:test_new(#{route_id => Route1ID, app_eui => 1, dev_eui => 0}),
+    DevAddr1 = 16#00000001,
+    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKeyFilter1 = hpr_skf:new(#{
+        route_id => Route1ID, devaddr => DevAddr1, session_key => SessionKey1, max_copies => 1
+    }),
+
+    % Send config via GRPC
+    ok = hpr_test_ics_route_service:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {route, Route1}})
+    ),
+    ok = hpr_test_ics_route_service:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {eui_pair, EUIPair1}})
+    ),
+    ok = hpr_test_ics_route_service:stream_resp(
+        hpr_route_stream_res:test_new(#{action => add, data => {skf, SessionKeyFilter1}})
+    ),
+
+    ok = check_config_counts(Route1ID, 1, 1, 0, 1),
+
+    % Make sure GRPC API returns them
+    application:set_env(hpr, test_route_get_euis, [EUIPair1]),
+    application:set_env(hpr, test_route_list_skfs, [SessionKeyFilter1]),
+
+    ?assertEqual(
+        {error, devaddr_empty},
+        hpr_route_stream_worker:refresh_route(Route1ID)
+    ),
+
+    ?assertEqual(
+        {error, {retry_exhausted, Route1ID}},
+        hpr_route_stream_worker:refresh_route(Route1ID, 3)
+    ),
+
+    % Add a DevAddrRange
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => Route1ID, start_addr => 16#00000001, end_addr => 16#0000000A
+    }),
+    application:set_env(hpr, test_route_get_devaddr_ranges, [DevAddrRange1]),
+    {ok, _} = hpr_route_stream_worker:refresh_route(Route1ID),
+
+    ok = check_config_counts(Route1ID, 1, 1, 1, 1),
     ok.
 
 %% ===================================================================

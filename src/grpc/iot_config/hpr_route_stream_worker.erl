@@ -62,6 +62,7 @@
 -export([
     start_link/1,
     refresh_route/1,
+    refresh_route/2,
     checkpoint/0,
     schedule_checkpoint/0
 ]).
@@ -147,6 +148,19 @@ start_link(Args) ->
 -spec refresh_route(hpr_route:id()) -> {ok, refresh_map()} | {error, any()}.
 refresh_route(RouteID) ->
     gen_server:call(?MODULE, {refresh_route, RouteID}, timer:seconds(300)).
+
+-spec refresh_route(hpr_route:id(), Retry :: non_neg_integer()) ->
+    {ok, refresh_map()} | {error, any()}.
+refresh_route(RouteID, Retry) when Retry == 0 ->
+    {error, {retry_exhausted, RouteID}};
+refresh_route(RouteID, Retry) ->
+    case ?MODULE:refresh_route(RouteID) of
+        {ok, _} = Result ->
+            Result;
+        {error, Reason} ->
+            lager:error("refresh_route failed ~p retrying ~p for ~p", [Reason, Retry, RouteID]),
+            ?MODULE:refresh_route(RouteID, Retry - 1)
+    end.
 
 -spec checkpoint() -> ok.
 checkpoint() ->
@@ -245,26 +259,37 @@ handle_call({refresh_route, RouteID}, _From, State) ->
 
     Reply =
         case {DevaddrResponse, EUIResponse, SKFResponse} of
+            {{error, _} = Err, _, _} ->
+                Err;
+            {_, {error, _} = Err, _} ->
+                Err;
+            {_, _, {error, _} = Err} ->
+                Err;
             {{ok, {DBefore, DAfter}}, {ok, {EBefore, EAfter}}, {ok, {SBefore, SAfter}}} ->
-                {ok, #{
-                    eui_before => length(EBefore),
-                    eui_after => length(EAfter),
-                    eui_removed => length(EBefore -- EAfter),
-                    eui_added => length(EAfter -- EBefore),
-                    %%
-                    skf_before => length(SBefore),
-                    skf_after => length(SAfter),
-                    skf_removed => length(SBefore -- SAfter),
-                    skf_added => length(SAfter -- SBefore),
-                    %%
-                    devaddr_before => length(DBefore),
-                    devaddr_after => length(DAfter),
-                    devaddr_removed => length(DBefore -- DAfter),
-                    devaddr_added => length(DAfter -- DBefore)
-                }};
-            {Err, _, _} when element(1, Err) == error -> Err;
-            {_, Err, _} when element(1, Err) == error -> Err;
-            {_, _, Err} when element(1, Err) == error -> Err;
+                LenSAfter = length(SAfter),
+                LenDAfter = length(DAfter),
+                % When we have some SKF (SAfter > 0) but no Devaddrs we consider it an error
+                case LenSAfter > 0 andalso LenDAfter == 0 of
+                    true ->
+                        {error, devaddr_empty};
+                    false ->
+                        {ok, #{
+                            eui_before => length(EBefore),
+                            eui_after => length(EAfter),
+                            eui_removed => length(EBefore -- EAfter),
+                            eui_added => length(EAfter -- EBefore),
+                            %%
+                            skf_before => length(SBefore),
+                            skf_after => LenSAfter,
+                            skf_removed => length(SBefore -- SAfter),
+                            skf_added => length(SAfter -- SBefore),
+                            %%
+                            devaddr_before => length(DBefore),
+                            devaddr_after => LenDAfter,
+                            devaddr_removed => length(DBefore -- DAfter),
+                            devaddr_added => length(DAfter -- DBefore)
+                        }}
+                end;
             Other ->
                 {error, {unexpected_response, Other}}
         end,
@@ -509,6 +534,7 @@ refresh_devaddrs(RouteID) ->
                     ],
                     {ok, {PreviousDevaddrs, Devaddrs1}};
                 Err ->
+                    lager:error([{route_id, RouteID}], "failed to refresh route devaddrs ~p", [Err]),
                     Err
             end;
         {error, _E} = Err ->
