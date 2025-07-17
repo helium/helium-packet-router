@@ -187,6 +187,7 @@ handle_info(?METRICS_TICK, State) ->
         fun record_routes/0,
         fun record_eui_pairs/0,
         fun record_skfs/0,
+        fun record_weird_routes/0,
         fun record_ets/0,
         fun record_queues/0,
         fun record_devices/0
@@ -276,6 +277,36 @@ record_skfs() ->
         ets:tab2list(hpr_routes_ets)
     ),
     _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], Count),
+    ok.
+
+-spec record_weird_routes() -> ok.
+record_weird_routes() ->
+    Count = lists:foldl(
+        fun(RouteETS, Acc) ->
+            Route = hpr_route_ets:route(RouteETS),
+            RouteID = hpr_route:id(Route),
+            SKFCount =
+                case ets:info(hpr_route_ets:skf_ets(RouteETS), size) of
+                    undefined -> 0;
+                    N -> N
+                end,
+            DevAddrRangesCount = hpr_devaddr_range_storage:count_for_route(RouteID),
+            case SKFCount > 0 andalso DevAddrRangesCount == 0 of
+                true ->
+                    lager:critical(
+                        [{route_id, RouteID}, {oui, hpr_route:oui(Route)}],
+                        "route has no devaddr ranges but has (~p) skfs",
+                        [SKFCount]
+                    ),
+                    Acc + 1;
+                false ->
+                    Acc
+            end
+        end,
+        0,
+        ets:tab2list(hpr_routes_ets)
+    ),
+    _ = prometheus_gauge:set(?METRICS_WEIRD_ROUTES_GAUGE, [], Count),
     ok.
 
 -spec record_grpc_connections() -> ok.
