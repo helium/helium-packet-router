@@ -369,7 +369,7 @@ try_refresh_route(RouteID) ->
     end.
 
 config_route_refresh(["config", "route", "refresh", RouteID], [], _Flags) ->
-    case hpr_route_stream_worker:refresh_route(RouteID) of
+    case hpr_route_stream_worker:refresh_route(RouteID, 3) of
         {ok, RefreshMap} ->
             Table = [
                 [
@@ -858,7 +858,7 @@ sync_routes([Route | Routes], ExistingRoutes, #{added := AddedRoutes} = Updates)
         {error, not_found} ->
             lager:info([{route_id, RouteID}], "syncing new route"),
             ok = hpr_route_storage:insert(Route),
-            hpr_route_stream_worker:refresh_route(hpr_route:id(Route)),
+            hpr_route_stream_worker:refresh_route(hpr_route:id(Route), 3),
 
             sync_routes(
                 Routes,
