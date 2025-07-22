@@ -318,13 +318,11 @@ config_route_refresh_all(_, _, _) ->
 config_route_refresh_broken(["config", "route", "refresh_broken"], [], _Flags) ->
     Pid = erlang:spawn(fun() ->
         RouteIDsWithDevAddr =
-            maps:keys(
-                hpr_devaddr_range_storage:foldl(
-                    fun({_, RouteID}, MapAcc) ->
-                        maps:put(RouteID, true, MapAcc)
-                    end,
-                    #{}
-                )
+            hpr_devaddr_range_storage:foldl(
+                fun({_, RouteID}, Acc) ->
+                    sets:add_element(RouteID, Acc)
+                end,
+                sets:new()
             ),
         RouteIDs = hpr_route_storage:foldl(
             fun(RouteETS, RouteIDs) ->
@@ -335,7 +333,7 @@ config_route_refresh_broken(["config", "route", "refresh_broken"], [], _Flags) -
                     end,
                 Route = hpr_route_ets:route(RouteETS),
                 RouteID = hpr_route:id(Route),
-                case SKFCount > 0 andalso not lists:member(RouteID, RouteIDsWithDevAddr) of
+                case SKFCount > 0 andalso not sets:is_element(RouteID, RouteIDsWithDevAddr) of
                     true ->
                         lager:warning(
                             [{route_id, RouteID}, {oui, hpr_route:oui(Route)}],

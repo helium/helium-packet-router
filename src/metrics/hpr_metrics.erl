@@ -186,7 +186,6 @@ handle_info(?METRICS_TICK, State) ->
         fun record_grpc_connections/0,
         fun record_routes/0,
         fun record_eui_pairs/0,
-        fun record_skfs/0,
         fun record_ets/0,
         fun record_queues/0,
         fun record_devices/0
@@ -296,21 +295,6 @@ record_eui_pairs() ->
         N ->
             _ = prometheus_gauge:set(?METRICS_EUI_PAIRS_GAUGE, [], N)
     end,
-    ok.
-
--spec record_skfs() -> ok.
-record_skfs() ->
-    Count = lists:foldl(
-        fun(RouteETS, Acc) ->
-            case ets:info(hpr_route_ets:skf_ets(RouteETS), size) of
-                undefined -> Acc;
-                N -> N + Acc
-            end
-        end,
-        0,
-        ets:tab2list(hpr_routes_ets)
-    ),
-    _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], Count),
     ok.
 
 -spec record_grpc_connections() -> ok.
