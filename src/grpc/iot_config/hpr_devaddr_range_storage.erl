@@ -4,6 +4,7 @@
     init_ets/0,
     checkpoint/0,
 
+    foldl/2,
     lookup/1,
     insert/1,
     delete/1,
@@ -37,6 +38,10 @@ checkpoint() ->
     with_open_dets(fun() ->
         ok = dets:from_ets(?DETS, ?ETS)
     end).
+
+-spec foldl(Fun :: function(), Acc :: any()) -> any().
+foldl(Fun, Acc) ->
+    ets:foldl(Fun, Acc, ?ETS).
 
 -spec lookup(DevAddr :: non_neg_integer()) -> [hpr_route_ets:route()].
 lookup(DevAddr) ->

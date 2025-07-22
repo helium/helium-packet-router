@@ -4,6 +4,7 @@
     init_ets/0,
     checkpoint/0,
 
+    foldl/2,
     insert/1, insert/2, insert/3,
     delete/1,
     lookup/1,
@@ -59,6 +60,10 @@ lookup(ID) ->
         _Other ->
             {error, not_found}
     end.
+
+-spec foldl(Fun :: function(), Acc :: any()) -> any().
+foldl(Fun, Acc) ->
+    ets:foldl(Fun, Acc, ?ETS).
 
 -spec insert(Route :: hpr_route:route()) -> ok.
 insert(Route) ->
