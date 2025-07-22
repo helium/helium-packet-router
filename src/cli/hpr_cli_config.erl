@@ -57,6 +57,7 @@ config_usage() ->
             "    [--display_skfs] default: false (SKFs not included)\n",
             "config route refresh_all                    - Refresh all routes\n",
             "    [--minimum] default: 1 (need a minimum of 1 SKFs ro be updated)\n",
+            "config route refresh_broken                 - Refresh broken routes\n",
             "config route refresh <route_id>             - Refresh route's EUIs, SKFs, DevAddrRanges\n",
             "config route activate <route_id>            - Activate route\n",
             "config route deactivate <route_id>          - Deactivate route\n",
@@ -102,6 +103,12 @@ config_cmd() ->
                 {minimum, [{longname, "minimum"}, {datatype, integer}]}
             ],
             fun config_route_refresh_all/3
+        ],
+        [
+            ["config", "route", "refresh_broken"],
+            [],
+            [],
+            fun config_route_refresh_broken/3
         ],
         [
             ["config", "route", "refresh", '*'],
@@ -299,44 +306,78 @@ config_route_refresh_all(["config", "route", "refresh_all"], [], Flags) ->
         RouteIDs = [ID || {ID, _} <- Sorted],
         Total = erlang:length(RouteIDs),
         lager:info("Found ~p routes to update", [Total]),
-        route_refresh_all(
-            Total, RouteIDs, backoff:init(timer:seconds(1), timer:minutes(1))
-        )
+        routes_refresh(Total, RouteIDs)
     end),
-    c_text("command spawned @ ~p, look at logs and tail hpr_cli_config", [Pid]);
+    c_text(
+        "command spawned @ ~p, look at logs and `tail -F /opt/hpr/log/info.log | grep hpr_cli_config`",
+        [Pid]
+    );
 config_route_refresh_all(_, _, _) ->
     usage.
 
-route_refresh_all(_Total, [], _Backoff0) ->
+config_route_refresh_broken(["config", "route", "refresh_broken"], [], _Flags) ->
+    Pid = erlang:spawn(fun() ->
+        RouteIDsWithDevAddr =
+            hpr_devaddr_range_storage:foldl(
+                fun({_, RouteID}, Acc) ->
+                    sets:add_element(RouteID, Acc)
+                end,
+                sets:new()
+            ),
+        RouteIDs = hpr_route_storage:foldl(
+            fun(RouteETS, RouteIDs) ->
+                SKFCount =
+                    case ets:info(hpr_route_ets:skf_ets(RouteETS), size) of
+                        undefined -> 0;
+                        N -> N
+                    end,
+                Route = hpr_route_ets:route(RouteETS),
+                RouteID = hpr_route:id(Route),
+                case SKFCount > 0 andalso not sets:is_element(RouteID, RouteIDsWithDevAddr) of
+                    true ->
+                        lager:warning(
+                            [{route_id, RouteID}, {oui, hpr_route:oui(Route)}],
+                            "BROKEN_ROUTES route has no devaddr ranges but has (~p) skfs",
+                            [SKFCount]
+                        ),
+                        [RouteID | RouteIDs];
+                    false ->
+                        RouteIDs
+                end
+            end,
+            []
+        ),
+        Total = erlang:length(RouteIDs),
+        lager:info("Found ~p routes to fix", [Total]),
+        routes_refresh(Total, RouteIDs)
+    end),
+    c_text(
+        "command spawned @ ~p, look at logs and `tail -F /opt/hpr/log/info.log | grep hpr_cli_config`",
+        [Pid]
+    );
+config_route_refresh_broken(_, _, _) ->
+    usage.
+
+routes_refresh(_Total, []) ->
     lager:info("All done!");
-route_refresh_all(Total, [RouteID | T] = RouteIDs, Backoff0) ->
+routes_refresh(Total, [RouteID | RouteIDs]) ->
     CurrTotal = erlang:length(RouteIDs),
     IDX = Total - CurrTotal + 1,
     lager:info("~p/~p===== ~s =====", [
         IDX, Total, RouteID
     ]),
     Start = erlang:system_time(millisecond),
-    case try_refresh_route(RouteID) of
-        ok ->
-            End = erlang:system_time(millisecond),
-            lager:info("took ~pms", [End - Start]),
-            {_, Backoff1} = backoff:succeed(Backoff0),
-            route_refresh_all(Total, T, Backoff1);
-        error ->
-            End = erlang:system_time(millisecond),
-            lager:info("took ~pms", [End - Start]),
-            {Delay, Backoff1} = backoff:fail(Backoff0),
-            lager:info("sleeping ~pms", [Delay]),
-            timer:sleep(Delay),
-            route_refresh_all(Total, RouteIDs, Backoff1)
-    end,
-    ok.
-
-try_refresh_route(RouteID) ->
-    try hpr_route_stream_worker:refresh_route(RouteID) of
+    try hpr_route_stream_worker:refresh_route(RouteID, 3) of
         {ok, Map} ->
             lager:info("| Type | Before  |  After  | Removed |  Added  |"),
             lager:info("|------|---------|---------|---------|---------|"),
+            lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
+                addr,
+                maps:get(devaddr_before, Map),
+                maps:get(devaddr_after, Map),
+                maps:get(devaddr_removed, Map),
+                maps:get(devaddr_added, Map)
+            ]),
             lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
                 eui,
                 maps:get(eui_before, Map),
@@ -350,23 +391,16 @@ try_refresh_route(RouteID) ->
                 maps:get(skf_after, Map),
                 maps:get(skf_removed, Map),
                 maps:get(skf_added, Map)
-            ]),
-            lager:info("| ~4w | ~7w | ~7w | ~7w | ~7w |", [
-                addr,
-                maps:get(devaddr_before, Map),
-                maps:get(devaddr_after, Map),
-                maps:get(devaddr_removed, Map),
-                maps:get(devaddr_added, Map)
-            ]),
-            ok;
+            ]);
         {error, _R} ->
-            lager:info("ERROR ~p", [_R]),
-            error
+            lager:error("error ~p", [_R])
     catch
         _E:_R ->
-            lager:info("CRASHED ~p", [_R]),
-            error
-    end.
+            lager:critical("crashed ~p", [_R])
+    end,
+    End = erlang:system_time(millisecond),
+    lager:info("took ~pms", [End - Start]),
+    routes_refresh(Total, RouteIDs).
 
 config_route_refresh(["config", "route", "refresh", RouteID], [], _Flags) ->
     case hpr_route_stream_worker:refresh_route(RouteID, 3) of
