@@ -62,7 +62,7 @@ cleaner_loop() ->
 -spec cleanup_old() -> ok.
 cleanup_old() ->
     Now = erlang:system_time(millisecond),
-    OneDayAgo = Now - 24 * 60 * 60 * 1000,
+    OneDayAgo = Now - timer:hours(24),
     %% Match-spec: match any {_, _, TS} where TS < OneDayAgo, delete it.
     MS = [
         {{'_', '_', '$1'}, [{'<', '$1', OneDayAgo}], [true]}
