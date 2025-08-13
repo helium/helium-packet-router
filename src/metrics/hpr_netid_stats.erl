@@ -8,7 +8,7 @@
 
 -define(ETS, hpr_netid_stats_ets).
 -define(CLEANER, hpr_netid_stats_cleaner).
--define(HOUR_MS, 60 * 60 * 1000).
+-define(HOUR_MS, timer:hours(1)).
 
 -spec init() -> ok.
 init() ->
