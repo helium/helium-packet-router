@@ -7,6 +7,8 @@
 ]).
 
 -define(ETS, hpr_netid_stats_ets).
+-define(CLEANER, hpr_netid_stats_cleaner).
+-define(HOUR_MS, timer:hours(1)).
 
 -spec init() -> ok.
 init() ->
@@ -16,6 +18,7 @@ init() ->
         set,
         {write_concurrency, true}
     ]),
+    ok = ensure_cleaner(),
     ok.
 
 -spec maybe_report_net_id(PacketUp :: hpr_packet_up:packet()) -> ok.
@@ -25,7 +28,7 @@ maybe_report_net_id(PacketUp) ->
             ok;
         {ok, NetId} ->
             ets:update_counter(
-                ?ETS, NetId, {2, 1}, {default, 0}
+                ?ETS, NetId, {2, 1}, {default, 0, erlang:system_time(millisecond)}
             ),
             ok
     end.
@@ -33,6 +36,39 @@ maybe_report_net_id(PacketUp) ->
 -spec export() -> list({non_neg_integer(), non_neg_integer()}).
 export() ->
     ets:tab2list(?ETS).
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
+ensure_cleaner() ->
+    case erlang:whereis(?CLEANER) of
+        undefined ->
+            Pid = erlang:spawn(fun cleaner_loop/0),
+            true = erlang:register(?CLEANER, Pid),
+            ok;
+        _Pid ->
+            ok
+    end.
+
+cleaner_loop() ->
+    catch cleanup_old(),
+    receive
+        stop -> ok
+    after ?HOUR_MS ->
+        cleaner_loop()
+    end.
+
+-spec cleanup_old() -> ok.
+cleanup_old() ->
+    Now = erlang:system_time(millisecond),
+    OneDayAgo = Now - timer:hours(24),
+    %% Match-spec: match any {_, _, TS} where TS < OneDayAgo, delete it.
+    MS = [
+        {{'_', '_', '$1'}, [{'<', '$1', OneDayAgo}], [true]}
+    ],
+    DeletedCount = ets:select_delete(?ETS, MS),
+    lager:debug("removed ~p entries older than 24h", [DeletedCount]).
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -43,15 +79,18 @@ export() ->
 
 all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
-        ?_test(test_maybe_report_net_id())
+        ?_test(test_maybe_report_net_id()),
+        ?_test(test_cleanup_old())
     ]}.
 
 foreach_setup() ->
+    application:ensure_all_started(lager),
     ok = ?MODULE:init(),
     ok.
 
 foreach_cleanup(ok) ->
     _ = catch ets:delete(?ETS),
+    application:stop(lager),
     ok.
 
 test_maybe_report_net_id() ->
@@ -61,8 +100,16 @@ test_maybe_report_net_id() ->
     ?assertEqual(ok, maybe_report_net_id(PacketUp)),
     ?assertEqual(ok, maybe_report_net_id(PacketUp)),
 
-    ?assertEqual([{0, 3}], ets:tab2list(?ETS)),
+    ?assertMatch([{0, 3, _}], ets:tab2list(?ETS)),
 
     ok.
+
+test_cleanup_old() ->
+    %% seed: one fresh, one old
+    T0 = erlang:system_time(millisecond),
+    ets:insert(?ETS, {1, 3, T0}),
+    ets:insert(?ETS, {2, 5, T0 - 25 * 60 * 60 * 1000}),
+    ok = cleanup_old(),
+    ?assertEqual([{1, 3, T0}], lists:sort(ets:tab2list(?ETS))).
 
 -endif.

@@ -279,6 +279,20 @@ record_routes() ->
     ),
     _ = prometheus_gauge:set(?METRICS_ROUTES_GAUGE, [], RoutesCount),
     _ = prometheus_gauge:set(?METRICS_SKFS_GAUGE, [], SKFsCount),
+
+    OldBrokenRoutes = lists:foldl(
+        fun({[{"oui", OUI} | _], Length}, Acc) ->
+            maps:put(OUI, Length, Acc)
+        end,
+        #{},
+        prometheus_gauge:values(default, ?METRICS_BROKEN_ROUTES_GAUGE)
+    ),
+    maps:foreach(
+        fun(OUI, _Count) ->
+            _ = prometheus_gauge:remove(?METRICS_BROKEN_ROUTES_GAUGE, [OUI])
+        end,
+        maps:without(maps:keys(BrokenMap), OldBrokenRoutes)
+    ),
     maps:foreach(
         fun(OUI, Count) ->
             _ = prometheus_gauge:set(?METRICS_BROKEN_ROUTES_GAUGE, [OUI], Count)
