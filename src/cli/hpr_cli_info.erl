@@ -80,21 +80,30 @@ info_ips(_, _, _) ->
     usage.
 
 info_netids(["info", "netids"], [], []) ->
+    NowMs = erlang:system_time(millisecond),
     List = lists:map(
-        fun({NetID, Count}) ->
+        fun({NetID, Count, Timestamp}) ->
+            TsISO = erlang:list_to_binary(
+                calendar:system_time_to_rfc3339(
+                    Timestamp, [{unit, millisecond}, {offset, "Z"}]
+                )
+            ),
+            ElapsedMs = max(1, NowMs - Timestamp),
+            Hours = ElapsedMs / 3600000.0,
+            CountPerHour = math:ceil(Count / Hours * 10) / 10.0,
             #{
                 net_id_str => erlang:list_to_binary(hpr_utils:net_id_display(NetID)),
                 net_id_int => NetID,
-                count => Count
+                count => Count,
+                timestamp => TsISO,
+                count_per_hour => CountPerHour
             }
         end,
         hpr_netid_stats:export()
     ),
     Json = jsx:encode(List, [{indent, 2}]),
-    case file:open("/tmp/net_ids.json", [write]) of
-        {ok, File} ->
-            file:write(File, Json),
-            file:close(File),
+    case file:write_file("/tmp/net_ids.json", Json) of
+        ok ->
             c_text("Exported to /tmp/net_ids.json");
         {error, Reason} ->
             c_text("Failed to export ~p", [Reason])

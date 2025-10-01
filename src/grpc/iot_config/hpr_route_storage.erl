@@ -13,6 +13,7 @@
     all_routes/0,
     all_route_ets/0,
     oui_routes/1,
+    oui_routes_ets/1,
 
     delete_all/0
 ]).
@@ -148,14 +149,21 @@ test_size() ->
 
 -spec all_routes() -> list(hpr_route:route()).
 all_routes() ->
-    [hpr_route_ets:route(R) || R <- ets:tab2list(?ETS)].
+    [hpr_route_ets:route(RouteETS) || RouteETS <- ets:tab2list(?ETS)].
 
 -spec all_route_ets() -> list(hpr_route_ets:route()).
 all_route_ets() ->
     ets:tab2list(?ETS).
 
--spec oui_routes(OUI :: non_neg_integer()) -> list(hpr_route_ets:route()).
+-spec oui_routes(OUI :: non_neg_integer()) -> list(hpr_route:route()).
 oui_routes(OUI) ->
+    [
+        hpr_route_ets:route(RouteETS)
+     || RouteETS <- ets:tab2list(?ETS), OUI == hpr_route:oui(hpr_route_ets:route(RouteETS))
+    ].
+
+-spec oui_routes_ets(OUI :: non_neg_integer()) -> list(hpr_route_ets:route()).
+oui_routes_ets(OUI) ->
     [
         RouteETS
      || RouteETS <- ets:tab2list(?ETS), OUI == hpr_route:oui(hpr_route_ets:route(RouteETS))

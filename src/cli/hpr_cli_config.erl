@@ -208,7 +208,7 @@ config_list(_, _, _) ->
 config_oui_list(["config", "oui", OUIString], [], Flags) ->
     Options = maps:from_list(Flags),
     OUI = erlang:list_to_integer(OUIString),
-    RoutesETS = hpr_route_storage:oui_routes(OUI),
+    RoutesETS = hpr_route_storage:oui_routes_ets(OUI),
 
     %% OUI 4
     %% ========================================================
@@ -882,7 +882,7 @@ sync_routes([], [Route | LeftoverRoutes], #{removed := RemovedRoutes} = Updates)
 sync_routes([Route | Routes], ExistingRoutes, #{added := AddedRoutes} = Updates) ->
     RouteID = hpr_route:id(Route),
     case hpr_route_storage:lookup(RouteID) of
-        {ok, _Route} ->
+        {ok, _RouteETS} ->
             lager:info([{route_id, RouteID}], "doing nothing, route already exists"),
             sync_routes(
                 Routes,
