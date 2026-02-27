@@ -26,6 +26,7 @@
             host => "${HPR_DOWNLINK_SERVICE_HOST}",
             port => "${HPR_DOWNLINK_SERVICE_PORT}"
         }},
+        {multi_buy_enabled, ${HPR_MULTI_BUY_ENABLED}},
         {multi_buy_service, #{
             transport => "${HPR_MULTI_BUY_SERVICE_TRANSPORT}",
             host => "${HPR_MULTI_BUY_SERVICE_HOST}",
