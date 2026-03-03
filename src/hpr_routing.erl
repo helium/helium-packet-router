@@ -502,6 +502,9 @@ foreach_setup() ->
     ok = hpr_multi_buy:init(),
     ok = hpr_device_stats:init(),
     ok = hpr_netid_stats:init(),
+    %% NOTE: These tests expect that routing is setup to hit multi-buy, but the
+    %% grpc service is not there.
+    application:set_env(hpr, multi_buy_enabled, true),
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> {error, not_implemented} end),
     ok.

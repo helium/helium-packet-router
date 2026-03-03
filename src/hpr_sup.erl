@@ -76,7 +76,7 @@ init([]) ->
     _ = maybe_start_channel(ConfigServiceConfig, ?IOT_CONFIG_CHANNEL),
     _ = maybe_start_channel(LocationServiceConfig, ?LOCATION_CHANNEL),
     _ = maybe_start_channel(DownlinkServiceConfig, ?DOWNLINK_CHANNEL),
-    _ = maybe_start_channel(MultiBuyServiceConfig, ?MULTI_BUY_CHANNEL),
+    _ = maybe_start_multi_buy_channel(MultiBuyServiceConfig),
 
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
@@ -130,6 +130,14 @@ maybe_start_channel(Config, ChannelName) ->
             lager:info("~s started at ~s:~w", [ChannelName, Host, Port]);
         _ ->
             lager:error("no host/port/transport to start ~s", [ChannelName])
+    end.
+
+maybe_start_multi_buy_channel(Config) ->
+    case hpr_multi_buy:enabled() of
+        true ->
+            maybe_start_channel(Config, ?MULTI_BUY_CHANNEL);
+        false ->
+            lager:info("multi_buy disabled, not starting ~s", [?MULTI_BUY_CHANNEL])
     end.
 
 -spec timing(Label :: string(), Fn :: fun()) -> ok.

@@ -7,7 +7,8 @@
     init/0,
     update_counter/2,
     cleanup/1,
-    make_key/2
+    make_key/2,
+    enabled/0
 ]).
 
 -define(ETS, hpr_multi_buy_ets).
@@ -41,22 +42,28 @@ update_counter(Key, Max) ->
         LocalCounter when LocalCounter > Max ->
             {error, ?MULTIBUY};
         LocalCounter ->
-            case request(Key) of
-                {ok, ServiceCounter} when ServiceCounter > Max ->
-                    ets:update_counter(
-                        ?ETS,
-                        Key,
-                        {2, Max - LocalCounter + 1},
-                        {default, 0, erlang:system_time(millisecond)}
-                    ),
-                    {error, ?MULTIBUY};
-                {ok, _ServiceCounter} ->
+            case enabled() of
+                false ->
+                    %% ETS-only mode: no external service configured
                     {ok, false};
-                {error, Reason} ->
-                    lager:error("failed to get a counter for ~s: ~p", [
-                        hpr_utils:bin_to_hex_string(Key), Reason
-                    ]),
-                    {ok, true}
+                true ->
+                    case request(Key) of
+                        {ok, ServiceCounter} when ServiceCounter > Max ->
+                            ets:update_counter(
+                                ?ETS,
+                                Key,
+                                {2, Max - LocalCounter + 1},
+                                {default, 0, erlang:system_time(millisecond)}
+                            ),
+                            {error, ?MULTIBUY};
+                        {ok, _ServiceCounter} ->
+                            {ok, false};
+                        {error, Reason} ->
+                            lager:error("failed to get a counter for ~s: ~p", [
+                                hpr_utils:bin_to_hex_string(Key), Reason
+                            ]),
+                            {ok, true}
+                    end
             end
     end.
 
@@ -81,6 +88,10 @@ make_key(PacketUp, Route) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+-spec enabled() -> boolean().
+enabled() ->
+    application:get_env(hpr, multi_buy_enabled, true).
 
 -spec scheduled_cleanup(Duration :: non_neg_integer()) -> ok.
 scheduled_cleanup(Duration) ->
@@ -119,6 +130,7 @@ all_test_() ->
         ?_test(test_max_too_low()),
         ?_test(test_update_counter()),
         ?_test(test_update_counter_with_service()),
+        ?_test(test_update_counter_ets_only()),
         ?_test(test_cleanup()),
         ?_test(test_scheduled_cleanup())
     ]}.
@@ -171,6 +183,29 @@ test_update_counter_with_service() ->
     ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
     ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
     ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max)),
+    ok.
+
+test_update_counter_ets_only() ->
+    %% Disable external multi-buy service (ETS-only mode)
+    application:set_env(hpr, multi_buy_enabled, false),
+
+    Key = crypto:strong_rand_bytes(16),
+    Max = 3,
+
+    %% The external service should never be called in ETS-only mode
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(_, _) ->
+        error(should_not_be_called)
+    end),
+
+    %% In ETS-only mode, successful updates return {ok, false} (not free)
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
+    %% Once max is exceeded, still get multi_buy error from local ETS
+    ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max)),
+
+    %% Re-enable for other tests
+    application:set_env(hpr, multi_buy_enabled, true),
     ok.
 
 test_cleanup() ->
