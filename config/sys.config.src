@@ -34,6 +34,7 @@
         }},
         {routing_cache_timeout_secs, 15},
         {routing_cache_window_secs, 120},
+        {devaddr_cache_ttl_ms, 43200000},
         {ics_stream_worker_checkpoint_secs, 300}
     ]},
     {aws_credentials, [

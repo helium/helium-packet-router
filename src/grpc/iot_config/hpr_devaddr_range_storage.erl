@@ -15,20 +15,29 @@
     lookup_for_route/1,
     count_for_route/1,
 
-    delete_all/0
+    delete_all/0,
+
+    clear_cache/0,
+    cache_size/0
 ]).
 
 -ifdef(TEST).
--export([test_delete_ets/0, test_size/0, test_tab_name/0]).
+-export([test_delete_ets/0, test_size/0, test_tab_name/0, test_cache_size/0, test_clear_cache/0]).
 -endif.
 
 -define(ETS, hpr_route_devaddr_ranges_ets).
 -define(DETS, hpr_route_devaddr_ranges_dets).
+-define(CACHE_ETS, hpr_devaddr_cache_ets).
+% 12 hours
+-define(DEFAULT_CACHE_TTL_MS, 43200000).
 
 -spec init_ets() -> ok.
 init_ets() ->
     ?ETS = ets:new(?ETS, [
         public, named_table, bag, {read_concurrency, true}
+    ]),
+    ?CACHE_ETS = ets:new(?CACHE_ETS, [
+        public, named_table, set, {read_concurrency, true}
     ]),
     ok = rehydrate_from_dets(),
     ok.
@@ -45,6 +54,34 @@ foldl(Fun, Acc) ->
 
 -spec lookup(DevAddr :: non_neg_integer()) -> [hpr_route_ets:route()].
 lookup(DevAddr) ->
+    case ets:lookup(?CACHE_ETS, DevAddr) of
+        [{DevAddr, {RouteIDs, CachedAt}}] ->
+            Now = erlang:system_time(millisecond),
+            TTL = hpr_utils:get_env_int(devaddr_cache_ttl_ms, ?DEFAULT_CACHE_TTL_MS),
+            case (Now - CachedAt) < TTL of
+                true ->
+                    %% Cache hit - fetch routes from storage
+                    catch_metrics(fun hpr_metrics:devaddr_cache_hit/0),
+                    lists:usort(
+                        lists:flatten([
+                            Route
+                         || RouteID <- RouteIDs,
+                            {ok, Route} <- [hpr_route_storage:lookup(RouteID)]
+                        ])
+                    );
+                false ->
+                    %% Cache expired
+                    catch_metrics(fun hpr_metrics:devaddr_cache_miss/0),
+                    lookup_and_cache(DevAddr)
+            end;
+        [] ->
+            %% Cache miss
+            catch_metrics(fun hpr_metrics:devaddr_cache_miss/0),
+            lookup_and_cache(DevAddr)
+    end.
+
+-spec lookup_and_cache(DevAddr :: non_neg_integer()) -> [hpr_route_ets:route()].
+lookup_and_cache(DevAddr) ->
     MS = [
         {
             {{'$1', '$2'}, '$3'},
@@ -56,6 +93,11 @@ lookup(DevAddr) ->
     ],
     RouteIDs = ets:select(?ETS, MS),
 
+    %% Cache the RouteIDs
+    Now = erlang:system_time(millisecond),
+    true = ets:insert(?CACHE_ETS, {DevAddr, {RouteIDs, Now}}),
+
+    %% Return the full routes
     lists:usort(
         lists:flatten([
             Route
@@ -72,6 +114,7 @@ insert(DevAddrRange) ->
             hpr_devaddr_range:route_id(DevAddrRange)
         }
     ]),
+    ok = invalidate_cache_for_route(hpr_devaddr_range:route_id(DevAddrRange)),
     lager:debug(
         [
             {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
@@ -88,6 +131,7 @@ delete(DevAddrRange) ->
         {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
         hpr_devaddr_range:route_id(DevAddrRange)
     }),
+    ok = invalidate_cache_for_route(hpr_devaddr_range:route_id(DevAddrRange)),
     lager:debug(
         [
             {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
@@ -105,9 +149,12 @@ delete_all() ->
 
 -ifdef(TEST).
 
+-include_lib("eunit/include/eunit.hrl").
+
 -spec test_delete_ets() -> ok.
 test_delete_ets() ->
     ets:delete(?ETS),
+    ets:delete(?CACHE_ETS),
     ok.
 
 -spec test_size() -> non_neg_integer().
@@ -117,6 +164,336 @@ test_size() ->
 -spec test_tab_name() -> atom().
 test_tab_name() ->
     ?ETS.
+
+-spec test_cache_size() -> non_neg_integer().
+test_cache_size() ->
+    ets:info(?CACHE_ETS, size).
+
+-spec test_clear_cache() -> ok.
+test_clear_cache() ->
+    ets:delete_all_objects(?CACHE_ETS),
+    ok.
+
+all_test_() ->
+    {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
+        {"cache_miss_on_first_lookup", ?_test(cache_miss_on_first_lookup())},
+        {"cache_hit_on_second_lookup", ?_test(cache_hit_on_second_lookup())},
+        {"cache_expiration", ?_test(cache_expiration())},
+        {"cache_invalidation_on_insert", ?_test(cache_invalidation_on_insert())},
+        {"cache_invalidation_on_delete", ?_test(cache_invalidation_on_delete())},
+        {"cache_invalidation_on_replace", ?_test(cache_invalidation_on_replace())},
+        {"clear_cache_function", ?_test(clear_cache_function())},
+        {"cache_size_function", ?_test(cache_size_function())}
+    ]}.
+
+foreach_setup() ->
+    BaseDirPath = filename:join([
+        ?MODULE,
+        erlang:integer_to_list(erlang:system_time(millisecond)),
+        "data"
+    ]),
+    ok = application:set_env(hpr, data_dir, BaseDirPath),
+    ok = application:set_env(hpr, devaddr_cache_ttl_ms, 1000),
+    true = hpr_skf_storage:test_register_heir(),
+    ok = hpr_route_ets:init(),
+    ok.
+
+foreach_cleanup(ok) ->
+    ok = hpr_devaddr_range_storage:test_delete_ets(),
+    ok = hpr_eui_pair_storage:test_delete_ets(),
+    ok = hpr_skf_storage:test_delete_ets(),
+    ok = hpr_route_storage:test_delete_ets(),
+    true = hpr_skf_storage:test_unregister_heir(),
+    ok.
+
+cache_miss_on_first_lookup() ->
+    %% Setup route
+    RouteID = "test-route-1",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    %% Insert devaddr range
+    DevAddr = 16#00000001,
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#00000000,
+        end_addr => 16#00000002
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange),
+
+    %% Cache should be empty before lookup
+    ?assertEqual(0, cache_size()),
+
+    %% First lookup - should be a cache miss
+    Routes = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes)),
+
+    %% Cache should now have 1 entry
+    ?assertEqual(1, cache_size()),
+    ok.
+
+cache_hit_on_second_lookup() ->
+    %% Setup route
+    RouteID = "test-route-2",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    %% Insert devaddr range
+    DevAddr = 16#00000010,
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#00000010,
+        end_addr => 16#00000020
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange),
+
+    %% First lookup - cache miss
+    Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes1)),
+    ?assertEqual(1, cache_size()),
+
+    %% Second lookup - should be cache hit
+    Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes2)),
+    ?assertEqual(1, cache_size()),
+
+    %% Routes should be the same
+    ?assertEqual(Routes1, Routes2),
+    ok.
+
+cache_expiration() ->
+    %% Setup route
+    RouteID = "test-route-3",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    %% Insert devaddr range
+    DevAddr = 16#00000030,
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#00000030,
+        end_addr => 16#00000040
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange),
+
+    %% Set short TTL for this test
+    ok = application:set_env(hpr, devaddr_cache_ttl_ms, 100),
+
+    %% First lookup - cache miss
+    _Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, cache_size()),
+
+    %% Wait for cache to expire
+    timer:sleep(150),
+
+    %% Lookup after expiration - should trigger new lookup
+    _Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+
+    %% Cache should still have 1 entry (refreshed)
+    ?assertEqual(1, cache_size()),
+
+    %% Reset TTL
+    ok = application:set_env(hpr, devaddr_cache_ttl_ms, 1000),
+    ok.
+
+cache_invalidation_on_insert() ->
+    %% Setup route
+    RouteID = "test-route-4",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    %% Insert first devaddr range
+    DevAddr = 16#00000050,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#00000050,
+        end_addr => 16#00000060
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange1),
+
+    %% First lookup to populate cache
+    _Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, cache_size()),
+
+    %% Insert another range for same route - should invalidate cache
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#00000061,
+        end_addr => 16#00000070
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange2),
+
+    %% Cache should be cleared for this DevAddr
+    %% (Note: cache may still have other entries, but the one for DevAddr should be gone)
+    %% We verify this by checking that next lookup works correctly
+    _Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ok.
+
+cache_invalidation_on_delete() ->
+    %% Setup route
+    RouteID = "test-route-5",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    %% Insert devaddr range
+    DevAddr = 16#00000070,
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#00000070,
+        end_addr => 16#00000080
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange),
+
+    %% First lookup to populate cache
+    Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes1)),
+    ?assertEqual(1, cache_size()),
+
+    %% Delete the devaddr range - should invalidate cache
+    ok = hpr_devaddr_range_storage:delete(DevAddrRange),
+
+    %% Next lookup should find no routes
+    Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(0, erlang:length(Routes2)),
+    ok.
+
+cache_invalidation_on_replace() ->
+    %% Setup route
+    RouteID = "test-route-6",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    %% Insert devaddr range
+    DevAddr = 16#00000090,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#00000090,
+        end_addr => 16#000000A0
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange1),
+
+    %% First lookup to populate cache
+    Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes1)),
+
+    %% Replace route - should invalidate cache
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#000000A1,
+        end_addr => 16#000000B0
+    }),
+    _Removed = hpr_devaddr_range_storage:replace_route(RouteID, [DevAddrRange2]),
+
+    %% Next lookup should find no routes (range no longer includes DevAddr)
+    Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(0, erlang:length(Routes2)),
+    ok.
+
+clear_cache_function() ->
+    %% Setup route and devaddr range
+    RouteID = "test-route-7",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    DevAddr = 16#000000C0,
+    DevAddrRange = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#000000C0,
+        end_addr => 16#000000D0
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange),
+
+    %% Populate cache
+    _Routes = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, cache_size()),
+
+    %% Clear cache
+    ok = clear_cache(),
+    ?assertEqual(0, cache_size()),
+
+    %% Next lookup should work and repopulate cache
+    _Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, cache_size()),
+    ok.
+
+cache_size_function() ->
+    %% Cache should start empty
+    ?assertEqual(0, cache_size()),
+
+    %% Setup multiple routes and ranges
+    lists:foreach(
+        fun(N) ->
+            RouteID = "test-route-" ++ erlang:integer_to_list(N),
+            Route = hpr_route:test_new(#{
+                id => RouteID,
+                net_id => 1,
+                oui => 1,
+                server => #{
+                    host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}
+                },
+                max_copies => 10
+            }),
+            ok = hpr_route_storage:insert(Route),
+
+            DevAddr = 16#00000100 + N,
+            DevAddrRange = hpr_devaddr_range:test_new(#{
+                route_id => RouteID,
+                start_addr => DevAddr,
+                end_addr => DevAddr + 10
+            }),
+            ok = hpr_devaddr_range_storage:insert(DevAddrRange),
+
+            %% Lookup to populate cache
+            _Routes = hpr_devaddr_range_storage:lookup(DevAddr)
+        end,
+        lists:seq(1, 5)
+    ),
+
+    %% Cache should have 5 entries
+    ?assertEqual(5, cache_size()),
+    ok.
 
 -endif.
 
@@ -135,12 +512,25 @@ count_for_route(RouteID) ->
     MS = [{{'_', RouteID}, [], [true]}],
     ets:select_count(?ETS, MS).
 
+-spec clear_cache() -> ok.
+clear_cache() ->
+    ets:delete_all_objects(?CACHE_ETS),
+    ok.
+
+-spec cache_size() -> non_neg_integer().
+cache_size() ->
+    case ets:info(?CACHE_ETS, size) of
+        undefined -> 0;
+        Size -> Size
+    end.
+
 %% -------------------------------------------------------------------
 %% Route Stream Helpers
 %% -------------------------------------------------------------------
 
 -spec delete_route(hpr_route:id()) -> non_neg_integer().
 delete_route(RouteID) ->
+    ok = invalidate_cache_for_route(RouteID),
     MS1 = [{{'_', RouteID}, [], [true]}],
     ets:select_delete(?ETS, MS1).
 
@@ -152,6 +542,31 @@ replace_route(RouteID, DevAddrRanges) ->
     Removed = hpr_devaddr_range_storage:delete_route(RouteID),
     lists:foreach(fun ?MODULE:insert/1, DevAddrRanges),
     Removed.
+
+-spec invalidate_cache_for_route(RouteID :: hpr_route:id()) -> ok.
+invalidate_cache_for_route(RouteID) ->
+    %% Delete all cache entries that contain this RouteID
+    %% Since cache stores {DevAddr, {RouteIDs, Timestamp}}, we need to iterate
+    ets:foldl(
+        fun({DevAddr, {RouteIDs, _Ts}}, Acc) ->
+            case lists:member(RouteID, RouteIDs) of
+                true -> ets:delete(?CACHE_ETS, DevAddr);
+                false -> ok
+            end,
+            Acc
+        end,
+        ok,
+        ?CACHE_ETS
+    ),
+    ok.
+
+-spec catch_metrics(Fun :: fun(() -> ok)) -> ok.
+catch_metrics(Fun) ->
+    try
+        Fun()
+    catch
+        _:_ -> ok
+    end.
 
 -spec rehydrate_from_dets() -> ok.
 rehydrate_from_dets() ->

@@ -67,6 +67,8 @@ config_usage() ->
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
             "\n\n",
             "config counts                       - Simple Counts of Configuration\n",
+            "config cache clear                  - Clear DevAddr lookup cache\n",
+            "config cache stats                  - Show DevAddr cache statistics\n",
             "config checkpoint next              - Time until next writing of configuration to disk\n"
             "config checkpoint write             - Write current configuration to disk\n",
             "config reset checkpoint [--commit]  - Set checkpoint timestamp to beginning of time (0)\n",
@@ -157,6 +159,8 @@ config_cmd() ->
             fun config_eui/3
         ],
         [["config", "counts"], [], [], fun config_counts/3],
+        [["config", "cache", "clear"], [], [], fun config_cache_clear/3],
+        [["config", "cache", "stats"], [], [], fun config_cache_stats/3],
         [["config", "checkpoint", "next"], [], [], fun config_checkpoint_next/3],
         [["config", "checkpoint", "write"], [], [], fun config_checkpoint_write/3],
         [
@@ -688,6 +692,22 @@ config_counts(["config", "counts"], [], []) ->
         ]
     ]);
 config_counts(_, _, _) ->
+    usage.
+
+config_cache_clear(["config", "cache", "clear"], [], []) ->
+    ok = hpr_devaddr_range_storage:clear_cache(),
+    c_text("DevAddr cache cleared");
+config_cache_clear(_, _, _) ->
+    usage.
+
+config_cache_stats(["config", "cache", "stats"], [], []) ->
+    CacheSize = hpr_devaddr_range_storage:cache_size(),
+    c_table([
+        [
+            {" Cache Entries ", CacheSize}
+        ]
+    ]);
+config_cache_stats(_, _, _) ->
     usage.
 
 config_checkpoint_next(["config", "checkpoint", "next"], [], []) ->

@@ -17,7 +17,9 @@
     observe_find_routes/1,
     observe_grpc_connection/2,
     ics_update/2,
-    observe_gateway_location/2
+    observe_gateway_location/2,
+    devaddr_cache_hit/0,
+    devaddr_cache_miss/0
 ]).
 
 -export([
@@ -141,6 +143,16 @@ observe_gateway_location(Start, Status) ->
         [Status],
         erlang:system_time(millisecond) - Start
     ).
+
+-spec devaddr_cache_hit() -> ok.
+devaddr_cache_hit() ->
+    _ = prometheus_counter:inc(?METRICS_DEVADDR_CACHE_HIT_COUNTER, []),
+    ok.
+
+-spec devaddr_cache_miss() -> ok.
+devaddr_cache_miss() ->
+    _ = prometheus_counter:inc(?METRICS_DEVADDR_CACHE_MISS_COUNTER, []),
+    ok.
 
 %% ------------------------------------------------------------------
 %% CLI Function Definitions
