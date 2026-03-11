@@ -512,6 +512,7 @@ foreach_setup() ->
 foreach_cleanup(ok) ->
     true = ets:delete(hpr_multi_buy_ets),
     true = ets:delete(hpr_route_devaddr_ranges_ets),
+    true = ets:delete(hpr_devaddr_cache_ets),
     true = ets:delete(hpr_route_eui_pairs_ets),
     true = ets:delete(hpr_device_stats_ets),
     true = ets:delete(hpr_netid_stats_ets),
