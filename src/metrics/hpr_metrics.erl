@@ -26,6 +26,12 @@
     counts/0
 ]).
 
+-ifdef(TEST).
+-export([
+    record_routes/0
+]).
+-endif.
+
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
 %% ------------------------------------------------------------------
@@ -274,7 +280,12 @@ record_routes() ->
             RouteID = hpr_route:id(Route),
             OUI = hpr_route:oui(Route),
             NewBrokenMap =
-                case SKFCount > 0 andalso not sets:is_element(RouteID, RouteIDsWithDevAddr) of
+                case
+                    SKFCount > 0 andalso
+                        not sets:is_element(RouteID, RouteIDsWithDevAddr) andalso
+                        hpr_route:active(Route) andalso
+                        not hpr_route:locked(Route)
+                of
                     true ->
                         lager:warning(
                             [{route_id, RouteID}, {oui, OUI}],
