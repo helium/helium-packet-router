@@ -105,6 +105,12 @@ insert(DevAddrRange) ->
             hpr_devaddr_range:route_id(DevAddrRange)
         }
     ]),
+    %% Invalidate cache entries in the range being inserted (handles empty cached results)
+    ok = invalidate_cache_for_range(
+        hpr_devaddr_range:start_addr(DevAddrRange),
+        hpr_devaddr_range:end_addr(DevAddrRange)
+    ),
+    %% Also invalidate all cache entries containing this route (handles existing cached results elsewhere)
     ok = invalidate_cache_for_route(hpr_devaddr_range:route_id(DevAddrRange)),
     lager:debug(
         [
@@ -122,6 +128,12 @@ delete(DevAddrRange) ->
         {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
         hpr_devaddr_range:route_id(DevAddrRange)
     }),
+    %% Invalidate cache entries in the range being deleted (handles empty cached results)
+    ok = invalidate_cache_for_range(
+        hpr_devaddr_range:start_addr(DevAddrRange),
+        hpr_devaddr_range:end_addr(DevAddrRange)
+    ),
+    %% Also invalidate all cache entries containing this route (handles existing cached results elsewhere)
     ok = invalidate_cache_for_route(hpr_devaddr_range:route_id(DevAddrRange)),
     lager:debug(
         [
@@ -659,6 +671,26 @@ invalidate_cache_for_route(RouteID) ->
     ets:foldl(
         fun({DevAddr, {RouteIDs, _Ts}}, Acc) ->
             case lists:member(RouteID, RouteIDs) of
+                true -> ets:delete(?CACHE_ETS, DevAddr);
+                false -> ok
+            end,
+            Acc
+        end,
+        ok,
+        ?CACHE_ETS
+    ),
+    ok.
+
+-spec invalidate_cache_for_range(
+    StartAddr :: non_neg_integer(),
+    EndAddr :: non_neg_integer()
+) -> ok.
+invalidate_cache_for_range(StartAddr, EndAddr) ->
+    %% Delete all cache entries for DevAddrs within this range
+    %% This handles the case where empty results were cached
+    ets:foldl(
+        fun({DevAddr, _CachedData}, Acc) ->
+            case DevAddr >= StartAddr andalso DevAddr =< EndAddr of
                 true -> ets:delete(?CACHE_ETS, DevAddr);
                 false -> ok
             end,
