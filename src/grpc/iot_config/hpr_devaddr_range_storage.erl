@@ -61,18 +61,20 @@ lookup(DevAddr) ->
             case (Now - CachedAt) < TTL of
                 true ->
                     %% Cache hit - fetch routes from storage
-                    catch_metrics(fun hpr_metrics:devaddr_cache_hit/0),
-                    [Route
+                    ok = hpr_metrics:devaddr_cache_hit(),
+                    [
+                        Route
                      || RouteID <- lists:usort(RouteIDs),
-                        {ok, Route} <- [hpr_route_storage:lookup(RouteID)]];
+                        {ok, Route} <- [hpr_route_storage:lookup(RouteID)]
+                    ];
                 false ->
                     %% Cache expired
-                    catch_metrics(fun hpr_metrics:devaddr_cache_miss/0),
+                    ok = hpr_metrics:devaddr_cache_miss(),
                     lookup_and_cache(DevAddr)
             end;
         [] ->
             %% Cache miss
-            catch_metrics(fun hpr_metrics:devaddr_cache_miss/0),
+            ok = hpr_metrics:devaddr_cache_miss(),
             lookup_and_cache(DevAddr)
     end.
 
@@ -94,8 +96,11 @@ lookup_and_cache(DevAddr) ->
     true = ets:insert(?CACHE_ETS, {DevAddr, {RouteIDs, Now}}),
 
     %% Return the full routes (dedup RouteIDs first to avoid redundant lookups)
-    [Route || RouteID <- lists:usort(RouteIDs),
-              {ok, Route} <- [hpr_route_storage:lookup(RouteID)]].
+    [
+        Route
+     || RouteID <- lists:usort(RouteIDs),
+        {ok, Route} <- [hpr_route_storage:lookup(RouteID)]
+    ].
 
 -spec insert(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 insert(DevAddrRange) ->
@@ -150,6 +155,116 @@ delete_all() ->
     ets:delete_all_objects(?ETS),
     ok.
 
+%% ------------------------------------------------------------------
+%% CLI Functions
+%% ------------------------------------------------------------------
+
+-spec lookup_for_route(RouteID :: hpr_route:id()) ->
+    list({non_neg_integer(), non_neg_integer()}).
+lookup_for_route(RouteID) ->
+    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    ets:select(?ETS, MS).
+
+-spec count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
+count_for_route(RouteID) ->
+    MS = [{{'_', RouteID}, [], [true]}],
+    ets:select_count(?ETS, MS).
+
+-spec clear_cache() -> ok.
+clear_cache() ->
+    ets:delete_all_objects(?CACHE_ETS),
+    ok.
+
+-spec cache_size() -> non_neg_integer().
+cache_size() ->
+    case ets:info(?CACHE_ETS, size) of
+        undefined -> 0;
+        Size -> Size
+    end.
+
+%% -------------------------------------------------------------------
+%% Route Stream Helpers
+%% -------------------------------------------------------------------
+
+-spec delete_route(hpr_route:id()) -> non_neg_integer().
+delete_route(RouteID) ->
+    ok = invalidate_cache_for_route(RouteID),
+    MS1 = [{{'_', RouteID}, [], [true]}],
+    ets:select_delete(?ETS, MS1).
+
+-spec replace_route(
+    RouteID :: hpr_route:id(),
+    DevAddrRanges :: list(hpr_devaddr_range:devaddr_range())
+) -> non_neg_integer().
+replace_route(RouteID, DevAddrRanges) ->
+    Removed = hpr_devaddr_range_storage:delete_route(RouteID),
+    lists:foreach(fun ?MODULE:insert/1, DevAddrRanges),
+    Removed.
+
+-spec invalidate_cache_for_route(RouteID :: hpr_route:id()) -> ok.
+invalidate_cache_for_route(RouteID) ->
+    %% Delete all cache entries that contain this RouteID
+    %% Since cache stores {DevAddr, {RouteIDs, Timestamp}}, we need to iterate
+    ets:foldl(
+        fun({DevAddr, {RouteIDs, _Ts}}, Acc) ->
+            case lists:member(RouteID, RouteIDs) of
+                true -> ets:delete(?CACHE_ETS, DevAddr);
+                false -> ok
+            end,
+            Acc
+        end,
+        ok,
+        ?CACHE_ETS
+    ),
+    ok.
+
+-spec invalidate_cache_for_range(
+    StartAddr :: non_neg_integer(),
+    EndAddr :: non_neg_integer()
+) -> ok.
+invalidate_cache_for_range(StartAddr, EndAddr) ->
+    %% Delete all cache entries for DevAddrs within this range
+    %% This handles the case where empty results were cached
+    ets:foldl(
+        fun({DevAddr, _CachedData}, Acc) ->
+            case DevAddr >= StartAddr andalso DevAddr =< EndAddr of
+                true -> ets:delete(?CACHE_ETS, DevAddr);
+                false -> ok
+            end,
+            Acc
+        end,
+        ok,
+        ?CACHE_ETS
+    ),
+    ok.
+
+-spec rehydrate_from_dets() -> ok.
+rehydrate_from_dets() ->
+    with_open_dets(fun() ->
+        case dets:to_ets(?DETS, ?ETS) of
+            {error, _Reason} ->
+                lager:error("failed ot hydrate ets: ~p", [_Reason]);
+            _ ->
+                lager:info("ets hydrated")
+        end
+    end).
+
+-spec with_open_dets(FN :: fun()) -> ok.
+with_open_dets(FN) ->
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join([DataDir, "hpr_devaddr_range_storage.dets"]),
+    ok = filelib:ensure_dir(DETSFile),
+
+    case dets:open_file(?DETS, [{file, DETSFile}, {type, bag}]) of
+        {ok, _Dets} ->
+            FN(),
+            dets:close(?DETS);
+        {error, Reason} ->
+            Deleted = file:delete(DETSFile),
+            lager:warning("failed to open dets file ~p: ~p, deleted: ~p", [?MODULE, Reason, Deleted]),
+            with_open_dets(FN)
+    end.
+
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -200,6 +315,9 @@ foreach_setup() ->
     ok = application:set_env(hpr, devaddr_cache_ttl_ms, 1000),
     true = hpr_skf_storage:test_register_heir(),
     ok = hpr_route_ets:init(),
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
     ok.
 
 foreach_cleanup(ok) ->
@@ -208,6 +326,8 @@ foreach_cleanup(ok) ->
     ok = hpr_skf_storage:test_delete_ets(),
     ok = hpr_route_storage:test_delete_ets(),
     true = hpr_skf_storage:test_unregister_heir(),
+    ?assert(meck:validate(hpr_metrics)),
+    meck:unload(hpr_metrics),
     ok.
 
 cache_miss_on_first_lookup() ->
@@ -247,6 +367,9 @@ cache_miss_on_first_lookup() ->
     ?assertEqual([RouteID], CachedRouteIDs),
     ?assert(is_integer(Timestamp)),
     ?assert(Timestamp > 0),
+
+    ?assertEqual(1, meck:num_calls(hpr_metrics, devaddr_cache_miss, 0)),
+    ?assertEqual(0, meck:num_calls(hpr_metrics, devaddr_cache_hit, 0)),
     ok.
 
 cache_hit_on_second_lookup() ->
@@ -294,6 +417,9 @@ cache_hit_on_second_lookup() ->
 
     %% Routes should be the same
     ?assertEqual(Routes1, Routes2),
+
+    ?assertEqual(1, meck:num_calls(hpr_metrics, devaddr_cache_miss, 0)),
+    ?assertEqual(1, meck:num_calls(hpr_metrics, devaddr_cache_hit, 0)),
     ok.
 
 cache_expiration() ->
@@ -617,121 +743,3 @@ cache_size_function() ->
     ok.
 
 -endif.
-
-%% ------------------------------------------------------------------
-%% CLI Functions
-%% ------------------------------------------------------------------
-
--spec lookup_for_route(RouteID :: hpr_route:id()) ->
-    list({non_neg_integer(), non_neg_integer()}).
-lookup_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
-    ets:select(?ETS, MS).
-
--spec count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
-count_for_route(RouteID) ->
-    MS = [{{'_', RouteID}, [], [true]}],
-    ets:select_count(?ETS, MS).
-
--spec clear_cache() -> ok.
-clear_cache() ->
-    ets:delete_all_objects(?CACHE_ETS),
-    ok.
-
--spec cache_size() -> non_neg_integer().
-cache_size() ->
-    case ets:info(?CACHE_ETS, size) of
-        undefined -> 0;
-        Size -> Size
-    end.
-
-%% -------------------------------------------------------------------
-%% Route Stream Helpers
-%% -------------------------------------------------------------------
-
--spec delete_route(hpr_route:id()) -> non_neg_integer().
-delete_route(RouteID) ->
-    ok = invalidate_cache_for_route(RouteID),
-    MS1 = [{{'_', RouteID}, [], [true]}],
-    ets:select_delete(?ETS, MS1).
-
--spec replace_route(
-    RouteID :: hpr_route:id(),
-    DevAddrRanges :: list(hpr_devaddr_range:devaddr_range())
-) -> non_neg_integer().
-replace_route(RouteID, DevAddrRanges) ->
-    Removed = hpr_devaddr_range_storage:delete_route(RouteID),
-    lists:foreach(fun ?MODULE:insert/1, DevAddrRanges),
-    Removed.
-
--spec invalidate_cache_for_route(RouteID :: hpr_route:id()) -> ok.
-invalidate_cache_for_route(RouteID) ->
-    %% Delete all cache entries that contain this RouteID
-    %% Since cache stores {DevAddr, {RouteIDs, Timestamp}}, we need to iterate
-    ets:foldl(
-        fun({DevAddr, {RouteIDs, _Ts}}, Acc) ->
-            case lists:member(RouteID, RouteIDs) of
-                true -> ets:delete(?CACHE_ETS, DevAddr);
-                false -> ok
-            end,
-            Acc
-        end,
-        ok,
-        ?CACHE_ETS
-    ),
-    ok.
-
--spec invalidate_cache_for_range(
-    StartAddr :: non_neg_integer(),
-    EndAddr :: non_neg_integer()
-) -> ok.
-invalidate_cache_for_range(StartAddr, EndAddr) ->
-    %% Delete all cache entries for DevAddrs within this range
-    %% This handles the case where empty results were cached
-    ets:foldl(
-        fun({DevAddr, _CachedData}, Acc) ->
-            case DevAddr >= StartAddr andalso DevAddr =< EndAddr of
-                true -> ets:delete(?CACHE_ETS, DevAddr);
-                false -> ok
-            end,
-            Acc
-        end,
-        ok,
-        ?CACHE_ETS
-    ),
-    ok.
-
--spec catch_metrics(Fun :: fun(() -> ok)) -> ok.
-catch_metrics(Fun) ->
-    try
-        Fun()
-    catch
-        _:_ -> ok
-    end.
-
--spec rehydrate_from_dets() -> ok.
-rehydrate_from_dets() ->
-    with_open_dets(fun() ->
-        case dets:to_ets(?DETS, ?ETS) of
-            {error, _Reason} ->
-                lager:error("failed ot hydrate ets: ~p", [_Reason]);
-            _ ->
-                lager:info("ets hydrated")
-        end
-    end).
-
--spec with_open_dets(FN :: fun()) -> ok.
-with_open_dets(FN) ->
-    DataDir = hpr_utils:base_data_dir(),
-    DETSFile = filename:join([DataDir, "hpr_devaddr_range_storage.dets"]),
-    ok = filelib:ensure_dir(DETSFile),
-
-    case dets:open_file(?DETS, [{file, DETSFile}, {type, bag}]) of
-        {ok, _Dets} ->
-            FN(),
-            dets:close(?DETS);
-        {error, Reason} ->
-            Deleted = file:delete(DETSFile),
-            lager:warning("failed to open dets file ~p: ~p, deleted: ~p", [?MODULE, Reason, Deleted]),
-            with_open_dets(FN)
-    end.
