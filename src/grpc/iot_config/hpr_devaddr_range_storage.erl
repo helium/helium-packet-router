@@ -62,13 +62,9 @@ lookup(DevAddr) ->
                 true ->
                     %% Cache hit - fetch routes from storage
                     catch_metrics(fun hpr_metrics:devaddr_cache_hit/0),
-                    lists:usort(
-                        lists:flatten([
-                            Route
-                         || RouteID <- RouteIDs,
-                            {ok, Route} <- [hpr_route_storage:lookup(RouteID)]
-                        ])
-                    );
+                    [Route
+                     || RouteID <- lists:usort(RouteIDs),
+                        {ok, Route} <- [hpr_route_storage:lookup(RouteID)]];
                 false ->
                     %% Cache expired
                     catch_metrics(fun hpr_metrics:devaddr_cache_miss/0),
@@ -97,14 +93,9 @@ lookup_and_cache(DevAddr) ->
     Now = erlang:system_time(millisecond),
     true = ets:insert(?CACHE_ETS, {DevAddr, {RouteIDs, Now}}),
 
-    %% Return the full routes
-    lists:usort(
-        lists:flatten([
-            Route
-         || RouteID <- RouteIDs,
-            {ok, Route} <- [hpr_route_storage:lookup(RouteID)]
-        ])
-    ).
+    %% Return the full routes (dedup RouteIDs first to avoid redundant lookups)
+    [Route || RouteID <- lists:usort(RouteIDs),
+              {ok, Route} <- [hpr_route_storage:lookup(RouteID)]].
 
 -spec insert(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 insert(DevAddrRange) ->
@@ -182,6 +173,7 @@ all_test_() ->
         {"cache_invalidation_on_insert", ?_test(cache_invalidation_on_insert())},
         {"cache_invalidation_on_delete", ?_test(cache_invalidation_on_delete())},
         {"cache_invalidation_on_replace", ?_test(cache_invalidation_on_replace())},
+        {"cache_deduplicates_route_ids", ?_test(cache_deduplicates_route_ids())},
         {"clear_cache_function", ?_test(clear_cache_function())},
         {"cache_size_function", ?_test(cache_size_function())}
     ]}.
@@ -229,13 +221,20 @@ cache_miss_on_first_lookup() ->
 
     %% Cache should be empty before lookup
     ?assertEqual(0, cache_size()),
+    ?assertEqual([], ets:lookup(?CACHE_ETS, DevAddr)),
 
     %% First lookup - should be a cache miss
     Routes = hpr_devaddr_range_storage:lookup(DevAddr),
     ?assertEqual(1, erlang:length(Routes)),
+    [FoundRoute] = Routes,
+    ?assertEqual(RouteID, hpr_route:id(hpr_route_ets:route(FoundRoute))),
 
-    %% Cache should now have 1 entry
+    %% Cache should now have 1 entry with correct data
     ?assertEqual(1, cache_size()),
+    [{DevAddr, {CachedRouteIDs, Timestamp}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([RouteID], CachedRouteIDs),
+    ?assert(is_integer(Timestamp)),
+    ?assert(Timestamp > 0),
     ok.
 
 cache_hit_on_second_lookup() ->
@@ -264,10 +263,22 @@ cache_hit_on_second_lookup() ->
     ?assertEqual(1, erlang:length(Routes1)),
     ?assertEqual(1, cache_size()),
 
-    %% Second lookup - should be cache hit
+    %% Get cached data after first lookup
+    [{DevAddr, {CachedRouteIDs1, Timestamp1}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([RouteID], CachedRouteIDs1),
+
+    %% Wait a bit to ensure timestamps would differ if cache was refreshed
+    timer:sleep(10),
+
+    %% Second lookup - should be cache hit (timestamp should NOT change)
     Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
     ?assertEqual(1, erlang:length(Routes2)),
     ?assertEqual(1, cache_size()),
+
+    %% Verify cache entry is unchanged (proves it was a cache hit)
+    [{DevAddr, {CachedRouteIDs2, Timestamp2}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual(CachedRouteIDs1, CachedRouteIDs2),
+    ?assertEqual(Timestamp1, Timestamp2),
 
     %% Routes should be the same
     ?assertEqual(Routes1, Routes2),
@@ -298,17 +309,29 @@ cache_expiration() ->
     ok = application:set_env(hpr, devaddr_cache_ttl_ms, 100),
 
     %% First lookup - cache miss
-    _Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes1)),
     ?assertEqual(1, cache_size()),
+
+    %% Get cached data after first lookup
+    [{DevAddr, {CachedRouteIDs1, Timestamp1}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([RouteID], CachedRouteIDs1),
 
     %% Wait for cache to expire
     timer:sleep(150),
 
-    %% Lookup after expiration - should trigger new lookup
-    _Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    %% Lookup after expiration - should trigger fresh lookup and update timestamp
+    Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes2)),
 
-    %% Cache should still have 1 entry (refreshed)
+    %% Cache should still have 1 entry but timestamp should be updated
     ?assertEqual(1, cache_size()),
+    [{DevAddr, {CachedRouteIDs2, Timestamp2}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([RouteID], CachedRouteIDs2),
+    ?assert(Timestamp2 > Timestamp1, "Timestamp should be updated after expiration"),
+
+    %% Routes should still be the same
+    ?assertEqual(Routes1, Routes2),
 
     %% Reset TTL
     ok = application:set_env(hpr, devaddr_cache_ttl_ms, 1000),
@@ -336,8 +359,13 @@ cache_invalidation_on_insert() ->
     ok = hpr_devaddr_range_storage:insert(DevAddrRange1),
 
     %% First lookup to populate cache
-    _Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes1)),
     ?assertEqual(1, cache_size()),
+
+    %% Verify cache entry exists
+    [{DevAddr, {CachedRouteIDs1, _Timestamp1}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([RouteID], CachedRouteIDs1),
 
     %% Insert another range for same route - should invalidate cache
     DevAddrRange2 = hpr_devaddr_range:test_new(#{
@@ -347,10 +375,14 @@ cache_invalidation_on_insert() ->
     }),
     ok = hpr_devaddr_range_storage:insert(DevAddrRange2),
 
-    %% Cache should be cleared for this DevAddr
-    %% (Note: cache may still have other entries, but the one for DevAddr should be gone)
-    %% We verify this by checking that next lookup works correctly
-    _Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    %% Cache entry for this DevAddr should be cleared
+    ?assertEqual([], ets:lookup(?CACHE_ETS, DevAddr)),
+    ?assertEqual(0, cache_size()),
+
+    %% Next lookup should work and repopulate cache
+    Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes2)),
+    ?assertEqual(1, cache_size()),
     ok.
 
 cache_invalidation_on_delete() ->
@@ -379,12 +411,25 @@ cache_invalidation_on_delete() ->
     ?assertEqual(1, erlang:length(Routes1)),
     ?assertEqual(1, cache_size()),
 
+    %% Verify cache entry exists
+    [{DevAddr, {CachedRouteIDs1, _Timestamp1}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([RouteID], CachedRouteIDs1),
+
     %% Delete the devaddr range - should invalidate cache
     ok = hpr_devaddr_range_storage:delete(DevAddrRange),
 
-    %% Next lookup should find no routes
+    %% Cache should be cleared
+    ?assertEqual([], ets:lookup(?CACHE_ETS, DevAddr)),
+    ?assertEqual(0, cache_size()),
+
+    %% Next lookup should find no routes and cache empty result
     Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
     ?assertEqual(0, erlang:length(Routes2)),
+
+    %% Cache should now contain empty result
+    ?assertEqual(1, cache_size()),
+    [{DevAddr, {CachedRouteIDs2, _Timestamp2}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([], CachedRouteIDs2),
     ok.
 
 cache_invalidation_on_replace() ->
@@ -411,6 +456,11 @@ cache_invalidation_on_replace() ->
     %% First lookup to populate cache
     Routes1 = hpr_devaddr_range_storage:lookup(DevAddr),
     ?assertEqual(1, erlang:length(Routes1)),
+    ?assertEqual(1, cache_size()),
+
+    %% Verify cache entry exists
+    [{DevAddr, {CachedRouteIDs1, _Timestamp1}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([RouteID], CachedRouteIDs1),
 
     %% Replace route - should invalidate cache
     DevAddrRange2 = hpr_devaddr_range:test_new(#{
@@ -418,11 +468,70 @@ cache_invalidation_on_replace() ->
         start_addr => 16#000000A1,
         end_addr => 16#000000B0
     }),
-    _Removed = hpr_devaddr_range_storage:replace_route(RouteID, [DevAddrRange2]),
+    Removed = hpr_devaddr_range_storage:replace_route(RouteID, [DevAddrRange2]),
+    ?assertEqual(1, Removed),
+
+    %% Cache should be cleared
+    ?assertEqual([], ets:lookup(?CACHE_ETS, DevAddr)),
+    ?assertEqual(0, cache_size()),
 
     %% Next lookup should find no routes (range no longer includes DevAddr)
     Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
     ?assertEqual(0, erlang:length(Routes2)),
+
+    %% Verify empty result was cached
+    ?assertEqual(1, cache_size()),
+    [{DevAddr, {CachedRouteIDs2, _Timestamp2}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual([], CachedRouteIDs2),
+    ok.
+
+cache_deduplicates_route_ids() ->
+    %% Setup route
+    RouteID = "test-route-dedup",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    %% Insert multiple overlapping devaddr ranges for same route
+    DevAddr = 16#000000B0,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#000000A0,
+        end_addr => 16#000000C0
+    }),
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#000000B0,
+        end_addr => 16#000000D0
+    }),
+    DevAddrRange3 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => 16#00000090,
+        end_addr => 16#000000B5
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange1),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange2),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange3),
+
+    %% Lookup should find all 3 ranges but return only 1 route (deduplicated)
+    Routes = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes)),
+    [FoundRoute] = Routes,
+    ?assertEqual(RouteID, hpr_route:id(hpr_route_ets:route(FoundRoute))),
+
+    %% Verify cached RouteIDs contains duplicates (raw ETS select result)
+    [{DevAddr, {CachedRouteIDs, _Timestamp}}] = ets:lookup(?CACHE_ETS, DevAddr),
+    ?assertEqual(3, erlang:length(CachedRouteIDs)),
+    ?assertEqual([RouteID, RouteID, RouteID], CachedRouteIDs),
+
+    %% Second lookup should still return only 1 route (usort applied)
+    Routes2 = hpr_devaddr_range_storage:lookup(DevAddr),
+    ?assertEqual(1, erlang:length(Routes2)),
     ok.
 
 clear_cache_function() ->
