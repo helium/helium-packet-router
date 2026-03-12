@@ -507,6 +507,9 @@ foreach_setup() ->
     application:set_env(hpr, multi_buy_enabled, true),
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> {error, not_implemented} end),
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
     ok.
 
 foreach_cleanup(ok) ->
@@ -526,6 +529,7 @@ foreach_cleanup(ok) ->
     true = ets:delete(hpr_routes_ets),
     true = erlang:unregister(hpr_sup),
     meck:unload(hpr_gateway_location),
+    meck:unload(hpr_metrics),
     ok.
 
 find_routes_for_uplink_no_skf() ->
@@ -985,7 +989,6 @@ maybe_deliver_packet_to_route_multi_buy() ->
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
-    meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
     meck:expect(hpr_metrics, packet_up_per_oui, fun(_, _) -> ok end),
 
@@ -1040,7 +1043,6 @@ maybe_deliver_packet_to_route_multi_buy() ->
 
     ?assertEqual(2, meck:num_calls(hpr_protocol_router, send, 4)),
     meck:unload(hpr_protocol_router),
-    meck:unload(hpr_metrics),
     ok.
 
 -endif.

@@ -22,3 +22,4 @@ src/grpc/autogen
 hpr_route_ets/
 hpr_devaddr_range_storage/
 CLAUDE.md
+*.coverdata

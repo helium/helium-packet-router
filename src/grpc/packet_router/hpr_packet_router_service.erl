@@ -317,19 +317,28 @@ route_packet_test() ->
     EnvUp = hpr_envelope_up:new(PacketUp),
     meck:expect(hpr_routing, handle_packet, fun(_PacketUp, _Opts) -> ok end),
 
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
+
     StreamState = grpcbox_stream:stream_handler_state(
         #state{}, #handler_state{last_phash = hpr_packet_up:phash(PacketUp)}
     ),
 
     ?assertEqual({ok, StreamState}, ?MODULE:route(EnvUp, StreamState)),
+    %% Wait for the spawned process to execute (handle_packet spawns a process)
+    timer:sleep(100),
     ?assertEqual(1, meck:num_calls(hpr_routing, handle_packet, 2)),
 
     meck:unload(hpr_routing),
+    meck:unload(hpr_metrics),
     ok.
 
 route_register_test() ->
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, observe_grpc_connection, fun(_, _) -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> ok end),
     application:ensure_all_started(gproc),
@@ -383,6 +392,8 @@ handle_info_test() ->
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
     meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
 
     ?assertEqual(stream_state, ?MODULE:handle_info({packet_down, PacketDown}, stream_state)),
     ?assertEqual(stream_state, ?MODULE:handle_info(msg, stream_state)),
@@ -398,6 +409,8 @@ send_packet_down_test() ->
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
     meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
+    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
 
     #{public := PubKey0} = libp2p_crypto:generate_keys(ed25519),
     PubKeyBin0 = libp2p_crypto:pubkey_to_bin(PubKey0),

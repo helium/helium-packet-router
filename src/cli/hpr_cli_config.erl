@@ -18,7 +18,11 @@
 -ifdef(TEST).
 
 -export([
-    config_route_sync/3
+    config_route_sync/3,
+    config_route_activate/3,
+    config_route_deactivate/3,
+    config_oui_activate/3,
+    config_oui_deactivate/3
 ]).
 
 -endif.
@@ -822,8 +826,22 @@ set_routes_active(RoutesETS, Active) ->
     lists:foldl(
         fun(RouteETS, Count) ->
             Route0 = hpr_route_ets:route(RouteETS),
+            RouteID = hpr_route:id(Route0),
             Route1 = hpr_route:active(Active, Route0),
             ok = hpr_route_storage:insert(Route1),
+            case Active of
+                false ->
+                    %% When deactivating, remove all SKFs, DevAddr ranges, and EUIs
+                    %% but keep the route itself
+                    _ = hpr_skf_storage:delete_route(RouteID),
+                    _ = hpr_devaddr_range_storage:delete_route(RouteID),
+                    _ = hpr_eui_pair_storage:delete_route(RouteID),
+                    ok;
+                true ->
+                    %% When activating, refresh the route to fetch SKFs, DevAddr ranges, and EUIs
+                    _ = hpr_route_stream_worker:refresh_route(RouteID, 3),
+                    ok
+            end,
             Count + 1
         end,
         0,
