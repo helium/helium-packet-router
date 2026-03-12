@@ -8,7 +8,8 @@
 
 -export([
     elli_started_test/1,
-    main_test/1
+    main_test/1,
+    record_routes_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -29,7 +30,8 @@
 all() ->
     [
         elli_started_test,
-        main_test
+        main_test,
+        record_routes_test
     ].
 
 %%--------------------------------------------------------------------
@@ -194,6 +196,222 @@ main_test(_Config) ->
                     not_found
                 ])
         end
+    ),
+
+    ok.
+
+record_routes_test(_Config) ->
+    %% Setup Route 1: Normal route with DevAddr range and SKFs
+    RouteID1 = "RouteID1",
+    OUI1 = 1001,
+    Route1 = hpr_route:test_new(#{
+        id => RouteID1,
+        net_id => 0,
+        oui => OUI1,
+        server => #{
+            host => "127.0.0.1",
+            port => 8080,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1
+    }),
+
+    %% Setup Route 2: Broken route with SKFs but no DevAddr range (active, not locked)
+    RouteID2 = "RouteID2",
+    OUI2 = 2002,
+    Route2 = hpr_route:test_new(#{
+        id => RouteID2,
+        net_id => 0,
+        oui => OUI2,
+        server => #{
+            host => "127.0.0.1",
+            port => 8081,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1
+    }),
+
+    %% Setup Route 3: Route with DevAddr range but no SKFs
+    RouteID3 = "RouteID3",
+    OUI3 = 3003,
+    Route3 = hpr_route:test_new(#{
+        id => RouteID3,
+        net_id => 0,
+        oui => OUI3,
+        server => #{
+            host => "127.0.0.1",
+            port => 8082,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1
+    }),
+
+    %% Setup Route 4: Has SKFs but no DevAddr, but is NOT active (should not be broken)
+    RouteID4 = "RouteID4",
+    OUI4 = 4004,
+    Route4 = hpr_route:test_new(#{
+        id => RouteID4,
+        net_id => 0,
+        oui => OUI4,
+        server => #{
+            host => "127.0.0.1",
+            port => 8083,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1,
+        active => false
+    }),
+
+    %% Setup Route 5: Has SKFs but no DevAddr, but IS locked (should not be broken)
+    RouteID5 = "RouteID5",
+    OUI5 = 5005,
+    Route5 = hpr_route:test_new(#{
+        id => RouteID5,
+        net_id => 0,
+        oui => OUI5,
+        server => #{
+            host => "127.0.0.1",
+            port => 8084,
+            protocol => {packet_router, #{}}
+        },
+        max_copies => 1,
+        locked => true
+    }),
+
+    %% Add routes to storage
+    ok = hpr_route_storage:insert(Route1),
+    ok = hpr_route_storage:insert(Route2),
+    ok = hpr_route_storage:insert(Route3),
+    ok = hpr_route_storage:insert(Route4),
+    ok = hpr_route_storage:insert(Route5),
+
+    %% Wait for all routes to be inserted
+    ok = test_utils:wait_until(fun() ->
+        5 =:= ets:info(hpr_routes_ets, size)
+    end),
+
+    %% Add DevAddr ranges for Route 1 and Route 3
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID1,
+        start_addr => 16#00000000,
+        end_addr => 16#000000FF
+    }),
+    DevAddrRange3 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID3,
+        start_addr => 16#00000100,
+        end_addr => 16#000001FF
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange1),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange3),
+
+    %% Add SKFs to Route 1 and Route 2
+    %% Route 1 will have 2 SKFs and has DevAddr range (not broken)
+    SKF1_1 = hpr_skf:new(#{
+        route_id => RouteID1,
+        devaddr => 16#00000001,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+    SKF1_2 = hpr_skf:new(#{
+        route_id => RouteID1,
+        devaddr => 16#00000002,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+    ok = hpr_skf_storage:insert(SKF1_1),
+    ok = hpr_skf_storage:insert(SKF1_2),
+
+    %% Route 2 will have 3 SKFs but no DevAddr range (broken because active and not locked)
+    SKF2_1 = hpr_skf:new(#{
+        route_id => RouteID2,
+        devaddr => 16#00000010,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+    SKF2_2 = hpr_skf:new(#{
+        route_id => RouteID2,
+        devaddr => 16#00000011,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+    SKF2_3 = hpr_skf:new(#{
+        route_id => RouteID2,
+        devaddr => 16#00000012,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+    ok = hpr_skf_storage:insert(SKF2_1),
+    ok = hpr_skf_storage:insert(SKF2_2),
+    ok = hpr_skf_storage:insert(SKF2_3),
+
+    %% Route 4 will have 2 SKFs but no DevAddr range (NOT broken because inactive)
+    SKF4_1 = hpr_skf:new(#{
+        route_id => RouteID4,
+        devaddr => 16#00000020,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+    SKF4_2 = hpr_skf:new(#{
+        route_id => RouteID4,
+        devaddr => 16#00000021,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+    ok = hpr_skf_storage:insert(SKF4_1),
+    ok = hpr_skf_storage:insert(SKF4_2),
+
+    %% Route 5 will have 1 SKF but no DevAddr range (NOT broken because locked)
+    SKF5_1 = hpr_skf:new(#{
+        route_id => RouteID5,
+        devaddr => 16#00000030,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+    ok = hpr_skf_storage:insert(SKF5_1),
+
+    %% Call record_routes
+    ok = hpr_metrics:record_routes(),
+
+    %% Verify metrics
+    %% Should have 5 routes total
+    ?assertEqual(
+        5,
+        prometheus_gauge:value(?METRICS_ROUTES_GAUGE)
+    ),
+
+    %% Should have 8 SKFs total (2 from Route1 + 3 from Route2 + 0 from Route3 + 2 from Route4 + 1 from Route5)
+    ?assertEqual(
+        8,
+        prometheus_gauge:value(?METRICS_SKFS_GAUGE)
+    ),
+
+    %% Should have 1 broken route (Route2) for OUI2
+    %% Route2 is broken because it has SKFs, no DevAddr range, is active, and is not locked
+    ?assertEqual(
+        1,
+        prometheus_gauge:value(?METRICS_BROKEN_ROUTES_GAUGE, [OUI2])
+    ),
+
+    %% OUI1 and OUI3 should not have broken routes (they have DevAddr ranges)
+    ?assertEqual(
+        undefined,
+        prometheus_gauge:value(?METRICS_BROKEN_ROUTES_GAUGE, [OUI1])
+    ),
+    ?assertEqual(
+        undefined,
+        prometheus_gauge:value(?METRICS_BROKEN_ROUTES_GAUGE, [OUI3])
+    ),
+
+    %% OUI4 should not have broken routes (route is inactive)
+    ?assertEqual(
+        undefined,
+        prometheus_gauge:value(?METRICS_BROKEN_ROUTES_GAUGE, [OUI4])
+    ),
+
+    %% OUI5 should not have broken routes (route is locked)
+    ?assertEqual(
+        undefined,
+        prometheus_gauge:value(?METRICS_BROKEN_ROUTES_GAUGE, [OUI5])
     ),
 
     ok.

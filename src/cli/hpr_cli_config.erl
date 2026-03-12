@@ -18,7 +18,11 @@
 -ifdef(TEST).
 
 -export([
-    config_route_sync/3
+    config_route_sync/3,
+    config_route_activate/3,
+    config_route_deactivate/3,
+    config_oui_activate/3,
+    config_oui_deactivate/3
 ]).
 
 -endif.
@@ -52,6 +56,9 @@ config_usage() ->
             "config oui <oui>                            - Info for OUI\n",
             "    [--display_euis] default: false (EUIs not included)\n",
             "    [--display_skfs] default: false (SKFs not included)\n",
+            "config oui activate <oui>                   - Activate all routes for OUI\n",
+            "config oui deactivate <oui>                 - Deactivate all routes for OUI\n",
+            "config oui refresh <oui>                    - Refresh all routes for OUI\n",
             "config route <route_id>                     - Info for route\n",
             "    [--display_euis] default: false (EUIs not included)\n",
             "    [--display_skfs] default: false (SKFs not included)\n",
@@ -67,6 +74,8 @@ config_usage() ->
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
             "\n\n",
             "config counts                       - Simple Counts of Configuration\n",
+            "config cache clear                  - Clear DevAddr lookup cache\n",
+            "config cache stats                  - Show DevAddr cache statistics\n",
             "config checkpoint next              - Time until next writing of configuration to disk\n"
             "config checkpoint write             - Write current configuration to disk\n",
             "config reset checkpoint [--commit]  - Set checkpoint timestamp to beginning of time (0)\n",
@@ -86,6 +95,24 @@ config_cmd() ->
                 {display_skfs, [{longname, "display_skfs"}, {datatype, boolean}]}
             ],
             fun config_oui_list/3
+        ],
+        [
+            ["config", "oui", "activate", '*'],
+            [],
+            [],
+            fun config_oui_activate/3
+        ],
+        [
+            ["config", "oui", "deactivate", '*'],
+            [],
+            [],
+            fun config_oui_deactivate/3
+        ],
+        [
+            ["config", "oui", "refresh", '*'],
+            [],
+            [],
+            fun config_oui_refresh/3
         ],
         [
             ["config", "route", '*'],
@@ -157,6 +184,8 @@ config_cmd() ->
             fun config_eui/3
         ],
         [["config", "counts"], [], [], fun config_counts/3],
+        [["config", "cache", "clear"], [], [], fun config_cache_clear/3],
+        [["config", "cache", "stats"], [], [], fun config_cache_stats/3],
         [["config", "checkpoint", "next"], [], [], fun config_checkpoint_next/3],
         [["config", "checkpoint", "write"], [], [], fun config_checkpoint_write/3],
         [
@@ -249,6 +278,49 @@ config_oui_list(["config", "oui", OUIString], [], Flags) ->
         )
     );
 config_oui_list(_, _, _) ->
+    usage.
+
+config_oui_activate(["config", "oui", "activate", OUIString], [], _Flags) ->
+    OUI = erlang:list_to_integer(OUIString),
+    RoutesETS = hpr_route_storage:oui_routes_ets(OUI),
+    case RoutesETS of
+        [] ->
+            c_text("No routes found for OUI ~p", [OUI]);
+        _ ->
+            ActivatedCount = set_routes_active(RoutesETS, true),
+            c_text("Activated ~p routes for OUI ~p", [ActivatedCount, OUI])
+    end;
+config_oui_activate(_, _, _) ->
+    usage.
+
+config_oui_deactivate(["config", "oui", "deactivate", OUIString], [], _Flags) ->
+    OUI = erlang:list_to_integer(OUIString),
+    RoutesETS = hpr_route_storage:oui_routes_ets(OUI),
+    case RoutesETS of
+        [] ->
+            c_text("No routes found for OUI ~p", [OUI]);
+        _ ->
+            DeactivatedCount = set_routes_active(RoutesETS, false),
+            c_text("Deactivated ~p routes for OUI ~p", [DeactivatedCount, OUI])
+    end;
+config_oui_deactivate(_, _, _) ->
+    usage.
+
+config_oui_refresh(["config", "oui", "refresh", OUIString], [], _Flags) ->
+    OUI = erlang:list_to_integer(OUIString),
+    Pid = erlang:spawn(fun() ->
+        %% Get all routes for the OUI from the API to ensure we have them all
+        APIRoutes = get_api_routes_for_oui(OUI),
+        RouteIDs = [hpr_route:id(Route) || Route <- APIRoutes],
+        Total = erlang:length(RouteIDs),
+        lager:info("Found ~p routes to refresh for OUI ~p", [Total, OUI]),
+        routes_refresh(Total, RouteIDs)
+    end),
+    c_text(
+        "command spawned @ ~p for OUI ~p, look at logs and `tail -F /opt/hpr/log/info.log | grep hpr_cli_config`",
+        [Pid, OUI]
+    );
+config_oui_refresh(_, _, _) ->
     usage.
 
 config_route(["config", "route", RouteID], [], Flags) ->
@@ -440,9 +512,7 @@ config_route_activate(["config", "route", "activate", RouteID], [], _Flags) ->
         {error, not_found} ->
             c_text("Route ~s not found", [RouteID]);
         {ok, RouteETS} ->
-            Route0 = hpr_route_ets:route(RouteETS),
-            Route1 = hpr_route:active(true, Route0),
-            ok = hpr_route_storage:insert(Route1),
+            _Count = set_routes_active([RouteETS], true),
             c_text("Route ~s activated", [RouteID])
     end;
 config_route_activate(_, _, _) ->
@@ -453,9 +523,7 @@ config_route_deactivate(["config", "route", "deactivate", RouteID], [], _Flags) 
         {error, not_found} ->
             c_text("Route ~s not found", [RouteID]);
         {ok, RouteETS} ->
-            Route0 = hpr_route_ets:route(RouteETS),
-            Route1 = hpr_route:active(false, Route0),
-            ok = hpr_route_storage:insert(Route1),
+            _Count = set_routes_active([RouteETS], false),
             c_text("Route ~s deactivated", [RouteID])
     end;
 config_route_deactivate(_, _, _) ->
@@ -690,6 +758,22 @@ config_counts(["config", "counts"], [], []) ->
 config_counts(_, _, _) ->
     usage.
 
+config_cache_clear(["config", "cache", "clear"], [], []) ->
+    ok = hpr_devaddr_range_storage:clear_cache(),
+    c_text("DevAddr cache cleared");
+config_cache_clear(_, _, _) ->
+    usage.
+
+config_cache_stats(["config", "cache", "stats"], [], []) ->
+    CacheSize = hpr_devaddr_range_storage:cache_size(),
+    c_table([
+        [
+            {" Cache Entries ", CacheSize}
+        ]
+    ]);
+config_cache_stats(_, _, _) ->
+    usage.
+
 config_checkpoint_next(["config", "checkpoint", "next"], [], []) ->
     Msg = hpr_route_stream_worker:print_next_checkpoint(),
     c_text(Msg);
@@ -733,6 +817,36 @@ config_reset(_, _, _) ->
 %%--------------------------------------------------------------------
 %% Helpers
 %%--------------------------------------------------------------------
+
+-spec set_routes_active(
+    RoutesETS :: list(hpr_route_ets:route()),
+    Active :: boolean()
+) -> non_neg_integer().
+set_routes_active(RoutesETS, Active) ->
+    lists:foldl(
+        fun(RouteETS, Count) ->
+            Route0 = hpr_route_ets:route(RouteETS),
+            RouteID = hpr_route:id(Route0),
+            Route1 = hpr_route:active(Active, Route0),
+            ok = hpr_route_storage:insert(Route1),
+            case Active of
+                false ->
+                    %% When deactivating, remove all SKFs, DevAddr ranges, and EUIs
+                    %% but keep the route itself
+                    _ = hpr_skf_storage:delete_route(RouteID),
+                    _ = hpr_devaddr_range_storage:delete_route(RouteID),
+                    _ = hpr_eui_pair_storage:delete_route(RouteID),
+                    ok;
+                true ->
+                    %% When activating, refresh the route to fetch SKFs, DevAddr ranges, and EUIs
+                    _ = hpr_route_stream_worker:refresh_route(RouteID, 3),
+                    ok
+            end,
+            Count + 1
+        end,
+        0,
+        RoutesETS
+    ).
 
 -spec c_table(list(proplists:proplist()) | proplists:proplist()) -> clique_status:status().
 c_table(PropLists) -> [clique_status:table(PropLists)].

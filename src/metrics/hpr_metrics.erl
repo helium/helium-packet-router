@@ -17,12 +17,20 @@
     observe_find_routes/1,
     observe_grpc_connection/2,
     ics_update/2,
-    observe_gateway_location/2
+    observe_gateway_location/2,
+    devaddr_cache_hit/0,
+    devaddr_cache_miss/0
 ]).
 
 -export([
     counts/0
 ]).
+
+-ifdef(TEST).
+-export([
+    record_routes/0
+]).
+-endif.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
@@ -141,6 +149,16 @@ observe_gateway_location(Start, Status) ->
         [Status],
         erlang:system_time(millisecond) - Start
     ).
+
+-spec devaddr_cache_hit() -> ok.
+devaddr_cache_hit() ->
+    _ = prometheus_counter:inc(?METRICS_DEVADDR_CACHE_HIT_COUNTER, []),
+    ok.
+
+-spec devaddr_cache_miss() -> ok.
+devaddr_cache_miss() ->
+    _ = prometheus_counter:inc(?METRICS_DEVADDR_CACHE_MISS_COUNTER, []),
+    ok.
 
 %% ------------------------------------------------------------------
 %% CLI Function Definitions
@@ -262,7 +280,12 @@ record_routes() ->
             RouteID = hpr_route:id(Route),
             OUI = hpr_route:oui(Route),
             NewBrokenMap =
-                case SKFCount > 0 andalso not sets:is_element(RouteID, RouteIDsWithDevAddr) of
+                case
+                    SKFCount > 0 andalso
+                        not sets:is_element(RouteID, RouteIDsWithDevAddr) andalso
+                        hpr_route:active(Route) andalso
+                        not hpr_route:locked(Route)
+                of
                     true ->
                         lager:warning(
                             [{route_id, RouteID}, {oui, OUI}],
