@@ -44,6 +44,7 @@
     net_id :: hpr_http_roaming:netid_num(),
     route_id :: string(),
     address :: address(),
+    pool_name :: atom(),
     transaction_id :: integer(),
     packets = [] :: list(hpr_http_roaming:packet()),
     send_data_timer = 200 :: non_neg_integer(),
@@ -90,16 +91,24 @@ init(Args) ->
     lager:debug("~p init with ~p", [?MODULE, Args]),
     try gproc:add_local_name(Key) of
         true ->
-            {ok, #state{
-                net_id = NetID,
-                route_id = RouteID,
-                address = Address,
-                transaction_id = next_transaction_id(),
-                send_data_timer = DedupeTimeout,
-                flow_type = FlowType,
-                auth_header = Auth,
-                receiver_nsid = ReceiverNSID
-            }}
+            case check_endpoint(Address) of
+                {error, Reason} ->
+                    lager:error("endpoint unreachable ~s: ~p", [Address, Reason]),
+                    {stop, {endpoint_unreachable, Address, Reason}};
+                ok ->
+                    PoolName = ensure_pool(Address),
+                    {ok, #state{
+                        net_id = NetID,
+                        route_id = RouteID,
+                        address = Address,
+                        pool_name = PoolName,
+                        transaction_id = next_transaction_id(),
+                        send_data_timer = DedupeTimeout,
+                        flow_type = FlowType,
+                        auth_header = Auth,
+                        receiver_nsid = ReceiverNSID
+                    }}
+            end
     catch
         % This will only catch a bad registration
         error:badarg ->
@@ -190,6 +199,31 @@ pool_name(Address) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
+-spec check_endpoint(binary()) -> ok | {error, term()}.
+check_endpoint(Address) ->
+    case uri_string:parse(Address) of
+        #{host := Host, port := Port} ->
+            try_connect(Host, Port);
+        #{scheme := <<"https">>, host := Host} ->
+            try_connect(Host, 443);
+        #{scheme := <<"http">>, host := Host} ->
+            try_connect(Host, 80);
+        _ ->
+            {error, {bad_address, Address}}
+    end.
+
+-spec try_connect(binary() | string(), non_neg_integer()) -> ok | {error, term()}.
+try_connect(Host, Port) when is_binary(Host) ->
+    try_connect(binary_to_list(Host), Port);
+try_connect(Host, Port) ->
+    case gen_tcp:connect(Host, Port, [], 1000) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
 -spec maybe_schedule_send_data(integer(), undefined | reference()) -> {ok, reference()}.
 maybe_schedule_send_data(Timeout, undefined) ->
     {ok, erlang:send_after(Timeout, self(), ?SEND_DATA)};
@@ -229,6 +263,7 @@ send_data(
         net_id = NetID,
         route_id = RouteID,
         address = Address,
+        pool_name = PoolName,
         packets = Packets,
         transaction_id = TransactionID,
         flow_type = FlowType,
@@ -252,8 +287,6 @@ send_data(
             null -> [{<<"Content-Type">>, <<"application/json">>}];
             _ -> [{<<"Content-Type">>, <<"application/json">>}, {<<"Authorization">>, Auth}]
         end,
-
-    PoolName = ensure_pool(Address),
     case
         hackney:post(Address, Headers, Data1, [
             with_body,
