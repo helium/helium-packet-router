@@ -18,7 +18,8 @@
 %% ------------------------------------------------------------------
 -export([
     start_link/1,
-    handle_packet/4
+    handle_packet/4,
+    ensure_pool/1
 ]).
 
 %% ------------------------------------------------------------------
@@ -164,6 +165,28 @@ terminate(_Reason, #state{}) ->
     ok.
 
 %% ------------------------------------------------------------------
+%% Pool Management
+%% ------------------------------------------------------------------
+
+-spec ensure_pool(binary()) -> atom().
+ensure_pool(Address) ->
+    PoolName = pool_name(Address),
+    case whereis(PoolName) of
+        undefined ->
+            case hackney_pool:start_pool(PoolName, [{max_connections, 10}, {timeout, 30000}]) of
+                ok -> PoolName;
+                {error, {already_started, _}} -> PoolName
+            end;
+        _Pid ->
+            PoolName
+    end.
+
+-spec pool_name(binary()) -> atom().
+pool_name(Address) ->
+    %% Address is a URL like <<"https://host:port/path">>
+    binary_to_atom(<<"hpr_http_pool_", Address/binary>>).
+
+%% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
@@ -230,9 +253,18 @@ send_data(
             _ -> [{<<"Content-Type">>, <<"application/json">>}, {<<"Authorization">>, Auth}]
         end,
 
-    case hackney:post(Address, Headers, Data1, [with_body]) of
+    PoolName = ensure_pool(Address),
+    case
+        hackney:post(Address, Headers, Data1, [
+            with_body,
+            {pool, PoolName},
+            {checkout_timeout, 1000},
+            {recv_timeout, 2500},
+            {connect_timeout, 2500}
+        ])
+    of
         {ok, 200, _Headers, <<>>} ->
-            lager:info("~p empty response [flow_type: ~p]", [NetID, FlowType]),
+            lager:debug("~p empty response [flow_type: ~p]", [NetID, FlowType]),
             ok;
         {ok, 200, _Headers, Res} ->
             case FlowType of
@@ -265,5 +297,8 @@ send_data(
             end;
         {ok, Code, _Headers, Resp} ->
             lager:error("bad response: [code: ~p] [res: ~p]", [Code, Resp]),
+            ok;
+        {error, Reason} ->
+            lager:error("http request failed: [address: ~p] [reason: ~p]", [Address, Reason]),
             ok
     end.

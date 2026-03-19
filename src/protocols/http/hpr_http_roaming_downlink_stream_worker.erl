@@ -192,12 +192,21 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                                     {200, jsx:encode(PayloadResponse)};
                                 async ->
                                     _ = erlang:spawn(fun() ->
+                                        PoolName = hpr_http_roaming_worker:ensure_pool(
+                                            Endpoint
+                                        ),
                                         case
                                             hackney:post(
                                                 Endpoint,
                                                 Headers,
                                                 jsx:encode(PayloadResponse),
-                                                [with_body]
+                                                [
+                                                    with_body,
+                                                    {pool, PoolName},
+                                                    {checkout_timeout, 1000},
+                                                    {recv_timeout, 2500},
+                                                    {connect_timeout, 2500}
+                                                ]
                                             )
                                         of
                                             {ok, Code, _, _} ->
@@ -207,9 +216,9 @@ process_downlink(#http_roaming_downlink_v1_pb{data = Data}) ->
                                                     [Code, Endpoint]
                                                 );
                                             {error, Reason} ->
-                                                lager:debug(
+                                                lager:error(
                                                     [{gateway, hpr_utils:gateway_name(PubKeyBin)}],
-                                                    "async downlink response ~s, Endpoint: ~s",
+                                                    "async downlink failed ~p, Endpoint: ~s",
                                                     [Reason, Endpoint]
                                                 )
                                         end
