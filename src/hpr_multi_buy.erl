@@ -6,6 +6,7 @@
 -export([
     init/0,
     update_counter/2,
+    update_counter/3,
     cleanup/1,
     make_key/2,
     enabled/0
@@ -31,9 +32,14 @@ init() ->
 
 -spec update_counter(Key :: binary(), Max :: non_neg_integer()) ->
     {ok, boolean()} | {error, ?MAX_TOO_LOW | ?MULTIBUY}.
-update_counter(_Key, Max) when Max =< 0 ->
-    {error, ?MAX_TOO_LOW};
 update_counter(Key, Max) ->
+    update_counter(Key, Max, true).
+
+-spec update_counter(Key :: binary(), Max :: non_neg_integer(), UseNetwork :: boolean()) ->
+    {ok, boolean()} | {error, ?MAX_TOO_LOW | ?MULTIBUY}.
+update_counter(_Key, Max, _UseNetwork) when Max =< 0 ->
+    {error, ?MAX_TOO_LOW};
+update_counter(Key, Max, UseNetwork) ->
     case
         ets:update_counter(
             ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
@@ -42,9 +48,9 @@ update_counter(Key, Max) ->
         LocalCounter when LocalCounter > Max ->
             {error, ?MULTIBUY};
         LocalCounter ->
-            case enabled() of
+            case UseNetwork andalso enabled() of
                 false ->
-                    %% ETS-only mode: no external service configured
+                    %% ETS-only mode: no external service configured or not requested
                     {ok, false};
                 true ->
                     case request(Key) of
@@ -131,6 +137,7 @@ all_test_() ->
         ?_test(test_update_counter()),
         ?_test(test_update_counter_with_service()),
         ?_test(test_update_counter_ets_only()),
+        ?_test(test_update_counter_no_network()),
         ?_test(test_cleanup()),
         ?_test(test_scheduled_cleanup())
     ]}.
@@ -206,6 +213,21 @@ test_update_counter_ets_only() ->
 
     %% Re-enable for other tests
     application:set_env(hpr, multi_buy_enabled, true),
+    ok.
+
+test_update_counter_no_network() ->
+    %% Even with multi_buy_enabled=true, UseNetwork=false should skip gRPC
+    Key = crypto:strong_rand_bytes(16),
+    Max = 3,
+
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(_, _) ->
+        error(should_not_be_called)
+    end),
+
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, false)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, false)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, false)),
+    ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max, false)),
     ok.
 
 test_cleanup() ->
