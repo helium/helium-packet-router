@@ -18,7 +18,8 @@
     delete_all/0,
 
     clear_cache/0,
-    cache_size/0
+    cache_size/0,
+    evict_expired/0
 ]).
 
 -ifdef(TEST).
@@ -30,6 +31,8 @@
 -define(CACHE_ETS, hpr_devaddr_cache_ets).
 % 12 hours
 -define(DEFAULT_CACHE_TTL_MS, 43200000).
+% 24 hours
+-define(DEFAULT_CACHE_EVICTION_INTERVAL_MS, 86400000).
 
 -spec init_ets() -> ok.
 init_ets() ->
@@ -40,6 +43,7 @@ init_ets() ->
         public, named_table, set, {read_concurrency, true}
     ]),
     ok = rehydrate_from_dets(),
+    ok = schedule_eviction(),
     ok.
 
 -spec checkpoint() -> ok.
@@ -148,6 +152,16 @@ clear_cache() ->
     ets:delete_all_objects(?CACHE_ETS),
     ok.
 
+-spec evict_expired() -> non_neg_integer().
+evict_expired() ->
+    TTL = hpr_utils:get_env_int(devaddr_cache_ttl_ms, ?DEFAULT_CACHE_TTL_MS),
+    Cutoff = erlang:system_time(millisecond) - TTL,
+    Evicted = ets:select_delete(?CACHE_ETS, [
+        {{'_', {'_', '$1'}}, [{'<', '$1', Cutoff}], [true]}
+    ]),
+    lager:info("evicted ~b expired devaddr cache entries", [Evicted]),
+    Evicted.
+
 %% ------------------------------------------------------------------
 %% CLI Functions
 %% ------------------------------------------------------------------
@@ -188,6 +202,14 @@ replace_route(RouteID, DevAddrRanges) ->
     Removed = hpr_devaddr_range_storage:delete_route(RouteID),
     lists:foreach(fun ?MODULE:insert/1, DevAddrRanges),
     Removed.
+
+-spec schedule_eviction() -> ok.
+schedule_eviction() ->
+    Interval = hpr_utils:get_env_int(
+        devaddr_cache_eviction_interval_ms, ?DEFAULT_CACHE_EVICTION_INTERVAL_MS
+    ),
+    {ok, _TRef} = timer:apply_interval(Interval, ?MODULE, evict_expired, []),
+    ok.
 
 -spec rehydrate_from_dets() -> ok.
 rehydrate_from_dets() ->
@@ -252,7 +274,8 @@ all_test_() ->
         {"cache_invalidation_on_replace", ?_test(cache_invalidation_on_replace())},
         {"cache_deduplicates_route_ids", ?_test(cache_deduplicates_route_ids())},
         {"clear_cache_function", ?_test(clear_cache_function())},
-        {"cache_size_function", ?_test(cache_size_function())}
+        {"cache_size_function", ?_test(cache_size_function())},
+        {"evict_expired_function", ?_test(evict_expired_function())}
     ]}.
 
 foreach_setup() ->
@@ -642,6 +665,60 @@ cache_size_function() ->
 
     %% Cache should have 5 entries
     ?assertEqual(5, cache_size()),
+    ok.
+
+evict_expired_function() ->
+    %% Setup route and range
+    RouteID = "test-route-evict",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+
+    DevAddr1 = 16#00000200,
+    DevAddrRange1 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => DevAddr1,
+        end_addr => DevAddr1 + 10
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange1),
+
+    DevAddr2 = 16#00000300,
+    DevAddrRange2 = hpr_devaddr_range:test_new(#{
+        route_id => RouteID,
+        start_addr => DevAddr2,
+        end_addr => DevAddr2 + 10
+    }),
+    ok = hpr_devaddr_range_storage:insert(DevAddrRange2),
+
+    %% Populate cache with short TTL
+    ok = application:set_env(hpr, devaddr_cache_ttl_ms, 100),
+    _Routes1 = hpr_devaddr_range_storage:lookup(DevAddr1),
+    ?assertEqual(1, cache_size()),
+
+    %% Wait for first entry to expire
+    timer:sleep(150),
+
+    %% Add second entry (now fresh)
+    _Routes2 = hpr_devaddr_range_storage:lookup(DevAddr2),
+    ?assertEqual(2, cache_size()),
+
+    %% Evict should only remove the expired entry
+    Evicted = evict_expired(),
+    ?assertEqual(1, Evicted),
+    ?assertEqual(1, cache_size()),
+
+    %% The fresh entry should still be there
+    ?assertNotEqual([], ets:lookup(?CACHE_ETS, DevAddr2)),
+    %% The expired entry should be gone
+    ?assertEqual([], ets:lookup(?CACHE_ETS, DevAddr1)),
+
+    %% Reset TTL
+    ok = application:set_env(hpr, devaddr_cache_ttl_ms, 1000),
     ok.
 
 -endif.
