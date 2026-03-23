@@ -8,7 +8,7 @@
     find_routes/2
 ]).
 
--define(MAX_JOIN_REQ, 50).
+-define(MAX_JOIN_REQ, 25).
 
 -define(GATEWAY_THROTTLE, hpr_gateway_rate_limit).
 -define(DEFAULT_GATEWAY_THROTTLE, 25).
@@ -345,13 +345,13 @@ maybe_deliver_packet_to_route(PacketUpType, PacketUp, RouteETS, Timestamp, SKFMa
             {error, in_cooldown};
         {true, false, _} ->
             Key = hpr_multi_buy:make_key(PacketUp, Route),
-            MaxCopies =
+            {MaxCopies, UseNetwork} =
                 case {SKFMaxCopies, PacketUpType} of
-                    {0, {join_req, _}} -> ?MAX_JOIN_REQ;
-                    {0, _} -> hpr_route:max_copies(Route);
-                    _ -> SKFMaxCopies
+                    {0, {join_req, _}} -> {?MAX_JOIN_REQ, false};
+                    {0, _} -> {hpr_route:max_copies(Route), true};
+                    _ -> {SKFMaxCopies, true}
                 end,
-            case hpr_multi_buy:update_counter(Key, MaxCopies) of
+            case hpr_multi_buy:update_counter(Key, MaxCopies, UseNetwork) of
                 {error, Reason} = Error ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
                     Error;
