@@ -29,6 +29,8 @@
 -define(ETS, hpr_route_devaddr_ranges_ets).
 -define(DETS, hpr_route_devaddr_ranges_dets).
 -define(CACHE_ETS, hpr_devaddr_cache_ets).
+% 1 hours
+-define(DEFAULT_CACHE_EMPTY_ROUTES_TTL_MS, 3600000).
 % 12 hours
 -define(DEFAULT_CACHE_TTL_MS, 43200000).
 % 24 hours
@@ -59,6 +61,21 @@ foldl(Fun, Acc) ->
 -spec lookup(DevAddr :: non_neg_integer()) -> [hpr_route_ets:route()].
 lookup(DevAddr) ->
     case ets:lookup(?CACHE_ETS, DevAddr) of
+        [{DevAddr, {[], CachedAt}}] ->
+            Now = erlang:system_time(millisecond),
+            TTL = hpr_utils:get_env_int(
+                devaddr_cache_empty_routes_ttl_ms, ?DEFAULT_CACHE_EMPTY_ROUTES_TTL_MS
+            ),
+            case (Now - CachedAt) < TTL of
+                true ->
+                    %% Cache hit - fetch routes from storage
+                    ok = hpr_metrics:devaddr_cache_hit(),
+                    [];
+                false ->
+                    %% Cache expired
+                    ok = hpr_metrics:devaddr_cache_miss(),
+                    lookup_and_cache(DevAddr)
+            end;
         [{DevAddr, {RouteIDs, CachedAt}}] ->
             Now = erlang:system_time(millisecond),
             TTL = hpr_utils:get_env_int(devaddr_cache_ttl_ms, ?DEFAULT_CACHE_TTL_MS),
@@ -108,12 +125,18 @@ lookup_and_cache(DevAddr) ->
 
 -spec insert(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 insert(DevAddrRange) ->
-    true = ets:insert(?ETS, [
-        {
-            {hpr_devaddr_range:start_addr(DevAddrRange), hpr_devaddr_range:end_addr(DevAddrRange)},
-            hpr_devaddr_range:route_id(DevAddrRange)
-        }
-    ]),
+    StartAddr = hpr_devaddr_range:start_addr(DevAddrRange),
+    EndAddr = hpr_devaddr_range:end_addr(DevAddrRange),
+    true = ets:insert(?ETS, [{{StartAddr, EndAddr}, hpr_devaddr_range:route_id(DevAddrRange)}]),
+    case EndAddr - StartAddr of
+        Diff when Diff =< 1024 ->
+            lists:foreach(
+                fun(DevAddr) -> ets:delete(?CACHE_ETS, DevAddr) end,
+                lists:seq(StartAddr, EndAddr)
+            );
+        _ ->
+            ok
+    end,
     lager:debug(
         [
             {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
