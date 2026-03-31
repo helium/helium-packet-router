@@ -1,0 +1,261 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+    tags: ["*"]
+  workflow_dispatch:
+
+env:
+  APK_DEPS: autoconf automake bison build-base bzip2 cmake curl dbus-dev flex git gmp-dev libsodium-dev libtool linux-headers lz4 openssl-dev pkgconfig protoc sed tar wget vim
+  CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: deps
+        run: apk add --no-cache --update ${{ env.APK_DEPS }}
+      - name: rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+      - name: build
+        run: make
+      - name: build test
+        run: ./rebar3 as test compile
+      - name: tar
+        run: tar -czf build.tar.gz -C _build/ .
+      - name: upload-artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: build
+          path: build.tar.gz
+
+  xref:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-xref
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: download-artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build
+      - name: untar
+        run: mkdir _build && tar -xf build.tar.gz -C _build
+      - name: xref
+        run: ./rebar3 xref
+
+  eunit:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-eunit
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: download-artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build
+      - name: untar
+        run: mkdir _build && tar -xf build.tar.gz -C _build
+      - name: eunit
+        run: ./rebar3 eunit -v
+
+  dialyzer:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-dialyzer
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: download-artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build
+      - name: untar
+        run: mkdir _build && tar -xf build.tar.gz -C _build
+      - name: dialyzer
+        run: ./rebar3 dialyzer
+
+  suites:
+    runs-on: ubuntu-latest
+    outputs:
+      ct_suites: ${{ steps.gen_test_suites.outputs.ct_suites }}
+      aws_suites: ${{ steps.gen_test_suites.outputs.aws_suites }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: gen_test_suites
+        id: gen_test_suites
+        run: |
+          CT_SUITES="["
+          AWS_SUITES="["
+          for F in ./test/*_SUITE.erl; do
+            SUITE=$(basename "$F")
+            if [ "$SUITE" = "hpr_packet_reporter_SUITE.erl" ]; then
+              AWS_SUITES+="\"${SUITE}\","
+            else
+              CT_SUITES+="\"${SUITE}\","
+            fi
+          done
+          CT_SUITES=${CT_SUITES%,}
+          CT_SUITES+="]"
+          AWS_SUITES=${AWS_SUITES%,}
+          AWS_SUITES+="]"
+          echo "ct_suites=${CT_SUITES}" >> "$GITHUB_OUTPUT"
+          echo "aws_suites=${AWS_SUITES}" >> "$GITHUB_OUTPUT"
+
+  ct:
+    needs: [build, suites]
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: "${{ fromJSON(needs.suites.outputs.ct_suites) }}"
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-ct-${{ matrix.suite }}
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: download-artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build
+      - name: untar
+        run: mkdir _build && tar -xf build.tar.gz -C _build
+      - name: ct
+        run: CT_LAGER=DEBUG ./rebar3 ct --suite=${{ matrix.suite }} --readable=true
+
+  ct-aws:
+    needs: [build, suites]
+    if: ${{ needs.suites.outputs.aws_suites != '[]' }}
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: "${{ fromJSON(needs.suites.outputs.aws_suites) }}"
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-ct-aws-${{ matrix.suite }}
+      cancel-in-progress: true
+    services:
+      localstack:
+        image: localstack/localstack:1.4
+        env:
+          SERVICES: s3
+        ports:
+          - "4566-4583:4566-4583"
+        volumes:
+          - "/var/lib/localstack:/var/lib/localstack"
+          - "/var/run/docker.sock:/var/run/docker.sock"
+    env:
+      HPR_PACKET_REPORTER_LOCAL_HOST: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_HOST }}
+      HPR_PACKET_REPORTER_LOCAL_PORT: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_PORT }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: deps
+        run: apk add --no-cache --update python3 python3-dev py3-pip
+      - name: localstack
+        run: |
+          curl 'http://localstack:4566/health'
+          python3 -m venv /tmp/venv
+          . /tmp/venv/bin/activate
+          pip install --no-cache-dir awscli-local[ver1]
+          aws configure set aws_access_key_id testkey
+          aws configure set aws_secret_access_key testsecret
+          aws configure set default.region us-east-1
+          aws --endpoint-url=http://localstack:4566 s3 mb s3://test-bucket
+      - name: download-artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build
+      - name: untar
+        run: mkdir _build && tar -xf build.tar.gz -C _build
+      - name: ct
+        run: CT_LAGER=DEBUG ./rebar3 ct --suite=${{ matrix.suite }} --readable=true
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-alpine
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-release
+      cancel-in-progress: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: deps
+        run: apk add --no-cache --update ${{ env.APK_DEPS }}
+      - name: rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+      - name: download-artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build
+      - name: untar
+        run: mkdir _build && tar -xf build.tar.gz -C _build
+      - name: release
+        run: make rel
+
+  package:
+    needs: [xref, eunit, dialyzer, ct, ct-aws, release]
+    if: ${{ !failure() && !cancelled() && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:24.3-slim
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-package
+      cancel-in-progress: true
+    steps:
+      - name: deps
+        run: |
+          apt update &&
+          apt install --yes autoconf automake bison gcc libc6-dev binutils libbz2-dev curl libdbus-1-dev flex git libgmp10 libgmp-dev libsodium-dev libtool liblz4-dev libssl1.1 libssl-dev pkgconf bash protobuf-compiler sed tar wget vim zip ruby
+      - name: install cmake
+        uses: lukka/get-cmake@b78306120111dc2522750771cfd09ee7ca723687 # v4.3.0
+      - name: fpm install
+        run: gem install fpm
+      - name: rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+      - name: checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: build and package
+        run: ./.github/scripts/make_deb.sh
+      - name: packagecloud upload
+        env:
+          PACKAGECLOUD_API_KEY: ${{ secrets.PACKAGECLOUD_API_KEY }}
+        run: ./.github/scripts/packagecloud_upload.sh
