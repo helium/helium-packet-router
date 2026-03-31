@@ -100,13 +100,19 @@ observe_packet_report(Status, Start) ->
     ).
 
 -spec observe_multi_buy(
-    Status :: {ok, non_neg_integer()} | {error, any()},
+    Status :: {ok, non_neg_integer(), boolean()} | {error, any()},
     Time :: non_neg_integer()
 ) -> ok.
-observe_multi_buy({Status, _}, Time) ->
+observe_multi_buy({ok, _, _}, Time) ->
     prometheus_histogram:observe(
         ?METRICS_MULTI_BUY_GET_HISTOGRAM,
-        [Status],
+        [ok],
+        Time
+    );
+observe_multi_buy({error, _}, Time) ->
+    prometheus_histogram:observe(
+        ?METRICS_MULTI_BUY_GET_HISTOGRAM,
+        [error],
         Time
     ).
 

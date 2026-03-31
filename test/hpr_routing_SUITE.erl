@@ -799,13 +799,13 @@ multi_buy_requests_test(_Config) ->
         Packets1
     ),
 
-    MultiBuyKey = hpr_multi_buy:make_key(hd(Packets1), Route),
+    _MultiBuyKey = hpr_multi_buy:make_key(hd(Packets1), Route),
     %% We should stop making requests when the multi-buy service says it's seen
     %% more than the MaxCopies. When we've sent more update_counter than
     %% MaxCopies, we can check that we haven't exceeded MaxCopies worth of
     %% requests because this tests is simulating other HPR seeing the same packet.
     ok = test_utils:wait_until(fun() ->
-        UpdatesRequested = meck:num_calls(hpr_multi_buy, update_counter, [MultiBuyKey, MaxCopies]),
+        UpdatesRequested = meck:num_calls(hpr_multi_buy, update_counter, 4),
         RequestsSent = meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2),
         Headroom = 2,
 
