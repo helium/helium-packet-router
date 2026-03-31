@@ -33,7 +33,6 @@
 -define(DEFAULT_CACHE_TTL_MS, 43200000).
 % 24 hours
 -define(DEFAULT_CACHE_EVICTION_INTERVAL_MS, 86400000).
--define(MAX_CACHE_INVALIDATION_RANGE, 1024).
 
 -spec init_ets() -> ok.
 init_ets() ->
@@ -166,15 +165,13 @@ evict_expired() ->
 invalidate_cache(DevAddrRange) ->
     StartAddr = hpr_devaddr_range:start_addr(DevAddrRange),
     EndAddr = hpr_devaddr_range:end_addr(DevAddrRange),
-    case EndAddr - StartAddr of
-        Diff when Diff =< ?MAX_CACHE_INVALIDATION_RANGE ->
-            lists:foreach(
-                fun(DevAddr) -> ets:delete(?CACHE_ETS, DevAddr) end,
-                lists:seq(StartAddr, EndAddr)
-            );
-        _ ->
-            clear_cache()
-    end.
+    delete_range(StartAddr, EndAddr).
+
+-spec delete_range(DevAddr :: non_neg_integer(), EndAddr :: non_neg_integer()) -> ok.
+delete_range(Addr, EndAddr) when Addr > EndAddr -> ok;
+delete_range(Addr, EndAddr) ->
+    ets:delete(?CACHE_ETS, Addr),
+    delete_range(Addr + 1, EndAddr).
 
 %% ------------------------------------------------------------------
 %% CLI Functions
@@ -204,9 +201,14 @@ cache_size() ->
 
 -spec delete_route(hpr_route:id()) -> non_neg_integer().
 delete_route(RouteID) ->
-    ok = clear_cache(),
+    Ranges = lookup_for_route(RouteID),
     MS1 = [{{'_', RouteID}, [], [true]}],
-    ets:select_delete(?ETS, MS1).
+    Deleted = ets:select_delete(?ETS, MS1),
+    lists:foreach(
+        fun({StartAddr, EndAddr}) -> delete_range(StartAddr, EndAddr) end,
+        Ranges
+    ),
+    Deleted.
 
 -spec replace_route(
     RouteID :: hpr_route:id(),
@@ -285,9 +287,12 @@ all_test_() ->
         {"cache_hit_on_second_lookup", ?_test(cache_hit_on_second_lookup())},
         {"cache_expiration", ?_test(cache_expiration())},
         {"cache_invalidation_on_delete", ?_test(cache_invalidation_on_delete())},
-        {"cache_invalidation_on_insert_small_range", ?_test(cache_invalidation_on_insert_small_range())},
-        {"cache_invalidation_on_insert_large_range", ?_test(cache_invalidation_on_insert_large_range())},
-        {"insert_invalidates_cached_empty_result", ?_test(insert_invalidates_cached_empty_result())},
+        {"cache_invalidation_on_insert_small_range",
+            ?_test(cache_invalidation_on_insert_small_range())},
+        {"cache_invalidation_on_insert_large_range",
+            ?_test(cache_invalidation_on_insert_large_range())},
+        {"insert_invalidates_cached_empty_result",
+            ?_test(insert_invalidates_cached_empty_result())},
         {"cache_invalidation_on_replace", ?_test(cache_invalidation_on_replace())},
         {"cache_deduplicates_route_ids", ?_test(cache_deduplicates_route_ids())},
         {"clear_cache_function", ?_test(clear_cache_function())},
@@ -584,16 +589,17 @@ cache_invalidation_on_insert_large_range() ->
     _Routes = hpr_devaddr_range_storage:lookup(DevAddr),
     ?assertEqual(1, cache_size()),
 
-    %% Insert a large range (diff > 1024) — should clear entire cache
+    %% Insert a large range — should only invalidate cache entries within that range
     DevAddrRange2 = hpr_devaddr_range:test_new(#{
         route_id => RouteID,
         start_addr => 16#00010000,
-        end_addr => 16#00020000
+        end_addr => 16#00010010
     }),
     ok = hpr_devaddr_range_storage:insert(DevAddrRange2),
 
-    %% Entire cache should be cleared, including the unrelated entry
-    ?assertEqual(0, cache_size()),
+    %% Unrelated cache entry should still exist (targeted invalidation)
+    ?assertEqual(1, cache_size()),
+    ?assertNotEqual([], ets:lookup(?CACHE_ETS, DevAddr)),
     ok.
 
 insert_invalidates_cached_empty_result() ->
