@@ -15,6 +15,10 @@ RUN apk add --no-cache --update \
 ENV CARGO_BUILD_RUSTFLAGS="-C target-feature=-crt-static"
 
 # Install Rust toolchain
+# Pin RUSTUP_HOME and CARGO_HOME so they don't depend on $HOME,
+# which GitHub Actions overrides to /github/home inside containers.
+ENV RUSTUP_HOME="/root/.rustup"
+ENV CARGO_HOME="/root/.cargo"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
 
