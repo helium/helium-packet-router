@@ -15,7 +15,7 @@ RUN apk add --no-cache --update \
 ENV CARGO_BUILD_RUSTFLAGS="-C target-feature=-crt-static"
 
 # Install Rust toolchain
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 FROM base AS builder
