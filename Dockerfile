@@ -1,4 +1,4 @@
-FROM erlang:24.3-alpine
+FROM erlang:24.3-alpine  AS base
 
 RUN apk add --no-cache --update \
     autoconf automake bison build-base bzip2 cmake curl \
@@ -17,6 +17,8 @@ ENV CARGO_BUILD_RUSTFLAGS="-C target-feature=-crt-static"
 # Install Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
+
+FROM base AS builder
 
 WORKDIR /opt/hpr
 

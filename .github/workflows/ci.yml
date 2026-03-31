@@ -13,97 +13,135 @@ env:
   CARGO_BUILD_RUSTFLAGS: -C target-feature=-crt-static
 
 jobs:
+  compute-base-build-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.out.outputs.tag }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Create Tag
+        id: out
+        run: echo "tag=${{ hashFiles('Dockerfile') }}" >> "$GITHUB_OUTPUT"
+
+  build-base:
+    needs: compute-base-build-tag
+    runs-on: ubuntu-latest
+    env:
+      CACHE_HIT: false
+      IMAGE: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull Cached base Image
+        run: |
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "CACHE_HIT=true" >> $GITHUB_ENV
+          else
+            echo "CACHE_HIT=false" >> $GITHUB_ENV
+          fi
+      - name: Set up Docker Buildx
+        if: env.CACHE_HIT == 'false'
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+      - name: Build and Push base Image (if not cached)
+        if: env.CACHE_HIT == 'false'
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          context: .
+          file: Dockerfile
+          target: base
+          push: true
+          tags: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
+
   build:
     runs-on: ubuntu-latest
+    needs: [compute-base-build-tag, build-base]
     container:
-      image: erlang:24.3-alpine
+      image: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: deps
-        run: apk add --no-cache --update ${{ env.APK_DEPS }}
-      - name: rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+      - name: Cache _build Directory
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          toolchain: stable
+          path: _build
+          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
+          restore-keys: |
+            build_cache-
       - name: build
         run: make
       - name: build test
         run: ./rebar3 as test compile
-      - name: tar
-        run: tar -czf build.tar.gz -C _build/ .
-      - name: upload-artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
-        with:
-          name: build
-          path: build.tar.gz
 
   xref:
-    needs: build
+    needs: [compute-base-build-tag, build-base, build]
     runs-on: ubuntu-latest
     container:
-      image: erlang:24.3-alpine
+      image: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-xref
       cancel-in-progress: true
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: deps
-        run: apk add --no-cache git
-      - name: download-artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Restore cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          name: build
-      - name: untar
-        run: mkdir _build && tar -xf build.tar.gz -C _build
+          path: _build
+          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
+          restore-keys: |
+            build_cache-
       - name: xref
         run: ./rebar3 xref
 
   eunit:
-    needs: build
+    needs: [compute-base-build-tag, build-base, build]
     runs-on: ubuntu-latest
     container:
-      image: erlang:24.3-alpine
+      image: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-eunit
       cancel-in-progress: true
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: deps
-        run: apk add --no-cache git
-      - name: download-artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Restore cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          name: build
-      - name: untar
-        run: mkdir _build && tar -xf build.tar.gz -C _build
+          path: _build
+          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
+          restore-keys: |
+            build_cache-
       - name: eunit
         run: ./rebar3 eunit -v
 
   dialyzer:
-    needs: build
+    needs: [compute-base-build-tag, build-base, build]
     runs-on: ubuntu-latest
     container:
-      image: erlang:24.3-alpine
+      image: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-dialyzer
       cancel-in-progress: true
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: deps
-        run: apk add --no-cache git
-      - name: download-artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Restore cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          name: build
-      - name: untar
-        run: mkdir _build && tar -xf build.tar.gz -C _build
+          path: _build
+          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
+          restore-keys: |
+            build_cache-
       - name: dialyzer
         run: ./rebar3 dialyzer
 
@@ -136,10 +174,10 @@ jobs:
           echo "aws_suites=${AWS_SUITES}" >> "$GITHUB_OUTPUT"
 
   ct:
-    needs: [build, suites]
+    needs: [compute-base-build-tag, build-base, build, suites]
     runs-on: ubuntu-latest
     container:
-      image: erlang:24.3-alpine
+      image: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
     strategy:
       fail-fast: false
       matrix:
@@ -150,23 +188,22 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: deps
-        run: apk add --no-cache git
-      - name: download-artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Restore cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          name: build
-      - name: untar
-        run: mkdir _build && tar -xf build.tar.gz -C _build
+          path: _build
+          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
+          restore-keys: |
+            build_cache-
       - name: ct
         run: CT_LAGER=DEBUG ./rebar3 ct --suite=${{ matrix.suite }} --readable=true
 
   ct-aws:
-    needs: [build, suites]
+    needs: [compute-base-build-tag, build-base, build, suites]
     if: ${{ needs.suites.outputs.aws_suites != '[]' }}
     runs-on: ubuntu-latest
     container:
-      image: erlang:24.3-alpine
+      image: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
     strategy:
       fail-fast: false
       matrix:
@@ -190,50 +227,51 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: deps
-        run: apk add --no-cache --update git python3 python3-dev py3-pip
-      - name: localstack
+      - name: Install AWS CLI (user install)
         run: |
-          curl 'http://localstack:4566/health'
-          python3 -m venv /tmp/venv
-          . /tmp/venv/bin/activate
-          pip install --no-cache-dir awscli-local[ver1]
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          /tmp/aws/install --install-dir $HOME/.local/aws-cli --bin-dir $HOME/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Localstack init
+        timeout-minutes: 1
+        run: |
+          until curl -sf http://localstack:4566/health > /dev/null 2>&1; do
+            echo "...waiting for Localstack..."
+            sleep 2
+          done
           aws configure set aws_access_key_id testkey
           aws configure set aws_secret_access_key testsecret
           aws configure set default.region us-east-1
           aws --endpoint-url=http://localstack:4566 s3 mb s3://test-bucket
-      - name: download-artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Restore cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          name: build
-      - name: untar
-        run: mkdir _build && tar -xf build.tar.gz -C _build
+          path: _build
+          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
+          restore-keys: |
+            build_cache-
       - name: ct
         run: CT_LAGER=DEBUG ./rebar3 ct --suite=${{ matrix.suite }} --readable=true
 
   release:
-    needs: build
+    needs: [compute-base-build-tag, build-base, build]
     runs-on: ubuntu-latest
     container:
-      image: erlang:24.3-alpine
+      image: ghcr.io/${{ github.repository }}/base:${{ needs.compute-base-build-tag.outputs.image_tag }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-release
       cancel-in-progress: true
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: deps
-        run: apk add --no-cache --update ${{ env.APK_DEPS }}
-      - name: rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+      - name: Restore cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          toolchain: stable
-      - name: download-artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: build
-      - name: untar
-        run: mkdir _build && tar -xf build.tar.gz -C _build
+          path: _build
+          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
+          restore-keys: |
+            build_cache-
       - name: release
         run: make rel
 
@@ -261,6 +299,13 @@ jobs:
           toolchain: stable
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Restore cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: _build
+          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
+          restore-keys: |
+            build_cache-
       - name: build and package
         run: ./.github/scripts/make_deb.sh
       - name: packagecloud upload
