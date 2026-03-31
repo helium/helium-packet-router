@@ -734,7 +734,7 @@ multi_buy_requests_test(_Config) ->
         Count = ets:update_counter(
             ETS, Key, {2, 2}, {default, 0}
         ),
-        {ok, #multi_buy_inc_res_v1_pb{count = Count}, []}
+        {ok, #multi_buy_inc_res_v1_pb{count = Count, denied = false}, []}
     end),
 
     meck:new(hpr_protocol_router, [passthrough]),
@@ -818,7 +818,7 @@ multi_buy_requests_test(_Config) ->
         Count = ets:update_counter(
             ETS, Key, {2, 1}, {default, 0}
         ),
-        {ok, #multi_buy_inc_res_v1_pb{count = Count}, []}
+        {ok, #multi_buy_inc_res_v1_pb{count = Count, denied = false}, []}
     end),
 
     Packets2 = lists:map(

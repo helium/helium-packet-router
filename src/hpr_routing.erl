@@ -345,13 +345,15 @@ maybe_deliver_packet_to_route(PacketUpType, PacketUp, RouteETS, Timestamp, SKFMa
             {error, in_cooldown};
         {true, false, _} ->
             Key = hpr_multi_buy:make_key(PacketUp, Route),
+            PubKeyBin = hpr_packet_up:gateway(PacketUp),
+            Region = hpr_packet_up:region(PacketUp),
             MaxCopies =
                 case {SKFMaxCopies, PacketUpType} of
                     {0, {join_req, _}} -> ?MAX_JOIN_REQ;
                     {0, _} -> hpr_route:max_copies(Route);
                     _ -> SKFMaxCopies
                 end,
-            case hpr_multi_buy:update_counter(Key, MaxCopies) of
+            case hpr_multi_buy:update_counter(Key, MaxCopies, PubKeyBin, Region) of
                 {error, Reason} = Error ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
                     Error;
@@ -359,7 +361,6 @@ maybe_deliver_packet_to_route(PacketUpType, PacketUp, RouteETS, Timestamp, SKFMa
                     Server = hpr_route:server(Route),
                     Protocol = hpr_route:protocol(Server),
                     RouteID = hpr_route:id(Route),
-                    PubKeyBin = hpr_packet_up:gateway(PacketUp),
                     GatewayLocation =
                         case hpr_gateway_location:get(PubKeyBin) of
                             {error, _Reason} ->

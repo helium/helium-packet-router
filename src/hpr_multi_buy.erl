@@ -5,7 +5,7 @@
 
 -export([
     init/0,
-    update_counter/2,
+    update_counter/4,
     cleanup/1,
     make_key/2,
     enabled/0
@@ -14,6 +14,7 @@
 -define(ETS, hpr_multi_buy_ets).
 -define(MULTIBUY, multi_buy).
 -define(MAX_TOO_LOW, multi_buy_max_too_low).
+-define(DENIED, denied).
 -define(CLEANUP_TIME, timer:minutes(30)).
 
 -spec init() -> ok.
@@ -29,11 +30,13 @@ init() ->
     ok = scheduled_cleanup(?CLEANUP_TIME),
     ok.
 
--spec update_counter(Key :: binary(), Max :: non_neg_integer()) ->
-    {ok, boolean()} | {error, ?MAX_TOO_LOW | ?MULTIBUY}.
-update_counter(_Key, Max) when Max =< 0 ->
+-spec update_counter(
+    Key :: binary(), Max :: non_neg_integer(), HotspotKey :: binary(), Region :: atom()
+) ->
+    {ok, boolean()} | {error, ?MAX_TOO_LOW | ?MULTIBUY | ?DENIED}.
+update_counter(_Key, Max, _HotspotKey, _Region) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
-update_counter(Key, Max) ->
+update_counter(Key, Max, HotspotKey, Region) ->
     case
         ets:update_counter(
             ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
@@ -47,8 +50,19 @@ update_counter(Key, Max) ->
                     %% ETS-only mode: no external service configured
                     {ok, false};
                 true ->
-                    case request(Key) of
-                        {ok, ServiceCounter} when ServiceCounter > Max ->
+                    case request(Key, HotspotKey, Region) of
+                        {ok, _ServiceCounter, true} ->
+                            ets:update_counter(
+                                ?ETS,
+                                Key,
+                                {2, Max - LocalCounter + 1},
+                                {default, 0, erlang:system_time(millisecond)}
+                            ),
+                            lager:info("denied hotspot/region for ~s", [
+                                hpr_utils:bin_to_hex_string(Key)
+                            ]),
+                            {error, ?DENIED};
+                        {ok, ServiceCounter, _Denied} when ServiceCounter > Max ->
                             ets:update_counter(
                                 ?ETS,
                                 Key,
@@ -56,7 +70,7 @@ update_counter(Key, Max) ->
                                 {default, 0, erlang:system_time(millisecond)}
                             ),
                             {error, ?MULTIBUY};
-                        {ok, _ServiceCounter} ->
+                        {ok, _ServiceCounter, _Denied} ->
                             {ok, false};
                         {error, Reason} ->
                             lager:error("failed to get a counter for ~s: ~p", [
@@ -98,13 +112,18 @@ scheduled_cleanup(Duration) ->
     {ok, _} = timer:apply_interval(Duration, ?MODULE, cleanup, [Duration]),
     ok.
 
--spec request(Key :: binary()) -> {ok, non_neg_integer()} | {error, any()}.
-request(Key) ->
+-spec request(Key :: binary(), HotspotKey :: binary(), Region :: atom()) ->
+    {ok, non_neg_integer(), boolean()} | {error, any()}.
+request(Key, HotspotKey, Region) ->
     {Time, Result} = timer:tc(fun() ->
-        Req = #multi_buy_inc_req_v1_pb{key = hpr_utils:bin_to_hex_string(Key)},
+        Req = #multi_buy_inc_req_v1_pb{
+            key = hpr_utils:bin_to_hex_string(Key),
+            hotspot_key = HotspotKey,
+            region = Region
+        },
         try helium_multi_buy_multi_buy_client:inc(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
-            {ok, #multi_buy_inc_res_v1_pb{count = Count}, _} ->
-                {ok, Count};
+            {ok, #multi_buy_inc_res_v1_pb{count = Count, denied = Denied}, _} ->
+                {ok, Count, Denied =:= true};
             _Any ->
                 {error, _Any}
         catch
@@ -124,12 +143,15 @@ request(Key) ->
 
 -define(TEST_SLEEP, 250).
 -define(TEST_PERF, 1000).
+-define(TEST_HOTSPOT_KEY, <<"test_hotspot_key">>).
+-define(TEST_REGION, 'US915').
 
 all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         ?_test(test_max_too_low()),
         ?_test(test_update_counter()),
         ?_test(test_update_counter_with_service()),
+        ?_test(test_update_counter_denied()),
         ?_test(test_update_counter_ets_only()),
         ?_test(test_cleanup()),
         ?_test(test_scheduled_cleanup())
@@ -156,16 +178,21 @@ foreach_cleanup(ok) ->
 test_max_too_low() ->
     Key = crypto:strong_rand_bytes(16),
     Max = 0,
-    ?assertEqual({error, ?MAX_TOO_LOW}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual(
+        {error, ?MAX_TOO_LOW},
+        ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)
+    ),
     ok.
 
 test_update_counter() ->
     Key = crypto:strong_rand_bytes(16),
     Max = 3,
-    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual(
+        {error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)
+    ),
     ok.
 
 test_update_counter_with_service() ->
@@ -176,13 +203,27 @@ test_update_counter_with_service() ->
         OldCount = maps:get(K, Map, 0),
         NewCount = OldCount + 1,
         persistent_term:put(test_update_counter_with_service_map, Map#{K => NewCount}),
-        {ok, #multi_buy_inc_res_v1_pb{count = NewCount}, undefined}
+        {ok, #multi_buy_inc_res_v1_pb{count = NewCount, denied = false}, undefined}
     end),
 
-    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual(
+        {error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)
+    ),
+    ok.
+
+test_update_counter_denied() ->
+    Key = crypto:strong_rand_bytes(16),
+    Max = 3,
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(#multi_buy_inc_req_v1_pb{}, _) ->
+        {ok, #multi_buy_inc_res_v1_pb{count = 1, denied = true}, undefined}
+    end),
+
+    ?assertEqual(
+        {error, ?DENIED}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)
+    ),
     ok.
 
 test_update_counter_ets_only() ->
@@ -198,11 +239,13 @@ test_update_counter_ets_only() ->
     end),
 
     %% In ETS-only mode, successful updates return {ok, false} (not free)
-    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
-    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual({ok, false}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
     %% Once max is exceeded, still get multi_buy error from local ETS
-    ?assertEqual({error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max)),
+    ?assertEqual(
+        {error, ?MULTIBUY}, ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)
+    ),
 
     %% Re-enable for other tests
     application:set_env(hpr, multi_buy_enabled, true),
@@ -212,8 +255,8 @@ test_cleanup() ->
     Key1 = crypto:strong_rand_bytes(16),
     Key2 = crypto:strong_rand_bytes(16),
     Max = 1,
-    ?assertEqual({ok, true}, ?MODULE:update_counter(Key1, Max)),
-    ?assertEqual({ok, true}, ?MODULE:update_counter(Key2, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key1, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key2, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
@@ -229,8 +272,8 @@ test_scheduled_cleanup() ->
     Key1 = crypto:strong_rand_bytes(16),
     Key2 = crypto:strong_rand_bytes(16),
     Max = 1,
-    ?assertEqual({ok, true}, ?MODULE:update_counter(Key1, Max)),
-    ?assertEqual({ok, true}, ?MODULE:update_counter(Key2, Max)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key1, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
+    ?assertEqual({ok, true}, ?MODULE:update_counter(Key2, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION)),
 
     ?assertEqual(2, ets:info(?ETS, size)),
 
