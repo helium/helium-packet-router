@@ -69,7 +69,9 @@ jobs:
       - name: Cache _build Directory
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: _build
+          path: |
+            _build
+            src/grpc/autogen
           key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
           restore-keys: |
             build_cache-
@@ -92,7 +94,9 @@ jobs:
       - name: Restore cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: _build
+          path: |
+            _build
+            src/grpc/autogen
           key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
           restore-keys: |
             build_cache-
@@ -113,7 +117,9 @@ jobs:
       - name: Restore cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: _build
+          path: |
+            _build
+            src/grpc/autogen
           key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
           restore-keys: |
             build_cache-
@@ -134,7 +140,9 @@ jobs:
       - name: Restore cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: _build
+          path: |
+            _build
+            src/grpc/autogen
           key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
           restore-keys: |
             build_cache-
@@ -187,7 +195,9 @@ jobs:
       - name: Restore cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: _build
+          path: |
+            _build
+            src/grpc/autogen
           key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
           restore-keys: |
             build_cache-
@@ -243,7 +253,9 @@ jobs:
       - name: Restore cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: _build
+          path: |
+            _build
+            src/grpc/autogen
           key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
           restore-keys: |
             build_cache-
@@ -264,7 +276,9 @@ jobs:
       - name: Restore cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: _build
+          path: |
+            _build
+            src/grpc/autogen
           key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
           restore-keys: |
             build_cache-
@@ -298,7 +312,9 @@ jobs:
       - name: Restore cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
-          path: _build
+          path: |
+            _build
+            src/grpc/autogen
           key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
           restore-keys: |
             build_cache-
