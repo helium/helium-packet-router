@@ -234,7 +234,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Install AWS CLI
-        run: apk add --no-cache py3-pip && pip3 install awscli
+        run: apk add --no-cache aws-cli
       - name: Localstack init
         timeout-minutes: 1
         run: |
