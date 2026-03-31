@@ -233,12 +233,8 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: Install AWS CLI (user install)
-        run: |
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
-          unzip -q /tmp/awscliv2.zip -d /tmp
-          /tmp/aws/install --install-dir $HOME/.local/aws-cli --bin-dir $HOME/.local/bin
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install AWS CLI
+        run: apk add --no-cache py3-pip && pip3 install awscli
       - name: Localstack init
         timeout-minutes: 1
         run: |
@@ -309,15 +305,6 @@ jobs:
           toolchain: stable
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: Restore cache
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
-        with:
-          path: |
-            _build
-            src/grpc/autogen
-          key: build_cache-${{ hashFiles('rebar.config','rebar.lock') }}
-          restore-keys: |
-            build_cache-
       - name: build and package
         run: ./.github/scripts/make_deb.sh
       - name: packagecloud upload
