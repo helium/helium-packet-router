@@ -52,7 +52,7 @@ init() ->
 update_counter(_Key, Max, _HotspotKey, _Region, _Route) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
 update_counter(Key, Max, HotspotKey, Region, Route) ->
-    case is_using_custom_multibuy(Route) of
+    case is_using_custom_multi_buy(Route) of
         false ->
             update_counter_default(Key, Max, HotspotKey, Region);
         true ->
@@ -170,7 +170,7 @@ update_counter_custom(Key, Max, HotspotKey, Region, Route) ->
     Channel = make_channel_key(Route),
     case is_in_backoff(Channel) of
         true ->
-            FailOnUnavailable = hpr_route:multibuy_fail_on_unavailable(Route),
+            FailOnUnavailable = hpr_route:multi_buy_fail_on_unavailable(Route),
             case FailOnUnavailable of
                 true -> {error, ?FAIL_ON_UNAVAILABLE};
                 false -> {ok, false}
@@ -210,12 +210,12 @@ update_counter_custom(Key, Max, HotspotKey, Region, Route) ->
 ) ->
     {ok, non_neg_integer(), boolean()} | {error, any(), boolean()}.
 request_custom(Key, HotspotKey, Region, Route) ->
-    Protocol = hpr_route:multibuy_protocol(Route),
-    Host = hpr_route:multibuy_host(Route),
-    Port = hpr_route:multibuy_port(Route),
+    Protocol = hpr_route:multi_buy_protocol(Route),
+    Host = hpr_route:multi_buy_host(Route),
+    Port = hpr_route:multi_buy_port(Route),
     RouteID = hpr_route:id(Route),
     Channel = make_channel_key(Route),
-    FailOnUnavailable = hpr_route:multibuy_fail_on_unavailable(Route),
+    FailOnUnavailable = hpr_route:multi_buy_fail_on_unavailable(Route),
     case ensure_channel(Channel, Protocol, Host, Port, RouteID) of
         ok ->
             {Time, Result} = timer:tc(fun() ->
@@ -255,9 +255,11 @@ ensure_channel(Channel, Protocol, Host, Port, RouteID) ->
             ok;
         {error, _PickReason} ->
             lager:info("starting multi-buy channel for route ~s", [RouteID]),
-            try grpcbox_client:connect(Channel, [{Protocol, Host, Port, []}], #{
-                sync_start => true
-            }) of
+            try
+                grpcbox_client:connect(Channel, [{Protocol, Host, Port, []}], #{
+                    sync_start => true
+                })
+            of
                 {ok, _Pid} ->
                     ok;
                 {error, Reason} ->
@@ -278,14 +280,14 @@ ensure_channel(Channel, Protocol, Host, Port, RouteID) ->
 make_channel_key(Route) ->
     [
         hpr_route:id(Route),
-        hpr_route:multibuy_protocol(Route),
-        hpr_route:multibuy_host(Route),
-        hpr_route:multibuy_port(Route)
+        hpr_route:multi_buy_protocol(Route),
+        hpr_route:multi_buy_host(Route),
+        hpr_route:multi_buy_port(Route)
     ].
 
--spec is_using_custom_multibuy(Route :: hpr_route:route()) -> boolean().
-is_using_custom_multibuy(Route) ->
-    case hpr_route:multibuy(Route) of
+-spec is_using_custom_multi_buy(Route :: hpr_route:route()) -> boolean().
+is_using_custom_multi_buy(Route) ->
+    case hpr_route:multi_buy(Route) of
         undefined -> false;
         _ -> true
     end.
@@ -336,10 +338,10 @@ scheduled_cleanup(Duration) ->
 -define(TEST_PERF, 1000).
 -define(TEST_HOTSPOT_KEY, <<"test_hotspot_key">>).
 -define(TEST_REGION, 'US915').
--define(TEST_ROUTE, #iot_config_route_v1_pb{multibuy = undefined}).
+-define(TEST_ROUTE, #iot_config_route_v1_pb{multi_buy = undefined}).
 -define(TEST_CUSTOM_ROUTE(FailOnUnavailable), #iot_config_route_v1_pb{
     id = "test-custom-route",
-    multibuy = #iot_config_multibuy_v1_pb{
+    multi_buy = #iot_config_multi_buy_v1_pb{
         protocol = http,
         host = "localhost",
         port = 9999,
@@ -356,7 +358,7 @@ all_test_() ->
         ?_test(test_update_counter_ets_only()),
         ?_test(test_cleanup()),
         ?_test(test_scheduled_cleanup()),
-        ?_test(test_is_using_custom_multibuy()),
+        ?_test(test_is_using_custom_multi_buy()),
         ?_test(test_update_counter_custom_success()),
         ?_test(test_update_counter_custom_denied()),
         ?_test(test_update_counter_custom_fail_on_unavailable()),
@@ -544,9 +546,9 @@ test_scheduled_cleanup() ->
 
     ok.
 
-test_is_using_custom_multibuy() ->
-    ?assertNot(is_using_custom_multibuy(?TEST_ROUTE)),
-    ?assert(is_using_custom_multibuy(?TEST_CUSTOM_ROUTE(false))),
+test_is_using_custom_multi_buy() ->
+    ?assertNot(is_using_custom_multi_buy(?TEST_ROUTE)),
+    ?assert(is_using_custom_multi_buy(?TEST_CUSTOM_ROUTE(false))),
     ok.
 
 test_update_counter_custom_success() ->
