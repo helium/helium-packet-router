@@ -90,29 +90,37 @@ locked(Route) ->
 ignore_empty_skf(Route) ->
     Route#iot_config_route_v1_pb.ignore_empty_skf.
 
--spec multibuy(Route :: route()) -> multibuy().
+-spec multibuy(Route :: route()) -> multibuy() | undefined.
 multibuy(Route) ->
     Route#iot_config_route_v1_pb.multibuy.
 
--spec multibuy_protocol(Route :: route()) -> string().
+-spec multibuy_protocol(Route :: route()) -> http | https | undefined.
 multibuy_protocol(Route) ->
-    Multibuy = ?MODULE:multibuy(Route),
-    Multibuy#iot_config_multibuy_v1_pb.protocol.
+    case ?MODULE:multibuy(Route) of
+        undefined -> undefined;
+        Multibuy -> Multibuy#iot_config_multibuy_v1_pb.protocol
+    end.
 
--spec multibuy_host(Route :: route()) -> string().
+-spec multibuy_host(Route :: route()) -> string() | undefined.
 multibuy_host(Route) ->
-    Multibuy = ?MODULE:multibuy(Route),
-    Multibuy#iot_config_multibuy_v1_pb.host.
+    case ?MODULE:multibuy(Route) of
+        undefined -> undefined;
+        Multibuy -> Multibuy#iot_config_multibuy_v1_pb.host
+    end.
 
--spec multibuy_port(Route :: route()) -> non_neg_integer().
+-spec multibuy_port(Route :: route()) -> non_neg_integer() | undefined.
 multibuy_port(Route) ->
-    Multibuy = ?MODULE:multibuy(Route),
-    Multibuy#iot_config_multibuy_v1_pb.port.
+    case ?MODULE:multibuy(Route) of
+        undefined -> undefined;
+        Multibuy -> Multibuy#iot_config_multibuy_v1_pb.port
+    end.
 
--spec multibuy_fail_on_unavailable(Route :: route()) -> boolean().
+-spec multibuy_fail_on_unavailable(Route :: route()) -> boolean() | undefined.
 multibuy_fail_on_unavailable(Route) ->
-    Multibuy = ?MODULE:multibuy(Route),
-    Multibuy#iot_config_multibuy_v1_pb.fail_on_unavailable.
+    case ?MODULE:multibuy(Route) of
+        undefined -> undefined;
+        Multibuy -> Multibuy#iot_config_multibuy_v1_pb.fail_on_unavailable
+    end.
 
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->

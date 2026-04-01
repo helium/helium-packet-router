@@ -16,6 +16,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -include("hpr_metrics.hrl").
+-include("hpr.hrl").
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -174,7 +175,7 @@ main_test(_Config) ->
 
     ?assertNotEqual(
         undefined,
-        prometheus_histogram:value(?METRICS_MULTI_BUY_GET_HISTOGRAM, [ok])
+        prometheus_histogram:value(?METRICS_MULTI_BUY_GET_HISTOGRAM, ["default", ok])
     ),
 
     ok = gen_server:stop(ServerPid),
