@@ -194,8 +194,7 @@ update_counter_custom(Key, Max, HotspotKey, Region, Route) ->
                     lager:warning("failed to get a counter for ~s: ~p", [
                         hpr_utils:bin_to_hex_string(Key), Reason
                     ]),
-                    %% Packet do not become free if the external service is unavailable
-                    {ok, false};
+                    update_counter_default(Key, Max, HotspotKey, Region);
                 {error, Reason, true} ->
                     inc_backoff(Channel),
                     lager:warning("failed to get a counter for ~s: ~p", [
