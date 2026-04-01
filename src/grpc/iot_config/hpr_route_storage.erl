@@ -175,7 +175,7 @@ oui_routes_ets(OUI) ->
 
 with_open_dets(FN) ->
     DataDir = hpr_utils:base_data_dir(),
-    DETSFile = filename:join([DataDir, "hpr_routes_storage.dets"]),
+    DETSFile = filename:join([DataDir, "hpr_routes_storage_v2.dets"]),
     ok = filelib:ensure_dir(DETSFile),
 
     case

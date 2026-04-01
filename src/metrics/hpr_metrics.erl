@@ -13,7 +13,7 @@
     packet_up_per_oui/2,
     packet_down/1,
     observe_packet_report/2,
-    observe_multi_buy/2,
+    observe_multi_buy/3,
     observe_find_routes/1,
     observe_grpc_connection/2,
     ics_update/2,
@@ -100,19 +100,26 @@ observe_packet_report(Status, Start) ->
     ).
 
 -spec observe_multi_buy(
-    Status :: {ok, non_neg_integer(), boolean()} | {error, any()},
+    Channel :: string(),
+    Status :: {ok, non_neg_integer(), boolean()} | {error, any()} | {error, any(), boolean()},
     Time :: non_neg_integer()
 ) -> ok.
-observe_multi_buy({ok, _, _}, Time) ->
+observe_multi_buy(Channel, {ok, _, _}, Time) ->
     prometheus_histogram:observe(
         ?METRICS_MULTI_BUY_GET_HISTOGRAM,
-        [ok],
+        [Channel, ok],
         Time
     );
-observe_multi_buy({error, _}, Time) ->
+observe_multi_buy(Channel, {error, _}, Time) ->
     prometheus_histogram:observe(
         ?METRICS_MULTI_BUY_GET_HISTOGRAM,
-        [error],
+        [Channel, error],
+        Time
+    );
+observe_multi_buy(Channel, {error, _, _}, Time) ->
+    prometheus_histogram:observe(
+        ?METRICS_MULTI_BUY_GET_HISTOGRAM,
+        [Channel, error],
         Time
     ).
 

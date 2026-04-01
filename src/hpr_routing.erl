@@ -353,7 +353,7 @@ maybe_deliver_packet_to_route(PacketUpType, PacketUp, RouteETS, Timestamp, SKFMa
                     {0, _} -> hpr_route:max_copies(Route);
                     _ -> SKFMaxCopies
                 end,
-            case hpr_multi_buy:update_counter(Key, MaxCopies, PubKeyBin, Region) of
+            case hpr_multi_buy:update_counter(Key, MaxCopies, PubKeyBin, Region, Route) of
                 {error, Reason} = Error ->
                     lager:debug(RouteMD, "not sending ~p", [Reason]),
                     Error;
@@ -990,7 +990,7 @@ maybe_deliver_packet_to_route_multi_buy() ->
     meck:new(hpr_protocol_router, [passthrough]),
     meck:expect(hpr_protocol_router, send, fun(_, _, _, _) -> ok end),
 
-    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
+    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _, _) -> ok end),
     meck:expect(hpr_metrics, packet_up_per_oui, fun(_, _) -> ok end),
 
     RouteID1 = "route_id_1",
