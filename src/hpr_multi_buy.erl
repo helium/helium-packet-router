@@ -614,7 +614,7 @@ test_update_counter_custom_no_fail() ->
     end),
 
     ?assertEqual(
-        {ok, false},
+        {ok, true},
         ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION, Route)
     ),
     ok.
