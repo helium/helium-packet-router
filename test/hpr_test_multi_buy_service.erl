@@ -24,7 +24,7 @@ inc(Ctx, Req) ->
         OldCount = maps:get(Key, Map, 0),
         NewCount = OldCount + 1,
         persistent_term:put(test_multi_buy_service_inc_map, Map#{Key => NewCount}),
-        {ok, #multi_buy_inc_res_v1_pb{count = NewCount}, Ctx0}
+        {ok, #multi_buy_inc_res_v1_pb{count = NewCount, denied = false}, Ctx0}
     end),
     F(Ctx, Req).
 

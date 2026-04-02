@@ -10,10 +10,15 @@
     max_copies/1,
     active/1, active/2,
     locked/1,
-    ignore_empty_skf/1
+    ignore_empty_skf/1,
+    multi_buy/1
 ]).
 
 -export([
+    multi_buy_protocol/1,
+    multi_buy_host/1,
+    multi_buy_port/1,
+    multi_buy_fail_on_unavailable/1,
     lns/1,
     gwmp_region_lns/2,
     md/1,
@@ -39,6 +44,7 @@
 -type route() :: #iot_config_route_v1_pb{}.
 -type id() :: string().
 -type server() :: #iot_config_server_v1_pb{}.
+-type multi_buy() :: #iot_config_multi_buy_v1_pb{}.
 -type protocol() ::
     {packet_router, #iot_config_protocol_packet_router_v1_pb{}}
     | {gwmp, #iot_config_protocol_gwmp_v1_pb{}}
@@ -83,6 +89,38 @@ locked(Route) ->
 -spec ignore_empty_skf(Route :: route()) -> boolean().
 ignore_empty_skf(Route) ->
     Route#iot_config_route_v1_pb.ignore_empty_skf.
+
+-spec multi_buy(Route :: route()) -> multi_buy() | undefined.
+multi_buy(Route) ->
+    Route#iot_config_route_v1_pb.multi_buy.
+
+-spec multi_buy_protocol(Route :: route()) -> http | https | undefined.
+multi_buy_protocol(Route) ->
+    case ?MODULE:multi_buy(Route) of
+        undefined -> undefined;
+        Multibuy -> Multibuy#iot_config_multi_buy_v1_pb.protocol
+    end.
+
+-spec multi_buy_host(Route :: route()) -> string() | undefined.
+multi_buy_host(Route) ->
+    case ?MODULE:multi_buy(Route) of
+        undefined -> undefined;
+        Multibuy -> Multibuy#iot_config_multi_buy_v1_pb.host
+    end.
+
+-spec multi_buy_port(Route :: route()) -> non_neg_integer() | undefined.
+multi_buy_port(Route) ->
+    case ?MODULE:multi_buy(Route) of
+        undefined -> undefined;
+        Multibuy -> Multibuy#iot_config_multi_buy_v1_pb.port
+    end.
+
+-spec multi_buy_fail_on_unavailable(Route :: route()) -> boolean() | undefined.
+multi_buy_fail_on_unavailable(Route) ->
+    case ?MODULE:multi_buy(Route) of
+        undefined -> undefined;
+        Multibuy -> Multibuy#iot_config_multi_buy_v1_pb.fail_on_unavailable
+    end.
 
 -spec lns(Route :: route()) -> binary().
 lns(Route) ->
@@ -224,7 +262,8 @@ test_new(RouteMap) ->
         max_copies = maps:get(max_copies, RouteMap),
         active = maps:get(active, RouteMap, true),
         locked = maps:get(locked, RouteMap, false),
-        ignore_empty_skf = maps:get(ignore_empty_skf, RouteMap, false)
+        ignore_empty_skf = maps:get(ignore_empty_skf, RouteMap, false),
+        multi_buy = mk_multi_buy(maps:get(multi_buy, RouteMap, undefined))
     }.
 
 -spec mk_server(map()) -> #iot_config_server_v1_pb{}.
@@ -265,6 +304,17 @@ mk_protocol({http_roaming, HttpMap}) ->
     }};
 mk_protocol(undefined) ->
     undefined.
+
+-spec mk_multi_buy(undefined | map()) -> #iot_config_multi_buy_v1_pb{} | undefined.
+mk_multi_buy(undefined) ->
+    undefined;
+mk_multi_buy(MultibuyMap) ->
+    #iot_config_multi_buy_v1_pb{
+        protocol = maps:get(protocol, MultibuyMap, http),
+        host = maps:get(host, MultibuyMap, []),
+        port = maps:get(port, MultibuyMap, 0),
+        fail_on_unavailable = maps:get(fail_on_unavailable, MultibuyMap, false)
+    }.
 
 -endif.
 %% ------------------------------------------------------------------

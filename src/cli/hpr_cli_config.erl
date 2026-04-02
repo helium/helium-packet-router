@@ -338,6 +338,9 @@ config_route(["config", "route", RouteID], [], Flags) ->
     %% - Active     :: true
     %% - Locked     :: false
     %% - Ignore Empty SKF :: true
+    %% - Multi Buy  :: http://localhost:9999
+    %%   - Fail On Unavailable :: true
+    %%   - Backoff  :: active (2.5s remaining) | none
     %% - DevAddr Ranges
     %% --- Start -> End
     %% --- Start -> End
@@ -916,6 +919,36 @@ mk_top_level_route_info(RouteETS) ->
             undefined -> 0;
             {Timestamp, _} -> Timestamp
         end,
+    MultiBuyInfo =
+        case hpr_route:multi_buy(Route) of
+            undefined ->
+                [];
+            _MultiBuy ->
+                Protocol = hpr_route:multi_buy_protocol(Route),
+                Host = hpr_route:multi_buy_host(Route),
+                Port = hpr_route:multi_buy_port(Route),
+                FailOnUnavailable = hpr_route:multi_buy_fail_on_unavailable(Route),
+                Channel = [RouteID, Protocol, Host, Port],
+                BackoffInfo =
+                    case ets:lookup(hpr_multi_buy_backoff_ets, Channel) of
+                        [{_, Until, _}] ->
+                            Now = erlang:system_time(millisecond),
+                            case Until > Now of
+                                true ->
+                                    RemainingSecs = (Until - Now) / 1000,
+                                    io_lib:format("active (~.1fs remaining)", [RemainingSecs]);
+                                false ->
+                                    "none"
+                            end;
+                        [] ->
+                            "none"
+                    end,
+                [
+                    io_lib:format("- Multi Buy  :: ~s://~s:~w~n", [Protocol, Host, Port]),
+                    io_lib:format("  - Fail On Unavailable :: ~w~n", [FailOnUnavailable]),
+                    io_lib:format("  - Backoff  :: ~s~n", [BackoffInfo])
+                ]
+        end,
     [
         io_lib:format("- ID         :: ~s~n", [RouteID]),
         io_lib:format("- Net ID     :: ~s (~p)~n", [hpr_utils:net_id_display(NetID), NetID]),
@@ -926,7 +959,7 @@ mk_top_level_route_info(RouteETS) ->
         io_lib:format("- Active     :: ~w~n", [hpr_route:active(Route)]),
         io_lib:format("- Locked     :: ~w~n", [hpr_route:locked(Route)]),
         io_lib:format("- Ignore Empty SKF :: ~w~n", [hpr_route:ignore_empty_skf(Route)])
-    ].
+    ] ++ MultiBuyInfo.
 
 format_devaddr({S, E}) ->
     io_lib:format("  - ~s -> ~s~n", [

@@ -391,7 +391,7 @@ handle_info_test() ->
 
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
-    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
+    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _, _) -> ok end),
     meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
     meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
 
@@ -408,7 +408,7 @@ send_packet_down_test() ->
 
     meck:new(hpr_metrics, [passthrough]),
     meck:expect(hpr_metrics, packet_down, fun(_) -> ok end),
-    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _) -> ok end),
+    meck:expect(hpr_metrics, observe_multi_buy, fun(_, _, _) -> ok end),
     meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
     meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
 

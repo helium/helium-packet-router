@@ -13,7 +13,8 @@
     load_region/2,
     location/2,
     info/2,
-    info_stream/2
+    info_stream/2,
+    info_stream_v_2/2
 ]).
 
 -export([
@@ -40,6 +41,9 @@ info(_Ctx, _Msg) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
 info_stream(_Ctx, _Msg) ->
+    {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
+
+info_stream_v_2(_Ctx, _Msg) ->
     {grpc_error, {grpcbox_stream:code_to_status(12), <<"UNIMPLEMENTED">>}}.
 
 location(Ctx, Req) ->

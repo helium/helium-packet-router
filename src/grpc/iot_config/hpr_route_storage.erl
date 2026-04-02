@@ -19,7 +19,7 @@
 ]).
 
 -ifdef(TEST).
--export([test_delete_ets/0, test_size/0]).
+-export([test_delete_ets/0, test_size/0, maybe_migrate_route/1]).
 -endif.
 
 -define(ETS, hpr_routes_ets).
@@ -38,7 +38,7 @@ init_ets() ->
         [] = dets:traverse(
             ?DETS,
             fun(RouteETS) ->
-                Route = hpr_route_ets:route(RouteETS),
+                Route = maybe_migrate_route(hpr_route_ets:route(RouteETS)),
                 ok = ?MODULE:insert(Route),
                 continue
             end
@@ -173,6 +173,16 @@ oui_routes_ets(OUI) ->
 %% Internal Functions
 %% -------------------------------------------------------------------
 
+%% @doc Migrate old route records that don't have the multi_buy field.
+%% Old iot_config_route_v1_pb has 9 elements (tag + 8 fields),
+%% new one has 10 (tag + 9 fields with multi_buy). Append undefined if needed.
+-spec maybe_migrate_route(tuple()) -> hpr_route:route().
+maybe_migrate_route(Route) when tuple_size(Route) =:= 9 ->
+    lager:info("migrating route ~p to include multi_buy field", [element(2, Route)]),
+    erlang:append_element(Route, undefined);
+maybe_migrate_route(Route) ->
+    Route.
+
 with_open_dets(FN) ->
     DataDir = hpr_utils:base_data_dir(),
     DETSFile = filename:join([DataDir, "hpr_routes_storage.dets"]),
@@ -193,3 +203,45 @@ with_open_dets(FN) ->
             lager:warning("failed to open dets file ~p: ~p, deleted: ~p", [?MODULE, Reason, Deleted]),
             with_open_dets(FN)
     end.
+
+%% ------------------------------------------------------------------
+%% EUnit tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-include("../autogen/iot_config_pb.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+maybe_migrate_route_test() ->
+    %% Old route record: 9 elements (tag + 8 fields, no multi_buy)
+    OldRoute = {iot_config_route_v1_pb, "route-id-1", 0, 1, undefined, 5, true, false, false},
+    ?assertEqual(9, tuple_size(OldRoute)),
+
+    Migrated = maybe_migrate_route(OldRoute),
+    ?assertEqual(10, tuple_size(Migrated)),
+    ?assertEqual("route-id-1", Migrated#iot_config_route_v1_pb.id),
+    ?assertEqual(0, Migrated#iot_config_route_v1_pb.net_id),
+    ?assertEqual(1, Migrated#iot_config_route_v1_pb.oui),
+    ?assertEqual(5, Migrated#iot_config_route_v1_pb.max_copies),
+    ?assertEqual(true, Migrated#iot_config_route_v1_pb.active),
+    ?assertEqual(false, Migrated#iot_config_route_v1_pb.locked),
+    ?assertEqual(false, Migrated#iot_config_route_v1_pb.ignore_empty_skf),
+    ?assertEqual(undefined, Migrated#iot_config_route_v1_pb.multi_buy),
+
+    %% New route record: 10 elements, should pass through unchanged
+    NewRoute = #iot_config_route_v1_pb{
+        id = "route-id-2",
+        net_id = 0,
+        oui = 1,
+        max_copies = 5,
+        active = true,
+        locked = false,
+        ignore_empty_skf = false,
+        multi_buy = undefined
+    },
+    ?assertEqual(10, tuple_size(NewRoute)),
+    ?assertEqual(NewRoute, maybe_migrate_route(NewRoute)),
+
+    ok.
+
+-endif.
