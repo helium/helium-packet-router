@@ -52,7 +52,11 @@ init(RPC, StreamState) ->
 -spec handle_info(Msg :: any(), StreamState :: grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({stream_resp, RouteStreamResp}, StreamState) ->
     %% If the timestamp of the message is after `since`, send the update.
-    #stream_handler_state{since = Since} = grpcbox_stream:stream_handler_state(StreamState),
+    Since =
+        case grpcbox_stream:stream_handler_state(StreamState) of
+            #stream_handler_state{since = S} -> S;
+            undefined -> 0
+        end,
     Timestamp = hpr_route_stream_res:timestamp(RouteStreamResp),
     MD = [{since, Since}, {timestamp, Timestamp}],
     %% ct:print("got RouteStreamResp ~p~n~p", [RouteStreamResp, MD]),
