@@ -16,7 +16,6 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -include("hpr_metrics.hrl").
--include("hpr.hrl").
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
