@@ -156,7 +156,7 @@ request_default(Key, B58PubKeyBin, Region) ->
             _Any ->
                 {error, _Any}
         catch
-            Any -> {error, Any}
+            _Class:Any -> {error, Any}
         end
     end),
     hpr_metrics:observe_multi_buy("default", Result, Time),
@@ -238,7 +238,7 @@ request_custom(Key, B58PubKeyBin, Region, Route) ->
                     _Any ->
                         {error, _Any, FailOnUnavailable}
                 catch
-                    Any -> {error, Any, FailOnUnavailable}
+                    _Class:Any -> {error, Any, FailOnUnavailable}
                 end
             end),
             hpr_metrics:observe_multi_buy(RouteID, Result, Time),
