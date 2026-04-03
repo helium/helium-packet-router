@@ -2,6 +2,7 @@
 
 ## [Routing](docs/routing.md)
 ## [Playbook](docs/playbook.md)
+## [Multi Buy](docs/multi-buy.md)
 
 ## Shortcomings
 
