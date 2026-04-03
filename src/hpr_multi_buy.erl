@@ -22,6 +22,8 @@
 -define(BACKOFF_MIN, timer:seconds(1)).
 -define(BACKOFF_MAX, timer:minutes(5)).
 
+-type b58_key() :: binary().
+
 -spec init() -> ok.
 init() ->
     %% Table structure
@@ -44,19 +46,22 @@ init() ->
 -spec update_counter(
     Key :: binary(),
     Max :: non_neg_integer(),
-    HotspotKey :: binary(),
+    PubKeyBin :: libp2p_crypto:pubkey_bin(),
     Region :: atom(),
     Route :: hpr_route:route()
 ) ->
     {ok, boolean()} | {error, ?MAX_TOO_LOW | ?MULTIBUY | ?DENIED | ?FAIL_ON_UNAVAILABLE}.
-update_counter(_Key, Max, _HotspotKey, _Region, _Route) when Max =< 0 ->
+update_counter(_Key, Max, _PubKeyBin, _Region, _Route) when Max =< 0 ->
     {error, ?MAX_TOO_LOW};
-update_counter(Key, Max, HotspotKey, Region, Route) ->
+update_counter(Key, Max, PubKeyBin, Region, Route) ->
+    B58PubKeyBin = erlang:list_to_binary(
+        libp2p_crypto:bin_to_b58(PubKeyBin)
+    ),
     case is_using_custom_multi_buy(Route) of
         false ->
-            update_counter_default(Key, Max, HotspotKey, Region);
+            update_counter_default(Key, Max, B58PubKeyBin, Region);
         true ->
-            update_counter_custom(Key, Max, HotspotKey, Region, Route)
+            update_counter_custom(Key, Max, B58PubKeyBin, Region, Route)
     end.
 
 -spec cleanup(Duration :: non_neg_integer()) -> ok.
@@ -84,11 +89,11 @@ make_key(PacketUp, Route) ->
 -spec update_counter_default(
     Key :: binary(),
     Max :: non_neg_integer(),
-    HotspotKey :: binary(),
+    B58PubKeyBin :: b58_key(),
     Region :: atom()
 ) ->
     {ok, boolean()} | {error, ?MULTIBUY | ?DENIED}.
-update_counter_default(Key, Max, HotspotKey, Region) ->
+update_counter_default(Key, Max, B58PubKeyBin, Region) ->
     case
         ets:update_counter(
             ?ETS, Key, {2, 1}, {default, 0, erlang:system_time(millisecond)}
@@ -102,7 +107,7 @@ update_counter_default(Key, Max, HotspotKey, Region) ->
                     %% ETS-only mode: no external service configured
                     {ok, false};
                 true ->
-                    case request_default(Key, HotspotKey, Region) of
+                    case request_default(Key, B58PubKeyBin, Region) of
                         {ok, _ServiceCounter, true} ->
                             ets:update_counter(
                                 ?ETS,
@@ -135,14 +140,14 @@ update_counter_default(Key, Max, HotspotKey, Region) ->
     end.
 
 -spec request_default(
-    Key :: binary(), HotspotKey :: binary(), Region :: atom()
+    Key :: binary(), B58PubKeyBin :: b58_key(), Region :: atom()
 ) ->
     {ok, non_neg_integer(), boolean()} | {error, any()}.
-request_default(Key, HotspotKey, Region) ->
+request_default(Key, B58PubKeyBin, Region) ->
     {Time, Result} = timer:tc(fun() ->
         Req = #multi_buy_inc_req_v1_pb{
             key = hpr_utils:bin_to_hex_string(Key),
-            hotspot_key = HotspotKey,
+            hotspot_key = B58PubKeyBin,
             region = Region
         },
         try helium_multi_buy_multi_buy_client:inc(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
@@ -151,7 +156,6 @@ request_default(Key, HotspotKey, Region) ->
             _Any ->
                 {error, _Any}
         catch
-            exit:{timeout, _Error} -> {error, timeout};
             Any -> {error, Any}
         end
     end),
@@ -161,12 +165,12 @@ request_default(Key, HotspotKey, Region) ->
 -spec update_counter_custom(
     Key :: binary(),
     Max :: non_neg_integer(),
-    HotspotKey :: binary(),
+    B58PubKeyBin :: b58_key(),
     Region :: atom(),
     Route :: hpr_route:route()
 ) ->
     {ok, boolean()} | {error, ?MULTIBUY | ?DENIED | ?FAIL_ON_UNAVAILABLE}.
-update_counter_custom(Key, Max, HotspotKey, Region, Route) ->
+update_counter_custom(Key, Max, B58PubKeyBin, Region, Route) ->
     Channel = make_channel_key(Route),
     case is_in_backoff(Channel) of
         true ->
@@ -176,7 +180,7 @@ update_counter_custom(Key, Max, HotspotKey, Region, Route) ->
                 false -> {ok, false}
             end;
         false ->
-            case request_custom(Key, HotspotKey, Region, Route) of
+            case request_custom(Key, B58PubKeyBin, Region, Route) of
                 {ok, Count, true} ->
                     reset_backoff(Channel),
                     lager:info("denied hotspot/region for ~s with ~p", [
@@ -194,7 +198,7 @@ update_counter_custom(Key, Max, HotspotKey, Region, Route) ->
                     lager:warning("failed to get a counter for ~s: ~p", [
                         hpr_utils:bin_to_hex_string(Key), Reason
                     ]),
-                    update_counter_default(Key, Max, HotspotKey, Region);
+                    update_counter_default(Key, Max, B58PubKeyBin, Region);
                 {error, Reason, true} ->
                     inc_backoff(Channel),
                     lager:warning("failed to get a counter for ~s: ~p", [
@@ -205,10 +209,13 @@ update_counter_custom(Key, Max, HotspotKey, Region, Route) ->
     end.
 
 -spec request_custom(
-    Key :: binary(), HotspotKey :: binary(), Region :: atom(), Route :: hpr_route:route()
+    Key :: binary(),
+    B58PubKeyBin :: b58_key(),
+    Region :: atom(),
+    Route :: hpr_route:route()
 ) ->
     {ok, non_neg_integer(), boolean()} | {error, any(), boolean()}.
-request_custom(Key, HotspotKey, Region, Route) ->
+request_custom(Key, B58PubKeyBin, Region, Route) ->
     Protocol = hpr_route:multi_buy_protocol(Route),
     Host = hpr_route:multi_buy_host(Route),
     Port = hpr_route:multi_buy_port(Route),
@@ -220,7 +227,7 @@ request_custom(Key, HotspotKey, Region, Route) ->
             {Time, Result} = timer:tc(fun() ->
                 Req = #multi_buy_inc_req_v1_pb{
                     key = hpr_utils:bin_to_hex_string(Key),
-                    hotspot_key = HotspotKey,
+                    hotspot_key = B58PubKeyBin,
                     region = Region
                 },
                 %% We do not need to set a rcv_timeout on the grpc call here because
@@ -231,7 +238,6 @@ request_custom(Key, HotspotKey, Region, Route) ->
                     _Any ->
                         {error, _Any, FailOnUnavailable}
                 catch
-                    exit:{timeout, _Error} -> {error, timeout, FailOnUnavailable};
                     Any -> {error, Any, FailOnUnavailable}
                 end
             end),
