@@ -1,0 +1,49 @@
+name: ECRDelete
+run-name: Delete version ${{ inputs.version }} from ${{ inputs.environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: "Version to delete"
+        required: true
+      environment:
+        type: environment
+        description: "Target environment"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ inputs.version }}-${{ inputs.environment }}-delete
+      cancel-in-progress: true
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: gha_delete_${{ github.repository_id }}_${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Delete tag from ECR
+        run: |
+          set -euo pipefail
+          echo "Deleting tag '${{ inputs.version }}' from '${{ vars.ECR_REPOSITORY_NAME }}'"
+
+          FAILS=$(aws ecr batch-delete-image \
+            --repository-name "${{ vars.ECR_REPOSITORY_NAME }}" \
+            --image-ids imageTag="${{ inputs.version }}" \
+            --region "${{ vars.AWS_REGION }}" \
+            --query 'failures | length(@array)' \
+            --output text)
+
+          if [ "${FAILS}" != "0" ]; then
+            echo "ECR reported failures while deleting tag '${{ inputs.version }}'."
+            exit 1
+          fi

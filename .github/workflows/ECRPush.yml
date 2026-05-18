@@ -1,0 +1,55 @@
+name: ECRPush
+run-name: Deploy version ${{ inputs.version }} to ${{ inputs.environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: "Version to deploy"
+        required: true
+      environment:
+        type: environment
+        description: "Target environment"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+
+jobs:
+  pull-push:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ inputs.version }}-${{ inputs.environment }}-pull-push
+      cancel-in-progress: true
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: gha_build_${{ github.repository_id }}_${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@183a1442edf41672e66566b7fc560e297a290896 # v2
+      - name: Pull from GHCR, tag for ECR, and push
+        run: |
+          SRC="ghcr.io/${{ github.repository }}:${{ inputs.version }}"
+          DST="${{ vars.ECR_URL }}:${{ inputs.version }}"
+
+          echo "Pulling $SRC"
+          docker pull "$SRC"
+
+          echo "Tagging $SRC -> $DST"
+          docker tag "$SRC" "$DST"
+
+          echo "Pushing $DST"
+          docker push "$DST"

@@ -1,4 +1,4 @@
-FROM erlang:24.3-alpine  AS base
+FROM erlang:24.3-alpine AS base
 
 RUN apk add --no-cache --update \
     autoconf automake bison build-base bzip2 cmake curl \
@@ -26,7 +26,7 @@ FROM base AS builder
 
 WORKDIR /opt/hpr
 
-# Build app depencies
+# Build app dependencies
 COPY Makefile Makefile
 COPY rebar3 rebar3
 COPY rebar.config rebar.config
@@ -44,8 +44,18 @@ RUN make compile
 # Build release
 RUN make release
 
-# Add tests
-COPY test/ test/
-RUN ./rebar3 compile as test
+# Slim runtime stage: same alpine/musl as builder so the
+# release-bundled erts and NIFs are ABI-compatible. Drops the build
+# toolchain (cmake, gcc, rust, etc.) and the source tree.
+FROM erlang:24.3-alpine AS runner
 
-CMD ["make", "run"]
+RUN apk add --no-cache \
+    libsodium \
+    libstdc++ \
+    ca-certificates
+
+WORKDIR /opt/hpr
+
+COPY --from=builder /opt/hpr/_build/default/rel/hpr ./rel
+
+CMD ["/opt/hpr/rel/bin/hpr", "foreground"]
