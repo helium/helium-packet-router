@@ -114,6 +114,8 @@ all_test_() ->
         {"test_eui_pair", ?_test(test_eui_pair())},
         {"test_devaddr_range", ?_test(test_devaddr_range())},
         {"test_skf", ?_test(test_skf())},
+        {"test_replace_route_keeps_table", ?_test(test_replace_route_keeps_table())},
+        {"test_skf_tolerates_dead_table", ?_test(test_skf_tolerates_dead_table())},
         {"test_select_skf", ?_test(test_select_skf())},
         {"test_delete_route", ?_test(test_delete_route())},
         {"test_delete_all", ?_test(test_delete_all())}
@@ -421,6 +423,99 @@ test_skf() ->
     ?assertEqual(ok, hpr_skf_storage:delete(SKF2)),
     ?assertEqual([], hpr_skf_storage:lookup(SKFETS2, DevAddr2)),
 
+    ok.
+
+test_replace_route_keeps_table() ->
+    Route = hpr_route:test_new(#{
+        id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "lns1.testdomain.com",
+            port => 80,
+            protocol => {http_roaming, #{}}
+        },
+        max_copies => 1
+    }),
+    RouteID = hpr_route:id(Route),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+
+    DevAddr = 16#00000001,
+    SessionKey1 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SessionKey2 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SKF1 = hpr_skf:new(#{
+        route_id => RouteID, devaddr => DevAddr, session_key => SessionKey1, max_copies => 1
+    }),
+    SKF2 = hpr_skf:new(#{
+        route_id => RouteID, devaddr => DevAddr, session_key => SessionKey2, max_copies => 2
+    }),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF1)),
+
+    {ok, RouteETS0} = hpr_route_storage:lookup(RouteID),
+    SKFETS0 = ?MODULE:skf_ets(RouteETS0),
+
+    %% Replace the whole set: drop SKF1, add SKF2. Returns the previous size.
+    ?assertEqual({ok, 1}, hpr_skf_storage:replace_route(RouteID, [SKF2])),
+
+    {ok, RouteETS1} = hpr_route_storage:lookup(RouteID),
+    SKFETS1 = ?MODULE:skf_ets(RouteETS1),
+
+    %% The table reference is unchanged (mutated in place) and still alive.
+    ?assertEqual(SKFETS0, SKFETS1),
+    ?assert(erlang:is_list(ets:info(SKFETS0))),
+
+    %% Contents reflect the new set: SKF1 gone, SKF2 present.
+    SK2 = hpr_utils:hex_to_bin(SessionKey2),
+    ?assertEqual([{SK2, 2}], hpr_skf_storage:lookup(SKFETS1, DevAddr)),
+    ok.
+
+test_skf_tolerates_dead_table() ->
+    Route = hpr_route:test_new(#{
+        id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "lns1.testdomain.com",
+            port => 80,
+            protocol => {http_roaming, #{}}
+        },
+        max_copies => 1
+    }),
+    RouteID = hpr_route:id(Route),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+
+    DevAddr = 16#00000001,
+    SessionKey = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SKF = hpr_skf:new(#{
+        route_id => RouteID, devaddr => DevAddr, session_key => SessionKey, max_copies => 1
+    }),
+    ?assertEqual(ok, hpr_skf_storage:insert(SKF)),
+
+    {ok, RouteETS} = hpr_route_storage:lookup(RouteID),
+    SKFETS = ?MODULE:skf_ets(RouteETS),
+
+    %% Simulate a pre-existing dangling reference: destroy the skf table but
+    %% leave the route record pointing at it.
+    true = ets:delete(SKFETS),
+    ?assertEqual(undefined, ets:info(SKFETS)),
+
+    %% Read/clear paths tolerate the dead table instead of crashing with badarg.
+    ?assertEqual([], hpr_skf_storage:lookup_route(RouteID)),
+    ?assertEqual(0, hpr_skf_storage:count_route(RouteID)),
+    ?assertEqual(0, hpr_skf_storage:clear_route(RouteID)),
+
+    %% replace_route recovers by recreating the table, then applies the new set.
+    SessionKey2 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+    SKF2 = hpr_skf:new(#{
+        route_id => RouteID, devaddr => DevAddr, session_key => SessionKey2, max_copies => 3
+    }),
+    ?assertEqual({ok, 0}, hpr_skf_storage:replace_route(RouteID, [SKF2])),
+
+    {ok, RouteETS2} = hpr_route_storage:lookup(RouteID),
+    SKFETS2 = ?MODULE:skf_ets(RouteETS2),
+    ?assert(erlang:is_list(ets:info(SKFETS2))),
+    SK2 = hpr_utils:hex_to_bin(SessionKey2),
+    ?assertEqual([{SK2, 3}], hpr_skf_storage:lookup(SKFETS2, DevAddr)),
     ok.
 
 test_select_skf() ->

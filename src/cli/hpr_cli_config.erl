@@ -835,8 +835,11 @@ set_routes_active(RoutesETS, Active) ->
             case Active of
                 false ->
                     %% When deactivating, remove all SKFs, DevAddr ranges, and EUIs
-                    %% but keep the route itself
-                    _ = hpr_skf_storage:delete_route(RouteID),
+                    %% but keep the route itself. Clear the SKF table in place
+                    %% rather than deleting it: the route record is kept, so
+                    %% destroying its skf_ets table would leave a dangling
+                    %% reference that crashes later route operations.
+                    _ = hpr_skf_storage:clear_route(RouteID),
                     _ = hpr_devaddr_range_storage:delete_route(RouteID),
                     _ = hpr_eui_pair_storage:delete_route(RouteID),
                     ok;
