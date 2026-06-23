@@ -30,6 +30,16 @@ trace app_eui <app_eui>         - Trace App EUI (ex: B216CDC4ABB9437)
 trace dev_eui <dev_eui>         - Trace Dev EUI (ex: B216CDC4ABB9437)
 ```
 
+`hpr denylist` Drop uplinks from specific gateways (in-memory, cleared on restart)
+```
+Usage:
+
+denylist ls                 - List denylisted gateways
+denylist add <gateway>      - Add a gateway (b58 address) to the denylist
+denylist remove <gateway>   - Remove a gateway (b58 address) from the denylist
+denylist reset              - Remove the entire denylist
+```
+
 `hpr config`
 
 ```

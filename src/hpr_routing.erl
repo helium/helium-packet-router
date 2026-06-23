@@ -18,7 +18,8 @@
 
 -type hpr_routing_response() ::
     ok
-    | {error, gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic}.
+    | {error,
+        gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic | gateway_denied}.
 
 -type route() :: {hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}.
 -type routes() :: list(route()).
@@ -44,6 +45,7 @@ handle_packet(PacketUp, Opts) ->
     Checks = [
         {fun packet_type_check/1, [], invalid_packet_type},
         {fun gateway_check/2, [Gateway], wrong_gateway},
+        {fun gateway_denied_check/1, [], gateway_denied},
         {fun packet_session_check/2, [SessionKey], bad_signature},
         {fun gateway_throttle_check/1, [], gateway_limit_exceeded},
         {fun packet_throttle_check/1, [], packet_limit_exceeded}
@@ -438,6 +440,15 @@ packet_type_check(PacketUp) ->
 gateway_check(PacketUp, Gateway) ->
     hpr_packet_up:gateway(PacketUp) == Gateway.
 
+%% Drop packets from denylisted gateways. The denylist is a cheap, usually-empty
+%% ETS lookup, so we run it before signature/throttle work. The gateway field is
+%% not signature-verified at this point, but that is fine for a denylist: a packet
+%% spoofing a denied gateway's key still fails packet_session_check downstream.
+-spec gateway_denied_check(PacketUp :: hpr_packet_up:packet()) ->
+    boolean().
+gateway_denied_check(PacketUp) ->
+    not hpr_denylist:is_denied(hpr_packet_up:gateway(PacketUp)).
+
 -spec packet_session_check(PacketUp :: hpr_packet_up:packet(), SessionKey :: undefined | binary()) ->
     boolean().
 packet_session_check(PacketUp, undefined) ->
@@ -494,7 +505,8 @@ all_test_() ->
         ?_test(maybe_deliver_packet_to_route_locked()),
         ?_test(maybe_deliver_packet_to_route_inactive()),
         ?_test(maybe_deliver_packet_to_route_in_cooldown()),
-        ?_test(maybe_deliver_packet_to_route_multi_buy())
+        ?_test(maybe_deliver_packet_to_route_multi_buy()),
+        ?_test(handle_packet_gateway_denied())
     ]}.
 
 foreach_setup() ->
@@ -529,9 +541,29 @@ foreach_cleanup(ok) ->
         ets:tab2list(hpr_routes_ets)
     ),
     true = ets:delete(hpr_routes_ets),
+    _ = (catch hpr_denylist:reset()),
     true = erlang:unregister(hpr_sup),
     meck:unload(hpr_gateway_location),
     meck:unload(hpr_metrics),
+    ok.
+
+handle_packet_gateway_denied() ->
+    meck:expect(hpr_metrics, observe_packet_up, fun(_, _, _, _) -> ok end),
+    %% handle_packet/2 calls hpr_packet_up:md/2 which reaches gproc; start it so
+    %% the md lookup returns "not found" (a warning) instead of crashing.
+    {ok, _} = application:ensure_all_started(gproc),
+
+    PacketUp = test_utils:uplink_packet_up(#{devaddr => 16#00000001}),
+    Gateway = hpr_packet_up:gateway(PacketUp),
+    Opts = #{gateway => Gateway},
+
+    %% Not denied by default: the denylist check passes and routing continues
+    %% (the test packet then fails on its bad signature, not gateway_denied).
+    ?assertNotEqual({error, gateway_denied}, hpr_routing:handle_packet(PacketUp, Opts)),
+
+    %% Once denied, the packet is dropped with gateway_denied.
+    ok = hpr_denylist:add(Gateway),
+    ?assertEqual({error, gateway_denied}, hpr_routing:handle_packet(PacketUp, Opts)),
     ok.
 
 find_routes_for_uplink_no_skf() ->
