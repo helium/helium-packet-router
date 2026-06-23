@@ -12,6 +12,7 @@
     select/1, select/2,
 
     delete_route/1,
+    clear_route/1,
     replace_route/2,
     lookup_route/1,
     count_route/1,
@@ -211,8 +212,18 @@ delete_route(RouteID) ->
     case hpr_route_storage:lookup(RouteID) of
         {ok, RouteETS} ->
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
-            Size = ets:info(SKFETS, size),
-            ets:delete(SKFETS),
+            %% The skf table can be gone already (e.g. a dangling reference left
+            %% over from a partial supervisor restart). ets:info/2 returns
+            %% `undefined` for a dead table, but ets:delete/1 would raise badarg,
+            %% so guard it and treat a missing table as already deleted.
+            Size =
+                case ets:info(SKFETS, size) of
+                    undefined ->
+                        0;
+                    S ->
+                        true = ets:delete(SKFETS),
+                        S
+                end,
             DetsFilename = ?MODULE:dets_filename(RouteID),
             _ = file:delete(DetsFilename),
             Size;
@@ -230,30 +241,78 @@ delete_route(RouteID) ->
             Err
     end.
 
+%% @doc Empty a route's SKF table in place without destroying it.
+%%
+%% Used when deactivating a route: the SKFs are dropped but the route record
+%% (and its `skf_ets' reference) is kept. Destroying the table here would leave
+%% the kept route record pointing at a dead table (a dangling reference), so we
+%% clear the contents in place instead and remove the persisted DETS file.
+-spec clear_route(hpr_route:id()) -> non_neg_integer().
+clear_route(RouteID) ->
+    case hpr_route_storage:lookup(RouteID) of
+        {ok, RouteETS} ->
+            SKFETS = hpr_route_ets:skf_ets(RouteETS),
+            Size =
+                case ets:info(SKFETS, size) of
+                    undefined ->
+                        0;
+                    S ->
+                        true = ets:delete_all_objects(SKFETS),
+                        S
+                end,
+            _ = file:delete(?MODULE:dets_filename(RouteID)),
+            Size;
+        {error, not_found} ->
+            _ = file:delete(?MODULE:dets_filename(RouteID)),
+            0
+    end.
+
+%% @doc Replace a route's full SKF set, mutating the existing table in place.
+%%
+%% The `skf_ets' table reference stored in the route record is created once (at
+%% route creation) and must stay valid for the route's whole lifetime. We never
+%% create a new table or rewrite the record's `skf_ets' field here, otherwise a
+%% concurrent read-modify-write from another process (e.g. a CLI `route sync')
+%% could write back a stale reference to a table we just deleted.
+%%
+%% New entries are inserted/overwritten first and stale keys deleted after, so
+%% the table is always a superset of the old and new sets during the update and
+%% never transiently missing a currently-valid key.
 -spec replace_route(hpr_route:id(), list(hpr_skf:skf())) ->
     {ok, non_neg_integer()} | {error, any()}.
 replace_route(RouteID, NewSKFs) ->
     case hpr_route_storage:lookup(RouteID) of
         {ok, RouteETS} ->
-            OldTab = hpr_route_ets:skf_ets(RouteETS),
-            NewTab = ets:new(?ETS_SKFS, [
-                public,
-                set,
-                {read_concurrency, true},
-                {write_concurrency, true},
-                {heir, erlang:whereis(?SKF_HEIR), RouteID}
-            ]),
-            lists:foreach(fun(SKF) -> ok = do_insert_skf(NewTab, SKF) end, NewSKFs),
+            %% Recover from a pre-existing dangling reference: if the table is
+            %% already gone, recreate it once. This is a controlled single-writer
+            %% re-creation (replace_route only runs in the stream worker).
+            {SKFETS, OldSize} =
+                case ets:info(hpr_route_ets:skf_ets(RouteETS), size) of
+                    undefined ->
+                        Tab = hpr_skf_storage:make_ets(RouteID),
+                        ok = hpr_route_storage:insert(
+                            hpr_route_ets:route(RouteETS),
+                            Tab,
+                            hpr_route_ets:backoff(RouteETS)
+                        ),
+                        {Tab, 0};
+                    S ->
+                        {hpr_route_ets:skf_ets(RouteETS), S}
+                end,
 
-            ok = hpr_route_storage:insert(
-                hpr_route_ets:route(RouteETS),
-                NewTab,
-                hpr_route_ets:backoff(RouteETS)
+            ok = lists:foreach(fun(SKF) -> ok = do_insert_skf(SKFETS, SKF) end, NewSKFs),
+
+            NewKeys = sets:from_list([new_skf_key(SKF) || SKF <- NewSKFs]),
+            CurrentKeys = ets:select(SKFETS, [{{'$1', '_'}, [], ['$1']}]),
+            lists:foreach(
+                fun(Key) ->
+                    case sets:is_element(Key, NewKeys) of
+                        true -> ok;
+                        false -> true = ets:delete(SKFETS, Key)
+                    end
+                end,
+                CurrentKeys
             ),
-
-            OldSize = ets:info(OldTab, size),
-
-            true = ets:delete(OldTab),
             {ok, OldSize};
         Other ->
             {error, Other}
@@ -265,7 +324,12 @@ lookup_route(RouteID) ->
     case hpr_route_storage:lookup(RouteID) of
         {ok, RouteETS} ->
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
-            ets:tab2list(SKFETS);
+            %% Tolerate a dangling reference: ets:tab2list/1 would raise badarg
+            %% on a dead table.
+            case ets:info(SKFETS, size) of
+                undefined -> [];
+                _ -> ets:tab2list(SKFETS)
+            end;
         {error, not_found} ->
             []
     end.
@@ -275,9 +339,12 @@ count_route(RouteID) ->
     case hpr_route_storage:lookup(RouteID) of
         {ok, RouteETS} ->
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
-            ets:info(SKFETS, size);
+            case ets:info(SKFETS, size) of
+                undefined -> 0;
+                Size -> Size
+            end;
         {error, not_found} ->
-            []
+            0
     end.
 
 %% -------------------------------------------------------------------
@@ -297,6 +364,21 @@ do_insert_skf(SKFETS, SKF) ->
             lager:warning("failed to insert ~p ~p", [{{SessionKey, DevAddr}, MaxCopies}, _R])
     end,
     ok.
+
+%% @doc The ETS key for an SKF, matching the entry inserted by do_insert_skf/2.
+%% Returns `undefined' for a malformed session key (which do_insert_skf/2 skips),
+%% a harmless sentinel that never matches a real key.
+-spec new_skf_key(hpr_skf:skf()) -> {binary(), non_neg_integer()} | undefined.
+new_skf_key(SKF) ->
+    DevAddr = hpr_skf:devaddr(SKF),
+    SessionKey = hpr_skf:session_key(SKF),
+    try hpr_utils:hex_to_bin(SessionKey) of
+        SessionKeyBin ->
+            {SessionKeyBin, DevAddr}
+    catch
+        _E:_R ->
+            undefined
+    end.
 
 -spec skf_md(hpr_route:id(), hpr_skf:skf()) -> proplists:proplist().
 skf_md(RouteID, SKF) ->

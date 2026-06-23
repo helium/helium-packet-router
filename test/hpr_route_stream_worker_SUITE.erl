@@ -638,6 +638,10 @@ refresh_route_test(_Config) ->
     {ok, RouteETS2} = hpr_route_storage:lookup(Route1ID),
     SKFETS2 = hpr_route_ets:skf_ets(RouteETS2),
 
+    %% Refresh mutates the skf table in place, so its identity is preserved.
+    %% A new table here would mean a window where a dangling reference can form.
+    ?assertEqual(SKFETS1, SKFETS2),
+
     %% Old routing is removed
     ?assertMatch([RouteETS2], hpr_devaddr_range_storage:lookup(16#00000005)),
     ?assertEqual([RouteETS2], hpr_eui_pair_storage:lookup(1, 12)),
@@ -684,6 +688,8 @@ refresh_route_test(_Config) ->
     %% Everything was removed
     {ok, RouteETS3} = hpr_route_storage:lookup(Route1ID),
     SKFETS3 = hpr_route_ets:skf_ets(RouteETS3),
+    %% Emptying the set also keeps the same table (cleared in place, not destroyed).
+    ?assertEqual(SKFETS2, SKFETS3),
     ?assertMatch([], hpr_devaddr_range_storage:lookup(16#00000005)),
     ?assertEqual([], hpr_eui_pair_storage:lookup(1, 12)),
     ?assertEqual([], hpr_eui_pair_storage:lookup(1, 100)),
