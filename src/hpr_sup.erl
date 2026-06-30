@@ -78,6 +78,13 @@ init([]) ->
     _ = maybe_start_channel(DownlinkServiceConfig, ?DOWNLINK_CHANNEL),
     _ = maybe_start_multi_buy_channel(MultiBuyServiceConfig),
 
+    %% Pre-warm custom multi-buy channels for routes restored from disk so the
+    %% first uplinks after a restart don't race cold channels. Routes are already
+    %% hydrated into ETS by `hpr_route_ets:init/0' above.
+    ok = timing("multi buy custom channels", fun() ->
+        lists:foreach(fun hpr_multi_buy:init_channel/1, hpr_route_storage:all_routes())
+    end),
+
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
         {port, 3000}
