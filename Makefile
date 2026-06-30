@@ -13,7 +13,8 @@ compile: | $(grpc_services_directory)
 	$(REBAR) format
 
 clean:
-	git clean -dXfffffffffff
+	rm -rf src/grpc/autogen/
+	rm -rf _build/
 
 test: | $(grpc_services_directory)
 	$(REBAR) fmt --verbose --check rebar.config
