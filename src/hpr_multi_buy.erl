@@ -6,6 +6,7 @@
 
 -export([
     init/0,
+    init_channel/1,
     update_counter/5,
     cleanup/1,
     make_key/2,
@@ -62,6 +63,29 @@ update_counter(Key, Max, PubKeyBin, Region, Route) ->
             update_counter_default(Key, Max, B58PubKeyBin, Region);
         true ->
             update_counter_custom(Key, Max, B58PubKeyBin, Region, Route)
+    end.
+
+-spec init_channel(Route :: hpr_route:route()) -> ok.
+init_channel(Route) ->
+    %% Pre-warm the custom multi-buy grpc channel for a route so the first
+    %% uplinks (e.g. right after a restart) don't race a cold channel and pile
+    %% onto the 5s grpc timeout. No-op for default routes. Idempotent
+    %% (`ensure_channel' returns fast if the channel is already up) and
+    %% non-blocking so it never stalls boot or route processing.
+    case is_using_custom_multi_buy(Route) of
+        false ->
+            ok;
+        true ->
+            _ = erlang:spawn(fun() ->
+                _ = ensure_channel(
+                    make_channel_key(Route),
+                    hpr_route:multi_buy_protocol(Route),
+                    hpr_route:multi_buy_host(Route),
+                    hpr_route:multi_buy_port(Route),
+                    hpr_route:id(Route)
+                )
+            end),
+            ok
     end.
 
 -spec cleanup(Duration :: non_neg_integer()) -> ok.
@@ -222,8 +246,14 @@ request_custom(Key, B58PubKeyBin, Region, Route) ->
     RouteID = hpr_route:id(Route),
     Channel = make_channel_key(Route),
     FailOnUnavailable = hpr_route:multi_buy_fail_on_unavailable(Route),
-    case ensure_channel(Channel, Protocol, Host, Port, RouteID) of
-        ok ->
+    %% Only issue the grpc call once the channel actually has a ready connection.
+    %% Right after a restart the channel is cold: `ensure_channel' would connect
+    %% (sync_start) and return `ok' before the HTTP/2 connection is up, so every
+    %% request would then block on the 5s grpc timeout. Instead we fail fast and
+    %% start the channel in the background, which lets the caller's backoff engage
+    %% within milliseconds and short-circuit the rest of the burst.
+    case grpcbox_channel:pick(Channel, unary) of
+        {ok, _} ->
             {Time, Result} = timer:tc(fun() ->
                 Req = #multi_buy_inc_req_v1_pb{
                     key = hpr_utils:bin_to_hex_string(Key),
@@ -243,8 +273,9 @@ request_custom(Key, B58PubKeyBin, Region, Route) ->
             end),
             hpr_metrics:observe_multi_buy(RouteID, Result, Time),
             Result;
-        {error, ConnectReason} ->
-            {error, ConnectReason, FailOnUnavailable}
+        {error, _PickReason} ->
+            _ = ensure_channel(Channel, Protocol, Host, Port, RouteID),
+            {error, channel_not_ready, FailOnUnavailable}
     end.
 
 -spec ensure_channel(
@@ -368,7 +399,9 @@ all_test_() ->
         ?_test(test_update_counter_custom_denied()),
         ?_test(test_update_counter_custom_fail_on_unavailable()),
         ?_test(test_update_counter_custom_no_fail()),
-        ?_test(test_update_counter_custom_backoff())
+        ?_test(test_update_counter_custom_backoff()),
+        ?_test(test_update_counter_custom_channel_not_ready()),
+        ?_test(test_init_channel())
     ]}.
 
 foreach_setup() ->
@@ -658,6 +691,54 @@ test_update_counter_custom_backoff() ->
         {ok, false},
         ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION, Route)
     ),
+    ok.
+
+test_update_counter_custom_channel_not_ready() ->
+    Key = crypto:strong_rand_bytes(16),
+    Max = 3,
+    Route = ?TEST_CUSTOM_ROUTE(true),
+
+    %% Channel is cold (e.g. right after a restart): `pick' has no ready endpoint.
+    meck:expect(grpcbox_channel, pick, fun(_, _) -> {error, no_endpoints} end),
+    %% The grpc `inc' must never be called while the channel is cold: we fail fast
+    %% instead of blocking on the 5s grpc timeout.
+    meck:expect(helium_multi_buy_multi_buy_client, inc, fun(_, _) ->
+        error(should_not_be_called)
+    end),
+
+    ?assertEqual(
+        {error, ?FAIL_ON_UNAVAILABLE},
+        ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION, Route)
+    ),
+    ?assertEqual(0, meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2)),
+
+    %% The first fast failure engages backoff, so the next request short-circuits
+    %% without even attempting to connect.
+    ?assert(is_in_backoff(make_channel_key(Route))),
+    ?assertEqual(
+        {error, ?FAIL_ON_UNAVAILABLE},
+        ?MODULE:update_counter(Key, Max, ?TEST_HOTSPOT_KEY, ?TEST_REGION, Route)
+    ),
+    ?assertEqual(0, meck:num_calls(helium_multi_buy_multi_buy_client, inc, 2)),
+    ok.
+
+test_init_channel() ->
+    %% Cold channel so `ensure_channel' has to connect.
+    meck:expect(grpcbox_channel, pick, fun(_, _) -> {error, no_endpoints} end),
+
+    %% Default route: nothing to pre-warm, no channel connect attempted.
+    ConnectsBefore = meck:num_calls(grpcbox_client, connect, ['_', '_', '_']),
+    ?assertEqual(ok, ?MODULE:init_channel(?TEST_ROUTE)),
+    timer:sleep(50),
+    ?assertEqual(
+        ConnectsBefore, meck:num_calls(grpcbox_client, connect, ['_', '_', '_'])
+    ),
+
+    %% Custom route with a cold channel: connected in the background.
+    Route = ?TEST_CUSTOM_ROUTE(false),
+    ?assertEqual(ok, ?MODULE:init_channel(Route)),
+    ok = meck:wait(grpcbox_client, connect, ['_', '_', '_'], timer:seconds(1)),
+    ?assert(meck:num_calls(grpcbox_client, connect, ['_', '_', '_']) > ConnectsBefore),
     ok.
 
 -endif.
