@@ -480,7 +480,8 @@ terminate(_Reason, #state{checkpoint_timer = CheckpointTimer, stream = Stream} =
         | {skf, hpr_skf:skf()}
 ) -> ok.
 process_route_stream_res(add, {route, Route}) ->
-    hpr_route_storage:insert(Route);
+    ok = hpr_route_storage:insert(Route),
+    ok = hpr_multi_buy:init_channel(Route);
 process_route_stream_res(add, {eui_pair, EUIPair}) ->
     hpr_eui_pair_storage:insert(EUIPair);
 process_route_stream_res(add, {devaddr_range, DevAddrRange}) ->
