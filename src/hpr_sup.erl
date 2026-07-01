@@ -90,22 +90,27 @@ init([]) ->
         {port, 3000}
     ],
 
-    ChildSpecs = [
-        ?WORKER(hpr_routing_cache, [#{}]),
-        ?WORKER(hpr_metrics, [#{}]),
-        ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
+    %% Packet router GRPC server config. Started as the LAST child below so we
+    %% don't accept gateway connections until the rest of HPR is initialized.
+    PacketRouterServerConfig = application:get_env(?APP, packet_router_server, #{}),
 
-        ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
+    ChildSpecs =
+        [
+            ?WORKER(hpr_routing_cache, [#{}]),
+            ?WORKER(hpr_metrics, [#{}]),
+            ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
 
-        ?WORKER(hpr_route_stream_worker, [#{}]),
+            ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
 
-        ?WORKER(hpr_protocol_router, [#{}]),
+            ?WORKER(hpr_route_stream_worker, [#{}]),
 
-        ?SUP(hpr_gwmp_sup, []),
+            ?WORKER(hpr_protocol_router, [#{}]),
 
-        ?SUP(hpr_http_roaming_sup, []),
-        ?WORKER(hpr_http_roaming_downlink_stream_worker, [#{}])
-    ],
+            ?SUP(hpr_gwmp_sup, []),
+
+            ?SUP(hpr_http_roaming_sup, []),
+            ?WORKER(hpr_http_roaming_downlink_stream_worker, [#{}])
+        ] ++ grpc_server_child_specs(PacketRouterServerConfig),
     {ok, {
         #{
             strategy => one_for_one,
@@ -114,6 +119,36 @@ init([]) ->
         },
         ChildSpecs
     }}.
+
+%% @doc Build the child spec for the packet router GRPC server.
+%%
+%% Historically this server was auto-started by the `grpcbox' application from
+%% its `servers' env, which happens before HPR is initialized — meaning we could
+%% accept gateway uplinks before the routing/multi-buy/ETS state was ready. We
+%% now start it ourselves as the last child of `hpr_sup' so the listener only
+%% comes up once everything else is in place.
+-spec grpc_server_child_specs(Config :: map()) -> [supervisor:child_spec()].
+grpc_server_child_specs(Config) when map_size(Config) =:= 0 ->
+    lager:error("no packet_router_server config, not starting grpc server"),
+    [];
+grpc_server_child_specs(Config) ->
+    GrpcOpts = maps:get(grpc_opts, Config, #{}),
+    ServerOpts = maps:get(server_opts, Config, #{}),
+    ListenOpts = maps:get(listen_opts, Config, #{}),
+    PoolOpts = maps:get(pool_opts, Config, #{}),
+    TransportOpts = maps:get(transport_opts, Config, #{}),
+    [
+        #{
+            id => grpcbox_services_sup,
+            start =>
+                {grpcbox_services_sup, start_link, [
+                    ServerOpts, GrpcOpts, ListenOpts, PoolOpts, TransportOpts
+                ]},
+            type => supervisor,
+            restart => permanent,
+            shutdown => 5000
+        }
+    ].
 
 maybe_start_channel(Config, ChannelName) ->
     case Config of
