@@ -26,6 +26,7 @@
 -define(METRICS_DEVICE_GAUGE, "hpr_device_gauge").
 -define(METRICS_DEVADDR_CACHE_HIT_COUNTER, "hpr_devaddr_cache_hit_counter").
 -define(METRICS_DEVADDR_CACHE_MISS_COUNTER, "hpr_devaddr_cache_miss_counter").
+-define(METRICS_LIVENESS_REPORT_HISTOGRAM, "hpr_liveness_report_histogram").
 
 -define(METRICS, [
     {?METRICS_GRPC_CONNECTION_GAUGE, prometheus_gauge, [], "Number of active GRPC Connections"},
@@ -50,5 +51,6 @@
         "ICS gateway location req"},
     {?METRICS_DEVICE_GAUGE, prometheus_gauge, [], "Approximate number of devices"},
     {?METRICS_DEVADDR_CACHE_HIT_COUNTER, prometheus_counter, [], "DevAddr cache hits"},
-    {?METRICS_DEVADDR_CACHE_MISS_COUNTER, prometheus_counter, [], "DevAddr cache misses"}
+    {?METRICS_DEVADDR_CACHE_MISS_COUNTER, prometheus_counter, [], "DevAddr cache misses"},
+    {?METRICS_LIVENESS_REPORT_HISTOGRAM, prometheus_histogram, [status], "Liveness Reports"}
 ]).

@@ -11,6 +11,16 @@
             report_interval => 300_000,
             report_max_size => 50_000_000
         }},
+        {gateway_liveness_reporter, #{
+            aws_bucket => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET}">>,
+            aws_bucket_region => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET_REGION}">>,
+            %% ecron 6-field spec (sec min hour dom month dow): daily at midnight
+            report_interval => <<"0 0 0 * * *">>,
+            %% ecron 6-field spec: every 15 min
+            checkpoint_interval => <<"0 */15 * * * *">>,
+            %% post-report cleanup: drop entries not seen in the last 5 min
+            stale_threshold => 300_000
+        }},
         {iot_config_service, #{
             transport => "${HPR_IOT_CONFIG_TRANSPORT}",
             host => "${HPR_IOT_CONFIG_HOST}",
