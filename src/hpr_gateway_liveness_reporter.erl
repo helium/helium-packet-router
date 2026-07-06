@@ -7,33 +7,22 @@
 %% ------------------------------------------------------------------
 %% API Function Exports
 %% ------------------------------------------------------------------
--export([
-    start_link/1
-]).
-
+-export([start_link/1]).
 %% ------------------------------------------------------------------
 %% gen_server Function Exports
 %% ------------------------------------------------------------------
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2
-]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -ifdef(TEST).
 
--export([
-    get_bucket/1,
-    get_client/1
-]).
+-export([get_bucket/1, get_client/1]).
 
 -endif.
 
 -define(SERVER, ?MODULE).
 -define(CHECKPOINT_JOB, hpr_gateway_liveness_checkpoint).
 -define(REPORT_JOB, hpr_gateway_liveness_report).
+-define(FILE_NAME, "packet_router_liveness_report").
 
 -record(state, {
     bucket :: binary(),
@@ -43,15 +32,15 @@
 }).
 
 -type state() :: #state{}.
-
--type gateway_liveness_reporter_opts() :: #{
-    aws_bucket => binary(),
-    aws_bucket_region => binary(),
-    report_interval => binary(),
-    checkpoint_interval => binary(),
-    stale_threshold => non_neg_integer(),
-    server_name => binary()
-}.
+-type gateway_liveness_reporter_opts() ::
+    #{
+        aws_bucket => binary(),
+        aws_bucket_region => binary(),
+        report_interval => binary(),
+        checkpoint_interval => binary(),
+        stale_threshold => non_neg_integer(),
+        server_name => binary()
+    }.
 
 %% ------------------------------------------------------------------
 %%% API Function Definitions
@@ -88,11 +77,15 @@ init(
         report_interval := ReportCron,
         checkpoint_interval := CheckpointCron,
         stale_threshold := StaleThreshold
-    } = Args
+    } =
+        Args
 ) ->
-    lager:info(maps:to_list(Args), "started"),
+    lager:info(
+        maps:to_list(Args), "started"
+    ),
     ServerName = maps:get(server_name, Args, default_server_name()),
-    ok = ensure_job(?CHECKPOINT_JOB, CheckpointCron, {gen_server, cast, [?SERVER, checkpoint]}),
+    ok =
+        ensure_job(?CHECKPOINT_JOB, CheckpointCron, {gen_server, cast, [?SERVER, checkpoint]}),
     ok = ensure_job(?REPORT_JOB, ReportCron, {gen_server, cast, [?SERVER, report]}),
     {ok, #state{
         bucket = Bucket,
@@ -134,40 +127,39 @@ terminate(_Reason, _State) ->
 -spec ensure_job(ecron:name(), ecron:crontab_spec(), ecron:mfargs()) -> ok.
 ensure_job(JobName, Spec, MFA) ->
     case ecron:add(JobName, Spec, MFA) of
-        {ok, _} -> ok;
-        {error, already_exist} -> ok
+        {ok, _} ->
+            ok;
+        {error, already_exist} ->
+            ok
     end.
 
 -spec encode_entry(
     PubKeyBin :: libp2p_crypto:pubkey_bin(),
     LastSeen :: non_neg_integer(),
     ServerName :: binary()
-) -> binary().
+) ->
+    binary().
 encode_entry(PubKeyBin, LastSeen, ServerName) ->
-    EncodedReport = hpr_liveness_report:encode(
-        hpr_liveness_report:new(PubKeyBin, ServerName, LastSeen)
-    ),
+    EncodedReport =
+        hpr_liveness_report:encode(
+            hpr_liveness_report:new(PubKeyBin, ServerName, LastSeen)
+        ),
     ReportSize = erlang:size(EncodedReport),
     <<ReportSize:32/big-integer-unsigned, EncodedReport/binary>>.
 
 -spec setup_aws(state()) -> aws_client:aws_client().
-setup_aws(#state{
-    bucket_region = <<"local">>
-}) ->
-    #{
-        access_key_id := AccessKey,
-        secret_access_key := Secret
-    } = aws_credentials:get_credentials(),
+setup_aws(#state{bucket_region = <<"local">>}) ->
+    #{access_key_id := AccessKey, secret_access_key := Secret} =
+        aws_credentials:get_credentials(),
     {LocalHost, LocalPort} = get_local_host_port(),
     aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
-setup_aws(#state{
-    bucket_region = BucketRegion
-}) ->
+setup_aws(#state{bucket_region = BucketRegion}) ->
     #{
         access_key_id := AccessKey,
         secret_access_key := Secret,
         token := Token
-    } = aws_credentials:get_credentials(),
+    } =
+        aws_credentials:get_credentials(),
     aws_client:make_temporary_client(AccessKey, Secret, Token, BucketRegion).
 
 -spec report(state()) -> ok.
@@ -180,16 +172,18 @@ report(#state{bucket = Bucket, server_name = ServerName} = State) ->
             StartTime = erlang:system_time(millisecond),
             AWSClient = setup_aws(State),
 
-            EncodedEntries = [
-                encode_entry(PubKeyBin, LastSeen, ServerName)
-             || {PubKeyBin, LastSeen} <- Entries
-            ],
+            EncodedEntries =
+                [encode_entry(PubKeyBin, LastSeen, ServerName) || {PubKeyBin, LastSeen} <- Entries],
             Body = zlib:gzip(EncodedEntries),
 
             Timestamp = erlang:system_time(millisecond),
-            FileName = erlang:list_to_binary(
-                "livenessreport." ++ erlang:integer_to_list(Timestamp) ++ ".gz"
-            ),
+            FileName =
+                erlang:list_to_binary(
+                    ?FILE_NAME ++
+                        "." ++
+                        erlang:integer_to_list(Timestamp) ++
+                        ".gz"
+                ),
 
             MD = [
                 {filename, erlang:binary_to_list(FileName)},

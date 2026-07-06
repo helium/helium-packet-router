@@ -160,7 +160,7 @@ upload_test(_Config) ->
     ),
     FileName = maps:get(<<"Key">>, Contents),
     [Prefix, Timestamp, Ext] = binary:split(FileName, <<".">>, [global]),
-    ?assertEqual(<<"livenessreport">>, Prefix),
+    ?assertEqual(<<"packet_router_liveness_report">>, Prefix),
     ?assert(erlang:binary_to_integer(Timestamp) < erlang:system_time(millisecond)),
     ?assert(
         erlang:binary_to_integer(Timestamp) > erlang:system_time(millisecond) - timer:seconds(2)
