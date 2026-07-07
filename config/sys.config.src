@@ -16,8 +16,8 @@
             aws_bucket_region => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET_REGION}">>,
             %% ecron 6-field spec (sec min hour dom month dow): daily at midnight
             report_interval => <<"0 0 0 * * *">>,
-            %% ecron 6-field spec: every 15 min
-            checkpoint_interval => <<"0 */15 * * * *">>,
+            %% ecron 6-field spec: hourly
+            checkpoint_interval => <<"0 0 * * * *">>,
             %% post-report cleanup: drop entries not seen in the last 5 min
             stale_threshold => 300_000
         }},
