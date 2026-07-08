@@ -13,6 +13,7 @@
     packet_up_per_oui/2,
     packet_down/1,
     observe_packet_report/2,
+    observe_liveness_report/2,
     observe_multi_buy/3,
     observe_find_routes/1,
     observe_grpc_connection/2,
@@ -95,6 +96,17 @@ packet_down(Status) ->
 observe_packet_report(Status, Start) ->
     prometheus_histogram:observe(
         ?METRICS_PACKET_REPORT_HISTOGRAM,
+        [Status],
+        erlang:system_time(millisecond) - Start
+    ).
+
+-spec observe_liveness_report(
+    Status :: ok | error,
+    Start :: non_neg_integer()
+) -> ok.
+observe_liveness_report(Status, Start) ->
+    prometheus_histogram:observe(
+        ?METRICS_LIVENESS_REPORT_HISTOGRAM,
         [Status],
         erlang:system_time(millisecond) - Start
     ).

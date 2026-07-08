@@ -30,7 +30,8 @@
         observer_cli,
         gproc,
         backoff,
-        h3
+        h3,
+        ecron
     ]},
     {included_applications, []},
     {env, []},

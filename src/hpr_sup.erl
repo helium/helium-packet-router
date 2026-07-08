@@ -64,8 +64,10 @@ init([]) ->
     ok = timing("packet_router streams", fun() -> hpr_protocol_router:init() end),
     ok = timing("config service", fun() -> hpr_route_ets:init() end),
     ok = timing("gw location", fun() -> hpr_gateway_location:init() end),
+    ok = timing("gw liveness", fun() -> hpr_gateway_liveness_storage:init_ets() end),
 
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
+    LivenessReporterConfig = application:get_env(?APP, gateway_liveness_reporter, #{}),
     ConfigServiceConfig = application:get_env(?APP, ?IOT_CONFIG_SERVICE, #{}),
     LocationServiceConfig = application:get_env(?APP, iot_location_service, #{}),
     DownlinkServiceConfig = application:get_env(?APP, downlink_service, #{}),
@@ -89,6 +91,7 @@ init([]) ->
         ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
 
         ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
+        ?WORKER(hpr_gateway_liveness_reporter, [LivenessReporterConfig]),
 
         ?WORKER(hpr_route_stream_worker, [#{}]),
 

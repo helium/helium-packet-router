@@ -176,6 +176,7 @@ handle_register(Reg, StreamState0) ->
             {stop, StreamState0};
         true ->
             ok = ?MODULE:register(PubKeyBin),
+            ok = hpr_gateway_liveness_storage:record_connect(PubKeyBin),
             %% Atttempt to get location from ICS to pre-cache data
             _ = hpr_gateway_location:get(PubKeyBin),
             HandlerState = grpcbox_stream:stream_handler_state(StreamState0),
@@ -341,6 +342,8 @@ route_register_test() ->
     meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> ok end),
+    meck:new(hpr_gateway_liveness_storage, [passthrough]),
+    meck:expect(hpr_gateway_liveness_storage, record_connect, fun(_) -> ok end),
     application:ensure_all_started(gproc),
     application:ensure_all_started(lager),
 
@@ -374,6 +377,7 @@ route_register_test() ->
     application:stop(lager),
     meck:unload(hpr_metrics),
     meck:unload(hpr_gateway_location),
+    meck:unload(hpr_gateway_liveness_storage),
     ok.
 
 handle_info_test() ->
