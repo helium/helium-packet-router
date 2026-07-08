@@ -6,7 +6,7 @@
     new/3,
     gateway/1,
     server/1,
-    timestamp/1,
+    timestamp_ms/1,
     encode/1,
     decode/1
 ]).
@@ -32,7 +32,7 @@ new(PubKeyBin, Server, LastSeen) ->
     #packet_router_liveness_report_v1_pb{
         gateway = PubKeyBin,
         server = Server,
-        timestamp = LastSeen
+        timestamp_ms = LastSeen
     }.
 
 -spec gateway(LivenessReport :: liveness_report()) -> binary().
@@ -45,9 +45,9 @@ gateway(LivenessReport) ->
 server(LivenessReport) ->
     LivenessReport#packet_router_liveness_report_v1_pb.server.
 
--spec timestamp(LivenessReport :: liveness_report()) -> non_neg_integer() | undefined.
-timestamp(LivenessReport) ->
-    LivenessReport#packet_router_liveness_report_v1_pb.timestamp.
+-spec timestamp_ms(LivenessReport :: liveness_report()) -> non_neg_integer() | undefined.
+timestamp_ms(LivenessReport) ->
+    LivenessReport#packet_router_liveness_report_v1_pb.timestamp_ms.
 
 -spec encode(LivenessReport :: liveness_report()) -> binary().
 encode(#packet_router_liveness_report_v1_pb{} = LivenessReport) ->
@@ -67,7 +67,7 @@ test_new(Opts) ->
     #packet_router_liveness_report_v1_pb{
         gateway = maps:get(gateway, Opts, <<"gateway">>),
         server = maps:get(server, Opts, <<"hpr">>),
-        timestamp = maps:get(timestamp, Opts, erlang:system_time(millisecond))
+        timestamp_ms = maps:get(timestamp_ms, Opts, erlang:system_time(millisecond))
     }.
 
 -endif.
@@ -89,10 +89,10 @@ server_test() ->
     ?assertEqual(<<"hpr-1">>, server(LivenessReport)),
     ok.
 
-timestamp_test() ->
+timestamp_ms_test() ->
     Now = erlang:system_time(millisecond),
-    LivenessReport = test_new(#{timestamp => Now}),
-    ?assertEqual(Now, timestamp(LivenessReport)),
+    LivenessReport = test_new(#{timestamp_ms => Now}),
+    ?assertEqual(Now, timestamp_ms(LivenessReport)),
     ok.
 
 encode_decode_test() ->
@@ -102,13 +102,13 @@ encode_decode_test() ->
     %% `server' is a protobuf `string' field: gpb decodes it back as a list
     %% regardless of what type (binary or list) was supplied on encode.
     ?assertEqual(erlang:binary_to_list(server(LivenessReport)), server(Decoded)),
-    ?assertEqual(timestamp(LivenessReport), timestamp(Decoded)),
+    ?assertEqual(timestamp_ms(LivenessReport), timestamp_ms(Decoded)),
     ok.
 
 new_test() ->
     Now = erlang:system_time(millisecond),
     ?assertEqual(
-        test_new(#{gateway => <<"gateway">>, server => <<"hpr-1">>, timestamp => Now}),
+        test_new(#{gateway => <<"gateway">>, server => <<"hpr-1">>, timestamp_ms => Now}),
         ?MODULE:new(<<"gateway">>, <<"hpr-1">>, Now)
     ).
 
