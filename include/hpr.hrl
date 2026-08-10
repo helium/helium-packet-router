@@ -13,3 +13,7 @@
 -define(HPR_KEY, hpr_key).
 
 -define(HPR_FREE_NET_IDS, hpr_free_net_ids).
+
+%% Port for the Elli metrics endpoint (hpr_metrics_handler)
+-define(METRICS_PORT, metrics_port).
+-define(DEFAULT_METRICS_PORT, 3000).

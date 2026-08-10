@@ -5,6 +5,9 @@
         {hpr_free_net_ids, [16#C00053]},
         {http_roaming_sender_nsid, <<"${HPR_ROAMING_SENDER_NSID}">>},
         {no_routes, []},
+        %% Elli metrics endpoint port. Quoted so an unset variable cannot break
+        %% the term file; empty or unparseable falls back to 3000.
+        {metrics_port, "${HPR_METRICS_PORT}"},
         {packet_reporter, #{
             aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
             aws_bucket_region => <<"${HPR_PACKET_REPORTER_AWS_BUCKET_REGION}">>,
