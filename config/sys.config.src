@@ -8,6 +8,9 @@
         {packet_reporter, #{
             aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
             aws_bucket_region => <<"${HPR_PACKET_REPORTER_AWS_BUCKET_REGION}">>,
+            %% Optional S3-compatible endpoint, e.g.
+            %% <<"https://t3.storageapi.dev">>. Leave empty for real AWS S3.
+            aws_endpoint => <<"${HPR_PACKET_REPORTER_AWS_ENDPOINT}">>,
             report_interval => 300_000,
             report_max_size => 50_000_000
         }},
