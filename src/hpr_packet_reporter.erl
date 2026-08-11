@@ -27,7 +27,8 @@
 
 -export([
     get_bucket/1,
-    get_client/1
+    get_client/1,
+    get_current_packets/1
 ]).
 
 -endif.
@@ -90,6 +91,12 @@ get_bucket(#state{bucket = Bucket}) ->
 -spec get_client(state()) -> aws_client:aws_client().
 get_client(State) ->
     setup_aws(State).
+
+%% Named accessor so suites do not index into #state{} positionally — adding a
+%% field silently shifts every element/2 index after it.
+-spec get_current_packets(state()) -> [iodata()].
+get_current_packets(#state{current_packets = Packets}) ->
+    Packets.
 
 -endif.
 
