@@ -20,6 +20,9 @@
         {gateway_liveness_reporter, #{
             aws_bucket => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET}">>,
             aws_bucket_region => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET_REGION}">>,
+            %% Name this instance reports itself as. Leave empty to use the
+            %% hostname; set it where the hostname is meaningless.
+            server_name => <<"${HPR_LIVENESS_REPORTER_SERVER_NAME}">>,
             %% ecron 6-field spec (sec min hour dom month dow): daily at midnight
             report_interval => <<"0 0 0 * * *">>,
             %% ecron 6-field spec: hourly
