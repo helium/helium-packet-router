@@ -1,10 +1,9 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% To run this SUITE:
-%% - `docker-compose -f docker-compose-ct.yaml up`
-%% - Set HPR_PACKET_REPORTER_LOCAL_HOST=localhost
-%% - Set HPR_PACKET_REPORTER_LOCAL_PORT=4556
-%% HPR_PACKET_REPORTER_LOCAL_HOST=localhost HPR_PACKET_REPORTER_LOCAL_PORT=4566 ./rebar3 ct --suite=hpr_packet_reporter_SUITE
+%% - `docker compose -f docker-compose-ct.yaml up`
+%% - HPR_TEST_S3_ENDPOINT=http://localhost:4566 ./rebar3 ct --suite=hpr_packet_reporter_SUITE
+%% Or simply `make test-aws`, which does both.
 %% @end
 %%--------------------------------------------------------------------
 -module(hpr_packet_reporter_SUITE).
@@ -45,19 +44,20 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
-    case
-        {
-            os:getenv("HPR_PACKET_REPORTER_LOCAL_HOST", []),
-            os:getenv("HPR_PACKET_REPORTER_LOCAL_PORT", [])
-        }
-    of
-        {[], _} ->
-            {skip, env_host_empty};
-        {_, []} ->
-            {skip, env_post_empty};
-        _ ->
+    case os:getenv("HPR_TEST_S3_ENDPOINT") of
+        false ->
+            {skip, no_s3_endpoint};
+        Endpoint ->
+            ok = set_endpoint(packet_reporter, erlang:list_to_binary(Endpoint)),
             test_utils:init_per_testcase(TestCase, Config)
     end.
+
+%% Point a reporter at the S3 endpoint this run was given. CI and the local
+%% docker-compose reach localstack under different hostnames, so the endpoint
+%% cannot simply be hardcoded in ct.config.
+set_endpoint(Key, Endpoint) ->
+    Cfg = application:get_env(hpr, Key, #{}),
+    application:set_env(hpr, Key, Cfg#{aws_endpoint => Endpoint}).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN

@@ -164,11 +164,14 @@ jobs:
           AWS_SUITES="["
           for F in ./test/*_SUITE.erl; do
             SUITE=$(basename "$F")
-            if [ "$SUITE" = "hpr_packet_reporter_SUITE.erl" ]; then
-              AWS_SUITES+="\"${SUITE}\","
-            else
-              CT_SUITES+="\"${SUITE}\","
-            fi
+            case "$SUITE" in
+              hpr_packet_reporter_SUITE.erl|hpr_gateway_liveness_reporter_SUITE.erl)
+                AWS_SUITES+="\"${SUITE}\","
+                ;;
+              *)
+                CT_SUITES+="\"${SUITE}\","
+                ;;
+            esac
           done
           CT_SUITES=${CT_SUITES%,}
           CT_SUITES+="]"
@@ -228,8 +231,10 @@ jobs:
           - "/var/lib/localstack:/var/lib/localstack"
           - "/var/run/docker.sock:/var/run/docker.sock"
     env:
-      HPR_PACKET_REPORTER_LOCAL_HOST: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_HOST }}
-      HPR_PACKET_REPORTER_LOCAL_PORT: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_PORT }}
+      # The reporter suites skip themselves unless this is set, so it is
+      # hardcoded rather than read from a repo secret: an unset secret would
+      # turn the whole job into a silent no-op.
+      HPR_TEST_S3_ENDPOINT: http://localstack:4566
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6

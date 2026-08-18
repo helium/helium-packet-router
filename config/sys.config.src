@@ -10,16 +10,24 @@
         {metrics_port, "${HPR_METRICS_PORT}"},
         {packet_reporter, #{
             aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
-            aws_bucket_region => <<"${HPR_PACKET_REPORTER_AWS_BUCKET_REGION}">>,
-            %% Optional S3-compatible endpoint, e.g.
-            %% <<"https://t3.storageapi.dev">>. Leave empty for real AWS S3.
+            %% Set aws_endpoint for an S3-compatible provider, e.g.
+            %% <<"https://t3.storageapi.dev">>; the key/secret below are then
+            %% required. Leave it empty for real AWS S3 in aws_region, with
+            %% credentials from the aws_credentials provider chain.
             aws_endpoint => <<"${HPR_PACKET_REPORTER_AWS_ENDPOINT}">>,
+            aws_region => <<"${HPR_PACKET_REPORTER_AWS_REGION}">>,
+            aws_access_key_id => <<"${HPR_PACKET_REPORTER_AWS_KEY}">>,
+            aws_secret_access_key => <<"${HPR_PACKET_REPORTER_AWS_SECRET}">>,
             report_interval => 300_000,
             report_max_size => 50_000_000
         }},
         {gateway_liveness_reporter, #{
             aws_bucket => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET}">>,
-            aws_bucket_region => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET_REGION}">>,
+            %% See packet_reporter above for the endpoint / region rule.
+            aws_endpoint => <<"${HPR_LIVENESS_REPORTER_AWS_ENDPOINT}">>,
+            aws_region => <<"${HPR_LIVENESS_REPORTER_AWS_REGION}">>,
+            aws_access_key_id => <<"${HPR_LIVENESS_REPORTER_AWS_KEY}">>,
+            aws_secret_access_key => <<"${HPR_LIVENESS_REPORTER_AWS_SECRET}">>,
             %% Name this instance reports itself as. Leave empty to use the
             %% hostname; set it where the hostname is meaningless.
             server_name => <<"${HPR_LIVENESS_REPORTER_SERVER_NAME}">>,
@@ -80,12 +88,11 @@
         {devaddr_cache_ttl_ms, 43200000},
         {ics_stream_worker_checkpoint_secs, 300}
     ]},
+    %% Used only by reporters that set no aws_endpoint. A reporter pointed at an
+    %% S3-compatible endpoint authenticates with its own key/secret above and
+    %% never consults this chain.
     {aws_credentials, [
         {credential_providers, [aws_credentials_env, aws_credentials_ec2]}
-        %% uncomment for env usage
-        %% {aws_access_key_id, "${HPR_PACKET_REPORTER_AWS_KEY}"},
-        %% {aws_secret_access_key, "${HPR_PACKET_REPORTER_AWS_SECRET}"},
-        %% {aws_default_region, "${HPR_PACKET_REPORTER_AWS_REGION}"}
     ]},
     {chatterbox, [
         {client_initial_window_size, 16777216},
