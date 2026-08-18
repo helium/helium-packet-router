@@ -211,9 +211,9 @@ parse_endpoint_test() ->
     ),
     ?assertEqual({<<"http">>, <<"localhost">>, <<"80">>}, parse_endpoint(<<"http://localhost">>)),
     ?assertEqual(
-        {<<"http">>, <<"localhost">>, <<"4566">>},
+        {<<"http">>, <<"localhost">>, <<"9000">>},
         parse_endpoint(
-            <<"http://localhost:4566">>
+            <<"http://localhost:9000">>
         )
     ),
     ?assertEqual(
@@ -240,14 +240,14 @@ endpoint_client_test() ->
     ?assertNot(maps:is_key(token, Client)),
     ok.
 
-%% http endpoints (localstack) keep the constructor's proto untouched.
+%% http endpoints (rustfs in CT) keep the constructor's proto untouched.
 endpoint_http_client_test() ->
     Client = client(
-        from_config(?ENDPOINT_CONFIG#{aws_endpoint => <<"http://localhost:4566">>})
+        from_config(?ENDPOINT_CONFIG#{aws_endpoint => <<"http://localhost:9000">>})
     ),
     ?assertEqual(
         aws_client:make_local_client(
-            <<"railway-key">>, <<"railway-secret">>, <<"4566">>, <<"localhost">>
+            <<"railway-key">>, <<"railway-secret">>, <<"9000">>, <<"localhost">>
         ),
         Client
     ).

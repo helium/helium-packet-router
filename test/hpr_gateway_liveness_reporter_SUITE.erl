@@ -1,9 +1,11 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% To run this SUITE:
-%% - `docker compose -f docker-compose-ct.yaml up`
-%% - HPR_TEST_S3_ENDPOINT=http://localhost:4566 ./rebar3 ct --suite=hpr_gateway_liveness_reporter_SUITE
-%% Or simply `make test-aws`, which does both.
+%% - `make test-aws`, which brings up rustfs and runs both reporter suites.
+%% Or manually: `docker compose up -d --wait` then
+%% `./rebar3 ct --suite=hpr_gateway_liveness_reporter_SUITE`.
+%% The endpoint comes from config/ct.config; CI overrides it with
+%% HPR_TEST_S3_ENDPOINT because rustfs resolves under another hostname there.
 %% @end
 %%--------------------------------------------------------------------
 -module(hpr_gateway_liveness_reporter_SUITE).
@@ -38,22 +40,24 @@ all() ->
 %% TEST CASE SETUP
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
+    ok = maybe_override_endpoint(gateway_liveness_reporter),
+    Config1 = test_utils:init_per_testcase(TestCase, Config),
+    ok = hpr_gateway_liveness_storage:delete_all(),
+    Config1.
+
+%% ct.config points at rustfs on localhost. CI runs the suites inside a
+%% container where rustfs resolves under a different hostname, so it overrides
+%% the endpoint rather than duplicating the whole reporter config.
+maybe_override_endpoint(Key) ->
     case os:getenv("HPR_TEST_S3_ENDPOINT") of
         false ->
-            {skip, no_s3_endpoint};
+            ok;
         Endpoint ->
-            ok = set_endpoint(gateway_liveness_reporter, erlang:list_to_binary(Endpoint)),
-            Config1 = test_utils:init_per_testcase(TestCase, Config),
-            ok = hpr_gateway_liveness_storage:delete_all(),
-            Config1
+            Cfg = application:get_env(hpr, Key, #{}),
+            application:set_env(hpr, Key, Cfg#{
+                aws_endpoint => erlang:list_to_binary(Endpoint)
+            })
     end.
-
-%% Point a reporter at the S3 endpoint this run was given. CI and the local
-%% docker-compose reach localstack under different hostnames, so the endpoint
-%% cannot simply be hardcoded in ct.config.
-set_endpoint(Key, Endpoint) ->
-    Cfg = application:get_env(hpr, Key, #{}),
-    application:set_env(hpr, Key, Cfg#{aws_endpoint => Endpoint}).
 
 %%--------------------------------------------------------------------
 %% TEST CASE TEARDOWN
@@ -61,35 +65,34 @@ set_endpoint(Key, Endpoint) ->
 end_per_testcase(TestCase, Config) ->
     %% Empty bucket for next test
     State = sys:get_state(hpr_gateway_liveness_reporter),
-    AWSClient = hpr_gateway_liveness_reporter:get_client(State),
-    Bucket = hpr_gateway_liveness_reporter:get_bucket(State),
+    ok = empty_bucket(
+        hpr_gateway_liveness_reporter:get_client(State),
+        hpr_gateway_liveness_reporter:get_bucket(State)
+    ),
+    ok = hpr_gateway_liveness_storage:delete_all(),
+    test_utils:end_per_testcase(TestCase, Config).
+
+%% rustfs does not implement the batch DeleteObjects API (aws_s3:delete_objects/3
+%% returns an error against it), so objects are removed one key at a time.
+empty_bucket(AWSClient, Bucket) ->
     {ok, #{<<"ListBucketResult">> := ListBucketResult}, _} = aws_s3:list_objects(
         AWSClient, Bucket
     ),
-    case maps:get(<<"Contents">>, ListBucketResult, undefined) of
-        undefined ->
-            ok;
-        Contents ->
-            Keys =
-                case erlang:is_map(Contents) of
-                    true ->
-                        [maps:get(<<"Key">>, Contents)];
-                    false ->
-                        [maps:get(<<"Key">>, Content) || Content <- Contents]
-                end,
-            {ok, _, _} = aws_s3:delete_objects(
-                AWSClient, Bucket, #{
-                    <<"Body">> => #{
-                        <<"Delete">> => [
-                            #{<<"Object">> => #{<<"Key">> => Key}}
-                         || Key <- Keys
-                        ]
-                    }
-                }
-            )
-    end,
-    ok = hpr_gateway_liveness_storage:delete_all(),
-    test_utils:end_per_testcase(TestCase, Config).
+    Keys =
+        case maps:get(<<"Contents">>, ListBucketResult, undefined) of
+            undefined ->
+                [];
+            Contents when erlang:is_map(Contents) ->
+                [maps:get(<<"Key">>, Contents)];
+            Contents ->
+                [maps:get(<<"Key">>, Content) || Content <- Contents]
+        end,
+    lists:foreach(
+        fun(Key) ->
+            {ok, _, _} = aws_s3:delete_object(AWSClient, Bucket, Key, #{})
+        end,
+        Keys
+    ).
 
 %%--------------------------------------------------------------------
 %% TEST CASES

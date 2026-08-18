@@ -24,15 +24,15 @@ test: | $(grpc_services_directory)
 	$(REBAR) dialyzer
 	$(REBAR) release
 	$(REBAR) eunit -v
+	docker compose up -d --wait;
 	$(REBAR) ct --readable=true
+	docker compose down -v
 
-# Both reporter suites skip unless HPR_TEST_S3_ENDPOINT is set; localstack's
-# edge port is 4566.
+# Reporter suites need rustfs; ct.config already points at localhost:9000.
 test-aws:
-	docker compose -f docker-compose-ct.yaml up -d;
-	HPR_TEST_S3_ENDPOINT=http://localhost:4566 \
+	docker compose up -d --wait;
 	$(REBAR) ct --readable=true --suite=hpr_packet_reporter_SUITE,hpr_gateway_liveness_reporter_SUITE;
-	docker compose -f docker-compose-ct.yaml down -v
+	docker compose down -v
 
 
 rel: | $(grpc_services_directory)
