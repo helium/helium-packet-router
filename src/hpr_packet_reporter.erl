@@ -27,7 +27,8 @@
 
 -export([
     get_bucket/1,
-    get_client/1
+    get_client/1,
+    get_current_packets/1
 ]).
 
 -endif.
@@ -39,6 +40,9 @@
 -record(state, {
     bucket :: binary(),
     bucket_region :: binary(),
+    %% Optional S3-compatible endpoint, e.g. <<"https://t3.storageapi.dev">>.
+    %% Empty means use the real AWS endpoint derived from bucket_region.
+    endpoint = <<>> :: binary(),
     report_max_size :: non_neg_integer(),
     report_interval :: non_neg_integer(),
     compressor,
@@ -51,6 +55,7 @@
 -type packet_reporter_opts() :: #{
     aws_bucket => binary(),
     aws_bucket_region => binary(),
+    aws_endpoint => binary(),
     report_interval => non_neg_integer(),
     report_max_size => non_neg_integer()
 }.
@@ -87,6 +92,12 @@ get_bucket(#state{bucket = Bucket}) ->
 get_client(State) ->
     setup_aws(State).
 
+%% Named accessor so suites do not index into #state{} positionally — adding a
+%% field silently shifts every element/2 index after it.
+-spec get_current_packets(state()) -> [iodata()].
+get_current_packets(#state{current_packets = Packets}) ->
+    Packets.
+
 -endif.
 
 %% ------------------------------------------------------------------
@@ -109,6 +120,7 @@ init(
         bucket = Bucket,
         compressor = Compressor,
         bucket_region = BucketRegion,
+        endpoint = normalize_endpoint(maps:get(aws_endpoint, Args, <<>>)),
         report_max_size = MaxSize,
         report_interval = Interval
     }}.
@@ -187,6 +199,29 @@ encode_packet(Packet, Route, false, ReceivedTime) ->
     <<PacketSize:32/big-integer-unsigned, EncodedPacket/binary>>.
 
 -spec setup_aws(state()) -> aws_client:aws_client().
+%% Explicit S3-compatible endpoint (MinIO, rustfs, Railway buckets, ...).
+%%
+%% aws_s3 keys two behaviours off `region := <<"local">>`: build_host/3 uses the
+%% `endpoint` verbatim instead of composing <bucket>.s3.<region>.<endpoint>, and
+%% build_url/4 keeps the bucket in the path instead of the host. That is exactly
+%% path-style addressing against a custom host, so the client map is built here
+%% rather than via aws_client:make_local_client/4, whose `proto` is hardcoded to
+%% http and whose port defaults to 4556.
+setup_aws(#state{endpoint = Endpoint}) when Endpoint =/= <<>> ->
+    Credentials = aws_credentials:get_credentials(),
+    {Proto, Host, Port} = parse_endpoint(Endpoint),
+    with_token(
+        #{
+            access_key_id => maps:get(access_key_id, Credentials),
+            secret_access_key => maps:get(secret_access_key, Credentials),
+            region => <<"local">>,
+            endpoint => Host,
+            proto => Proto,
+            port => Port,
+            service => undefined
+        },
+        Credentials
+    );
 setup_aws(#state{
     bucket_region = <<"local">>
 }) ->
@@ -199,12 +234,65 @@ setup_aws(#state{
 setup_aws(#state{
     bucket_region = BucketRegion
 }) ->
-    #{
-        access_key_id := AccessKey,
-        secret_access_key := Secret,
-        token := Token
-    } = aws_credentials:get_credentials(),
-    aws_client:make_temporary_client(AccessKey, Secret, Token, BucketRegion).
+    Credentials = aws_credentials:get_credentials(),
+    %% Static credentials come from aws_credentials:make_map/3, which has no
+    %% `token` key at all, so matching on `token :=` would badmatch. Only
+    %% temporary (STS) credentials carry one.
+    with_token(
+        #{
+            access_key_id => maps:get(access_key_id, Credentials),
+            secret_access_key => maps:get(secret_access_key, Credentials),
+            region => BucketRegion,
+            endpoint => <<"amazonaws.com">>,
+            proto => <<"https">>,
+            port => <<"443">>,
+            service => undefined
+        },
+        Credentials
+    ).
+
+-spec with_token(aws_client:aws_client(), map()) -> aws_client:aws_client().
+with_token(Client, Credentials) ->
+    case maps:get(token, Credentials, undefined) of
+        undefined -> Client;
+        Token -> maps:put(token, Token, Client)
+    end.
+
+%% Treat an unset endpoint as absent. relx's substitution for sys.config.src
+%% leaves `${VAR}` literal when the variable is unset in some versions, which
+%% would otherwise be taken as a real host.
+-spec normalize_endpoint(binary()) -> binary().
+normalize_endpoint(<<>>) ->
+    <<>>;
+normalize_endpoint(Endpoint) when is_binary(Endpoint) ->
+    case binary:match(Endpoint, <<"${">>) of
+        nomatch -> Endpoint;
+        _ -> <<>>
+    end.
+
+%% Split <<"https://host:port">> into {Proto, Host, Port}. The scheme is
+%% optional and defaults to https; the port defaults to 443 for https and 80
+%% for http.
+-spec parse_endpoint(binary()) -> {binary(), binary(), binary()}.
+parse_endpoint(Endpoint) ->
+    {Proto, Rest} =
+        case Endpoint of
+            <<"https://", R/binary>> -> {<<"https">>, R};
+            <<"http://", R/binary>> -> {<<"http">>, R};
+            R -> {<<"https">>, R}
+        end,
+    DefaultPort =
+        case Proto of
+            <<"https">> -> <<"443">>;
+            <<"http">> -> <<"80">>
+        end,
+    Trimmed = erlang:iolist_to_binary(string:trim(Rest, trailing, "/")),
+    {Host, Port} =
+        case binary:split(Trimmed, <<":">>) of
+            [H, P] -> {H, P};
+            [H] -> {H, DefaultPort}
+        end,
+    {Proto, Host, Port}.
 
 -spec upload(state()) -> state().
 upload(#state{current_packets = []} = State) ->

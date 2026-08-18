@@ -82,7 +82,7 @@ init([]) ->
 
     ElliConfigMetrics = [
         {callback, hpr_metrics_handler},
-        {port, 3000}
+        {port, metrics_port()}
     ],
 
     ChildSpecs = [
@@ -110,6 +110,33 @@ init([]) ->
         },
         ChildSpecs
     }}.
+
+%% Port for the Elli metrics endpoint. Accepts an integer, or a string/binary so
+%% it can come straight from a ${VAR} substitution in sys.config.src. Anything
+%% unparseable — an empty value, or a variable relx left unsubstituted — falls
+%% back to the default rather than crashing the supervisor at boot.
+-spec metrics_port() -> pos_integer().
+metrics_port() ->
+    normalize_port(application:get_env(?APP, ?METRICS_PORT, ?DEFAULT_METRICS_PORT)).
+
+-spec normalize_port(pos_integer() | string() | binary() | term()) -> pos_integer().
+normalize_port(Port) when is_integer(Port), Port > 0 ->
+    Port;
+normalize_port(Port) when is_binary(Port) ->
+    normalize_port(erlang:binary_to_list(Port));
+normalize_port(Port) when is_list(Port) ->
+    case string:to_integer(string:trim(Port)) of
+        {Int, []} when Int > 0 ->
+            Int;
+        _ ->
+            lager:warning("bad ~p ~p, defaulting to ~w", [
+                ?METRICS_PORT, Port, ?DEFAULT_METRICS_PORT
+            ]),
+            ?DEFAULT_METRICS_PORT
+    end;
+normalize_port(Port) ->
+    lager:warning("bad ~p ~p, defaulting to ~w", [?METRICS_PORT, Port, ?DEFAULT_METRICS_PORT]),
+    ?DEFAULT_METRICS_PORT.
 
 maybe_start_channel(Config, ChannelName) ->
     case Config of

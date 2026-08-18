@@ -83,7 +83,7 @@ init(
     lager:info(
         maps:to_list(Args), "started"
     ),
-    ServerName = maps:get(server_name, Args, default_server_name()),
+    ServerName = server_name(maps:get(server_name, Args, <<>>)),
     ok =
         ensure_job(?CHECKPOINT_JOB, CheckpointCron, {gen_server, cast, [?SERVER, checkpoint]}),
     ok = ensure_job(?REPORT_JOB, ReportCron, {gen_server, cast, [?SERVER, report]}),
@@ -212,6 +212,21 @@ report(#state{bucket = Bucket, server_name = ServerName} = State) ->
             end
     end.
 
+%% Name this instance reports itself as. Comes from config so deployments where
+%% the hostname is meaningless can label their reports.
+%% An empty value, or a variable relx left unsubstituted, falls back to the
+%% hostname.
+-spec server_name(binary()) -> binary().
+server_name(<<>>) ->
+    default_server_name();
+server_name(ServerName) when is_binary(ServerName) ->
+    case binary:match(ServerName, <<"${">>) of
+        nomatch ->
+            ServerName;
+        _ ->
+            default_server_name()
+    end.
+
 -spec default_server_name() -> binary().
 default_server_name() ->
     {ok, Hostname} = inet:gethostname(),
@@ -238,3 +253,21 @@ get_local_host_port(Host, Port) when is_list(Port) ->
     get_local_host_port(Host, erlang:list_to_binary(Port));
 get_local_host_port(Host, Port) when is_binary(Host) andalso is_binary(Port) ->
     {Host, Port}.
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+server_name_test() ->
+    ?assertEqual(<<"hpr-us-west-1">>, server_name(<<"hpr-us-west-1">>)),
+    ?assertEqual(default_server_name(), server_name(<<>>)),
+    ?assertEqual(
+        default_server_name(),
+        server_name(<<"${HPR_LIVENESS_REPORTER_SERVER_NAME}">>)
+    ),
+    ok.
+
+-endif.

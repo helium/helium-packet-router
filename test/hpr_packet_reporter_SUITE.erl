@@ -124,7 +124,7 @@ upload_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             State = sys:get_state(hpr_packet_reporter),
-            N == erlang:length(erlang:element(7, State))
+            N == erlang:length(hpr_packet_reporter:get_current_packets(State))
         end
     ),
 
@@ -210,7 +210,7 @@ free_net_ids_test(_Config) ->
     ok = test_utils:wait_until(
         fun() ->
             State = sys:get_state(hpr_packet_reporter),
-            N == erlang:length(erlang:element(7, State))
+            N == erlang:length(hpr_packet_reporter:get_current_packets(State))
         end
     ),
 
