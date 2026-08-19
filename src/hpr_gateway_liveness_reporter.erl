@@ -25,8 +25,7 @@
 -define(FILE_NAME, "packet_router_liveness_report").
 
 -record(state, {
-    bucket :: binary(),
-    bucket_region :: binary(),
+    aws :: hpr_s3_client:opts(),
     server_name :: binary(),
     stale_threshold :: non_neg_integer()
 }).
@@ -36,6 +35,7 @@
     #{
         aws_bucket => binary(),
         aws_bucket_region => binary(),
+        aws_endpoint => binary(),
         report_interval => binary(),
         checkpoint_interval => binary(),
         stale_threshold => non_neg_integer(),
@@ -57,12 +57,12 @@ start_link(Args) ->
 -ifdef(TEST).
 
 -spec get_bucket(state()) -> binary().
-get_bucket(#state{bucket = Bucket}) ->
-    Bucket.
+get_bucket(#state{aws = Aws}) ->
+    hpr_s3_client:bucket(Aws).
 
 -spec get_client(state()) -> aws_client:aws_client().
-get_client(State) ->
-    setup_aws(State).
+get_client(#state{aws = Aws}) ->
+    hpr_s3_client:client(Aws).
 
 -endif.
 
@@ -72,24 +72,34 @@ get_client(State) ->
 -spec init(gateway_liveness_reporter_opts()) -> {ok, state()}.
 init(
     #{
-        aws_bucket := Bucket,
-        aws_bucket_region := BucketRegion,
+        aws_bucket := _,
         report_interval := ReportCron,
         checkpoint_interval := CheckpointCron,
         stale_threshold := StaleThreshold
     } =
         Args
 ) ->
-    lager:info(
-        maps:to_list(Args), "started"
-    ),
+    %% Resolved before the log line below: a half-configured credential pair
+    %% raises here, and Args must never be logged wholesale.
+    Aws = hpr_s3_client:from_config(Args),
     ServerName = server_name(maps:get(server_name, Args, <<>>)),
+    lager:info(
+        [
+            {bucket, hpr_s3_client:bucket(Aws)},
+            {endpoint, hpr_s3_client:endpoint(Aws)},
+            {credential_source, hpr_s3_client:credential_source(Aws)},
+            {server_name, ServerName},
+            {report_interval, ReportCron},
+            {checkpoint_interval, CheckpointCron},
+            {stale_threshold, StaleThreshold}
+        ],
+        "started"
+    ),
     ok =
         ensure_job(?CHECKPOINT_JOB, CheckpointCron, {gen_server, cast, [?SERVER, checkpoint]}),
     ok = ensure_job(?REPORT_JOB, ReportCron, {gen_server, cast, [?SERVER, report]}),
     {ok, #state{
-        bucket = Bucket,
-        bucket_region = BucketRegion,
+        aws = Aws,
         server_name = ServerName,
         stale_threshold = StaleThreshold
     }}.
@@ -147,30 +157,15 @@ encode_entry(PubKeyBin, LastSeen, ServerName) ->
     ReportSize = erlang:size(EncodedReport),
     <<ReportSize:32/big-integer-unsigned, EncodedReport/binary>>.
 
--spec setup_aws(state()) -> aws_client:aws_client().
-setup_aws(#state{bucket_region = <<"local">>}) ->
-    #{access_key_id := AccessKey, secret_access_key := Secret} =
-        aws_credentials:get_credentials(),
-    {LocalHost, LocalPort} = get_local_host_port(),
-    aws_client:make_local_client(AccessKey, Secret, LocalPort, LocalHost);
-setup_aws(#state{bucket_region = BucketRegion}) ->
-    #{
-        access_key_id := AccessKey,
-        secret_access_key := Secret,
-        token := Token
-    } =
-        aws_credentials:get_credentials(),
-    aws_client:make_temporary_client(AccessKey, Secret, Token, BucketRegion).
-
 -spec report(state()) -> ok.
-report(#state{bucket = Bucket, server_name = ServerName} = State) ->
+report(#state{aws = Aws, server_name = ServerName}) ->
+    Bucket = hpr_s3_client:bucket(Aws),
     case hpr_gateway_liveness_storage:all() of
         [] ->
             lager:info("nothing to report"),
             ok;
         Entries ->
             StartTime = erlang:system_time(millisecond),
-            AWSClient = setup_aws(State),
 
             EncodedEntries =
                 [encode_entry(PubKeyBin, LastSeen, ServerName) || {PubKeyBin, LastSeen} <- Entries],
@@ -192,9 +187,12 @@ report(#state{bucket = Bucket, server_name = ServerName} = State) ->
                 {gzip_bytes, erlang:byte_size(Body)}
             ],
             lager:info(MD, "uploading report"),
-            case
+            %% Building the client can raise (missing or half-configured
+            %% credentials); without the catch those failures would bypass the
+            %% error metric entirely and show up only as a daily log line.
+            try
                 aws_s3:put_object(
-                    AWSClient,
+                    hpr_s3_client:client(Aws),
                     Bucket,
                     FileName,
                     #{
@@ -208,6 +206,10 @@ report(#state{bucket = Bucket, server_name = ServerName} = State) ->
                     ok = hpr_metrics:observe_liveness_report(ok, StartTime);
                 _Error ->
                     lager:error(MD, "upload failed ~p", [_Error]),
+                    ok = hpr_metrics:observe_liveness_report(error, StartTime)
+            catch
+                Class:Reason ->
+                    lager:error(MD, "upload crashed ~p:~p", [Class, Reason]),
                     ok = hpr_metrics:observe_liveness_report(error, StartTime)
             end
     end.
@@ -231,28 +233,6 @@ server_name(ServerName) when is_binary(ServerName) ->
 default_server_name() ->
     {ok, Hostname} = inet:gethostname(),
     erlang:list_to_binary(Hostname).
-
--spec get_local_host_port() -> {binary(), binary()}.
-get_local_host_port() ->
-    get_local_host_port(
-        os:getenv("HPR_LIVENESS_REPORTER_LOCAL_HOST", []),
-        os:getenv("HPR_LIVENESS_REPORTER_LOCAL_PORT", [])
-    ).
-
--spec get_local_host_port(Host :: string() | binary(), Port :: string() | binary()) ->
-    {binary(), binary()}.
-get_local_host_port([], []) ->
-    {<<"localhost">>, <<"4556">>};
-get_local_host_port([], Port) ->
-    get_local_host_port(<<"localhost">>, Port);
-get_local_host_port(Host, []) ->
-    get_local_host_port(Host, <<"4556">>);
-get_local_host_port(Host, Port) when is_list(Host) ->
-    get_local_host_port(erlang:list_to_binary(Host), Port);
-get_local_host_port(Host, Port) when is_list(Port) ->
-    get_local_host_port(Host, erlang:list_to_binary(Port));
-get_local_host_port(Host, Port) when is_binary(Host) andalso is_binary(Port) ->
-    {Host, Port}.
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests

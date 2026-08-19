@@ -24,12 +24,15 @@ test: | $(grpc_services_directory)
 	$(REBAR) dialyzer
 	$(REBAR) release
 	$(REBAR) eunit -v
+	docker compose up -d --wait;
 	$(REBAR) ct --readable=true
+	docker compose down -v
 
+# Reporter suites need rustfs; ct.config already points at localhost:9000.
 test-aws:
-	docker compose -f docker-compose-ct.yaml up -d;
-	HPR_PACKET_REPORTER_LOCAL_HOST=localhost $(REBAR) ct --readable=true --suite=hpr_packet_reporter_SUITE;
-	docker compose -f docker-compose-ct.yaml down
+	docker compose up -d --wait;
+	$(REBAR) ct --readable=true --suite=hpr_packet_reporter_SUITE,hpr_gateway_liveness_reporter_SUITE;
+	docker compose down -v
 
 
 rel: | $(grpc_services_directory)
