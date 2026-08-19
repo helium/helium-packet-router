@@ -57,6 +57,12 @@ maybe_override_endpoint(Key) ->
         false ->
             ok;
         Endpoint ->
+            %% Load before reading: until hpr is loaded its env is empty, so
+            %% get_env/3 would hand back the default and the merge below would
+            %% drop bucket and credentials. Worse, starting the app then loads
+            %% it and overwrites whatever was set here with ct.config, silently
+            %% ignoring the override on the first test case of a run.
+            _ = application:load(hpr),
             Cfg = application:get_env(hpr, Key, #{}),
             application:set_env(hpr, Key, Cfg#{
                 aws_endpoint => erlang:list_to_binary(Endpoint)

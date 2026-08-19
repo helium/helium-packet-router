@@ -27,6 +27,7 @@
     from_config/1,
     client/1,
     bucket/1,
+    endpoint/1,
     credential_source/1
 ]).
 
@@ -90,6 +91,14 @@ client(#{target := {aws, Region}, bucket := Bucket}) ->
 -spec bucket(opts()) -> binary().
 bucket(#{bucket := Bucket}) ->
     Bucket.
+
+%% @doc Where this reporter uploads, for logging. `aws' means real S3 in that
+%% region; anything else is the S3-compatible endpoint it was pointed at.
+-spec endpoint(opts()) -> binary().
+endpoint(#{target := {endpoint, Proto, Host, Port, _, _}}) ->
+    <<Proto/binary, "://", Host/binary, ":", Port/binary>>;
+endpoint(#{target := {aws, Region}}) ->
+    <<"aws:", Region/binary>>.
 
 %% @doc Logged at startup so the migration onto per-bucket credentials is
 %% greppable without waiting for an upload.

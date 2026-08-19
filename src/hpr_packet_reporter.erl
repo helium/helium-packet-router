@@ -101,6 +101,7 @@ init(
     lager:info(
         [
             {bucket, hpr_s3_client:bucket(Aws)},
+            {endpoint, hpr_s3_client:endpoint(Aws)},
             {credential_source, hpr_s3_client:credential_source(Aws)},
             {report_interval, Interval},
             {report_max_size, MaxSize}
