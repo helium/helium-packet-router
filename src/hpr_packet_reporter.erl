@@ -36,7 +36,7 @@
 -type packet_reporter_opts() ::
     #{
         aws_bucket => binary(),
-        aws_region => binary(),
+        aws_bucket_region => binary(),
         aws_endpoint => binary(),
         report_interval => non_neg_integer(),
         report_max_size => non_neg_integer()

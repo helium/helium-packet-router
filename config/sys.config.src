@@ -12,10 +12,10 @@
             aws_bucket => <<"${HPR_PACKET_REPORTER_AWS_BUCKET}">>,
             %% Set aws_endpoint for an S3-compatible provider, e.g.
             %% <<"https://t3.storageapi.dev">>; the key/secret below are then
-            %% required. Leave it empty for real AWS S3 in aws_region, with
+            %% required. Leave it empty for real AWS S3 in aws_bucket_region, with
             %% credentials from the aws_credentials provider chain.
             aws_endpoint => <<"${HPR_PACKET_REPORTER_AWS_ENDPOINT}">>,
-            aws_region => <<"${HPR_PACKET_REPORTER_AWS_REGION}">>,
+            aws_bucket_region => <<"${HPR_PACKET_REPORTER_AWS_BUCKET_REGION}">>,
             aws_access_key_id => <<"${HPR_PACKET_REPORTER_AWS_KEY}">>,
             aws_secret_access_key => <<"${HPR_PACKET_REPORTER_AWS_SECRET}">>,
             report_interval => 300_000,
@@ -25,7 +25,7 @@
             aws_bucket => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET}">>,
             %% See packet_reporter above for the endpoint / region rule.
             aws_endpoint => <<"${HPR_LIVENESS_REPORTER_AWS_ENDPOINT}">>,
-            aws_region => <<"${HPR_LIVENESS_REPORTER_AWS_REGION}">>,
+            aws_bucket_region => <<"${HPR_LIVENESS_REPORTER_AWS_BUCKET_REGION}">>,
             aws_access_key_id => <<"${HPR_LIVENESS_REPORTER_AWS_KEY}">>,
             aws_secret_access_key => <<"${HPR_LIVENESS_REPORTER_AWS_SECRET}">>,
             %% Name this instance reports itself as. Leave empty to use the

@@ -10,7 +10,7 @@
 %%
 %%   `aws_endpoint' set  -> talk to that endpoint using this reporter's own
 %%                          `aws_access_key_id' / `aws_secret_access_key'.
-%%   `aws_endpoint' unset -> real AWS S3 in `aws_region', credentials from
+%%   `aws_endpoint' unset -> real AWS S3 in `aws_bucket_region', credentials from
 %%                          `aws_credentials:get_credentials/0'.
 %%
 %% Clients come from the `aws_client' constructors rather than hand-built maps
@@ -41,7 +41,7 @@
 
 -type config() :: #{
     aws_bucket := binary(),
-    aws_region => binary(),
+    aws_bucket_region => binary(),
     aws_endpoint => binary(),
     aws_access_key_id => binary(),
     aws_secret_access_key => binary(),
@@ -114,7 +114,7 @@ credential_source(#{target := {aws, _}}) -> provider.
 target(Config) ->
     case normalize(maps:get(aws_endpoint, Config, undefined)) of
         undefined ->
-            {aws, required(aws_region, Config)};
+            {aws, required(aws_bucket_region, Config)};
         Endpoint ->
             {Proto, Host, Port} = parse_endpoint(Endpoint),
             {endpoint, Proto, Host, Port, required(aws_access_key_id, Config),
@@ -283,12 +283,12 @@ endpoint_requires_credentials_test() ->
 
 no_endpoint_requires_region_test() ->
     ?assertError(
-        {missing_s3_config, aws_region},
+        {missing_s3_config, aws_bucket_region},
         from_config(#{aws_bucket => <<"b">>})
     ),
     %% an unsubstituted endpoint is absent, not a host
     ?assertError(
-        {missing_s3_config, aws_region},
+        {missing_s3_config, aws_bucket_region},
         from_config(#{aws_bucket => <<"b">>, aws_endpoint => <<"${UNSET}">>})
     ),
     ok.
@@ -303,7 +303,7 @@ with_mocked_credentials(Credentials, Fun) ->
     end.
 
 aws_opts() ->
-    from_config(#{aws_bucket => <<"test-bucket">>, aws_region => <<"us-west-2">>}).
+    from_config(#{aws_bucket => <<"test-bucket">>, aws_bucket_region => <<"us-west-2">>}).
 
 %% Static (env/file) credentials have no `token' key at all. Matching on
 %% `token :=' here is what used to crash the liveness reporter every report.

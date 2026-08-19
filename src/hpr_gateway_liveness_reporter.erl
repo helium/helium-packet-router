@@ -34,7 +34,7 @@
 -type gateway_liveness_reporter_opts() ::
     #{
         aws_bucket => binary(),
-        aws_region => binary(),
+        aws_bucket_region => binary(),
         aws_endpoint => binary(),
         report_interval => binary(),
         checkpoint_interval => binary(),
