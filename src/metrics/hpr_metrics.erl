@@ -18,9 +18,7 @@
     observe_find_routes/1,
     observe_grpc_connection/2,
     ics_update/2,
-    observe_gateway_location/2,
-    devaddr_cache_hit/0,
-    devaddr_cache_miss/0
+    observe_gateway_location/2
 ]).
 
 -export([
@@ -175,16 +173,6 @@ observe_gateway_location(Start, Status) ->
         erlang:system_time(millisecond) - Start
     ).
 
--spec devaddr_cache_hit() -> ok.
-devaddr_cache_hit() ->
-    _ = prometheus_counter:inc(?METRICS_DEVADDR_CACHE_HIT_COUNTER, []),
-    ok.
-
--spec devaddr_cache_miss() -> ok.
-devaddr_cache_miss() ->
-    _ = prometheus_counter:inc(?METRICS_DEVADDR_CACHE_MISS_COUNTER, []),
-    ok.
-
 %% ------------------------------------------------------------------
 %% CLI Function Definitions
 %% ------------------------------------------------------------------
@@ -287,13 +275,7 @@ declare_metrics() ->
 
 -spec record_routes() -> ok.
 record_routes() ->
-    RouteIDsWithDevAddr =
-        hpr_devaddr_range_storage:foldl(
-            fun({_, RouteID}, Acc) ->
-                sets:add_element(RouteID, Acc)
-            end,
-            sets:new()
-        ),
+    RouteIDsWithDevAddr = hpr_devaddr_range_storage:route_ids(),
     {RoutesCount, SKFsCount, BrokenMap} = hpr_route_storage:foldl(
         fun(RouteETS, {RoutesCount, SKFsCount, BrokenMap}) ->
             SKFCount =

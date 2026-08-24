@@ -32,6 +32,11 @@
 
 -endif.
 
+%% lager's own DEBUG mask, from lager.hrl. Duplicated rather than including
+%% lager's header: this is the literal the lager parse transform bakes into every
+%% lager:debug/N call site, so it is fixed for a pinned lager.
+-define(LAGER_DEBUG_MASK, 128).
+
 -define(JOIN_REQUEST, 2#000).
 -define(UNCONFIRMED_UP, 2#010).
 -define(CONFIRMED_UP, 2#100).
@@ -193,16 +198,34 @@ md(PacketUp) ->
 -spec md(PacketUp :: packet(), Opts :: map()) -> ok.
 md(PacketUp, Opts) ->
     PacketGateway = ?MODULE:gateway(PacketUp),
-    PacketGatewayName = hpr_utils:gateway_name(PacketGateway),
+    StreamGateway = maps:get(gateway, Opts, undefined),
+    StreamGatewayName = gateway_name(StreamGateway, Opts),
+    %% The two are the same gateway on every packet we go on to route --
+    %% hpr_routing:gateway_check/2 drops the packet otherwise -- so reuse the name
+    %% the stream process already resolved instead of encoding it a second time.
+    PacketGatewayName =
+        case PacketGateway =:= StreamGateway of
+            true -> StreamGatewayName;
+            false -> hpr_utils:gateway_name(PacketGateway)
+        end,
+    PHash = hpr_utils:bin_to_hex_string(
+        case maps:get(phash, Opts, undefined) of
+            undefined -> ?MODULE:phash(PacketUp);
+            Hash -> Hash
+        end
+    ),
     SessionKey =
         case maps:get(session_key, Opts, undefined) of
-            undefined -> "undefined";
-            K -> libp2p_crypto:bin_to_b58(K)
-        end,
-    StreamGatewayName =
-        case maps:get(gateway, Opts, undefined) of
-            undefined -> "undefined";
-            G -> hpr_utils:gateway_name(G)
+            undefined ->
+                "undefined";
+            K ->
+                %% base58check is ~10us measured and nothing reads this field
+                %% except a human in a debug line, so only pay for it when
+                %% something is actually listening.
+                case verbose_md() of
+                    true -> libp2p_crypto:bin_to_b58(K);
+                    false -> "elided"
+                end
         end,
     StreamPid =
         case maps:get(stream_pid, Opts, undefined) of
@@ -222,7 +245,7 @@ md(PacketUp, Opts) ->
                 {packet_gateway, PacketGatewayName},
                 {session_key, SessionKey},
                 {packet_type, FType},
-                {phash, hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp))}
+                {phash, PHash}
             ]);
         {join_req, {AppEUI, DevEUI}} ->
             lager:md([
@@ -235,7 +258,7 @@ md(PacketUp, Opts) ->
                 {app_eui_int, AppEUI},
                 {dev_eui_int, DevEUI},
                 {packet_type, join_req},
-                {phash, hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp))}
+                {phash, PHash}
             ]);
         {uplink, {Type, DevAddr}} ->
             lager:md([
@@ -247,8 +270,34 @@ md(PacketUp, Opts) ->
                 %% TODO: Add net id (warning they might not have one)
                 {devaddr_int, DevAddr},
                 {packet_type, Type},
-                {phash, hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp))}
+                {phash, PHash}
             ])
+    end.
+
+%% ------------------------------------------------------------------
+%% Internal Function Definitions
+%% ------------------------------------------------------------------
+
+-spec gateway_name(Gateway :: undefined | binary(), Opts :: map()) -> string().
+gateway_name(undefined, _Opts) ->
+    "undefined";
+gateway_name(Gateway, Opts) ->
+    case maps:get(gateway_name, Opts, undefined) of
+        undefined -> hpr_utils:gateway_name(Gateway);
+        Name -> Name
+    end.
+
+%% Is anything going to read debug-level metadata? This is the same condition
+%% lager's parse transform wraps every lager:debug/N call in: debug enabled on the
+%% default sink, or any trace installed. Checking traces matters -- hpr_utils:trace/2
+%% installs one and filters on the metadata keys built here, so a trace must still
+%% see complete metadata. lager_config:lookup/2 is a guarded persistent_term read,
+%% so this is cheap and safe before lager has started (it returns the default).
+-spec verbose_md() -> boolean().
+verbose_md() ->
+    case lager_config:get({lager_event, loglevel}, {0, []}) of
+        {_Level, Traces} when Traces =/= [] -> true;
+        {Level, _Traces} -> (Level band ?LAGER_DEBUG_MASK) =/= 0
     end.
 
 %% ------------------------------------------------------------------
@@ -288,6 +337,104 @@ sign(Packet, SigFun) ->
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
+
+md_test_() ->
+    {foreach, fun() -> ok end, fun(ok) -> lager:md([]) end, [
+        {"reuses the gateway name the stream resolved", ?_test(md_reuses_cached_gateway_name())},
+        {"resolves the name itself when the gateways differ",
+            ?_test(md_resolves_name_when_gateways_differ())},
+        {"uses the phash handed to it", ?_test(md_uses_opts_phash())},
+        {"elides the session key when nothing is listening", ?_test(md_elides_session_key())},
+        {"keeps the session key while a trace is installed",
+            ?_test(md_keeps_session_key_under_trace())}
+    ]}.
+
+md_test_gateway() ->
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    libp2p_crypto:pubkey_to_bin(PubKey).
+
+md_reuses_cached_gateway_name() ->
+    Gateway = md_test_gateway(),
+    PacketUp = ?MODULE:test_new(#{gateway => Gateway}),
+    %% A sentinel the real encoder would never produce, so this proves the cached
+    %% value is used rather than recomputed.
+    ok = ?MODULE:md(PacketUp, #{
+        gateway => Gateway, gateway_name => "cached-name", stream_pid => self()
+    }),
+    MD = lager:md(),
+    ?assertEqual("cached-name", proplists:get_value(stream_gateway, MD)),
+    %% Same gateway, so the packet_gateway field reuses it too.
+    ?assertEqual("cached-name", proplists:get_value(packet_gateway, MD)),
+    ok.
+
+md_resolves_name_when_gateways_differ() ->
+    PacketGateway = md_test_gateway(),
+    StreamGateway = md_test_gateway(),
+    PacketUp = ?MODULE:test_new(#{gateway => PacketGateway}),
+    ok = ?MODULE:md(PacketUp, #{
+        gateway => StreamGateway, gateway_name => "cached-name", stream_pid => self()
+    }),
+    MD = lager:md(),
+    ?assertEqual("cached-name", proplists:get_value(stream_gateway, MD)),
+    %% Must not borrow the stream's name for a different gateway.
+    ?assertEqual(
+        hpr_utils:gateway_name(PacketGateway), proplists:get_value(packet_gateway, MD)
+    ),
+    ok.
+
+md_uses_opts_phash() ->
+    Gateway = md_test_gateway(),
+    PacketUp = ?MODULE:test_new(#{gateway => Gateway}),
+    Handed = crypto:hash(sha256, <<"something else">>),
+    ok = ?MODULE:md(PacketUp, #{gateway => Gateway, phash => Handed, stream_pid => self()}),
+    ?assertEqual(
+        hpr_utils:bin_to_hex_string(Handed), proplists:get_value(phash, lager:md())
+    ),
+    %% Falls back to hashing the payload when it is not handed one.
+    ok = ?MODULE:md(PacketUp, #{gateway => Gateway, stream_pid => self()}),
+    ?assertEqual(
+        hpr_utils:bin_to_hex_string(?MODULE:phash(PacketUp)),
+        proplists:get_value(phash, lager:md())
+    ),
+    ok.
+
+md_elides_session_key() ->
+    Gateway = md_test_gateway(),
+    #{public := SessionPubKey} = libp2p_crypto:generate_keys(ed25519),
+    SessionKey = libp2p_crypto:pubkey_to_bin(SessionPubKey),
+    PacketUp = ?MODULE:test_new(#{gateway => Gateway}),
+    %% lager is not running, so lager_config returns the default: not verbose.
+    ok = ?MODULE:md(PacketUp, #{
+        gateway => Gateway, session_key => SessionKey, stream_pid => self()
+    }),
+    ?assertEqual("elided", proplists:get_value(session_key, lager:md())),
+    ok.
+
+md_keeps_session_key_under_trace() ->
+    Gateway = md_test_gateway(),
+    #{public := SessionPubKey} = libp2p_crypto:generate_keys(ed25519),
+    SessionKey = libp2p_crypto:pubkey_to_bin(SessionPubKey),
+    PacketUp = ?MODULE:test_new(#{gateway => Gateway}),
+    {ok, _} = application:ensure_all_started(lager),
+    try
+        %% hpr_utils:trace/2 installs a lager trace and filters on the very
+        %% metadata built here, so an installed trace must get the full value.
+        {ok, Trace} = lager:trace_console([{module, ?MODULE}]),
+        try
+            ok = ?MODULE:md(PacketUp, #{
+                gateway => Gateway, session_key => SessionKey, stream_pid => self()
+            }),
+            ?assertEqual(
+                libp2p_crypto:bin_to_b58(SessionKey),
+                proplists:get_value(session_key, lager:md())
+            )
+        after
+            lager:stop_trace(Trace)
+        end
+    after
+        application:stop(lager)
+    end,
+    ok.
 
 payload_test() ->
     PacketUp = ?MODULE:test_new(#{payload => <<"payload">>}),

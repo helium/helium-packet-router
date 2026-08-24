@@ -180,7 +180,7 @@ session_timeout_test(_Config) ->
     {ok, Pid} = hpr_packet_router_service:locate(PubKeyBin),
 
     %% Checking that session keys are the same
-    ?assertEqual(SessionKey, session_key_from_stream(Pid)),
+    ?assertEqual(SessionKey, hpr_packet_router_service:test_session_key(Pid)),
     Pid ! session_kill,
 
     ok = hpr_test_gateway:receive_stream_down(GatewayPid),
@@ -190,10 +190,3 @@ session_timeout_test(_Config) ->
 %% ===================================================================
 %% Helpers
 %% ===================================================================
-
-session_key_from_stream(Pid) ->
-    State = sys:get_state(Pid),
-    StreamState = erlang:element(2, State),
-    CallbackState = erlang:element(20, StreamState),
-    HandlerState = erlang:element(3, CallbackState),
-    erlang:element(5, HandlerState).

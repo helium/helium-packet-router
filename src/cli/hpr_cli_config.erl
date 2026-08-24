@@ -74,8 +74,8 @@ config_usage() ->
             "config eui --app <app_eui> --dev <dev_eui>  - List all Routes with EUI pair\n"
             "\n\n",
             "config counts                       - Simple Counts of Configuration\n",
-            "config cache clear                  - Clear DevAddr lookup cache\n",
-            "config cache stats                  - Show DevAddr cache statistics\n",
+            "config index rebuild                - Rebuild the DevAddr lookup index\n",
+            "config index stats                  - Show DevAddr lookup index statistics\n",
             "config checkpoint next              - Time until next writing of configuration to disk\n"
             "config checkpoint write             - Write current configuration to disk\n",
             "config reset checkpoint [--commit]  - Set checkpoint timestamp to beginning of time (0)\n",
@@ -184,8 +184,8 @@ config_cmd() ->
             fun config_eui/3
         ],
         [["config", "counts"], [], [], fun config_counts/3],
-        [["config", "cache", "clear"], [], [], fun config_cache_clear/3],
-        [["config", "cache", "stats"], [], [], fun config_cache_stats/3],
+        [["config", "index", "rebuild"], [], [], fun config_index_rebuild/3],
+        [["config", "index", "stats"], [], [], fun config_index_stats/3],
         [["config", "checkpoint", "next"], [], [], fun config_checkpoint_next/3],
         [["config", "checkpoint", "write"], [], [], fun config_checkpoint_write/3],
         [
@@ -392,13 +392,7 @@ config_route_refresh_all(_, _, _) ->
 
 config_route_refresh_broken(["config", "route", "refresh_broken"], [], _Flags) ->
     Pid = erlang:spawn(fun() ->
-        RouteIDsWithDevAddr =
-            hpr_devaddr_range_storage:foldl(
-                fun({_, RouteID}, Acc) ->
-                    sets:add_element(RouteID, Acc)
-                end,
-                sets:new()
-            ),
+        RouteIDsWithDevAddr = hpr_devaddr_range_storage:route_ids(),
         RouteIDs = hpr_route_storage:foldl(
             fun(RouteETS, RouteIDs) ->
                 SKFCount =
@@ -761,20 +755,33 @@ config_counts(["config", "counts"], [], []) ->
 config_counts(_, _, _) ->
     usage.
 
-config_cache_clear(["config", "cache", "clear"], [], []) ->
-    ok = hpr_devaddr_range_storage:clear_cache(),
-    c_text("DevAddr cache cleared");
-config_cache_clear(_, _, _) ->
+%% Replaces "config cache clear"/"config cache stats". The per-DevAddr result
+%% cache is gone -- lookups now go through a bucketed index derived from the
+%% range table, so there is nothing to invalidate, only a derived structure to
+%% rebuild or inspect.
+config_index_rebuild(["config", "index", "rebuild"], [], []) ->
+    case timer:tc(fun() -> hpr_devaddr_range_storage:rebuild_index() end) of
+        {Time0, Ranges} ->
+            Time = erlang:convert_time_unit(Time0, microsecond, millisecond),
+            c_text("Reindexed ~w devaddr ranges in ~wms", [Ranges, Time])
+    end;
+config_index_rebuild(_, _, _) ->
     usage.
 
-config_cache_stats(["config", "cache", "stats"], [], []) ->
-    CacheSize = hpr_devaddr_range_storage:cache_size(),
+config_index_stats(["config", "index", "stats"], [], []) ->
+    #{
+        ranges := Ranges,
+        index_rows := IndexRows,
+        wide_ranges := WideRanges
+    } = hpr_devaddr_range_storage:index_stats(),
     c_table([
         [
-            {" Cache Entries ", CacheSize}
+            {" DevAddr Ranges ", Ranges},
+            {" Index Rows ", IndexRows},
+            {" Wide Ranges ", WideRanges}
         ]
     ]);
-config_cache_stats(_, _, _) ->
+config_index_stats(_, _, _) ->
     usage.
 
 config_checkpoint_next(["config", "checkpoint", "next"], [], []) ->
