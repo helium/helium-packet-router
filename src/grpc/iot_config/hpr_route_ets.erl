@@ -130,8 +130,6 @@ foreach_setup() ->
     ok = application:set_env(hpr, data_dir, BaseDirPath),
     true = hpr_skf_storage:test_register_heir(),
     meck:new(hpr_metrics, [passthrough]),
-    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
-    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
     ?MODULE:init(),
     ok.
 

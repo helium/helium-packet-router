@@ -521,16 +521,16 @@ foreach_setup() ->
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> {error, not_implemented} end),
     meck:new(hpr_metrics, [passthrough]),
-    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
-    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
     ok.
 
 foreach_cleanup(ok) ->
     true = ets:delete(hpr_multi_buy_ets),
     true = ets:delete(hpr_multi_buy_backoff_ets),
-    true = ets:delete(hpr_route_devaddr_ranges_ets),
-    true = ets:delete(hpr_devaddr_cache_ets),
-    true = ets:delete(hpr_route_eui_pairs_ets),
+    %% Via the owning modules rather than by table name: hpr_devaddr_range_storage
+    %% also owns the derived lookup index, and naming its tables here just means
+    %% this cleanup silently rots the next time one is added.
+    ok = hpr_devaddr_range_storage:test_delete_ets(),
+    ok = hpr_eui_pair_storage:test_delete_ets(),
     true = ets:delete(hpr_device_stats_ets),
     true = ets:delete(hpr_netid_stats_ets),
     lists:foreach(
