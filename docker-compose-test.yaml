@@ -1,0 +1,176 @@
+# Runs the whole test suite in containers, one per check, against a real rustfs.
+#
+#   docker compose -f docker-compose-test.yaml up --build
+#
+# Every check runs the Dockerfile's `builder` stage, so they share the dependency
+# tree and grpc autogen already built there instead of each rebuilding it. They
+# all declare the same build/image, so it is built once and reused.
+#
+# rustfs ports are deliberately NOT published and no container_name is set, so
+# this file can run alongside docker-compose.yaml without fighting it for port
+# 9000. The checks reach rustfs over the compose network instead.
+#
+# Checks run concurrently and each exits with its own status; `up` prints them as
+# containers stop. Add --abort-on-container-failure to stop the rest on the first
+# failure, or --exit-code-from ct to propagate a single one to your shell.
+
+name: hpr-test
+
+x-check: &check
+  build:
+    context: .
+    target: builder
+  image: hpr:test
+  restart: "no"
+  working_dir: /opt/hpr
+  environment:
+    # These targets rebuild the test profile's deps, which recompiles enacl's
+    # NIF -- see the Makefile header. `make` exports this itself; it is repeated
+    # here so the container is correct even if a command bypasses make.
+    CFLAGS: -Wno-error=incompatible-pointer-types
+
+x-ct: &ct
+  <<: *check
+  depends_on:
+    rustfs-init:
+      condition: service_completed_successfully
+  # Replaces the anchor's environment wholesale, so CFLAGS is repeated.
+  environment:
+    CFLAGS: -Wno-error=incompatible-pointer-types
+    # config/ct.config points at localhost:9000 for a developer running CT on
+    # the host. In here rustfs is a sibling container, so the suites pick this
+    # up instead -- same override CI uses.
+    HPR_TEST_S3_ENDPOINT: http://rustfs:9000
+    AWS_ACCESS_KEY_ID: admin
+    AWS_SECRET_ACCESS_KEY: admin
+    AWS_DEFAULT_REGION: us-east-1
+
+services:
+  xref:
+    <<: *check
+    command: make xref
+
+  eunit:
+    <<: *check
+    command: make eunit
+
+  dialyzer:
+    <<: *check
+    # Dialyzer's base PLT covers all of OTP and takes several minutes to build
+    # from scratch. rebar3 keeps it under $HOME/.cache/rebar3, so persisting that
+    # directory turns every run after the first into a short one.
+    volumes:
+      - dialyzer_cache:/root/.cache/rebar3
+    command: make dialyzer
+
+  # One container per suite. Suites are independent -- each gets its own
+  # container, so the grpc servers CT starts on 8080/8085/8086/8087 and its
+  # data_dir never collide.
+  #
+  # The two reporter suites are the exception and share this one container.
+  # Both write to test-bucket and both assert it is empty and empty it during
+  # cleanup, so running them concurrently against one rustfs would have them
+  # deleting each other's objects. They are cheap; keeping them sequential is
+  # cheaper than standing up a second isolated rustfs.
+  ct-reporters:
+    <<: *ct
+    command: make ct SUITE=hpr_packet_reporter_SUITE,hpr_gateway_liveness_reporter_SUITE
+
+  ct-cli-config:
+    <<: *ct
+    command: make ct SUITE=hpr_cli_config_SUITE
+
+  ct-gateway-location:
+    <<: *ct
+    command: make ct SUITE=hpr_gateway_location_SUITE
+
+  ct-grpc-load:
+    <<: *ct
+    command: make ct SUITE=hpr_grpc_load_SUITE
+
+  ct-metrics:
+    <<: *ct
+    command: make ct SUITE=hpr_metrics_SUITE
+
+  ct-packet-router-service:
+    <<: *ct
+    command: make ct SUITE=hpr_packet_router_service_SUITE
+
+  ct-protocol-gwmp:
+    <<: *ct
+    command: make ct SUITE=hpr_protocol_gwmp_SUITE
+
+  ct-protocol-http-roaming:
+    <<: *ct
+    command: make ct SUITE=hpr_protocol_http_roaming_packet_SUITE
+
+  ct-protocol-router:
+    <<: *ct
+    command: make ct SUITE=hpr_protocol_router_SUITE
+
+  ct-route-stream-worker:
+    <<: *ct
+    command: make ct SUITE=hpr_route_stream_worker_SUITE
+
+  ct-routing:
+    <<: *ct
+    command: make ct SUITE=hpr_routing_SUITE
+
+  ct-sup:
+    <<: *ct
+    command: make ct SUITE=hpr_sup_SUITE
+
+  # Single pass/fail line for the plain `up` path. Only starts once all four
+  # checks have exited 0; if any fails, compose reports the unmet dependency
+  # instead, which is the signal you want.
+  results:
+    image: alpine
+    restart: "no"
+    depends_on:
+      xref: {condition: service_completed_successfully}
+      eunit: {condition: service_completed_successfully}
+      dialyzer: {condition: service_completed_successfully}
+      ct-reporters: {condition: service_completed_successfully}
+      ct-cli-config: {condition: service_completed_successfully}
+      ct-gateway-location: {condition: service_completed_successfully}
+      ct-grpc-load: {condition: service_completed_successfully}
+      ct-metrics: {condition: service_completed_successfully}
+      ct-packet-router-service: {condition: service_completed_successfully}
+      ct-protocol-gwmp: {condition: service_completed_successfully}
+      ct-protocol-http-roaming: {condition: service_completed_successfully}
+      ct-protocol-router: {condition: service_completed_successfully}
+      ct-route-stream-worker: {condition: service_completed_successfully}
+      ct-routing: {condition: service_completed_successfully}
+      ct-sup: {condition: service_completed_successfully}
+    command: echo "ALL CHECKS PASSED"
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0-alpha.90
+    restart: "no"
+    environment:
+      - RUSTFS_ACCESS_KEY=admin
+      - RUSTFS_SECRET_KEY=admin
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  # Creates the bucket both reporter suites write to, then exits. `ct` waits on
+  # it completing rather than on rustfs merely being healthy.
+  rustfs-init:
+    image: amazon/aws-cli:2.34.18
+    restart: "no"
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=admin
+    volumes:
+      - ./infra/rustfs/init.sh:/init.sh:ro
+    entrypoint: ["/init.sh"]
+
+volumes:
+  dialyzer_cache:
