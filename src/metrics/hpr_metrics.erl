@@ -275,13 +275,7 @@ declare_metrics() ->
 
 -spec record_routes() -> ok.
 record_routes() ->
-    RouteIDsWithDevAddr =
-        hpr_devaddr_range_storage:foldl(
-            fun({_, RouteID}, Acc) ->
-                sets:add_element(RouteID, Acc)
-            end,
-            sets:new()
-        ),
+    RouteIDsWithDevAddr = hpr_devaddr_range_storage:route_ids(),
     {RoutesCount, SKFsCount, BrokenMap} = hpr_route_storage:foldl(
         fun(RouteETS, {RoutesCount, SKFsCount, BrokenMap}) ->
             SKFCount =

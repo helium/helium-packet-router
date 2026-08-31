@@ -392,13 +392,7 @@ config_route_refresh_all(_, _, _) ->
 
 config_route_refresh_broken(["config", "route", "refresh_broken"], [], _Flags) ->
     Pid = erlang:spawn(fun() ->
-        RouteIDsWithDevAddr =
-            hpr_devaddr_range_storage:foldl(
-                fun({_, RouteID}, Acc) ->
-                    sets:add_element(RouteID, Acc)
-                end,
-                sets:new()
-            ),
+        RouteIDsWithDevAddr = hpr_devaddr_range_storage:route_ids(),
         RouteIDs = hpr_route_storage:foldl(
             fun(RouteETS, RouteIDs) ->
                 SKFCount =

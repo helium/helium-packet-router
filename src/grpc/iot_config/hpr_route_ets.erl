@@ -639,11 +639,14 @@ test_delete_route() ->
 
     ?assertEqual(ok, hpr_route_storage:delete(Route1)),
 
+    %% Both tables store route ids as binaries to keep 36-char UUID char lists
+    %% out of millions of rows; the module APIs still take and return strings.
+    StoredRouteID2 = erlang:list_to_binary(RouteID2),
     ?assertEqual(
-        [{{AppEUI2, DevEUI2}, RouteID2}], ets:tab2list(hpr_eui_pair_storage:test_tab_name())
+        [{{AppEUI2, DevEUI2}, StoredRouteID2}], ets:tab2list(hpr_eui_pair_storage:test_tab_name())
     ),
     ?assertEqual(
-        [{{StartAddr2, EndAddr2}, RouteID2}],
+        [{{StartAddr2, EndAddr2}, StoredRouteID2}],
         ets:tab2list(hpr_devaddr_range_storage:test_tab_name())
     ),
     ?assertEqual({ok, RouteETS2}, hpr_route_storage:lookup(hpr_route:id(Route2))),

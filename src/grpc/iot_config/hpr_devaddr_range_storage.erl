@@ -5,6 +5,7 @@
     checkpoint/0,
 
     foldl/2,
+    route_ids/0,
     lookup/1,
     insert/1,
     delete/1,
@@ -27,6 +28,7 @@
 
 -define(ETS, hpr_route_devaddr_ranges_ets).
 -define(DETS, hpr_route_devaddr_ranges_dets).
+-define(DETS_V1, hpr_route_devaddr_ranges_dets_v1).
 %% Bucketed interval index over ?ETS, so a lookup is a hash lookup instead of a
 %% scan. ?ETS stays authoritative; these two are derived and rebuilt from it.
 %%
@@ -58,7 +60,21 @@
 -define(MAX_BUCKETS_PER_RANGE, 65536).
 -define(WIDE_KEY, wide).
 
--define(DETS_FILENAME, "hpr_devaddr_range_storage.dets").
+%% Version 1: unversioned filename, route ids stored as char lists
+%% Version 2: route ids stored as binaries
+-define(DETS_FILENAME, "hpr_devaddr_range_storage_v2.dets").
+-define(DETS_FILENAME_V1, "hpr_devaddr_range_storage.dets").
+
+%% See hpr_eui_pair_storage: hpr_route:id() is a string(), and a 36-char UUID as
+%% a char list costs 576 bytes per row. Stored as a binary it costs 56. The
+%% module API still speaks strings.
+-spec id_to_stored(RouteID :: hpr_route:id()) -> binary().
+id_to_stored(RouteID) ->
+    erlang:list_to_binary(RouteID).
+
+-spec stored_to_id(Stored :: binary()) -> hpr_route:id().
+stored_to_id(Stored) ->
+    erlang:binary_to_list(Stored).
 
 -spec init_ets() -> ok.
 init_ets() ->
@@ -83,7 +99,28 @@ checkpoint() ->
 
 -spec foldl(Fun :: function(), Acc :: any()) -> any().
 foldl(Fun, Acc) ->
-    ets:foldl(Fun, Acc, ?ETS).
+    %% Hand the callback the route id in its public string() form. Callers
+    %% (hpr_metrics:record_routes/0, the config route refresh_broken command)
+    %% compare it against hpr_route:id/1, so leaking the interned binary here
+    %% would silently make every comparison false.
+    ets:foldl(
+        fun({Range, Stored}, InnerAcc) -> Fun({Range, stored_to_id(Stored)}, InnerAcc) end,
+        Acc,
+        ?ETS
+    ).
+
+-spec route_ids() -> sets:set(hpr_route:id()).
+route_ids() ->
+    %% The distinct route ids that have at least one devaddr range. Dedup in the
+    %% stored form and convert only the survivors: there are far more ranges than
+    %% routes, so converting per row (as foldl/2 must) would churn a lot of
+    %% garbage every metrics tick.
+    Stored = ets:foldl(
+        fun({_Range, S}, Acc) -> sets:add_element(S, Acc) end,
+        sets:new(),
+        ?ETS
+    ),
+    sets:from_list([stored_to_id(S) || S <- sets:to_list(Stored)]).
 
 %% The bounds check stays here rather than moving into an ets:select match spec:
 %% ets:select builds and compiles a spec per call, which costs more than
@@ -93,23 +130,23 @@ lookup(DevAddr) ->
     Candidates =
         ets:lookup(?INDEX_ETS, DevAddr bsr ?BUCKET_BITS) ++
             ets:lookup(?WIDE_ETS, ?WIDE_KEY),
-    RouteIDs = lists:usort([
-        RouteID
-     || {_Key, {Start, End, RouteID}} <- Candidates, Start =< DevAddr, DevAddr =< End
+    Stored = lists:usort([
+        RouteId
+     || {_Key, {Start, End, RouteId}} <- Candidates, Start =< DevAddr, DevAddr =< End
     ]),
     [
         Route
-     || RouteID <- RouteIDs,
-        {ok, Route} <- [hpr_route_storage:lookup(RouteID)]
+     || RouteId <- Stored,
+        {ok, Route} <- [hpr_route_storage:lookup(stored_to_id(RouteId))]
     ].
 
 -spec insert(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 insert(DevAddrRange) ->
     StartAddr = hpr_devaddr_range:start_addr(DevAddrRange),
     EndAddr = hpr_devaddr_range:end_addr(DevAddrRange),
-    RouteID = hpr_devaddr_range:route_id(DevAddrRange),
-    true = ets:insert(?ETS, [{{StartAddr, EndAddr}, RouteID}]),
-    ok = index_insert(StartAddr, EndAddr, RouteID),
+    Stored = id_to_stored(hpr_devaddr_range:route_id(DevAddrRange)),
+    true = ets:insert(?ETS, [{{StartAddr, EndAddr}, Stored}]),
+    ok = index_insert(StartAddr, EndAddr, Stored),
     lager:debug(
         [
             {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
@@ -124,9 +161,9 @@ insert(DevAddrRange) ->
 delete(DevAddrRange) ->
     StartAddr = hpr_devaddr_range:start_addr(DevAddrRange),
     EndAddr = hpr_devaddr_range:end_addr(DevAddrRange),
-    RouteID = hpr_devaddr_range:route_id(DevAddrRange),
-    true = ets:delete_object(?ETS, {{StartAddr, EndAddr}, RouteID}),
-    ok = index_delete(StartAddr, EndAddr, RouteID),
+    Stored = id_to_stored(hpr_devaddr_range:route_id(DevAddrRange)),
+    true = ets:delete_object(?ETS, {{StartAddr, EndAddr}, Stored}),
+    ok = index_delete(StartAddr, EndAddr, Stored),
     lager:debug(
         [
             {start_addr, hpr_utils:int_to_hex_string(hpr_devaddr_range:start_addr(DevAddrRange))},
@@ -151,8 +188,8 @@ rebuild_index() ->
     true = ets:delete_all_objects(?INDEX_ETS),
     true = ets:delete_all_objects(?WIDE_ETS),
     ets:foldl(
-        fun({{StartAddr, EndAddr}, RouteID}, Count) ->
-            ok = index_insert(StartAddr, EndAddr, RouteID),
+        fun({{StartAddr, EndAddr}, Stored}, Count) ->
+            ok = index_insert(StartAddr, EndAddr, Stored),
             Count + 1
         end,
         0,
@@ -177,10 +214,10 @@ index_stats() ->
 %% ------------------------------------------------------------------
 
 -spec index_insert(
-    StartAddr :: non_neg_integer(), EndAddr :: non_neg_integer(), RouteID :: hpr_route:id()
+    StartAddr :: non_neg_integer(), EndAddr :: non_neg_integer(), Stored :: binary()
 ) -> ok.
-index_insert(StartAddr, EndAddr, RouteID) ->
-    Entry = {StartAddr, EndAddr, RouteID},
+index_insert(StartAddr, EndAddr, Stored) ->
+    Entry = {StartAddr, EndAddr, Stored},
     case index_buckets(StartAddr, EndAddr) of
         {ok, Buckets} ->
             true = ets:insert(?INDEX_ETS, [{Bucket, Entry} || Bucket <- Buckets]);
@@ -190,10 +227,10 @@ index_insert(StartAddr, EndAddr, RouteID) ->
     ok.
 
 -spec index_delete(
-    StartAddr :: non_neg_integer(), EndAddr :: non_neg_integer(), RouteID :: hpr_route:id()
+    StartAddr :: non_neg_integer(), EndAddr :: non_neg_integer(), Stored :: binary()
 ) -> ok.
-index_delete(StartAddr, EndAddr, RouteID) ->
-    Entry = {StartAddr, EndAddr, RouteID},
+index_delete(StartAddr, EndAddr, Stored) ->
+    Entry = {StartAddr, EndAddr, Stored},
     case index_buckets(StartAddr, EndAddr) of
         {ok, Buckets} ->
             lists:foreach(
@@ -233,12 +270,12 @@ table_size(Tab) ->
 -spec lookup_for_route(RouteID :: hpr_route:id()) ->
     list({non_neg_integer(), non_neg_integer()}).
 lookup_for_route(RouteID) ->
-    MS = [{{{'$1', '$2'}, RouteID}, [], [{{'$1', '$2'}}]}],
+    MS = [{{{'$1', '$2'}, id_to_stored(RouteID)}, [], [{{'$1', '$2'}}]}],
     ets:select(?ETS, MS).
 
 -spec count_for_route(RouteID :: hpr_route:id()) -> non_neg_integer().
 count_for_route(RouteID) ->
-    MS = [{{'_', RouteID}, [], [true]}],
+    MS = [{{'_', id_to_stored(RouteID)}, [], [true]}],
     ets:select_count(?ETS, MS).
 
 %% -------------------------------------------------------------------
@@ -247,10 +284,11 @@ count_for_route(RouteID) ->
 
 -spec delete_route(hpr_route:id()) -> non_neg_integer().
 delete_route(RouteID) ->
+    Stored = id_to_stored(RouteID),
     Ranges = lookup_for_route(RouteID),
-    Deleted = ets:select_delete(?ETS, [{{'_', RouteID}, [], [true]}]),
+    Deleted = ets:select_delete(?ETS, [{{'_', Stored}, [], [true]}]),
     lists:foreach(
-        fun({StartAddr, EndAddr}) -> ok = index_delete(StartAddr, EndAddr, RouteID) end,
+        fun({StartAddr, EndAddr}) -> ok = index_delete(StartAddr, EndAddr, Stored) end,
         Ranges
     ),
     Deleted.
@@ -274,9 +312,42 @@ rehydrate_from_dets() ->
                 lager:info("ets hydrated")
         end
     end),
+    ok = maybe_migrate_v1(),
     Indexed = rebuild_index(),
     lager:info("indexed ~w devaddr ranges: ~p", [Indexed, index_stats()]),
     ok.
+
+%% See hpr_eui_pair_storage:maybe_migrate_v2/0 -- same reasoning. The route
+%% stream is incremental, so the table has to be carried across the format
+%% change rather than resynced.
+-spec maybe_migrate_v1() -> ok.
+maybe_migrate_v1() ->
+    DataDir = hpr_utils:base_data_dir(),
+    V1File = filename:join([DataDir, ?DETS_FILENAME_V1]),
+    case ets:info(?ETS, size) == 0 andalso filelib:is_regular(V1File) of
+        false ->
+            ok;
+        true ->
+            case dets:open_file(?DETS_V1, [{file, V1File}, {type, bag}, {access, read}]) of
+                {ok, _} ->
+                    Migrated = dets:foldl(
+                        fun({Range, RouteID}, Cnt) ->
+                            true = ets:insert(?ETS, {Range, id_to_stored(RouteID)}),
+                            Cnt + 1
+                        end,
+                        0,
+                        ?DETS_V1
+                    ),
+                    ok = dets:close(?DETS_V1),
+                    ok = ?MODULE:checkpoint(),
+                    lager:info("migrated ~w devaddr ranges from ~s", [
+                        Migrated, ?DETS_FILENAME_V1
+                    ]);
+                {error, _Reason} ->
+                    lager:warning("failed to open ~s to migrate: ~p", [V1File, _Reason])
+            end,
+            ok
+    end.
 
 -spec with_open_dets(FN :: fun()) -> ok.
 with_open_dets(FN) ->
@@ -321,6 +392,93 @@ test_index_size() ->
 test_wide_size() ->
     ets:info(?WIDE_ETS, size).
 
+migration_test_() ->
+    {foreach, fun migration_setup/0, fun migration_cleanup/1, [
+        {"v1 char lists become v2 binaries", ?_test(migrates_v1_dets())},
+        {"no v1 file is a no-op", ?_test(migration_without_v1_file())},
+        {"a populated v2 file wins", ?_test(migration_skipped_when_v2_populated())}
+    ]}.
+
+migration_setup() ->
+    %% Unique per test AND per run: unique_integer/1 restarts with the VM, so a
+    %% timestamp is needed too or a later run rehydrates an earlier run's dets
+    %% files and the "no legacy file" cases stop being empty.
+    RunDir = filename:join([
+        ?MODULE,
+        erlang:integer_to_list(erlang:system_time(nanosecond)) ++
+            "-" ++ erlang:integer_to_list(erlang:unique_integer([positive]))
+    ]),
+    ok = application:set_env(hpr, data_dir, filename:join([RunDir, "data"])),
+    RunDir.
+
+migration_cleanup(RunDir) ->
+    catch ets:delete(?ETS),
+    catch ets:delete(?INDEX_ETS),
+    catch ets:delete(?WIDE_ETS),
+    _ = file:del_dir_r(RunDir),
+    ok.
+
+write_dets(DETSFilename, Entries) ->
+    DETSFile = filename:join([hpr_utils:base_data_dir(), DETSFilename]),
+    ok = filelib:ensure_dir(DETSFile),
+    {ok, test_legacy_dets} = dets:open_file(test_legacy_dets, [
+        {file, DETSFile}, {type, bag}
+    ]),
+    ok = dets:insert(test_legacy_dets, Entries),
+    ok = dets:close(test_legacy_dets),
+    DETSFile.
+
+migrates_v1_dets() ->
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    _ = write_dets(?DETS_FILENAME_V1, [
+        {{16#00000000, 16#00000010}, RouteID},
+        {{16#00000020, 16#00000030}, RouteID}
+    ]),
+
+    ok = ?MODULE:init_ets(),
+
+    ?assertEqual(2, ?MODULE:test_size()),
+    ?assertEqual(
+        lists:sort([
+            {{16#00000000, 16#00000010}, erlang:list_to_binary(RouteID)},
+            {{16#00000020, 16#00000030}, erlang:list_to_binary(RouteID)}
+        ]),
+        lists:sort(ets:tab2list(?ETS))
+    ),
+    %% The API still speaks strings, so callers cannot tell.
+    ?assertEqual(
+        [{16#00000000, 16#00000010}, {16#00000020, 16#00000030}],
+        lists:sort(?MODULE:lookup_for_route(RouteID))
+    ),
+    ?assertEqual(2, ?MODULE:count_for_route(RouteID)),
+    ?assert(filelib:is_regular(filename:join([hpr_utils:base_data_dir(), ?DETS_FILENAME]))),
+    ?assert(filelib:is_regular(filename:join([hpr_utils:base_data_dir(), ?DETS_FILENAME_V1]))),
+    ok.
+
+migration_without_v1_file() ->
+    ok = ?MODULE:init_ets(),
+    ?assertEqual(0, ?MODULE:test_size()),
+    ok.
+
+migration_skipped_when_v2_populated() ->
+    RouteID = "7d502f32-4d58-4746-965e-8c7dfdcfc624",
+    _ = write_dets(?DETS_FILENAME, [
+        {{16#00000000, 16#00000010}, erlang:list_to_binary(RouteID)}
+    ]),
+    _ = write_dets(?DETS_FILENAME_V1, [
+        {{16#00000020, 16#00000030}, RouteID},
+        {{16#00000040, 16#00000050}, RouteID}
+    ]),
+
+    ok = ?MODULE:init_ets(),
+
+    ?assertEqual(1, ?MODULE:test_size()),
+    ?assertEqual(
+        [{{16#00000000, 16#00000010}, erlang:list_to_binary(RouteID)}],
+        ets:tab2list(?ETS)
+    ),
+    ok.
+
 all_test_() ->
     {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
         {"lookup_finds_route", ?_test(lookup_finds_route())},
@@ -333,7 +491,9 @@ all_test_() ->
         {"degenerate_range_never_matches", ?_test(degenerate_range_never_matches())},
         {"delete_route_leaves_no_index_rows", ?_test(delete_route_leaves_no_index_rows())},
         {"replace_route_updates_index", ?_test(replace_route_updates_index())},
-        {"rebuild_index_reconstructs_from_ets", ?_test(rebuild_index_reconstructs_from_ets())}
+        {"rebuild_index_reconstructs_from_ets", ?_test(rebuild_index_reconstructs_from_ets())},
+        {"foldl_yields_string_route_ids", ?_test(foldl_yields_string_route_ids())},
+        {"route_ids_yields_string_route_ids", ?_test(route_ids_yields_string_route_ids())}
     ]}.
 
 foreach_setup() ->
@@ -532,6 +692,60 @@ rebuild_index_reconstructs_from_ets() ->
     ?assertEqual(Before, {?MODULE:test_index_size(), ?MODULE:test_wide_size()}),
     ?assertEqual([RouteID], lookup_ids(16#00000005)),
     ?assertEqual([RouteID], lookup_ids(16#01000000)),
+    ok.
+
+foldl_yields_string_route_ids() ->
+    %% hpr_metrics:record_routes/0 and the "config route refresh_broken" command
+    %% build a set of route ids from foldl/2 and test membership with
+    %% hpr_route:id/1. If foldl leaked the interned binary, every route with SKFs
+    %% would be reported broken, so pin the public form here.
+    RouteID = "test-route-foldl",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+    ok = ?MODULE:insert(
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000900, end_addr => 16#00000910
+        })
+    ),
+
+    Collected = ?MODULE:foldl(fun({_Range, ID}, Acc) -> [ID | Acc] end, []),
+    ?assertEqual([RouteID], Collected),
+    ?assert(sets:is_element(hpr_route:id(Route), sets:from_list(Collected))),
+    ok.
+
+route_ids_yields_string_route_ids() ->
+    %% Same contract as foldl/2 -- hpr_metrics:record_routes/0 and the "config
+    %% route refresh_broken" command test membership with hpr_route:id/1 -- but
+    %% deduped before conversion, and deduped across ranges of the same route.
+    RouteID = "test-route-route-ids",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 1,
+        oui => 1,
+        server => #{host => "localhost", port => 1234, protocol => {gwmp, #{mapping => []}}},
+        max_copies => 10
+    }),
+    ok = hpr_route_storage:insert(Route),
+    ok = ?MODULE:insert(
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000A00, end_addr => 16#00000A10
+        })
+    ),
+    ok = ?MODULE:insert(
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000B00, end_addr => 16#00000B10
+        })
+    ),
+
+    RouteIDs = ?MODULE:route_ids(),
+    ?assertEqual([RouteID], sets:to_list(RouteIDs)),
+    ?assert(sets:is_element(hpr_route:id(Route), RouteIDs)),
     ok.
 
 -endif.
