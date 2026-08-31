@@ -108,6 +108,10 @@ init(
         ],
         "started"
     ),
+    %% One cast arrives here per reported uplink while this process holds up to
+    %% report_max_size of compressed report between uploads. Keeping the mailbox
+    %% off-heap stops every GC of that heap from also walking the queued messages.
+    _ = erlang:process_flag(message_queue_data, off_heap),
     ok = schedule_upload(Interval),
     Compressor = zlib:open(),
     ok = zlib:deflateInit(Compressor, default, deflated, 16 + ?MAX_WBITS, 8, default),
