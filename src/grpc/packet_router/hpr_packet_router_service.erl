@@ -15,6 +15,10 @@
     register/1
 ]).
 
+-ifdef(TEST).
+-export([test_session_key/1]).
+-endif.
+
 -define(REG_KEY(Gateway), {?MODULE, Gateway}).
 -define(IP_KEY, {?MODULE, ip}).
 -define(SESSION_TIMER, timer:minutes(35)).
@@ -23,6 +27,11 @@
 -record(handler_state, {
     started :: non_neg_integer(),
     pubkey_bin :: undefined | binary(),
+    %% Resolved once at register time and handed to every packet via Opts.
+    %% hpr_utils:gateway_name/1 is a base58check encode plus an md5 (~13us
+    %% measured), and the router process was paying it per packet just to build
+    %% lager metadata.
+    gateway_name :: undefined | string(),
     nonce :: undefined | binary(),
     session_key :: undefined | binary(),
     last_phash = <<>> :: binary()
@@ -134,6 +143,23 @@ register(PubKeyBin) ->
             ok
     end.
 
+-ifdef(TEST).
+
+%% Named accessor so suites do not index into #handler_state{} positionally --
+%% adding a field silently shifts every element/2 index after it, and the failure
+%% shows up as an unrelated-looking assertion in a CT suite (see the same note in
+%% hpr_packet_reporter). The grpcbox_stream digging lives here too, next to the
+%% record it depends on.
+-spec test_session_key(Pid :: pid()) -> undefined | binary().
+test_session_key(Pid) ->
+    State = sys:get_state(Pid),
+    StreamState = erlang:element(2, State),
+    CallbackState = erlang:element(20, StreamState),
+    HandlerState = erlang:element(3, CallbackState),
+    HandlerState#handler_state.session_key.
+
+-endif.
+
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
@@ -145,9 +171,14 @@ register(PubKeyBin) ->
     {ok, grpcbox_stream:t()}.
 handle_packet(PacketUp, Timestamp, StreamState) ->
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    %% Hashed once here and shared: we need it for last_phash regardless, and the
+    %% router process would otherwise hash the payload again for its metadata.
+    PHash = hpr_packet_up:phash(PacketUp),
     Opts = #{
         session_key => HandlerState#handler_state.session_key,
         gateway => HandlerState#handler_state.pubkey_bin,
+        gateway_name => HandlerState#handler_state.gateway_name,
+        phash => PHash,
         stream_pid => self(),
         timestamp => Timestamp
     },
@@ -155,7 +186,7 @@ handle_packet(PacketUp, Timestamp, StreamState) ->
     {ok,
         grpcbox_stream:stream_handler_state(
             StreamState,
-            HandlerState#handler_state{last_phash = hpr_packet_up:phash(PacketUp)}
+            HandlerState#handler_state{last_phash = PHash}
         )}.
 
 -spec handle_register(Reg :: hpr_register:register(), StreamState0 :: grpcbox_stream:t()) ->
@@ -165,7 +196,8 @@ handle_packet(PacketUp, Timestamp, StreamState) ->
 handle_register(Reg, StreamState0) ->
     PubKeyBin = hpr_register:gateway(Reg),
     ok = record_ip(StreamState0, PubKeyBin),
-    lager:md([{stream_gateway, hpr_utils:gateway_name(PubKeyBin)}]),
+    GatewayName = hpr_utils:gateway_name(PubKeyBin),
+    lager:md([{stream_gateway, GatewayName}]),
     case hpr_register:verify(Reg) of
         false ->
             lager:warning("failed to verify register"),
@@ -181,7 +213,9 @@ handle_register(Reg, StreamState0) ->
             _ = hpr_gateway_location:get(PubKeyBin),
             HandlerState = grpcbox_stream:stream_handler_state(StreamState0),
             StreamState1 = grpcbox_stream:stream_handler_state(
-                StreamState0, HandlerState#handler_state{pubkey_bin = PubKeyBin}
+                StreamState0, HandlerState#handler_state{
+                    pubkey_bin = PubKeyBin, gateway_name = GatewayName
+                }
             ),
             case hpr_register:packet_ack_interval(Reg) of
                 N when is_integer(N), N > 0 ->
