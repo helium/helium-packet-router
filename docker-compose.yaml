@@ -1,29 +1,43 @@
-version: '3'
 services:
-  hpr:
-    build:
-      context: .
-    image: quay.io/team-helium/hpr:local
-    container_name: helium_packet_router
+  rustfs:
+    image: rustfs/rustfs:1.0.0-alpha.90
+    container_name: hpr_rustfs
     restart: unless-stopped
-    env_file: .env
     ports:
-      - 8080:8080
+      - 9000:9000
+      - 9001:9001
     volumes:
-      - /var/data/hpr:/var/data
-      - /var/log/hpr:/var/log/hpr
-  promtail:
-    image: grafana/promtail
-    container_name: hpr_promtail
-    restart: unless-stopped
+      - rustfs_data:/data
+    environment:
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=admin
+      - RUSTFS_SECRET_KEY=admin
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f http://127.0.0.1:9000/health && curl -f
+            http://127.0.0.1:9001/rustfs/console/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  rustfs-init:
+    image: amazon/aws-cli:2.34.18
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    restart: no
+    environment:
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=admin
     volumes:
-      - /var/log:/var/log
-      - /var/data/hpr/promtail-config.yaml:/etc/promtail/promtail-config.yaml
-    command: -config.file=/etc/promtail/promtail-config.yaml
-  prometheus:
-      image: prom/prometheus
-      container_name: hpr_prometheus
-      restart: unless-stopped
-      volumes:
-          - /var/data/hpr/prometheus.yml:/etc/prometheus/prometheus.yml
-    
+      - ./infra/rustfs/init.sh:/init.sh:ro
+    entrypoint: [ "/init.sh" ]
+
+volumes:
+  rustfs_data:

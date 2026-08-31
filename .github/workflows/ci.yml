@@ -164,11 +164,14 @@ jobs:
           AWS_SUITES="["
           for F in ./test/*_SUITE.erl; do
             SUITE=$(basename "$F")
-            if [ "$SUITE" = "hpr_packet_reporter_SUITE.erl" ]; then
-              AWS_SUITES+="\"${SUITE}\","
-            else
-              CT_SUITES+="\"${SUITE}\","
-            fi
+            case "$SUITE" in
+              hpr_packet_reporter_SUITE.erl|hpr_gateway_liveness_reporter_SUITE.erl)
+                AWS_SUITES+="\"${SUITE}\","
+                ;;
+              *)
+                CT_SUITES+="\"${SUITE}\","
+                ;;
+            esac
           done
           CT_SUITES=${CT_SUITES%,}
           CT_SUITES+="]"
@@ -218,34 +221,37 @@ jobs:
       group: ${{ github.workflow }}-${{ github.ref }}-ct-aws-${{ matrix.suite }}
       cancel-in-progress: true
     services:
-      localstack:
-        image: localstack/localstack:1.4
+      rustfs:
+        image: rustfs/rustfs:1.0.0-alpha.90
         env:
-          SERVICES: s3
-        ports:
-          - "4566-4583:4566-4583"
-        volumes:
-          - "/var/lib/localstack:/var/lib/localstack"
-          - "/var/run/docker.sock:/var/run/docker.sock"
+          RUSTFS_ACCESS_KEY: admin
+          RUSTFS_SECRET_KEY: admin
+        options: >-
+          --health-cmd "curl -f http://127.0.0.1:9000/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
     env:
-      HPR_PACKET_REPORTER_LOCAL_HOST: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_HOST }}
-      HPR_PACKET_REPORTER_LOCAL_PORT: ${{ secrets.HPR_PACKET_REPORTER_LOCAL_PORT }}
+      # The job runs inside a container, so the rustfs service is reachable by
+      # its label rather than on localhost as it is under docker compose.
+      HPR_TEST_S3_ENDPOINT: http://rustfs:9000
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: admin
+      AWS_DEFAULT_REGION: us-east-1
     steps:
       - name: checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Install AWS CLI
         run: apk add --no-cache aws-cli
-      - name: Localstack init
-        timeout-minutes: 1
+      - name: Create rustfs bucket
+        timeout-minutes: 2
         run: |
-          until curl -sf http://localstack:4566/health > /dev/null 2>&1; do
-            echo "...waiting for Localstack..."
+          until curl -sf http://rustfs:9000/health > /dev/null 2>&1; do
+            echo "...waiting for rustfs..."
             sleep 2
           done
-          aws configure set aws_access_key_id testkey
-          aws configure set aws_secret_access_key testsecret
-          aws configure set default.region us-east-1
-          aws --endpoint-url=http://localstack:4566 s3 mb s3://test-bucket
+          aws --endpoint-url=http://rustfs:9000 s3 mb s3://test-bucket
       - name: Restore cache
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
         with:
