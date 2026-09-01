@@ -25,3 +25,4 @@ hpr_eui_pair_storage/
 CLAUDE.md
 *.coverdata
 .claude/
+hpr_denylist/

@@ -65,6 +65,7 @@ init([]) ->
     ok = timing("config service", fun() -> hpr_route_ets:init() end),
     ok = timing("gw location", fun() -> hpr_gateway_location:init() end),
     ok = timing("gw liveness", fun() -> hpr_gateway_liveness_storage:init_ets() end),
+    ok = timing("denylist", fun() -> hpr_denylist:init() end),
 
     PacketReporterConfig = application:get_env(?APP, packet_reporter, #{}),
     LivenessReporterConfig = application:get_env(?APP, gateway_liveness_reporter, #{}),

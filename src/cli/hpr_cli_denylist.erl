@@ -1,7 +1,8 @@
 %%%-------------------------------------------------------------------
 %% @doc hpr_cli_denylist
 %%
-%% CLI to manage the ephemeral gateway denylist (see hpr_denylist).
+%% CLI to manage the gateway denylist (see hpr_denylist). Changes are written
+%% through to disk and survive a restart.
 %% @end
 %%%-------------------------------------------------------------------
 -module(hpr_cli_denylist).
@@ -37,7 +38,7 @@ denylist_usage() ->
             "the denylist\n",
             "denylist remove <gateway>   - Remove a gateway (b58 address) "
             "from the denylist\n",
-            "denylist reset              - Remove the entire denylist\n"
+            "denylist reset              - Empty the denylist, on disk as well\n"
         ]
     ].
 

@@ -513,6 +513,7 @@ foreach_setup() ->
     true = erlang:register(hpr_sup, self()),
     ok = hpr_route_ets:init(),
     ok = hpr_multi_buy:init(),
+    ok = hpr_denylist:init(),
     ok = hpr_device_stats:init(),
     ok = hpr_netid_stats:init(),
     %% NOTE: These tests expect that routing is setup to hit multi-buy, but the
@@ -541,7 +542,8 @@ foreach_cleanup(ok) ->
         ets:tab2list(hpr_routes_ets)
     ),
     true = ets:delete(hpr_routes_ets),
-    _ = (catch hpr_denylist:reset()),
+    ok = hpr_denylist:reset(),
+    ok = hpr_denylist:test_delete_ets(),
     true = erlang:unregister(hpr_sup),
     meck:unload(hpr_gateway_location),
     meck:unload(hpr_metrics),
