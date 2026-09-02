@@ -513,6 +513,7 @@ foreach_setup() ->
     true = erlang:register(hpr_sup, self()),
     ok = hpr_route_ets:init(),
     ok = hpr_multi_buy:init(),
+    ok = hpr_denylist:init(),
     ok = hpr_device_stats:init(),
     ok = hpr_netid_stats:init(),
     %% NOTE: These tests expect that routing is setup to hit multi-buy, but the
@@ -521,16 +522,16 @@ foreach_setup() ->
     meck:new(hpr_gateway_location, [passthrough]),
     meck:expect(hpr_gateway_location, get, fun(_) -> {error, not_implemented} end),
     meck:new(hpr_metrics, [passthrough]),
-    meck:expect(hpr_metrics, devaddr_cache_hit, fun() -> ok end),
-    meck:expect(hpr_metrics, devaddr_cache_miss, fun() -> ok end),
     ok.
 
 foreach_cleanup(ok) ->
     true = ets:delete(hpr_multi_buy_ets),
     true = ets:delete(hpr_multi_buy_backoff_ets),
-    true = ets:delete(hpr_route_devaddr_ranges_ets),
-    true = ets:delete(hpr_devaddr_cache_ets),
-    true = ets:delete(hpr_route_eui_pairs_ets),
+    %% Via the owning modules rather than by table name: hpr_devaddr_range_storage
+    %% also owns the derived lookup index, and naming its tables here just means
+    %% this cleanup silently rots the next time one is added.
+    ok = hpr_devaddr_range_storage:test_delete_ets(),
+    ok = hpr_eui_pair_storage:test_delete_ets(),
     true = ets:delete(hpr_device_stats_ets),
     true = ets:delete(hpr_netid_stats_ets),
     lists:foreach(
@@ -541,7 +542,8 @@ foreach_cleanup(ok) ->
         ets:tab2list(hpr_routes_ets)
     ),
     true = ets:delete(hpr_routes_ets),
-    _ = (catch hpr_denylist:reset()),
+    ok = hpr_denylist:reset(),
+    ok = hpr_denylist:test_delete_ets(),
     true = erlang:unregister(hpr_sup),
     meck:unload(hpr_gateway_location),
     meck:unload(hpr_metrics),

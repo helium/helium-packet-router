@@ -47,6 +47,11 @@
     time :: non_neg_integer(),
     state :: route | no_routes | locked | {error, any()},
     routes = [] :: list(hpr_route_ets:route()),
+    %% Only meaningful while `state' is `locked': packets that arrived for this
+    %% hash while the first copy was still establishing routes. Every terminal
+    %% transition clears it -- the entry lives for routing_cache_window_secs
+    %% afterwards and is only ever read for `state'/`routes', so a retained
+    %% PacketUp would just pin a payload for the rest of the window.
     packets = [] :: list(packet())
 }).
 
@@ -101,19 +106,21 @@ lock(PacketUp, StartTime) ->
 
 -spec error(#routing_entry{}, {error, any()}) -> ok.
 error(Entry, Error) ->
-    ets:insert(?ROUTING_ETS, Entry#routing_entry{state = Error}),
+    ets:insert(?ROUTING_ETS, Entry#routing_entry{state = Error, packets = []}),
     ok.
 
 -spec no_routes(#routing_entry{}) -> ok.
 no_routes(Entry) ->
-    ets:insert(?ROUTING_ETS, Entry#routing_entry{state = no_routes}),
+    ets:insert(?ROUTING_ETS, Entry#routing_entry{state = no_routes, packets = []}),
     ok.
 
 -spec routes(#routing_entry{}, list(hpr_routing:route())) -> list(packet()).
 routes(#routing_entry{hash = Hash} = Entry, RoutesETS) ->
     case ?MODULE:lookup(Hash) of
         {locked, #routing_entry{packets = QueuedPackets}} ->
-            ets:insert(?ROUTING_ETS, Entry#routing_entry{state = route, routes = RoutesETS}),
+            ets:insert(?ROUTING_ETS, Entry#routing_entry{
+                state = route, routes = RoutesETS, packets = []
+            }),
             QueuedPackets;
         Other ->
             lager:warning(

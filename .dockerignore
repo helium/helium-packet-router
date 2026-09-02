@@ -1,3 +1,8 @@
 _build/
 _release/
 log/
+.claude/
+hpr_route_ets/
+hpr_devaddr_range_storage/
+hpr_eui_pair_storage/
+hpr_denylist/

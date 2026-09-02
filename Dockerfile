@@ -44,6 +44,15 @@ RUN make compile
 # Build release
 RUN make release
 
+# Test sources last: editing a suite must not invalidate the dependency and
+# release layers above. Needed so docker-compose-test.yaml can run eunit/ct
+# straight out of this stage.
+COPY test/ test/
+
+# Pre-build the test profile so docker-compose-test.yaml's per-suite containers
+# each start from a built tree rather than repeating this compile twelve times.
+RUN make test-compile
+
 # Slim runtime stage: same alpine/musl as builder so the
 # release-bundled erts and NIFs are ABI-compatible. Drops the build
 # toolchain (cmake, gcc, rust, etc.) and the source tree.

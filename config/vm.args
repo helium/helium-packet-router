@@ -8,3 +8,37 @@
 +P 2097151
 
 -env ERL_FULLSWEEP_AFTER 20
+
+## Scheduler busy-wait. The default is `medium`: each scheduler spins before it
+## sleeps. msacc on mainnet-iot-hpr0-oregon shows 4.24% avg per scheduler in
+## `other` against 6.35% in `emulator` -- roughly 0.7 of the 1.8 busy cores --
+## concentrated on the schedulers that cycle between work and idle.
+##
+## Our latency floor is the LoRaWAN Class A RX1 delay, 1s after the uplink; the
+## multi-buy grpc call alone is allowed 5s (see hpr_multi_buy:request_custom/4).
+## Futex wakeup is tens of microseconds, so spinning buys nothing we can measure.
++sbwt none
++sbwtdcpu none
++sbwtdio none
+
+## NOTE: neither +SDcpu nor +SDio is capped, and that is deliberate. msacc shows
+## the dirty schedulers ~100% asleep, but msacc CANNOT SEE TIME SPENT INSIDE A
+## DIRTY NIF: its state transitions happen in the emulator's scheduler loop, and
+## a dirty NIF never transitions, so the thread stays counted as `sleep'.
+##
+## Measured 2026-08-19: a saturating ed25519 loop kept the dirty CPU schedulers
+## busy (their `gc' rose from 0.06% to 2.21% -- a process only GCs on the
+## scheduler it runs on) while their `emulator' stayed at exactly 0.00%, and
+## accumulated system run-time accounted for only 0.357 of the ~1.0 core the loop
+## actually burned. enacl flags crypto_sign_verify_detached/3 as
+## ERL_NIF_DIRTY_JOB_CPU_BOUND with no size-based dispatch, and
+## libp2p_crypto:verify/3 routes ed25519 through it, so every packet's signature
+## check really is a dirty CPU job at ~55us. Dirty IO is the same story: file
+## work (the DETS checkpoints write 1.66M eui pairs every 300s) runs in prim_file
+## dirty NIFs and is equally invisible here.
+##
+## So do not size these off msacc. Corollary: msacc CPU totals for this workload
+## are a floor -- use the kernel's view for real utilization.
+
+## NOTE: +S is deliberately NOT set. Scheduler count should stay derived from the
+## vCPU count so that right-sizing the instance right-sizes the VM with it.

@@ -1,16 +1,23 @@
-%% @doc Ephemeral gateway denylist.
+%% @doc Gateway denylist.
 %%
 %% Gateways (identified by their libp2p `pubkey_bin') on this list have their
-%% uplinks dropped by hpr_routing during packet validation. The backing ETS
-%% table does not exist by default and is created lazily on the first `add/1';
-%% `reset/0' removes it entirely. The denylist is in-memory only and is cleared
-%% on restart.
+%% uplinks dropped by hpr_routing during packet validation.
 %%
-%% Because the table is usually created from a transient CLI/RPC process, it is
-%% given `hpr_sup' as its heir so ownership survives that process exiting.
+%% The list survives a restart. `init/0' creates the table and hydrates it from
+%% dets before any packet is served, which is the whole point: a denylist that
+%% came back empty after a deploy would silently start accepting the traffic it
+%% exists to drop, and nothing would say so.
+%%
+%% Changes are written through to dets immediately rather than checkpointed on a
+%% timer like the config tables. Those checkpoint because they take millions of
+%% stream updates; this list is small and only changes by operator action, and a
+%% periodic checkpoint would leave open exactly the window this is meant to
+%% close -- an entry added and then lost to a restart minutes later.
 -module(hpr_denylist).
 
 -export([
+    init/0,
+
     is_denied/1,
     add/1,
     remove/1,
@@ -19,9 +26,35 @@
     count/0
 ]).
 
--define(DENYLIST, hpr_gateway_denylist_ets).
--define(HEIR, hpr_sup).
+-ifdef(TEST).
+-export([test_delete_ets/0]).
+-endif.
 
+-define(DENYLIST, hpr_gateway_denylist_ets).
+-define(DETS, hpr_gateway_denylist_dets).
+-define(DETS_FILE, "hpr_denylist.dets").
+
+-spec init() -> ok.
+init() ->
+    ?DENYLIST = ets:new(?DENYLIST, [
+        public,
+        named_table,
+        set,
+        {read_concurrency, true}
+    ]),
+    ok = with_open_dets(fun() ->
+        [] = dets:traverse(?DETS, fun(Entry) ->
+            true = ets:insert(?DENYLIST, Entry),
+            continue
+        end)
+    end),
+    lager:info("denylist hydrated with ~w gateways", [?MODULE:count()]),
+    ok.
+
+%% @doc Whether this gateway's uplinks should be dropped.
+%%
+%% Called for every uplink, and deliberately tolerant of a missing table so the
+%% packet path cannot be taken down by a denylist that was never initialised.
 -spec is_denied(Gateway :: binary()) -> boolean().
 is_denied(Gateway) ->
     case ets:whereis(?DENYLIST) of
@@ -31,24 +64,25 @@ is_denied(Gateway) ->
 
 -spec add(Gateway :: binary()) -> ok.
 add(Gateway) ->
-    Tab = ensure_table(),
-    true = ets:insert(Tab, {Gateway}),
+    true = ets:insert(?DENYLIST, {Gateway}),
+    ok = with_open_dets(fun() -> ok = dets:insert(?DETS, {Gateway}) end),
     ok.
 
 -spec remove(Gateway :: binary()) -> ok.
 remove(Gateway) ->
-    case ets:whereis(?DENYLIST) of
-        undefined -> ok;
-        _ -> true = ets:delete(?DENYLIST, Gateway)
-    end,
+    true = ets:delete(?DENYLIST, Gateway),
+    ok = with_open_dets(fun() -> ok = dets:delete(?DETS, Gateway) end),
     ok.
 
+%% @doc Empty the denylist, on disk as well as in memory.
+%%
+%% Empties the table rather than deleting it: the table is created once by
+%% `init/0' at startup, so dropping it here would leave every later add/remove
+%% raising until the next restart.
 -spec reset() -> ok.
 reset() ->
-    case ets:whereis(?DENYLIST) of
-        undefined -> ok;
-        _ -> true = ets:delete(?DENYLIST)
-    end,
+    true = ets:delete_all_objects(?DENYLIST),
+    ok = with_open_dets(fun() -> ok = dets:delete_all_objects(?DETS) end),
     ok.
 
 -spec list() -> [binary()].
@@ -69,34 +103,20 @@ count() ->
 %% Internal Functions
 %% ------------------------------------------------------------------
 
-%% @doc Return the denylist table, creating it if needed.
-%%
-%% The table is given `hpr_sup' as its heir so it outlives the (often transient)
-%% process that first creates it. When `hpr_sup' is not running (e.g. in tests)
-%% it is created with no heir.
--spec ensure_table() -> ets:table().
-ensure_table() ->
-    case ets:whereis(?DENYLIST) of
-        undefined ->
-            Heir =
-                case erlang:whereis(?HEIR) of
-                    undefined -> {heir, none};
-                    Pid -> {heir, Pid, undefined}
-                end,
-            try
-                ets:new(?DENYLIST, [
-                    public,
-                    named_table,
-                    set,
-                    {read_concurrency, true},
-                    Heir
-                ])
-            catch
-                %% Another process created it between the whereis and the new.
-                error:badarg -> ?DENYLIST
-            end;
-        _ ->
-            ?DENYLIST
+-spec with_open_dets(FN :: fun()) -> ok.
+with_open_dets(FN) ->
+    DataDir = hpr_utils:base_data_dir(),
+    DETSFile = filename:join([DataDir, ?DETS_FILE]),
+    ok = filelib:ensure_dir(DETSFile),
+
+    case dets:open_file(?DETS, [{file, DETSFile}, {type, set}, {keypos, 1}]) of
+        {ok, _Dets} ->
+            FN(),
+            dets:close(?DETS);
+        {error, Reason} ->
+            Deleted = file:delete(DETSFile),
+            lager:warning("failed to open dets file ~p: ~p, deleted: ~p", [?MODULE, Reason, Deleted]),
+            with_open_dets(FN)
     end.
 
 %% ------------------------------------------------------------------
@@ -106,41 +126,50 @@ ensure_table() ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-all_test_() ->
-    {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
-        ?_test(test_missing_table()),
-        ?_test(test_add_remove()),
-        ?_test(test_reset())
-    ]}.
-
-foreach_setup() ->
-    ok.
-
-foreach_cleanup(ok) ->
+-spec test_delete_ets() -> ok.
+test_delete_ets() ->
     _ = catch ets:delete(?DENYLIST),
     ok.
 
-%% By default the table does not exist; reads are safe and report "not denied".
-test_missing_table() ->
-    Gateway = <<"gw1">>,
-    ?assertEqual(undefined, ets:whereis(?DENYLIST)),
-    ?assertEqual(false, ?MODULE:is_denied(Gateway)),
+all_test_() ->
+    {foreach, fun foreach_setup/0, fun foreach_cleanup/1, [
+        ?_test(test_empty_after_init()),
+        ?_test(test_add_remove()),
+        ?_test(test_reset()),
+        ?_test(test_survives_restart()),
+        ?_test(test_reset_survives_restart())
+    ]}.
+
+foreach_setup() ->
+    %% Unique per test AND per run: unique_integer/1 restarts with the VM, so a
+    %% timestamp is needed too or a later run hydrates an earlier run's dets file.
+    RunDir = filename:join([
+        ?MODULE,
+        erlang:integer_to_list(erlang:system_time(nanosecond)) ++
+            "-" ++ erlang:integer_to_list(erlang:unique_integer([positive]))
+    ]),
+    ok = application:set_env(hpr, data_dir, filename:join([RunDir, "data"])),
+    ok = ?MODULE:init(),
+    RunDir.
+
+foreach_cleanup(RunDir) ->
+    ok = ?MODULE:test_delete_ets(),
+    _ = file:del_dir_r(RunDir),
+    ok.
+
+%% Standing in for a boot with no dets file: the table exists and reads are safe.
+test_empty_after_init() ->
+    ?assertNotEqual(undefined, ets:whereis(?DENYLIST)),
+    ?assertEqual(false, ?MODULE:is_denied(<<"gw1">>)),
     ?assertEqual([], ?MODULE:list()),
     ?assertEqual(0, ?MODULE:count()),
-    %% remove/reset are no-ops when the table is missing
-    ?assertEqual(ok, ?MODULE:remove(Gateway)),
-    ?assertEqual(ok, ?MODULE:reset()),
-    ?assertEqual(undefined, ets:whereis(?DENYLIST)),
     ok.
 
 test_add_remove() ->
     Gateway1 = <<"gw1">>,
     Gateway2 = <<"gw2">>,
 
-    %% add lazily creates the table (with the {heir, none} fallback since hpr_sup
-    %% is not running under eunit)
     ?assertEqual(ok, ?MODULE:add(Gateway1)),
-    ?assertNotEqual(undefined, ets:whereis(?DENYLIST)),
     ?assert(?MODULE:is_denied(Gateway1)),
     ?assertEqual(false, ?MODULE:is_denied(Gateway2)),
     ?assertEqual(1, ?MODULE:count()),
@@ -164,14 +193,43 @@ test_reset() ->
     ?assertEqual(ok, ?MODULE:add(Gateway)),
     ?assert(?MODULE:is_denied(Gateway)),
 
-    %% reset removes the whole table
     ?assertEqual(ok, ?MODULE:reset()),
-    ?assertEqual(undefined, ets:whereis(?DENYLIST)),
+    ?assertEqual(0, ?MODULE:count()),
     ?assertEqual(false, ?MODULE:is_denied(Gateway)),
 
-    %% add after reset recreates it
+    %% the table is emptied, not dropped, so it stays usable
+    ?assertNotEqual(undefined, ets:whereis(?DENYLIST)),
     ?assertEqual(ok, ?MODULE:add(Gateway)),
     ?assert(?MODULE:is_denied(Gateway)),
     ok.
+
+%% The point of the whole module: entries come back after a restart.
+test_survives_restart() ->
+    Gateway1 = <<"gw1">>,
+    Gateway2 = <<"gw2">>,
+    ok = ?MODULE:add(Gateway1),
+    ok = ?MODULE:add(Gateway2),
+    ok = ?MODULE:remove(Gateway2),
+
+    ok = restart(),
+
+    ?assert(?MODULE:is_denied(Gateway1)),
+    ?assertEqual(false, ?MODULE:is_denied(Gateway2), "a removed gateway stays removed"),
+    ?assertEqual(1, ?MODULE:count()),
+    ok.
+
+test_reset_survives_restart() ->
+    ok = ?MODULE:add(<<"gw1">>),
+    ok = ?MODULE:reset(),
+
+    ok = restart(),
+
+    ?assertEqual(0, ?MODULE:count()),
+    ok.
+
+%% Drops the table and re-inits against the same data_dir, as a node restart does.
+restart() ->
+    ok = ?MODULE:test_delete_ets(),
+    ok = ?MODULE:init().
 
 -endif.
