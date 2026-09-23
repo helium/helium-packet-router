@@ -15,6 +15,7 @@
     observe_packet_report/2,
     observe_liveness_report/2,
     observe_multi_buy/3,
+    multi_buy_decision/2,
     observe_find_routes/1,
     observe_grpc_connection/2,
     ics_update/2,
@@ -132,6 +133,23 @@ observe_multi_buy(Channel, {error, _, _}, Time) ->
         [Channel, error],
         Time
     ).
+
+-spec multi_buy_decision(
+    Channel :: string(),
+    Decision ::
+        ok
+        | multi_buy
+        | denied
+        | backoff_drop
+        | backoff_pass
+        | error_drop
+        | error_fallback
+        | channel_not_ready_drop
+        | channel_not_ready_fallback
+) -> ok.
+multi_buy_decision(Channel, Decision) ->
+    _ = prometheus_counter:inc(?METRICS_MULTI_BUY_DECISION_COUNTER, [Channel, Decision]),
+    ok.
 
 -spec observe_find_routes(
     Time :: non_neg_integer()
