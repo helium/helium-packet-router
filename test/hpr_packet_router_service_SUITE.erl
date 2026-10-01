@@ -89,9 +89,17 @@ session_test(_Config) ->
 
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
 
+    %% Filtered to handle_packet/2: hpr_packet_router_service also calls
+    %% hpr_routing:admit/2 per packet now (rate limits are applied before a
+    %% packet gets a process), and meck:history/1 records every call to the
+    %% mocked module.
+    HandlePacketHistory = fun() ->
+        [H || {_, {hpr_routing, handle_packet, _}, _} = H <- meck:history(hpr_routing)]
+    end,
+
     ok = test_utils:wait_until(
         fun() ->
-            2 == erlang:length(meck:history(hpr_routing))
+            2 == erlang:length(HandlePacketHistory())
         end
     ),
 
@@ -118,7 +126,7 @@ session_test(_Config) ->
                 }
             ]},
             Verified2}
-    ] = meck:history(hpr_routing),
+    ] = HandlePacketHistory(),
 
     ?assertEqual(undefined, SessionKey1),
     ?assertEqual(Gateway, Gateway1),

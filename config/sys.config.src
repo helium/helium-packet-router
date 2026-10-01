@@ -53,7 +53,12 @@
             host => "${HPR_DOWNLINK_SERVICE_HOST}",
             port => "${HPR_DOWNLINK_SERVICE_PORT}"
         }},
-        {multi_buy_enabled, ${HPR_MULTI_BUY_ENABLED}},
+        %% Quoted, unlike every other placeholder here, because this one used to
+        %% be bare: an unset HPR_MULTI_BUY_ENABLED produced `{multi_buy_enabled, }`
+        %% and the whole sys.config failed to parse, so HPR would not boot at all
+        %% with a syntax error that named nothing useful. hpr_multi_buy:enabled/0
+        %% coerces the string.
+        {multi_buy_enabled, "${HPR_MULTI_BUY_ENABLED}"},
         {multi_buy_service, #{
             transport => "${HPR_MULTI_BUY_SERVICE_TRANSPORT}",
             host => "${HPR_MULTI_BUY_SERVICE_HOST}",
@@ -85,7 +90,24 @@
         }},
         {routing_cache_timeout_secs, 15},
         {routing_cache_window_secs, 120},
-        {ics_stream_worker_checkpoint_secs, 300}
+        {ics_stream_worker_checkpoint_secs, 300},
+        %% How long a multi-buy dedup key lives, and how often the expiry sweep
+        %% runs. Deliberately separate: one sweep over a whole TTL's worth of
+        %% rows contends with every in-flight packet.
+        {multi_buy_window_secs, 120},
+        {multi_buy_cleanup_secs, 15},
+        %% Multi-buy grpc deadline. Under the 1s Class A RX1 window, because a
+        %% later answer is unusable and only costs a parked process.
+        {multi_buy_timeout_ms, 500},
+        %% Per-second ceiling on gateway location lookups to iot-config, which
+        %% share one connection. Stops a cold cache plus a reconnect wave firing
+        %% one lookup per gateway at once.
+        {gateway_location_rate_limit, 100},
+        %% erlang:system_monitor thresholds. Nothing reported VM stalls before
+        %% these, which is how a multi-second stall left no trace in the logs.
+        {sysmon_long_gc_ms, 500},
+        {sysmon_long_schedule_ms, 500},
+        {sysmon_logs_per_sec, 10}
     ]},
     %% Used only by reporters that set no aws_endpoint. A reporter pointed at an
     %% S3-compatible endpoint authenticates with its own key/secret above and

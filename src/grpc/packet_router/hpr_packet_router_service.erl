@@ -174,15 +174,36 @@ handle_packet(PacketUp, Timestamp, StreamState) ->
     %% Hashed once here and shared: we need it for last_phash regardless, and the
     %% router process would otherwise hash the payload again for its metadata.
     PHash = hpr_packet_up:phash(PacketUp),
-    Opts = #{
-        session_key => HandlerState#handler_state.session_key,
-        gateway => HandlerState#handler_state.pubkey_bin,
-        gateway_name => HandlerState#handler_state.gateway_name,
-        phash => PHash,
-        stream_pid => self(),
-        timestamp => Timestamp
-    },
-    _ = erlang:spawn_opt(hpr_routing, handle_packet, [PacketUp, Opts], [{fullsweep_after, 0}]),
+    %% Admission control before the spawn. The rate limits used to be applied
+    %% inside the routing process, so a gateway flushing a buffer -- which is
+    %% what a fleet does when it reconnects -- got a process per packet, and its
+    %% metadata built, before anything could say no. Two ETS lookups here make a
+    %% rejected packet cost nothing but those lookups. hpr_routing is told the
+    %% limits already ran, so the budget is consumed once.
+    case hpr_routing:admit(hpr_packet_up:gateway(PacketUp), PHash) of
+        {error, _Reason} = Error ->
+            lager:debug("packet not admitted: ~p", [_Reason]),
+            _ = hpr_metrics:observe_packet_up(
+                hpr_packet_up:type(PacketUp), Error, 0, Timestamp
+            ),
+            ok;
+        ok ->
+            Opts = #{
+                session_key => HandlerState#handler_state.session_key,
+                gateway => HandlerState#handler_state.pubkey_bin,
+                gateway_name => HandlerState#handler_state.gateway_name,
+                phash => PHash,
+                stream_pid => self(),
+                timestamp => Timestamp,
+                admitted => true
+            },
+            _ = erlang:spawn_opt(
+                hpr_routing, handle_packet, [PacketUp, Opts], [{fullsweep_after, 0}]
+            ),
+            ok
+    end,
+    %% Recorded either way: last_phash is what the packet ack echoes back, and
+    %% we did receive the packet even when we declined to route it.
     {ok,
         grpcbox_stream:stream_handler_state(
             StreamState,
@@ -347,6 +368,11 @@ init_test() ->
     ok.
 
 route_packet_test() ->
+    %% handle_packet/3 now consults the rate limits before spawning, so the
+    %% throttle tables have to exist -- in the release hpr_routing:init/0 runs
+    %% from hpr_sup before the grpc server accepts anything.
+    {ok, _} = application:ensure_all_started(throttle),
+    ok = hpr_routing:init(),
     meck:new(hpr_routing, [passthrough]),
     PacketUp = hpr_packet_up:test_new(#{}),
     EnvUp = hpr_envelope_up:new(PacketUp),
@@ -362,6 +388,32 @@ route_packet_test() ->
     %% Wait for the spawned process to execute (handle_packet spawns a process)
     timer:sleep(100),
     ?assertEqual(1, meck:num_calls(hpr_routing, handle_packet, 2)),
+
+    meck:unload(hpr_routing),
+    meck:unload(hpr_metrics),
+    ok.
+
+%% A packet over its gateway's rate limit must be dropped without a process
+%% being spawned for it -- that is the whole point of moving the check here.
+route_packet_not_admitted_test() ->
+    {ok, _} = application:ensure_all_started(throttle),
+    ok = hpr_routing:init(),
+    meck:new(hpr_routing, [passthrough]),
+    meck:expect(hpr_routing, handle_packet, fun(_PacketUp, _Opts) -> ok end),
+    meck:expect(hpr_routing, admit, fun(_Gateway, _PHash) ->
+        {error, gateway_limit_exceeded}
+    end),
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, observe_packet_up, fun(_, _, _, _) -> ok end),
+
+    PacketUp = hpr_packet_up:test_new(#{}),
+    EnvUp = hpr_envelope_up:new(PacketUp),
+    StreamState = grpcbox_stream:stream_handler_state(#state{}, #handler_state{}),
+
+    ?assertMatch({ok, _}, ?MODULE:route(EnvUp, StreamState)),
+    timer:sleep(100),
+    ?assertEqual(0, meck:num_calls(hpr_routing, handle_packet, 2)),
+    ?assertEqual(1, meck:num_calls(hpr_metrics, observe_packet_up, 4)),
 
     meck:unload(hpr_routing),
     meck:unload(hpr_metrics),

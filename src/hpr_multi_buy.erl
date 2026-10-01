@@ -21,7 +21,14 @@
 -define(MAX_TOO_LOW, multi_buy_max_too_low).
 -define(DENIED, denied).
 -define(FAIL_ON_UNAVAILABLE, fail_on_unavailable).
--define(CLEANUP_TIME, timer:minutes(30)).
+%% TTL and sweep interval are separate. They used to be the same value, which
+%% meant one sweep deleted ~30 minutes of accumulated rows in a single
+%% select_delete over a write_concurrency table that every packet-route pair is
+%% update_counter-ing. The routing cache in front of this bounds phash reuse to
+%% routing_cache_window_secs (120s), so a 2 minute TTL is ample.
+-define(DEFAULT_WINDOW_SECS, 120).
+-define(DEFAULT_CLEANUP_SECS, 15).
+-define(DEFAULT_TIMEOUT_MS, 500).
 -define(BACKOFF_MIN, timer:seconds(1)).
 -define(BACKOFF_MAX, timer:minutes(5)).
 %% A route that fails closed drops every packet while it backs off, so it
@@ -50,7 +57,7 @@ init() ->
         set,
         {read_concurrency, true}
     ]),
-    ok = scheduled_cleanup(?CLEANUP_TIME),
+    ok = scheduled_cleanup(),
     ok.
 
 -spec update_counter(
@@ -130,10 +137,23 @@ cleanup_channel(Route) ->
 cleanup(Duration) ->
     erlang:spawn(fun() ->
         Time = erlang:system_time(millisecond) - Duration,
-        Deleted = ets:select_delete(?ETS, [
-            {{'_', '_', '$3'}, [{'<', '$3', Time}], [true]}
-        ]),
-        lager:debug("expiring ~w keys", [Deleted])
+        {Micros, Deleted} = timer:tc(fun() ->
+            ets:select_delete(?ETS, [
+                {{'_', '_', '$3'}, [{'<', '$3', Time}], [true]}
+            ])
+        end),
+        %% Info, not debug: this sweep contends with every in-flight packet, so
+        %% its duration and the table size it walks need to be visible on a
+        %% running node without turning on debug logging.
+        lager:info(
+            [
+                {deleted, Deleted},
+                {remaining, ets:info(?ETS, size)},
+                {duration_ms, erlang:convert_time_unit(Micros, microsecond, millisecond)},
+                {window_ms, Duration}
+            ],
+            "multi buy cleanup"
+        )
     end),
     ok.
 
@@ -212,7 +232,12 @@ request_default(Key, B58PubKeyBin, Region) ->
             hotspot_key = B58PubKeyBin,
             region = Region
         },
-        try helium_multi_buy_multi_buy_client:inc(Req, #{channel => ?MULTI_BUY_CHANNEL}) of
+        try
+            helium_multi_buy_multi_buy_client:inc(Req, #{
+                channel => ?MULTI_BUY_CHANNEL,
+                rcv_timeout => timeout_ms()
+            })
+        of
             {ok, #multi_buy_inc_res_v1_pb{count = Count, denied = Denied}, _} ->
                 {ok, Count, Denied =:= true};
             _Any ->
@@ -318,9 +343,20 @@ request_custom(Key, B58PubKeyBin, Region, Route) ->
                     hotspot_key = B58PubKeyBin,
                     region = Region
                 },
-                %% We do not need to set a rcv_timeout on the grpc call here because
-                %% by default it is 5s which is the default rx window as well
-                try helium_multi_buy_multi_buy_client:inc(Req, #{channel => Channel}) of
+                %% Bounded well under the RX1 window rather than left at
+                %% grpcbox's 5s default. HPR's latency budget is the Class A
+                %% RX1 delay, 1s after the uplink (see config/vm.args), so an
+                %% answer at 5s cannot be used -- all a 5s timeout buys is a
+                %% process parked for 5s per packet, which is how a slow
+                %% multi-buy service turns into a node-wide stall. Failing fast
+                %% also lets inc_backoff/1 below engage in milliseconds and
+                %% short-circuit the rest of a burst.
+                try
+                    helium_multi_buy_multi_buy_client:inc(Req, #{
+                        channel => Channel,
+                        rcv_timeout => timeout_ms()
+                    })
+                of
                     {ok, #multi_buy_inc_res_v1_pb{count = Count, denied = Denied}, _} ->
                         {ok, Count, Denied =:= true};
                     _Any ->
@@ -385,6 +421,10 @@ is_using_custom_multi_buy(Route) ->
         undefined -> false;
         _ -> true
     end.
+
+-spec timeout_ms() -> non_neg_integer().
+timeout_ms() ->
+    hpr_utils:get_env_int(multi_buy_timeout_ms, ?DEFAULT_TIMEOUT_MS).
 
 %% Table structure
 %% {Channel :: list(), Until :: integer(), Backoff :: backoff:backoff(),
@@ -455,14 +495,46 @@ reset_backoff(Channel) ->
     ets:delete(?BACKOFF_ETS, Channel),
     ok.
 
+%% @doc Whether to consult the multi-buy service at all.
+%%
+%% Accepts a string as well as a boolean because sys.config.src substitutes this
+%% from the environment, and the placeholder is quoted (an unquoted one broke
+%% sys.config parsing outright when the variable was unset). An unrecognised
+%% value keeps the historical default rather than silently disabling multi-buy,
+%% which would make every packet free.
 -spec enabled() -> boolean().
 enabled() ->
-    application:get_env(hpr, multi_buy_enabled, true).
+    case application:get_env(?APP, multi_buy_enabled, true) of
+        true ->
+            true;
+        false ->
+            false;
+        "true" ->
+            true;
+        "false" ->
+            false;
+        "" ->
+            true;
+        Other ->
+            lager:warning("unrecognised multi_buy_enabled ~p, defaulting to true", [Other]),
+            true
+    end.
 
--spec scheduled_cleanup(Duration :: non_neg_integer()) -> ok.
-scheduled_cleanup(Duration) ->
-    {ok, _} = timer:apply_interval(Duration, ?MODULE, cleanup, [Duration]),
+-spec scheduled_cleanup() -> ok.
+scheduled_cleanup() ->
+    Window = timer:seconds(hpr_utils:get_env_int(multi_buy_window_secs, ?DEFAULT_WINDOW_SECS)),
+    Interval = timer:seconds(
+        hpr_utils:get_env_int(multi_buy_cleanup_secs, ?DEFAULT_CLEANUP_SECS)
+    ),
+    {ok, _TRef} = scheduled_cleanup(Interval, Window),
     ok.
+
+%% @doc Split out so tests can drive the sweep at millisecond granularity (the
+%% env knobs above are in seconds) and cancel it afterwards.
+-spec scheduled_cleanup(Interval :: non_neg_integer(), Window :: non_neg_integer()) ->
+    {ok, timer:tref()}.
+scheduled_cleanup(Interval, Window) ->
+    {ok, _TRef} = timer:apply_interval(Interval, ?MODULE, cleanup, [Window]).
 
 %% ------------------------------------------------------------------
 %% EUNIT Tests
@@ -683,13 +755,16 @@ test_scheduled_cleanup() ->
 
     timer:sleep(50),
 
-    %% This will cleanup in 25ms
-    ?assertEqual(ok, scheduled_cleanup(25)),
+    %% This will cleanup in 25ms, expiring anything older than 10ms
+    {ok, TRef} = scheduled_cleanup(25, 10),
     ?assertEqual(2, ets:info(?ETS, size)),
 
     timer:sleep(50),
     ?assertEqual(0, ets:info(?ETS, size)),
 
+    %% Cancelled, or it keeps firing every 25ms for the rest of the run and
+    %% errors once foreach_cleanup/1 deletes the table under it.
+    {ok, cancel} = timer:cancel(TRef),
     ok.
 
 test_is_using_custom_multi_buy() ->

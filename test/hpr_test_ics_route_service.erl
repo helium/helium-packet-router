@@ -120,7 +120,12 @@ stream(RouteStreamReq, StreamState) ->
         true ->
             {ok,
                 grpcbox_stream:stream_handler_state(StreamState, #stream_handler_state{
-                    since = hpr_route_stream_req:since(RouteStreamReq)
+                    %% Seconds on the wire; handle_info/2 compares against a
+                    %% millisecond response timestamp, so normalise here the way
+                    %% iot-config's own comparison does.
+                    since = erlang:convert_time_unit(
+                        hpr_route_stream_req:since(RouteStreamReq), second, millisecond
+                    )
                 })}
     end.
 

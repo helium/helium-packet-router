@@ -230,7 +230,21 @@ send_data(
             _ -> [{<<"Content-Type">>, <<"application/json">>}, {<<"Authorization">>, Auth}]
         end,
 
-    case hackney:post(Address, Headers, Data1, [with_body]) of
+    %% hackney raises rather than returning an error for a malformed address --
+    %% a non-numeric port makes hackney_url:parse_netloc/2 call
+    %% erlang:list_to_integer/1 on it and exit with badarg. Left uncaught that
+    %% killed this gen_server on every batch, and each death cost a stack trace
+    %% through terminate/2 plus a supervisor report and two crash reports. The
+    %% address comes from route config, so it can be bad indefinitely; contain
+    %% it here and let the existing error path handle it.
+    Result =
+        try
+            hackney:post(Address, Headers, Data1, [with_body])
+        catch
+            PostClass:PostReason ->
+                {error, {PostClass, PostReason}}
+        end,
+    case Result of
         {ok, 200, _Headers, <<>>} ->
             lager:info("~p empty response [flow_type: ~p]", [NetID, FlowType]),
             ok;
@@ -265,5 +279,14 @@ send_data(
             end;
         {ok, Code, _Headers, Resp} ->
             lager:error("bad response: [code: ~p] [res: ~p]", [Code, Resp]),
+            ok;
+        {error, Reason} ->
+            %% One line naming the route and address, so a bad endpoint is
+            %% actionable without reading a stack trace.
+            lager:error(
+                [{route_id, RouteID}, {net_id, NetID}],
+                "http roaming send failed to ~p: ~p",
+                [Address, Reason]
+            ),
             ok
     end.

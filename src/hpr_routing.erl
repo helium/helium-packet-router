@@ -4,6 +4,7 @@
 
 -export([
     init/0,
+    admit/2,
     handle_packet/2,
     find_routes/2
 ]).
@@ -19,7 +20,13 @@
 -type hpr_routing_response() ::
     ok
     | {error,
-        gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic | gateway_denied}.
+        gateway_limit_exceeded
+        | packet_limit_exceeded
+        | invalid_packet_type
+        | bad_signature
+        | invalid_mic
+        | gateway_denied
+        | wrong_gateway}.
 
 -type route() :: {hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}.
 -type routes() :: list(route()).
@@ -42,14 +49,28 @@ handle_packet(PacketUp, Opts) ->
     lager:debug("received packet"),
     SessionKey = maps:get(session_key, Opts, undefined),
     Gateway = maps:get(gateway, Opts, undefined),
-    Checks = [
+    Checks0 = [
         {fun packet_type_check/1, [], invalid_packet_type},
         {fun gateway_check/2, [Gateway], wrong_gateway},
         {fun gateway_denied_check/1, [], gateway_denied},
-        {fun packet_session_check/2, [SessionKey], bad_signature},
-        {fun gateway_throttle_check/1, [], gateway_limit_exceeded},
-        {fun packet_throttle_check/1, [], packet_limit_exceeded}
+        {fun packet_session_check/2, [SessionKey], bad_signature}
     ],
+    %% The rate limits consume budget, so they run exactly once per packet.
+    %% hpr_packet_router_service calls admit/2 before spawning us -- that is the
+    %% point, a throttled packet should not cost a process -- and says so here.
+    %% A caller that does not (any direct caller, and the test suites) still gets
+    %% them, in their original position at the end of the list.
+    Checks =
+        case maps:get(admitted, Opts, false) of
+            true ->
+                Checks0;
+            false ->
+                Checks0 ++
+                    [
+                        {fun gateway_throttle_check/1, [], gateway_limit_exceeded},
+                        {fun packet_throttle_check/1, [], packet_limit_exceeded}
+                    ]
+        end,
     PacketUpType = hpr_packet_up:type(PacketUp),
     case execute_checks(PacketUp, Checks) of
         {error, _Reason} = Error ->
@@ -59,6 +80,36 @@ handle_packet(PacketUp, Opts) ->
         ok ->
             ok = hpr_netid_stats:maybe_report_net_id(PacketUp),
             do_handle_packet(PacketUp, Timestamp)
+    end.
+
+%% @doc Rate-limit decision, cheap enough to make before spawning anything.
+%%
+%% Two ETS lookups against limits the routing process would otherwise apply
+%% after it had already been created, its metadata built and its payload
+%% re-hashed. Takes the gateway and payload hash rather than digging them out of
+%% the packet, because the stream process is holding both already.
+-spec admit(Gateway :: libp2p_crypto:pubkey_bin(), PHash :: binary()) ->
+    ok | {error, gateway_limit_exceeded | packet_limit_exceeded}.
+admit(Gateway, PHash) ->
+    %% Fail open. This runs in the gateway's stream process, so an unexpected
+    %% throttle error here would take down that gateway's whole connection --
+    %% where the same error inside the routing process only ever cost one
+    %% packet. Dropping every packet from a hotspot because the rate limiter is
+    %% broken is strictly worse than not rate limiting it.
+    try
+        case check_gateway_throttle(Gateway) of
+            false ->
+                {error, gateway_limit_exceeded};
+            true ->
+                case check_packet_throttle(Gateway, PHash) of
+                    false -> {error, packet_limit_exceeded};
+                    true -> ok
+                end
+        end
+    catch
+        Class:Reason ->
+            lager:error("admit check failed, admitting anyway: ~p:~p", [Class, Reason]),
+            ok
     end.
 
 -spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
@@ -219,38 +270,25 @@ find_routes_for_uplink(
 ) ->
     empty | false | {ok, binary(), non_neg_integer()}.
 check_route_skfs(PacketUp, DevAddr, SKFETS) ->
-    case hpr_skf_storage:select(SKFETS, DevAddr) of
-        '$end_of_table' ->
+    %% The whole candidate set in one call, not chunked. Chunking existed
+    %% because the old table shape could not look up by DevAddr and had to scan
+    %% the table (23ms on a 137k-row route), so a bounded chunk was the only way
+    %% to avoid paying for all of it. Now that DevAddr is the key prefix this is
+    %% a range read, and handing every candidate to match_session_key/2 at once
+    %% is what lets its frame-counter search be the outer loop -- inverting the
+    %% loops inside a 100-key chunk would save nothing.
+    case hpr_skf_storage:lookup(SKFETS, DevAddr) of
+        [] ->
             empty;
-        Continuation ->
+        SKFs ->
             Payload = hpr_packet_up:payload(PacketUp),
-            check_route_skfs(Payload, Continuation)
-    end.
-
--spec check_route_skfs(
-    Payload :: binary(),
-    '$end_of_table' | {[{binary(), integer(), non_neg_integer()}], ets:continuation()}
-) -> false | {ok, binary(), non_neg_integer()}.
-check_route_skfs(_Payload, '$end_of_table') ->
-    false;
-check_route_skfs(Payload, {SKFs, Continuation}) ->
-    case check_skfs(Payload, SKFs) of
-        false ->
-            check_route_skfs(Payload, hpr_skf_storage:select(Continuation));
-        {ok, _SK, _MaxCopies} = OK ->
-            OK
-    end.
-
--spec check_skfs(Payload :: binary(), [{binary(), non_neg_integer()}]) ->
-    false | {ok, binary(), non_neg_integer()}.
-check_skfs(_Payload, []) ->
-    false;
-check_skfs(Payload, [{SessionKey, MaxCopies} | SKFs]) ->
-    case hpr_lorawan:key_matches_mic(SessionKey, Payload) of
-        false ->
-            check_skfs(Payload, SKFs);
-        true ->
-            {ok, SessionKey, MaxCopies}
+            case hpr_lorawan:match_session_key(Payload, [SK || {SK, _} <- SKFs]) of
+                false ->
+                    false;
+                {ok, SessionKey} ->
+                    {SessionKey, MaxCopies} = lists:keyfind(SessionKey, 1, SKFs),
+                    {ok, SessionKey, MaxCopies}
+            end
     end.
 
 -spec maybe_deliver_no_routes(
@@ -419,7 +457,15 @@ maybe_report_packet({uplink, _}, Routes, Routed, IsFree, PacketUp, ReceivedTime)
             [Route | _] = Routes,
             ok = hpr_packet_reporter:report_packet(PacketUp, Route, IsFree, ReceivedTime);
         _ ->
-            lager:error("routed packet to non unique OUI/Net ID ~p", [
+            %% The packet was delivered but is never reported, and so never
+            %% charged -- report_packet/4 takes a single route and there is no
+            %% one route to attribute it to. Counted so the volume is a graph
+            %% rather than an error line per packet; which route should win when
+            %% devaddr ranges overlap across OUIs is a config question, not one
+            %% to decide here.
+            RouteIDs = [hpr_route:id(R) || R <- Routes],
+            ok = hpr_metrics:unreported_packet(RouteIDs),
+            lager:warning("routed packet to non unique OUI/Net ID ~p", [
                 [{hpr_route:id(R), hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]
             ])
     end;
@@ -459,17 +505,23 @@ packet_session_check(PacketUp, SessionKey) ->
 -spec gateway_throttle_check(PacketUp :: hpr_packet_up:packet()) ->
     boolean().
 gateway_throttle_check(PacketUp) ->
-    Gateway = hpr_packet_up:gateway(PacketUp),
+    check_gateway_throttle(hpr_packet_up:gateway(PacketUp)).
+
+-spec packet_throttle_check(PacketUp :: hpr_packet_up:packet()) ->
+    boolean().
+packet_throttle_check(PacketUp) ->
+    check_packet_throttle(hpr_packet_up:gateway(PacketUp), hpr_packet_up:phash(PacketUp)).
+
+-spec check_gateway_throttle(Gateway :: libp2p_crypto:pubkey_bin()) -> boolean().
+check_gateway_throttle(Gateway) ->
     case throttle:check(?GATEWAY_THROTTLE, Gateway) of
         {limit_exceeded, _, _} -> false;
         _ -> true
     end.
 
--spec packet_throttle_check(PacketUp :: hpr_packet_up:packet()) ->
+-spec check_packet_throttle(Gateway :: libp2p_crypto:pubkey_bin(), PHash :: binary()) ->
     boolean().
-packet_throttle_check(PacketUp) ->
-    Gateway = hpr_packet_up:gateway(PacketUp),
-    PHash = hpr_packet_up:phash(PacketUp),
+check_packet_throttle(Gateway, PHash) ->
     case throttle:check(?PACKET_THROTTLE, {Gateway, PHash}) of
         {limit_exceeded, _, _} -> false;
         _ -> true

@@ -12,7 +12,7 @@
 -export([
     index_to_datarate/2,
     datarate_to_index/2,
-    key_matches_mic/2
+    match_session_key/2
 ]).
 
 -type temp_datarate_index() :: non_neg_integer().
@@ -37,22 +37,62 @@ datarate_to_index(Region, DR) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec key_matches_mic(Key :: binary(), Payload :: binary()) -> boolean().
-key_matches_mic(Key, Payload) ->
+%% @doc Which of these session keys authenticates the payload, if any.
+%%
+%% Takes the whole candidate set rather than one key, so the frame-counter
+%% search can be the outer loop. The previous shape -- one key at a time, all 8
+%% counter candidates each -- made every *wrong* key cost 8 CMACs, because the
+%% search only short-circuits on a match. On a route where one DevAddr carries
+%% ~1,000 session keys (a small DevAddr block multiplexed across many devices,
+%% which is what SKFs are for) that was ~4,300 CMACs per uplink at ~1.6us each.
+%%
+%% Inverted, a wrong key costs one CMAC on the first pass, and `b0/2' -- which
+%% depends on the payload and counter but not the key -- is built 8 times per
+%% packet instead of 8 times per key. Counter candidate 0 is tried first and is
+%% correct for any device below 65,536 messages, so in practice the first pass
+%% finds it: ~500 CMACs instead of ~4,300.
+%%
+%% One behavioural note: before, the first key in table order that matched at
+%% *any* counter candidate won; now the lowest counter candidate wins across all
+%% keys. That differs only if two distinct keys both produce a valid 4-byte MIC
+%% for the same payload at different counters (~2e-6 per packet here). Both
+%% orders are arbitrary in that case; this one prefers the likelier counter.
+-spec match_session_key(Payload :: binary(), Keys :: [binary()]) ->
+    {ok, binary()} | false.
+match_session_key(Payload, Keys) ->
     ExpectedMIC = mic(Payload),
     FCntLow = fcnt_low(Payload),
-    lists:any(
-        fun(HighBits) ->
-            FCnt = binary:decode_unsigned(
-                <<FCntLow:16/integer-unsigned-little, HighBits:16/integer-unsigned-little>>,
-                little
-            ),
-            B0 = b0(Payload, FCnt),
-            ComputedMIC = crypto:macN(cmac, aes_128_cbc, Key, B0, 4),
-            ComputedMIC =:= ExpectedMIC
-        end,
-        lists:seq(2#000, 2#111)
-    ).
+    match_fcnt(Payload, Keys, ExpectedMIC, FCntLow, lists:seq(2#000, 2#111)).
+
+-spec match_fcnt(
+    Payload :: binary(),
+    Keys :: [binary()],
+    ExpectedMIC :: binary(),
+    FCntLow :: non_neg_integer(),
+    HighBitCandidates :: [non_neg_integer()]
+) -> {ok, binary()} | false.
+match_fcnt(_Payload, _Keys, _ExpectedMIC, _FCntLow, []) ->
+    false;
+match_fcnt(Payload, Keys, ExpectedMIC, FCntLow, [HighBits | Rest]) ->
+    FCnt = binary:decode_unsigned(
+        <<FCntLow:16/integer-unsigned-little, HighBits:16/integer-unsigned-little>>,
+        little
+    ),
+    B0 = b0(Payload, FCnt),
+    case match_keys(B0, ExpectedMIC, Keys) of
+        {ok, _} = OK -> OK;
+        false -> match_fcnt(Payload, Keys, ExpectedMIC, FCntLow, Rest)
+    end.
+
+-spec match_keys(B0 :: binary(), ExpectedMIC :: binary(), Keys :: [binary()]) ->
+    {ok, binary()} | false.
+match_keys(_B0, _ExpectedMIC, []) ->
+    false;
+match_keys(B0, ExpectedMIC, [Key | Keys]) ->
+    case crypto:macN(cmac, aes_128_cbc, Key, B0, 4) of
+        ExpectedMIC -> {ok, Key};
+        _ -> match_keys(B0, ExpectedMIC, Keys)
+    end.
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -97,7 +137,7 @@ fcnt_low(Payload) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-key_matches_mic_test() ->
+match_session_key_test() ->
     AppSessionKey = crypto:strong_rand_bytes(16),
     NwkSessionKey = crypto:strong_rand_bytes(16),
     PacketUp = test_utils:uplink_packet_up(#{
@@ -105,11 +145,31 @@ key_matches_mic_test() ->
         nwk_session_key => NwkSessionKey
     }),
     Payload = hpr_packet_up:payload(PacketUp),
-    ?assert(?MODULE:key_matches_mic(NwkSessionKey, Payload)),
-    ?assertNot(?MODULE:key_matches_mic(crypto:strong_rand_bytes(16), Payload)),
+    Decoys = [crypto:strong_rand_bytes(16) || _ <- lists:seq(1, 50)],
+
+    ?assertEqual({ok, NwkSessionKey}, ?MODULE:match_session_key(Payload, [NwkSessionKey])),
+    ?assertEqual(false, ?MODULE:match_session_key(Payload, Decoys)),
+    ?assertEqual(false, ?MODULE:match_session_key(Payload, [])),
+
+    %% Found wherever it sits in the candidate set -- the real route has ~1,000
+    %% candidates per DevAddr, so position must not matter.
+    ?assertEqual(
+        {ok, NwkSessionKey}, ?MODULE:match_session_key(Payload, [NwkSessionKey | Decoys])
+    ),
+    ?assertEqual(
+        {ok, NwkSessionKey}, ?MODULE:match_session_key(Payload, Decoys ++ [NwkSessionKey])
+    ),
+    {Front, Back} = lists:split(25, Decoys),
+    ?assertEqual(
+        {ok, NwkSessionKey},
+        ?MODULE:match_session_key(Payload, Front ++ [NwkSessionKey] ++ Back)
+    ),
     ok.
 
-key_matches_mic_overflow_fcnt_test() ->
+%% The frame-counter high-bit search is what the loop inversion reorders, so a
+%% payload whose counter has overflowed 16 bits has to still be found -- and
+%% still be found when it is not the only candidate.
+match_session_key_overflow_fcnt_test() ->
     %% Valid frame count for this payload is 197,444
     Payload =
         <<64, 143, 1, 0, 72, 0, 68, 3, 1, 107, 147, 204, 92, 31, 53, 22, 254, 104, 129, 196, 14, 73,
@@ -122,6 +182,11 @@ key_matches_mic_overflow_fcnt_test() ->
             236, 6, 215>>,
 
     SessionKey = <<236, 133, 99, 189, 240, 193, 99, 222, 40, 78, 176, 12, 120, 166, 83, 214>>,
-    ?assert(?MODULE:key_matches_mic(SessionKey, Payload)).
+    Decoys = [crypto:strong_rand_bytes(16) || _ <- lists:seq(1, 50)],
+    ?assertEqual({ok, SessionKey}, ?MODULE:match_session_key(Payload, [SessionKey])),
+    ?assertEqual(
+        {ok, SessionKey}, ?MODULE:match_session_key(Payload, Decoys ++ [SessionKey | Decoys])
+    ),
+    ?assertEqual(false, ?MODULE:match_session_key(Payload, Decoys)).
 
 -endif.

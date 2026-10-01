@@ -170,13 +170,31 @@ checkpoint() ->
 last_timestamp() ->
     gen_server:call(?MODULE, last_timetstamp).
 
+%% @doc Write the configuration tables to disk.
+%%
+%% Timed per stage because this runs synchronously in handle_call/3 and so
+%% blocks every config-stream update behind it. hpr_skf_storage:checkpoint/0
+%% used to rewrite one DETS file per route in existence (~5,250 open/write/close
+%% cycles, 15s measured); it now writes only the routes whose SKFs changed, so
+%% `skf_routes' is the number actually written, not the number of routes.
 -spec do_checkpoint(LastTimestamp :: non_neg_integer()) -> ok.
 do_checkpoint(LastTimestamp) ->
-    ok = hpr_route_storage:checkpoint(),
-    ok = hpr_eui_pair_storage:checkpoint(),
-    ok = hpr_devaddr_range_storage:checkpoint(),
-    ok = hpr_skf_storage:checkpoint(),
-    ok = dets:insert(?DETS, {timestamp, LastTimestamp}).
+    {RouteTime, ok} = timer:tc(hpr_route_storage, checkpoint, []),
+    {EUITime, ok} = timer:tc(hpr_eui_pair_storage, checkpoint, []),
+    {DevAddrTime, ok} = timer:tc(hpr_devaddr_range_storage, checkpoint, []),
+    {SKFTime, SKFRoutes} = timer:tc(hpr_skf_storage, checkpoint, []),
+    ok = dets:insert(?DETS, {timestamp, LastTimestamp}),
+    lager:info(
+        [
+            {route_ms, erlang:convert_time_unit(RouteTime, microsecond, millisecond)},
+            {eui_ms, erlang:convert_time_unit(EUITime, microsecond, millisecond)},
+            {devaddr_ms, erlang:convert_time_unit(DevAddrTime, microsecond, millisecond)},
+            {skf_ms, erlang:convert_time_unit(SKFTime, microsecond, millisecond)},
+            {skf_routes, SKFRoutes}
+        ],
+        "checkpoint timings"
+    ),
+    ok.
 
 -spec schedule_checkpoint() -> {TimeScheduled :: non_neg_integer(), timer:tref()}.
 schedule_checkpoint() ->

@@ -191,18 +191,23 @@ handle_info(
     {{'DOWN', Gateway}, _Monitor, process, _Pid, _ExitReason},
     #state{waiting_cleanups = WaitingCleanups} = State
 ) ->
-    Name = hpr_utils:gateway_name(Gateway),
+    %% gateway_name/1 is a base58 encode plus an md5 (~13us). Inlined into the
+    %% lager call so the parse transform skips it when debug is off, instead of
+    %% paying it on every disconnect in this single gen_server.
     lager:debug(
-        [{gateway, Name}, {stream, _Pid}],
+        [{gateway, hpr_utils:gateway_name(Gateway)}, {stream, _Pid}],
         "stream went down: ~p waiting ~wms",
         [_ExitReason, ?CLEANUP_TIME]
     ),
     CleanupTimer = erlang:send_after(?CLEANUP_TIME, self(), {remove_stream, Gateway}),
     {noreply, State#state{waiting_cleanups = WaitingCleanups#{Gateway => CleanupTimer}}};
 handle_info({remove_stream, Gateway}, #state{waiting_cleanups = WaitingCleanups} = State) ->
-    Name = hpr_utils:gateway_name(Gateway),
-    lager:debug([{gateway, Name}], "removing streams"),
-    ?MODULE:remove_stream(Gateway),
+    lager:debug([{gateway, hpr_utils:gateway_name(Gateway)}], "removing streams"),
+    %% Spawned: the teardown only touches the shared stream table and closes
+    %% grpc streams, so it needs nothing from this state -- and doing it inline
+    %% puts every disconnect ahead of the register casts of the gateways
+    %% reconnecting behind it.
+    _ = erlang:spawn(?MODULE, remove_stream, [Gateway]),
     {noreply, State#state{waiting_cleanups = maps:without([Gateway], WaitingCleanups)}};
 handle_info(_Msg, State) ->
     lager:warning("unknown info ~p", [_Msg]),

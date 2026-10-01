@@ -1,9 +1,16 @@
 -ifdef(TEST).
 -define(METRICS_TICK_INTERVAL, timer:seconds(1)).
+-define(METRICS_SLOW_TICK_INTERVAL, timer:seconds(1)).
 -else.
 -define(METRICS_TICK_INTERVAL, timer:seconds(30)).
+%% The slow tick carries the collectors whose cost scales with the node: a
+%% process_info on every process, an ets:info on every table, and a fold over
+%% every devaddr range. At ~100k processes and ~5k SKF tables none of that is
+%% affordable at 30s, and none of it needs 30s resolution.
+-define(METRICS_SLOW_TICK_INTERVAL, timer:seconds(300)).
 -endif.
 -define(METRICS_TICK, '_hpr_metrics_tick').
+-define(METRICS_SLOW_TICK, '_hpr_metrics_slow_tick').
 
 -define(METRICS_GRPC_CONNECTION_GAUGE, "hpr_grpc_connection_gauge").
 -define(METRICS_GRPC_CONNECTION_HISTOGRAM, "hpr_grpc_connection_histogram").
@@ -25,6 +32,10 @@
     "hpr_iot_config_service_gateway_location_histogram"
 ).
 -define(METRICS_DEVICE_GAUGE, "hpr_device_gauge").
+-define(METRICS_SYSMON_COUNTER, "hpr_sysmon_counter").
+-define(METRICS_UNREPORTED_PACKET_COUNTER, "hpr_unreported_packet_counter").
+-define(METRICS_GRPC_CHANNEL_CONNS_GAUGE, "hpr_grpc_channel_conns_gauge").
+-define(METRICS_GRPC_CHANNEL_MAILBOX_GAUGE, "hpr_grpc_channel_mailbox_gauge").
 -define(METRICS_LIVENESS_REPORT_HISTOGRAM, "hpr_liveness_report_histogram").
 
 -define(METRICS, [
@@ -51,5 +62,12 @@
     {?METRICS_ICS_GATEWAY_LOCATION_HISTOGRAM, prometheus_histogram, [status],
         "ICS gateway location req"},
     {?METRICS_DEVICE_GAUGE, prometheus_gauge, [], "Approximate number of devices"},
+    {?METRICS_SYSMON_COUNTER, prometheus_counter, [kind], "VM system monitor events"},
+    {?METRICS_UNREPORTED_PACKET_COUNTER, prometheus_counter, [route_set],
+        "Packets delivered but not reported, by the route set they spanned"},
+    {?METRICS_GRPC_CHANNEL_CONNS_GAUGE, prometheus_gauge, [channel],
+        "Connections in a grpc channel's pool"},
+    {?METRICS_GRPC_CHANNEL_MAILBOX_GAUGE, prometheus_gauge, [channel],
+        "Deepest mailbox across a grpc channel's connections"},
     {?METRICS_LIVENESS_REPORT_HISTOGRAM, prometheus_histogram, [status], "Liveness Reports"}
 ]).
