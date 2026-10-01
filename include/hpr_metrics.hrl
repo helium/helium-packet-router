@@ -16,6 +16,7 @@
 -define(METRICS_BROKEN_ROUTES_GAUGE, "hpr_broken_routes_gauge").
 -define(METRICS_PACKET_REPORT_HISTOGRAM, "hpr_packet_report_histogram").
 -define(METRICS_MULTI_BUY_GET_HISTOGRAM, "hpr_multi_buy_get_histogram").
+-define(METRICS_MULTI_BUY_DECISION_COUNTER, "hpr_multi_buy_decision_counter").
 -define(METRICS_FIND_ROUTES_HISTOGRAM, "hpr_find_routes_histogram").
 -define(METRICS_VM_ETS_MEMORY, "hpr_vm_ets_memory").
 -define(METRICS_VM_PROC_Q, "hpr_vm_process_queue").
@@ -41,6 +42,8 @@
     {?METRICS_PACKET_REPORT_HISTOGRAM, prometheus_histogram, [status], "Packet Reports"},
     {?METRICS_MULTI_BUY_GET_HISTOGRAM, prometheus_histogram, [channel, status],
         "Multi Buy Service Get"},
+    {?METRICS_MULTI_BUY_DECISION_COUNTER, prometheus_counter, [channel, decision],
+        "Multi Buy decision per packet"},
     {?METRICS_FIND_ROUTES_HISTOGRAM, prometheus_histogram, [], "Find Routes"},
     {?METRICS_VM_ETS_MEMORY, prometheus_gauge, [name], "HPR ets memory"},
     {?METRICS_VM_PROC_Q, prometheus_gauge, [name], "Process queue"},

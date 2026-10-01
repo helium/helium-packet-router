@@ -941,11 +941,12 @@ mk_top_level_route_info(RouteETS) ->
                 Channel = [RouteID, Protocol, Host, Port],
                 BackoffInfo =
                     case ets:lookup(hpr_multi_buy_backoff_ets, Channel) of
-                        [{_, Until, _}] ->
+                        [{_, Until, _, ProbeUntil}] ->
                             Now = erlang:system_time(millisecond),
-                            case Until > Now of
+                            Deadline = erlang:max(Until, ProbeUntil),
+                            case Deadline > Now of
                                 true ->
-                                    RemainingSecs = (Until - Now) / 1000,
+                                    RemainingSecs = (Deadline - Now) / 1000,
                                     io_lib:format("active (~.1fs remaining)", [RemainingSecs]);
                                 false ->
                                     "none"

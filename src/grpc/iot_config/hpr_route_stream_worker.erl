@@ -480,8 +480,13 @@ terminate(_Reason, #state{checkpoint_timer = CheckpointTimer, stream = Stream} =
         | {skf, hpr_skf:skf()}
 ) -> ok.
 process_route_stream_res(add, {route, Route}) ->
+    PreviousRoute =
+        case hpr_route_storage:lookup(hpr_route:id(Route)) of
+            {ok, RouteETS} -> hpr_route_ets:route(RouteETS);
+            {error, not_found} -> undefined
+        end,
     ok = hpr_route_storage:insert(Route),
-    ok = hpr_multi_buy:init_channel(Route);
+    ok = hpr_multi_buy:update_channel(PreviousRoute, Route);
 process_route_stream_res(add, {eui_pair, EUIPair}) ->
     hpr_eui_pair_storage:insert(EUIPair);
 process_route_stream_res(add, {devaddr_range, DevAddrRange}) ->
@@ -489,7 +494,8 @@ process_route_stream_res(add, {devaddr_range, DevAddrRange}) ->
 process_route_stream_res(add, {skf, SKF}) ->
     hpr_skf_storage:insert(SKF);
 process_route_stream_res(remove, {route, Route}) ->
-    hpr_route_storage:delete(Route);
+    ok = hpr_route_storage:delete(Route),
+    ok = hpr_multi_buy:cleanup_channel(Route);
 process_route_stream_res(remove, {eui_pair, EUIPair}) ->
     hpr_eui_pair_storage:delete(EUIPair);
 process_route_stream_res(remove, {devaddr_range, DevAddrRange}) ->
