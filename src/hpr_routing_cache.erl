@@ -85,10 +85,21 @@ lookup(Hash) ->
         [#routing_entry{state = {error, _} = Err}] -> Err
     end.
 
--spec queue(#routing_entry{}, packet()) -> ok.
+%% @doc Queue a copy behind the copy that is establishing routes for it.
+%%
+%% `retry' means the entry changed since `Entry' was read -- another copy
+%% queued, or routes were established -- and the caller should look it up
+%% again. Writing `Entry' back regardless, as this used to, lost copies two
+%% ways: two copies queuing at once each wrote their own list and one
+%% disappeared, and a copy that read `locked' just before routes were
+%% established put the entry back to `locked' behind a queue nobody would
+%% drain, dropping it and every later copy until the cache cleanup.
+-spec queue(#routing_entry{}, packet()) -> ok | retry.
 queue(#routing_entry{packets = Packets} = Entry, NewPacket) ->
-    ets:insert(?ROUTING_ETS, Entry#routing_entry{packets = [NewPacket | Packets]}),
-    ok.
+    case swap_locked(Entry, Entry#routing_entry{packets = [NewPacket | Packets]}) of
+        true -> ok;
+        false -> retry
+    end.
 
 -spec lock(hpr_packet_up:packet(), StartTime :: non_neg_integer()) ->
     {ok, #routing_entry{}} | {error, already_locked}.
@@ -117,11 +128,16 @@ no_routes(Entry) ->
 -spec routes(#routing_entry{}, list(hpr_routing:route())) -> list(packet()).
 routes(#routing_entry{hash = Hash} = Entry, RoutesETS) ->
     case ?MODULE:lookup(Hash) of
-        {locked, #routing_entry{packets = QueuedPackets}} ->
-            ets:insert(?ROUTING_ETS, Entry#routing_entry{
-                state = route, routes = RoutesETS, packets = []
-            }),
-            QueuedPackets;
+        {locked, #routing_entry{packets = QueuedPackets} = Locked} ->
+            Routed = Locked#routing_entry{state = route, routes = RoutesETS, packets = []},
+            case swap_locked(Locked, Routed) of
+                true ->
+                    QueuedPackets;
+                false ->
+                    %% A copy queued between the lookup and the swap; take it
+                    %% too.
+                    routes(Entry, RoutesETS)
+            end;
         Other ->
             lager:warning(
                 [{hash, Hash}, {result, Other}],
@@ -129,6 +145,24 @@ routes(#routing_entry{hash = Hash} = Entry, RoutesETS) ->
             ),
             []
     end.
+
+%% Replace a locked entry with `New' only if it is still exactly `Old'. The
+%% queue only grows while an entry is locked, so an unchanged queue means
+%% nothing happened to the entry in between. The queue is compared in a guard
+%% rather than written into the match head, where atoms in a packet could be
+%% read as match variables.
+-spec swap_locked(Old :: #routing_entry{}, New :: #routing_entry{}) -> boolean().
+swap_locked(#routing_entry{hash = Hash, packets = Packets}, New) ->
+    %% Written out positionally, like do_crawl_routing/1's: match variables in
+    %% a #routing_entry{} would violate its field types.
+    MatchSpec = [
+        {
+            {routing_entry, Hash, '_', locked, '_', '$1'},
+            [{'=:=', '$1', {const, Packets}}],
+            [{const, New}]
+        }
+    ],
+    1 =:= ets:select_replace(?ROUTING_ETS, MatchSpec).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
@@ -189,3 +223,61 @@ do_crawl_routing(Window) ->
         }
     ],
     ets:select_delete(?ROUTING_ETS, MS).
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+%% Copies queuing at the same time all reach the copy establishing routes.
+concurrent_queue_test() ->
+    catch ets:delete(?ROUTING_ETS),
+    ok = init_ets(),
+    PacketUp = hpr_packet_up:test_new(#{}),
+    Hash = hpr_packet_up:phash(PacketUp),
+    {ok, Entry} = lock(PacketUp, 0),
+    Self = self(),
+    Copies = 50,
+    lists:foreach(
+        fun(N) -> erlang:spawn(fun() -> Self ! {queued, queue_until_done(Hash, {N, N})} end) end,
+        lists:seq(1, Copies)
+    ),
+    [
+        receive
+            {queued, ok} -> ok
+        after 5000 -> erlang:error(timeout)
+        end
+     || _ <- lists:seq(1, Copies)
+    ],
+    Queued = routes(Entry, []),
+    %% The first copy, which took the lock, plus every one queued behind it.
+    ?assertEqual(Copies + 1, length(Queued)),
+    ?assertEqual({route, []}, lookup(Hash)),
+    true = ets:delete(?ROUTING_ETS),
+    ok.
+
+%% A copy that read the entry while locked, but queues after routes were
+%% established, is told to look again instead of re-locking the entry.
+queue_after_routes_test() ->
+    catch ets:delete(?ROUTING_ETS),
+    ok = init_ets(),
+    PacketUp = hpr_packet_up:test_new(#{}),
+    Hash = hpr_packet_up:phash(PacketUp),
+    {ok, Entry} = lock(PacketUp, 0),
+    {locked, Stale} = lookup(Hash),
+    [_] = routes(Entry, []),
+    ?assertEqual(retry, queue(Stale, {late, 0})),
+    ?assertEqual({route, []}, lookup(Hash)),
+    true = ets:delete(?ROUTING_ETS),
+    ok.
+
+queue_until_done(Hash, Packet) ->
+    {locked, Entry} = lookup(Hash),
+    case queue(Entry, Packet) of
+        ok -> ok;
+        retry -> queue_until_done(Hash, Packet)
+    end.
+
+-endif.

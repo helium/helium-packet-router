@@ -142,7 +142,12 @@ do_handle_packet(PacketUp, Timestamp) ->
             route_packet(PacketUp, RoutesETS, Timestamp),
             ok;
         {locked, RoutingEntry} ->
-            hpr_routing_cache:queue(RoutingEntry, {PacketUp, Timestamp});
+            %% Queued, the copy establishing routes will route this one too.
+            %% Otherwise the entry moved on since we read it: look again.
+            case hpr_routing_cache:queue(RoutingEntry, {PacketUp, Timestamp}) of
+                ok -> ok;
+                retry -> do_handle_packet(PacketUp, Timestamp)
+            end;
         {error, _Reason} = Error ->
             hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Timestamp),
             Error
