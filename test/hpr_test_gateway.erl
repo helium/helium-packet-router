@@ -46,7 +46,10 @@
     pubkey_bin :: libp2p_crypto:pubkey_bin(),
     sig_fun :: libp2p_crypto:sig_fun(),
     stream :: grpcbox_client:stream(),
-    session_key :: undefined | {libp2p_crypto:pubkey_bin(), libp2p_crypto:sig_fun()}
+    session_key :: undefined | {libp2p_crypto:pubkey_bin(), libp2p_crypto:sig_fun()},
+    %% Milliseconds to wait before reconnecting after HPR ends our stream, the
+    %% way gateway-rs does. `false' (the default) stays disconnected.
+    reconnect_after_ms = false :: false | non_neg_integer()
 }).
 
 -type state() :: #state{}.
@@ -158,7 +161,8 @@ init(
         eui_pairs = EUIPairs,
         devaddr_ranges = DevAddrRanges,
         pubkey_bin = PubKeyBin,
-        sig_fun = libp2p_crypto:mk_sig_fun(PrivKey)
+        sig_fun = libp2p_crypto:mk_sig_fun(PrivKey),
+        reconnect_after_ms = maps:get(reconnect_after_ms, Args, false)
     }}.
 
 handle_call(pubkey_bin, _From, #state{pubkey_bin = PubKeyBin} = State) ->
@@ -228,7 +232,7 @@ handle_cast(_Msg, State) ->
     lager:debug("unknown cast ~p", [_Msg]),
     {noreply, State}.
 
-handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = SigFun} = State) ->
+handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin} = State) ->
     lager:debug("connecting"),
     case
         grpcbox_client:connect(PubKeyBin, [{http, "localhost", 8080, []}], #{
@@ -241,16 +245,7 @@ handle_info(?CONNECT, #state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = Si
         % {ok, _Conn, _} -> ok;
         % {ok, _Conn} -> ok
         _ ->
-            {ok, Stream} = helium_packet_router_packet_client:route(#{
-                channel => PubKeyBin
-            }),
-            Reg = hpr_register:test_new(#{gateway => PubKeyBin, session_capable => true}),
-            SignedReg = hpr_register:sign(Reg, SigFun),
-            EnvUp = hpr_envelope_up:new(SignedReg),
-            ok = grpcbox_client:send(Stream, EnvUp),
-            Pid ! {?MODULE, self(), {?REGISTER, EnvUp}},
-            lager:debug("connected and registering"),
-            {noreply, State#state{stream = Stream}}
+            {noreply, open_stream(State)}
     end;
 %% GRPC stream callbacks
 handle_info(
@@ -282,10 +277,28 @@ handle_info({headers, _StreamID, _Headers}, State) ->
 handle_info({trailers, _StreamID, _Trailers}, State) ->
     lager:debug("test gateway got trailers ~p for ~w", [_Trailers, _StreamID]),
     {noreply, State};
-handle_info({eos, StreamID}, #state{forward = ForwardPid} = State) ->
+handle_info({eos, StreamID}, #state{forward = ForwardPid, reconnect_after_ms = false} = State) ->
     lager:debug("test gateway got eos for ~w", [StreamID]),
     ForwardPid ! {?MODULE, self(), ?STREAM_DOWN},
     {noreply, State#state{stream = undefined}};
+%% gateway-rs treats HPR ending the stream as an error and reconnects from
+%% scratch: it drops the connection, which is what ends HPR's side of the
+%% stream (and its registration), then dials again.
+handle_info(
+    {eos, StreamID},
+    #state{
+        forward = ForwardPid,
+        pubkey_bin = PubKeyBin,
+        stream = Stream,
+        reconnect_after_ms = ReconnectAfter
+    } = State
+) ->
+    lager:debug("test gateway got eos for ~w, reconnecting", [StreamID]),
+    ForwardPid ! {?MODULE, self(), ?STREAM_DOWN},
+    _ = catch grpcbox_client:close_send(Stream),
+    _ = catch grpcbox_channel:stop(PubKeyBin),
+    _ = erlang:send_after(ReconnectAfter, self(), ?CONNECT),
+    {noreply, State#state{stream = undefined, session_key = undefined}};
 handle_info(_Msg, State) ->
     lager:debug("unknown info ~p", [_Msg]),
     {noreply, State}.
@@ -305,3 +318,16 @@ terminate(_Reason, #state{forward = Pid, pubkey_bin = PubKeyBin, stream = Stream
 %% ------------------------------------------------------------------
 %%% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+-spec open_stream(state()) -> state().
+open_stream(#state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = SigFun} = State) ->
+    {ok, Stream} = helium_packet_router_packet_client:route(#{
+        channel => PubKeyBin
+    }),
+    Reg = hpr_register:test_new(#{gateway => PubKeyBin, session_capable => true}),
+    SignedReg = hpr_register:sign(Reg, SigFun),
+    EnvUp = hpr_envelope_up:new(SignedReg),
+    ok = grpcbox_client:send(Stream, EnvUp),
+    Pid ! {?MODULE, self(), {?REGISTER, EnvUp}},
+    lager:debug("connected and registering"),
+    State#state{stream = Stream}.
