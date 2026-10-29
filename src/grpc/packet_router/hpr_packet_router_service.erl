@@ -12,7 +12,11 @@
 -export([
     send_packet_down/2,
     locate/1,
-    register/1
+    register/1,
+    connected_count/0,
+    spread_sessions/1,
+    spread_status/0,
+    cancel_spread/0
 ]).
 
 -ifdef(TEST).
@@ -23,6 +27,7 @@
 -define(IP_KEY, {?MODULE, ip}).
 -define(SESSION_TIMER, timer:minutes(35)).
 -define(SESSION_KILL, session_kill).
+-define(SPREADER, hpr_session_spreader).
 
 -record(handler_state, {
     started :: non_neg_integer(),
@@ -141,6 +146,147 @@ register(PubKeyBin) ->
             lager:warning("already registered to ~p, trying to give away", [OldPid]),
             OldPid ! {give_away, Self, PubKeyBin},
             ok
+    end.
+
+%% ------------------------------------------------------------------
+%% Session spread
+%%
+%% gateway-rs reconnects exactly 30 minutes after each successful session, with
+%% no jitter: its backoff applies jitter and *then* clamps to the 30 minute
+%% max, which erases it. So anything that disconnects a lot of gateways at once
+%% -- a restart, a deploy, a network blip -- leaves them reconnecting together
+%% every 30 minutes from then on, and nothing ever spreads them out again.
+%%
+%% When HPR closes a stream (the same empty-envelope close as ?SESSION_KILL),
+%% gateway-rs treats it as an error, reconnects within 5-6.5 seconds, and starts
+%% its next 30 minutes from the new session. So closing each stream once, at a
+%% uniformly random time in a window of 30 minutes or more, leaves the
+%% reconnects spread evenly instead of arriving as one wave.
+%%
+%% Gateways are looked up again at the moment their close fires, not captured
+%% up front: one that reconnects on its own during the window has a new stream
+%% by then, and aiming at the old pid would let it keep its old phase. A gateway
+%% no longer on this node by then is counted and skipped -- run the spread on
+%% every node behind the same load balancer.
+%% ------------------------------------------------------------------
+
+-spec connected_count() -> non_neg_integer().
+connected_count() ->
+    length(connected_gateways()).
+
+%% @doc Close every connected gateway's stream once, each at a random time
+%% within `WindowMs'. Returns how many were scheduled. Only one spread runs at a
+%% time on a node.
+-spec spread_sessions(WindowMs :: pos_integer()) ->
+    {ok, non_neg_integer()} | {error, already_running}.
+spread_sessions(WindowMs) when is_integer(WindowMs), WindowMs > 0 ->
+    spread_sessions(WindowMs, fun(W) -> rand:uniform(W) - 1 end).
+
+-spec spread_sessions(
+    WindowMs :: pos_integer(), DelayFun :: fun((pos_integer()) -> non_neg_integer())
+) ->
+    {ok, non_neg_integer()} | {error, already_running}.
+spread_sessions(WindowMs, DelayFun) ->
+    Gateways = connected_gateways(),
+    Total = length(Gateways),
+    Spreader = erlang:spawn(fun() -> spread_wait_go(Total, WindowMs) end),
+    try erlang:register(?SPREADER, Spreader) of
+        true ->
+            %% Timers aimed at the spreader, not at the streams: see above.
+            lists:foreach(
+                fun(Gateway) ->
+                    erlang:send_after(DelayFun(WindowMs), Spreader, {spread_close, Gateway})
+                end,
+                Gateways
+            ),
+            Spreader ! go,
+            lager:info("spreading ~w gateway sessions over ~wms", [Total, WindowMs]),
+            {ok, Total}
+    catch
+        error:badarg ->
+            exit(Spreader, kill),
+            {error, already_running}
+    end.
+
+-spec spread_status() ->
+    not_running
+    | {running, #{
+        total := non_neg_integer(),
+        closed := non_neg_integer(),
+        not_found := non_neg_integer(),
+        ends_in_ms := integer()
+    }}.
+spread_status() ->
+    case erlang:whereis(?SPREADER) of
+        undefined ->
+            not_running;
+        Pid ->
+            Ref = erlang:monitor(process, Pid),
+            Pid ! {status, self(), Ref},
+            receive
+                {Ref, Status} ->
+                    erlang:demonitor(Ref, [flush]),
+                    {running, Status};
+                {'DOWN', Ref, process, Pid, _} ->
+                    not_running
+            after 5000 ->
+                erlang:demonitor(Ref, [flush]),
+                not_running
+            end
+    end.
+
+%% @doc Stop a running spread. Closes still pending are dropped: their timers
+%% are aimed at the spreader, so they go nowhere once it is gone.
+-spec cancel_spread() -> ok | not_running.
+cancel_spread() ->
+    case erlang:whereis(?SPREADER) of
+        undefined ->
+            not_running;
+        Pid ->
+            exit(Pid, kill),
+            lager:info("session spread cancelled"),
+            ok
+    end.
+
+-spec connected_gateways() -> [libp2p_crypto:pubkey_bin()].
+connected_gateways() ->
+    gproc:select({l, n}, [{{{n, l, ?REG_KEY('$1')}, '_', '_'}, [], ['$1']}]).
+
+%% Holds until the caller has armed every timer, so a zero delay cannot be
+%% counted before the spread is fully set up.
+spread_wait_go(Total, WindowMs) ->
+    receive
+        go ->
+            Deadline = erlang:monotonic_time(millisecond) + WindowMs,
+            spread_loop(#{total => Total, closed => 0, not_found => 0, deadline => Deadline})
+    end.
+
+spread_loop(#{total := Total, closed := Closed, not_found := NotFound}) when
+    Closed + NotFound >= Total
+->
+    lager:info("session spread done: ~w closed, ~w no longer on this node", [Closed, NotFound]);
+spread_loop(#{deadline := Deadline} = S) ->
+    receive
+        {spread_close, Gateway} ->
+            case ?MODULE:locate(Gateway) of
+                {ok, Pid} ->
+                    Pid ! ?SESSION_KILL,
+                    ok = hpr_metrics:session_spread(closed),
+                    spread_loop(S#{closed => maps:get(closed, S) + 1});
+                {error, not_found} ->
+                    ok = hpr_metrics:session_spread(not_found),
+                    spread_loop(S#{not_found => maps:get(not_found, S) + 1})
+            end;
+        {status, From, Ref} ->
+            Status = maps:with([total, closed, not_found], S),
+            EndsIn = Deadline - erlang:monotonic_time(millisecond),
+            From ! {Ref, Status#{ends_in_ms => EndsIn}},
+            spread_loop(S)
+    after
+        %% Every timer fires within the window, so this only guards against a
+        %% spreader left waiting forever if something unexpected happens.
+        max(0, Deadline - erlang:monotonic_time(millisecond)) + timer:minutes(1) ->
+            lager:warning("session spread gave up waiting: ~p", [maps:remove(deadline, S)])
     end.
 
 -ifdef(TEST).
@@ -534,5 +680,129 @@ send_packet_down_test() ->
     meck:unload(hpr_metrics),
     application:stop(gproc),
     ok.
+
+spread_sessions_test() ->
+    application:ensure_all_started(gproc),
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, session_spread, fun(_) -> ok end),
+    Self = self(),
+
+    [Stay1, Stay2, Moves, Leaves] =
+        Gateways = [<<"stay1">>, <<"stay2">>, <<"moves">>, <<"leaves">>],
+    Streams = maps:from_list([{G, start_fake_stream(G, Self)} || G <- Gateways]),
+    ?assertEqual(4, ?MODULE:connected_count()),
+
+    %% Every close fires at 200ms, so the changes below land before any of them.
+    ?assertEqual({ok, 4}, spread_sessions(timer:seconds(1), fun(_Window) -> 200 end)),
+    ?assertEqual({error, already_running}, ?MODULE:spread_sessions(1000)),
+    ?assertMatch(
+        {running, #{total := 4, closed := 0, not_found := 0}}, ?MODULE:spread_status()
+    ),
+
+    %% One gateway reconnects on a new stream before its close fires; one is gone.
+    ok = stop_fake_stream(maps:get(Moves, Streams)),
+    NewMovesStream = start_fake_stream(Moves, Self),
+    ok = stop_fake_stream(maps:get(Leaves, Streams)),
+
+    %% Each gateway still here is closed exactly once, on the stream holding it
+    %% when the close fires -- the new stream for the one that moved.
+    ?assertEqual(
+        lists:sort([
+            {Stay1, maps:get(Stay1, Streams)},
+            {Stay2, maps:get(Stay2, Streams)},
+            {Moves, NewMovesStream}
+        ]),
+        lists:sort(collect_session_kills(3, 1000))
+    ),
+    ?assertEqual([], collect_session_kills(1, 300)),
+
+    ok = wait_for_no_spreader(),
+    ?assertEqual(not_running, ?MODULE:spread_status()),
+    ?assertEqual(3, meck:num_calls(hpr_metrics, session_spread, [closed])),
+    ?assertEqual(1, meck:num_calls(hpr_metrics, session_spread, [not_found])),
+
+    [
+        ok = stop_fake_stream(P)
+     || P <- [maps:get(Stay1, Streams), maps:get(Stay2, Streams), NewMovesStream]
+    ],
+    meck:unload(hpr_metrics),
+    application:stop(gproc),
+    ok.
+
+cancel_spread_test() ->
+    application:ensure_all_started(gproc),
+    meck:new(hpr_metrics, [passthrough]),
+    meck:expect(hpr_metrics, session_spread, fun(_) -> ok end),
+    Stream = start_fake_stream(<<"cancelled">>, self()),
+
+    ?assertEqual({ok, 1}, spread_sessions(timer:seconds(1), fun(_Window) -> 200 end)),
+    ?assertEqual(ok, ?MODULE:cancel_spread()),
+    ok = wait_for_no_spreader(),
+    ?assertEqual(not_running, ?MODULE:spread_status()),
+    ?assertEqual(not_running, ?MODULE:cancel_spread()),
+    %% The pending close went nowhere.
+    ?assertEqual([], collect_session_kills(1, 400)),
+
+    %% Nothing connected is a spread that finishes straight away.
+    ok = stop_fake_stream(Stream),
+    ?assertEqual({ok, 0}, ?MODULE:spread_sessions(1000)),
+    ok = wait_for_no_spreader(),
+
+    meck:unload(hpr_metrics),
+    application:stop(gproc),
+    ok.
+
+%% Stands in for a gateway's stream process: holds the gateway's name and
+%% reports what it is sent.
+start_fake_stream(Gateway, Parent) ->
+    Pid = erlang:spawn(fun() ->
+        true = gproc:add_local_name(?REG_KEY(Gateway)),
+        Parent ! {fake_stream_up, self()},
+        fake_stream_loop(Gateway, Parent)
+    end),
+    receive
+        {fake_stream_up, Pid} -> Pid
+    after 1000 -> error(fake_stream_did_not_start)
+    end.
+
+fake_stream_loop(Gateway, Parent) ->
+    receive
+        {stop, From} ->
+            gproc:unreg({n, l, ?REG_KEY(Gateway)}),
+            From ! {fake_stream_stopped, self()};
+        Msg ->
+            Parent ! {fake_stream_got, Gateway, self(), Msg},
+            fake_stream_loop(Gateway, Parent)
+    end.
+
+stop_fake_stream(Pid) ->
+    Pid ! {stop, self()},
+    receive
+        {fake_stream_stopped, Pid} -> ok
+    after 1000 -> error(fake_stream_did_not_stop)
+    end.
+
+collect_session_kills(0, _Timeout) ->
+    [];
+collect_session_kills(N, Timeout) ->
+    receive
+        {fake_stream_got, Gateway, Pid, ?SESSION_KILL} ->
+            [{Gateway, Pid} | collect_session_kills(N - 1, Timeout)]
+    after Timeout -> []
+    end.
+
+wait_for_no_spreader() ->
+    wait_for_no_spreader(50).
+
+wait_for_no_spreader(0) ->
+    error(spreader_still_running);
+wait_for_no_spreader(N) ->
+    case erlang:whereis(?SPREADER) of
+        undefined ->
+            ok;
+        _ ->
+            timer:sleep(20),
+            wait_for_no_spreader(N - 1)
+    end.
 
 -endif.

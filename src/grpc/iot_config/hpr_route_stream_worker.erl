@@ -47,6 +47,27 @@
 %% non-grpc server. Or, the grpc server is down. We fail the backoff
 %% and try again later.
 %%
+%% = Silent stream =
+%%
+%% A stream can also stop delivering without ending: no `eos', no `DOWN', no
+%% trailers, just nothing -- one node's stream going quiet for minutes while
+%% another node on the same config service keeps receiving updates. Nothing
+%% above notices that, so the node silently stops learning about config
+%% changes.
+%%
+%% So every `?SILENCE_CHECK_INTERVAL' the worker checks how long it has been
+%% since the stream delivered anything. Past `ics_stream_silence_secs' (default
+%% 600, 0 disables) it resets the stream; if the replacement is silent for a
+%% whole window too, it restarts the channel instead, in case the connection
+%% under the stream is what is stuck, and keeps alternating from there. Any
+%% delivery resets that escalation.
+%%
+%% A genuinely quiet config service looks the same from here, and that is
+%% fine: a reset resumes from the stored timestamp, so on a quiet stream it
+%% costs one reconnect and brings back nothing. Restarting the whole node to
+%% achieve the same thing is what an external watchdog used to do, and that
+%% disconnects every gateway on it at once.
+%%
 %% @end
 %%%-------------------------------------------------------------------
 -module(hpr_route_stream_worker).
@@ -128,11 +149,22 @@
     conn_backoff :: backoff:backoff(),
     counts :: counts_map(),
     last_timestamp = 0 :: non_neg_integer(),
-    checkpoint_timer :: undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}
+    checkpoint_timer :: undefined | {TimeScheduled :: non_neg_integer(), timer:tref()},
+    %% Monotonic ms of the last delivery (or of the stream being opened), and
+    %% how many silence resets in a row have found nothing since.
+    last_data_at = 0 :: integer(),
+    silent_resets = 0 :: non_neg_integer()
 }).
 
 -define(SERVER, ?MODULE).
 -define(INIT_STREAM, init_stream).
+-define(CHECK_SILENCE, check_silence).
+-define(DEFAULT_SILENCE_SECS, 600).
+-ifdef(TEST).
+-define(SILENCE_CHECK_INTERVAL, 200).
+-else.
+-define(SILENCE_CHECK_INTERVAL, timer:minutes(1)).
+-endif.
 -define(DETS, hpr_route_stream_worker_dets).
 
 %% ------------------------------------------------------------------
@@ -255,6 +287,7 @@ init(Args) ->
     Backoff = backoff:type(backoff:init(?BACKOFF_MIN, ?BACKOFF_MAX), normal),
     lager:info("starting ~p with ~p", [?MODULE, Args]),
     self() ! ?INIT_STREAM,
+    ok = schedule_silence_check(),
 
     ok = open_dets(),
     LastTimestamp =
@@ -267,7 +300,8 @@ init(Args) ->
         stream = undefined,
         conn_backoff = Backoff,
         counts = new_counts(),
-        last_timestamp = LastTimestamp
+        last_timestamp = LastTimestamp,
+        last_data_at = now_ms()
     }}.
 
 handle_call({refresh_route, RouteID}, _From, State) ->
@@ -336,14 +370,7 @@ handle_call(reset_timestamp, _From, #state{} = State) ->
     ok = dets:insert(?DETS, {timestamp, 0}),
     {reply, ok, State#state{last_timestamp = 0}};
 handle_call(reset_channel, _From, #state{} = State) ->
-    %% Attempt to signal to the other side we're going down.
-    Stopped = grpcbox_channel:stop(?IOT_CONFIG_CHANNEL),
-    lager:info("channel stopped ~w", [Stopped]),
-
-    Config = application:get_env(?APP, ?IOT_CONFIG_SERVICE, #{}),
-    Started = hpr_sup:maybe_start_channel(Config, ?IOT_CONFIG_CHANNEL),
-    lager:info("channel started ~w", [Started]),
-
+    ok = restart_channel(),
     self() ! ?INIT_STREAM,
 
     {reply, ok, State#state{stream = undefined, counts = new_counts()}};
@@ -389,7 +416,9 @@ handle_info(
             {noreply, State#state{
                 stream = Stream,
                 conn_backoff = Backoff1,
-                checkpoint_timer = Timer
+                checkpoint_timer = Timer,
+                %% A new stream gets a full silence window before it is judged.
+                last_data_at = now_ms()
             }};
         {error, undefined_channel} ->
             lager:error(
@@ -424,7 +453,12 @@ handle_info({data, _StreamID, RouteStreamRes}, #state{counts = Counts0} = State)
                 end
             )
     end,
-    {noreply, State#state{counts = Counts1, last_timestamp = Timestamp}};
+    {noreply, State#state{
+        counts = Counts1,
+        last_timestamp = Timestamp,
+        last_data_at = now_ms(),
+        silent_resets = 0
+    }};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
     {noreply, State};
@@ -471,6 +505,16 @@ handle_info(
     lager:info("stream went down sleeping ~wms", [Delay]),
     _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
     {noreply, State#state{stream = undefined, conn_backoff = Backoff1}};
+handle_info(?CHECK_SILENCE, #state{stream = Stream, last_data_at = LastDataAt} = State) ->
+    ok = schedule_silence_check(),
+    %% Read on every check so it can be changed on a running node.
+    LimitMs = timer:seconds(hpr_utils:get_env_int(ics_stream_silence_secs, ?DEFAULT_SILENCE_SECS)),
+    SilentMs = now_ms() - LastDataAt,
+    case Stream =/= undefined andalso LimitMs > 0 andalso SilentMs >= LimitMs of
+        true -> {noreply, reset_silent_stream(SilentMs, State)};
+        %% No stream means a reconnect is already in hand, under its own backoff.
+        false -> {noreply, State}
+    end;
 handle_info(_Msg, State) ->
     lager:warning("unimplemented_info ~p", [_Msg]),
     {noreply, State}.
@@ -680,6 +724,57 @@ open_dets() ->
     end.
 
 -spec maybe_cancel_timer(undefined | {TimeScheduled :: non_neg_integer(), timer:tref()}) -> ok.
+-spec reset_silent_stream(SilentMs :: non_neg_integer(), #state{}) -> #state{}.
+reset_silent_stream(SilentMs, #state{stream = Stream, silent_resets = N} = State) ->
+    Kind = silence_reset_kind(N),
+    lager:warning(
+        [{silent_secs, SilentMs div 1000}, {reset, Kind}, {in_a_row, N + 1}],
+        "config stream delivered nothing for ~ws, resetting the ~s",
+        [SilentMs div 1000, Kind]
+    ),
+    ok = hpr_metrics:ics_stream_silence_reset(Kind),
+    %% The stream is presumed wedged, so closing it is best effort: a failure
+    %% here must not take the worker down with it.
+    _ = (catch grpcbox_client:close_send(Stream)),
+    ok =
+        case Kind of
+            stream -> ok;
+            channel -> restart_channel()
+        end,
+    self() ! ?INIT_STREAM,
+    State#state{
+        stream = undefined,
+        counts = new_counts(),
+        silent_resets = N + 1,
+        last_data_at = now_ms()
+    }.
+
+%% @doc What to reset after `SilentResets' consecutive silence resets that
+%% brought nothing back. The stream first, being cheapest; then the channel, in
+%% case the connection under it is what is stuck; then alternate.
+-spec silence_reset_kind(SilentResets :: non_neg_integer()) -> stream | channel.
+silence_reset_kind(SilentResets) when SilentResets rem 2 =:= 0 -> stream;
+silence_reset_kind(_SilentResets) -> channel.
+
+-spec restart_channel() -> ok.
+restart_channel() ->
+    %% Attempt to signal to the other side we're going down.
+    Stopped = grpcbox_channel:stop(?IOT_CONFIG_CHANNEL),
+    lager:info("channel stopped ~w", [Stopped]),
+    Config = application:get_env(?APP, ?IOT_CONFIG_SERVICE, #{}),
+    Started = hpr_sup:maybe_start_channel(Config, ?IOT_CONFIG_CHANNEL),
+    lager:info("channel started ~w", [Started]),
+    ok.
+
+-spec schedule_silence_check() -> ok.
+schedule_silence_check() ->
+    _ = erlang:send_after(?SILENCE_CHECK_INTERVAL, self(), ?CHECK_SILENCE),
+    ok.
+
+-spec now_ms() -> integer().
+now_ms() ->
+    erlang:monotonic_time(millisecond).
+
 maybe_cancel_timer(undefined) ->
     ok;
 maybe_cancel_timer({_TimeScheduled, Timer}) ->
@@ -694,3 +789,18 @@ new_counts() ->
         skf => 0,
         devaddr_range => 0
     }.
+
+%% ------------------------------------------------------------------
+%% EUNIT Tests
+%% ------------------------------------------------------------------
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+silence_reset_kind_test() ->
+    ?assertEqual(
+        [stream, channel, stream, channel, stream],
+        [silence_reset_kind(N) || N <- lists:seq(0, 4)]
+    ).
+
+-endif.

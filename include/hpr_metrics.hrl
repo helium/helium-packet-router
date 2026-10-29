@@ -37,6 +37,8 @@
 -define(METRICS_GRPC_CHANNEL_CONNS_GAUGE, "hpr_grpc_channel_conns_gauge").
 -define(METRICS_GRPC_CHANNEL_MAILBOX_GAUGE, "hpr_grpc_channel_mailbox_gauge").
 -define(METRICS_LIVENESS_REPORT_HISTOGRAM, "hpr_liveness_report_histogram").
+-define(METRICS_ICS_STREAM_SILENCE_RESET_COUNTER, "hpr_iot_config_stream_silence_reset_counter").
+-define(METRICS_SESSION_SPREAD_COUNTER, "hpr_session_spread_counter").
 
 -define(METRICS, [
     {?METRICS_GRPC_CONNECTION_GAUGE, prometheus_gauge, [], "Number of active GRPC Connections"},
@@ -69,5 +71,9 @@
         "Connections in a grpc channel's pool"},
     {?METRICS_GRPC_CHANNEL_MAILBOX_GAUGE, prometheus_gauge, [channel],
         "Deepest mailbox across a grpc channel's connections"},
-    {?METRICS_LIVENESS_REPORT_HISTOGRAM, prometheus_histogram, [status], "Liveness Reports"}
+    {?METRICS_LIVENESS_REPORT_HISTOGRAM, prometheus_histogram, [status], "Liveness Reports"},
+    {?METRICS_ICS_STREAM_SILENCE_RESET_COUNTER, prometheus_counter, [reset],
+        "Config stream resets after it delivered nothing for too long"},
+    {?METRICS_SESSION_SPREAD_COUNTER, prometheus_counter, [outcome],
+        "Gateway streams closed by a session spread, by outcome"}
 ]).

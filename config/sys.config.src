@@ -90,6 +90,9 @@
         }},
         {routing_cache_timeout_secs, 15},
         {routing_cache_window_secs, 120},
+        %% Reset the config stream after it delivers nothing for this long; 0
+        %% disables. See hpr_route_stream_worker, "Silent stream".
+        {ics_stream_silence_secs, 600},
         {ics_stream_worker_checkpoint_secs, 300},
         %% How long a multi-buy dedup key lives, and how often the expiry sweep
         %% runs. Deliberately separate: one sweep over a whole TTL's worth of

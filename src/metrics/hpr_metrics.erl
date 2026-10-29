@@ -21,6 +21,8 @@
     observe_find_routes/1,
     observe_grpc_connection/2,
     ics_update/2,
+    ics_stream_silence_reset/1,
+    session_spread/1,
     observe_gateway_location/2
 ]).
 
@@ -190,6 +192,16 @@ observe_grpc_connection(Type, Start) ->
 ) -> ok.
 ics_update(Type, Action) ->
     _ = prometheus_counter:inc(?METRICS_ICS_UPDATES_COUNTER, [Type, Action]),
+    ok.
+
+-spec ics_stream_silence_reset(Reset :: stream | channel) -> ok.
+ics_stream_silence_reset(Reset) ->
+    _ = prometheus_counter:inc(?METRICS_ICS_STREAM_SILENCE_RESET_COUNTER, [Reset]),
+    ok.
+
+-spec session_spread(Outcome :: closed | not_found) -> ok.
+session_spread(Outcome) ->
+    _ = prometheus_counter:inc(?METRICS_SESSION_SPREAD_COUNTER, [Outcome]),
     ok.
 
 -spec observe_gateway_location(
