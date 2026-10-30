@@ -136,7 +136,7 @@ stream_updates_under_lookup_test(_Config) ->
                 Other -> {false, {count, Other, expected, Expected}}
             end
         end,
-        300,
+        600,
         200
     ),
     [Pid ! Stop || Pid <- Workers],

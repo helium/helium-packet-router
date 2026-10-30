@@ -68,8 +68,8 @@
 -define(BLOCK_GAP, 16).
 -define(HIGH_DEVADDR, 16#FC000000).
 -define(TAIL_ROUTES, 5277).
-%% Stream messages delivered but not yet taken by the stream worker, so its
-%% mailbox (and the test_counts/0 call queued behind it) stays bounded.
+%% Stream messages delivered but not yet taken by the stream worker: its
+%% mailbox is kept below this.
 -define(STREAM_WINDOW, 5000).
 -define(STREAM_CHECK_EVERY, 500).
 
@@ -321,49 +321,45 @@ route_responses(Seed, #{id := ID, route := Route, range := {Start, End}} = Spec,
 %% `TimestampSecs'. See push/1.
 -spec stream(dataset(), non_neg_integer()) -> ok.
 stream(#{seed := Seed, routes := Routes}, TimestampSecs) ->
-    Base = applied(),
-    _ = lists:foldl(
-        fun(Spec, Sent) -> push(route_responses(Seed, Spec, TimestampSecs), Base, Sent) end,
-        0,
-        Routes
-    ),
-    ok.
+    lists:foreach(fun(Spec) -> push(route_responses(Seed, Spec, TimestampSecs)) end, Routes).
 
 %% @doc Hand stream responses to hpr_route_stream_worker exactly as its gRPC
-%% client does -- `{data, StreamID, Response}' -- no more than ?STREAM_WINDOW
-%% ahead of what it has taken.
+%% client does -- `{data, StreamID, Response}' -- keeping its mailbox under
+%% ?STREAM_WINDOW.
 %%
 %% Not through hpr_test_ics_route_service: grpcbox's server stops sending on a
 %% stream after about a thousand of these messages and queues the rest, so a
 %% large route never arrives. The worker's own path -- routes applied in
 %% order, one process per SKF, storage -- is what these tests load; the mock
 %% is still the way in for small volumes, such as resuming from `since'.
+%%
+%% Paced on the mailbox length rather than on test_counts/0: that call waits
+%% behind every queued message, and on a small CI runner busy with lookups it
+%% timed out before the worker got to it.
 -spec push([hpr_route_stream_res:res()]) -> ok.
 push(Resps) ->
-    _ = push(Resps, applied(), 0),
+    Worker = erlang:whereis(hpr_route_stream_worker),
+    _ = lists:foldl(
+        fun(Resp, Sent) ->
+            ok = wait_window(Worker, Sent),
+            Worker ! {data, load_test, Resp},
+            Sent + 1
+        end,
+        0,
+        Resps
+    ),
     ok.
 
-push([], _Base, Sent) ->
-    Sent;
-push([Resp | Rest], Base, Sent) ->
-    ok = wait_window(Base, Sent),
-    erlang:whereis(hpr_route_stream_worker) ! {data, load_test, Resp},
-    push(Rest, Base, Sent + 1).
-
-wait_window(_Base, Sent) when Sent rem ?STREAM_CHECK_EVERY =/= 0 ->
+wait_window(_Worker, Sent) when Sent rem ?STREAM_CHECK_EVERY =/= 0 ->
     ok;
-wait_window(Base, Sent) ->
-    case Sent - (applied() - Base) > ?STREAM_WINDOW of
-        true ->
+wait_window(Worker, Sent) ->
+    case erlang:process_info(Worker, message_queue_len) of
+        {message_queue_len, Queued} when Queued > ?STREAM_WINDOW ->
             timer:sleep(20),
-            wait_window(Base, Sent);
-        false ->
+            wait_window(Worker, Sent);
+        _ ->
             ok
     end.
-
-%% Messages the stream worker has taken off the stream, every type.
-applied() ->
-    lists:sum(maps:values(hpr_route_stream_worker:test_counts())).
 
 %% ------------------------------------------------------------------
 %% Traffic
