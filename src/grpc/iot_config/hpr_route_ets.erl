@@ -122,6 +122,8 @@ all_test_() ->
         {"test_many_skfs_one_devaddr", ?_test(test_many_skfs_one_devaddr())},
         {"test_skf_dets_v2_migration", ?_test(test_skf_dets_v2_migration())},
         {"test_skf_dets_v3_roundtrip", ?_test(test_skf_dets_v3_roundtrip())},
+        {"test_skf_checkpoint_keeps_update_during_write",
+            ?_test(test_skf_checkpoint_keeps_update_during_write())},
         {"test_delete_route", ?_test(test_delete_route())},
         {"test_delete_all", ?_test(test_delete_all())}
     ]}.
@@ -612,6 +614,38 @@ test_skf_dets_v2_migration() ->
 
     %% The v2 file is left alone, so a rollback still finds its data.
     ?assert(filelib:is_regular(LegacyFile)),
+    ok.
+
+%% An SKF update applied while its route is being written to disk is written
+%% by the next checkpoint. Its dirty mark used to be wiped when the write
+%% finished, leaving it out of the file for good.
+test_skf_checkpoint_keeps_update_during_write() ->
+    Route = test_route_for_skf("6ea6dfd0-3dce-4106-8980-d34007ab689b"),
+    RouteID = hpr_route:id(Route),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    Late = hpr_skf:new(#{
+        route_id => RouteID,
+        devaddr => 16#09,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+
+    meck:new(dets, [unstick, passthrough]),
+    try
+        meck:expect(dets, from_ets, fun(File, ETS) ->
+            %% Lands after the table was read, as a spawned update can.
+            Result = meck:passthrough([File, ETS]),
+            ok = hpr_skf_storage:insert(Late),
+            Result
+        end),
+        ?assertEqual(1, hpr_skf_storage:checkpoint())
+    after
+        meck:unload(dets)
+    end,
+    ?assertEqual(1, hpr_skf_storage:checkpoint()),
+    Rebuilt = hpr_skf_storage:make_ets(RouteID),
+    ?assertEqual(1, ets:info(Rebuilt, size)),
+    true = ets:delete(Rebuilt),
     ok.
 
 %% Checkpoint writes v3, and a table rebuilt from it reads back identically --

@@ -110,9 +110,15 @@ legacy_dets_filename(RouteID) ->
 
 %% @doc Persist every route whose SKFs changed since the last checkpoint.
 %%
-%% Returns the number of routes written, for the caller's timing log. A route's
-%% dirty flag is cleared only after its write returns, so a failed write is
-%% retried on the next checkpoint rather than silently losing the change.
+%% Returns the number of routes written, for the caller's timing log.
+%%
+%% A route's dirty flag is cleared before its write, not after. SKF updates are
+%% applied by processes the stream worker spawns, so they keep landing while
+%% this runs; one that lands mid-write marks the route again and the next
+%% checkpoint picks it up. Cleared after the write, that mark was wiped with
+%% the update possibly missing from the file -- and the stored resume timestamp
+%% already past it, so the stream would never send it again. A failed write
+%% marks the route again, so it is retried rather than lost.
 -spec checkpoint() -> non_neg_integer().
 checkpoint() ->
     lists:foldl(
@@ -128,11 +134,17 @@ checkpoint() ->
                             ok = mark_clean(RouteID),
                             Written;
                         _ ->
-                            DETSFile = ?MODULE:dets_filename(RouteID),
-                            with_open_dets(DETSFile, fun() ->
-                                ok = dets:from_ets(DETSFile, ETS)
-                            end),
                             ok = mark_clean(RouteID),
+                            DETSFile = ?MODULE:dets_filename(RouteID),
+                            try
+                                with_open_dets(DETSFile, fun() ->
+                                    ok = dets:from_ets(DETSFile, ETS)
+                                end)
+                            catch
+                                Class:Reason:Stacktrace ->
+                                    ok = mark_dirty(RouteID),
+                                    erlang:raise(Class, Reason, Stacktrace)
+                            end,
                             Written + 1
                     end;
                 {error, not_found} ->
