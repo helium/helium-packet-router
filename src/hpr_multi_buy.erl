@@ -499,25 +499,56 @@ reset_backoff(Channel) ->
 %%
 %% Accepts a string as well as a boolean because sys.config.src substitutes this
 %% from the environment, and the placeholder is quoted (an unquoted one broke
-%% sys.config parsing outright when the variable was unset). An unrecognised
-%% value keeps the historical default rather than silently disabling multi-buy,
-%% which would make every packet free.
+%% sys.config parsing outright when the variable was unset). Any case of
+%% true/false and 1/0 is understood. An unrecognised value keeps the historical
+%% default rather than silently disabling multi-buy, which would make every
+%% packet free -- and is reported once, not on every packet this runs for.
 -spec enabled() -> boolean().
 enabled() ->
-    case application:get_env(?APP, multi_buy_enabled, true) of
-        true ->
-            true;
-        false ->
-            false;
-        "true" ->
-            true;
-        "false" ->
-            false;
-        "" ->
-            true;
-        Other ->
-            lager:warning("unrecognised multi_buy_enabled ~p, defaulting to true", [Other]),
+    Value = application:get_env(?APP, multi_buy_enabled, true),
+    case parse_enabled(Value) of
+        {ok, Enabled} ->
+            Enabled;
+        error ->
+            ok = warn_once(
+                {multi_buy_enabled, Value},
+                "unrecognised multi_buy_enabled ~p, defaulting to true",
+                [Value]
+            ),
             true
+    end.
+
+-spec parse_enabled(term()) -> {ok, boolean()} | error.
+parse_enabled(Bool) when is_boolean(Bool) ->
+    {ok, Bool};
+parse_enabled(1) ->
+    {ok, true};
+parse_enabled(0) ->
+    {ok, false};
+parse_enabled(Bin) when is_binary(Bin) ->
+    parse_enabled(erlang:binary_to_list(Bin));
+parse_enabled(Str) when is_list(Str) ->
+    case io_lib:printable_unicode_list(Str) andalso string:lowercase(string:trim(Str)) of
+        "" -> {ok, true};
+        "true" -> {ok, true};
+        "1" -> {ok, true};
+        "false" -> {ok, false};
+        "0" -> {ok, false};
+        _ -> error
+    end;
+parse_enabled(_) ->
+    error.
+
+%% Log a warning the first time `Key' is seen, and stay quiet after.
+-spec warn_once(Key :: term(), Format :: string(), Args :: list()) -> ok.
+warn_once(Key, Format, Args) ->
+    case persistent_term:get({?MODULE, warned, Key}, false) of
+        true ->
+            ok;
+        false ->
+            persistent_term:put({?MODULE, warned, Key}, true),
+            lager:warning(Format, Args),
+            ok
     end.
 
 -spec scheduled_cleanup() -> ok.
@@ -565,6 +596,7 @@ all_test_() ->
         ?_test(test_update_counter_with_service()),
         ?_test(test_update_counter_denied()),
         ?_test(test_update_counter_ets_only()),
+        ?_test(test_enabled_values()),
         ?_test(test_cleanup()),
         ?_test(test_scheduled_cleanup()),
         ?_test(test_is_using_custom_multi_buy()),
@@ -609,6 +641,18 @@ foreach_cleanup(ok) ->
     ?assert(meck:validate(grpcbox_client)),
     meck:unload(grpcbox_client),
     application:set_env(hpr, multi_buy_enabled, false),
+    ok.
+
+test_enabled_values() ->
+    Enabled = fun(Value) ->
+        ok = application:set_env(hpr, multi_buy_enabled, Value),
+        ?MODULE:enabled()
+    end,
+    [?assert(Enabled(V), V) || V <- [true, "true", "TRUE", " True ", <<"true">>, "1", 1, ""]],
+    [?assertNot(Enabled(V), V) || V <- [false, "false", "FALSE", <<"False">>, "0", 0]],
+    %% Unrecognised: the safe default, multi-buy stays on.
+    [?assert(Enabled(V), V) || V <- ["yes please", 42, undefined]],
+    ok = application:set_env(hpr, multi_buy_enabled, true),
     ok.
 
 test_max_too_low() ->
