@@ -145,6 +145,9 @@ checkpoint() ->
                                     ok = mark_dirty(RouteID),
                                     erlang:raise(Class, Reason, Stacktrace)
                             end,
+                            %% The v3 file now holds this route; see
+                            %% rehydrate_from_dets/2 for why v2 must not outlive it.
+                            ok = delete_legacy_dets(RouteID),
                             Written + 1
                     end;
                 {error, not_found} ->
@@ -176,9 +179,12 @@ with_open_dets(Filename, Fn) ->
 %% The config stream is incremental (it resumes from a stored timestamp), so it
 %% will not re-send SKFs we already acknowledged. A fresh v3 file would therefore
 %% leave every route's SKFs empty until an operator forced a refresh -- so the
-%% first boot on v3 reads the v2 file and flips each key instead. The v2 file is
-%% deliberately left on disk: the next checkpoint writes v3 alongside it, and
-%% keeping it means a rollback still finds data.
+%% first boot on v3 reads the v2 file and flips each key instead.
+%%
+%% The v2 file is deleted as soon as it is superseded: once the route's v3 file
+%% is written, and when the route is cleared or deleted. It is frozen at
+%% upgrade time, so left behind it would be read again whenever the v3 file is
+%% missing -- bringing back every key removed since.
 rehydrate_from_dets(RouteID, EtsRef) ->
     Filename = ?MODULE:dets_filename(RouteID),
     case filelib:is_regular(Filename) of
@@ -200,6 +206,11 @@ rehydrate_from_dets(RouteID, EtsRef) ->
                     with_open_dets(Filename, fun() -> ok end)
             end
     end.
+
+-spec delete_legacy_dets(Route :: hpr_route:id()) -> ok.
+delete_legacy_dets(RouteID) ->
+    _ = file:delete(legacy_dets_filename(RouteID)),
+    ok.
 
 -spec load_dets(Filename :: list(), EtsRef :: ets:table(), Fn :: fun()) -> ok.
 load_dets(Filename, EtsRef, Convert) ->
@@ -325,11 +336,13 @@ delete_route(RouteID) ->
                 end,
             DetsFilename = ?MODULE:dets_filename(RouteID),
             _ = file:delete(DetsFilename),
+            ok = delete_legacy_dets(RouteID),
             ok = mark_clean(RouteID),
             Size;
         {error, not_found} = Err ->
             DetsFilename = ?MODULE:dets_filename(RouteID),
             Deleted = file:delete(DetsFilename),
+            ok = delete_legacy_dets(RouteID),
             lager:info(
                 [
                     {route_id, RouteID},
@@ -362,10 +375,12 @@ clear_route(RouteID) ->
                         S
                 end,
             _ = file:delete(?MODULE:dets_filename(RouteID)),
+            ok = delete_legacy_dets(RouteID),
             ok = mark_clean(RouteID),
             Size;
         {error, not_found} ->
             _ = file:delete(?MODULE:dets_filename(RouteID)),
+            ok = delete_legacy_dets(RouteID),
             ok = mark_clean(RouteID),
             0
     end.

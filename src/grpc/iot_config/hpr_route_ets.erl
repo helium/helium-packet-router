@@ -122,6 +122,8 @@ all_test_() ->
         {"test_many_skfs_one_devaddr", ?_test(test_many_skfs_one_devaddr())},
         {"test_skf_dets_v2_migration", ?_test(test_skf_dets_v2_migration())},
         {"test_skf_dets_v3_roundtrip", ?_test(test_skf_dets_v3_roundtrip())},
+        {"test_skf_dets_v2_gone_after_clear", ?_test(test_skf_dets_v2_gone_after_clear())},
+        {"test_skf_dets_v2_gone_after_delete", ?_test(test_skf_dets_v2_gone_after_delete())},
         {"test_skf_checkpoint_keeps_update_during_write",
             ?_test(test_skf_checkpoint_keeps_update_during_write())},
         {"test_delete_route", ?_test(test_delete_route())},
@@ -596,13 +598,7 @@ test_skf_dets_v2_migration() ->
     SessionKey = crypto:strong_rand_bytes(16),
 
     %% A v2 file, keyed {SessionKey, DevAddr}, written before the route exists.
-    LegacyFile = filename:join([
-        hpr_utils:base_data_dir(), io_lib:format("hpr_skf_~s_v2.dets", [RouteID])
-    ]),
-    ok = filelib:ensure_dir(LegacyFile),
-    {ok, _} = dets:open_file(LegacyFile, [{type, set}]),
-    ok = dets:insert(LegacyFile, {{SessionKey, DevAddr}, 7}),
-    ok = dets:close(LegacyFile),
+    LegacyFile = test_write_v2_dets(RouteID, [{{SessionKey, DevAddr}, 7}]),
 
     ?assertEqual(ok, hpr_route_storage:insert(Route)),
     {ok, RouteETS} = hpr_route_storage:lookup(RouteID),
@@ -612,8 +608,43 @@ test_skf_dets_v2_migration() ->
     ?assertEqual([{SessionKey, 7}], hpr_skf_storage:lookup(SKFETS, DevAddr)),
     ?assertEqual([{DevAddr, SessionKey, 7}], hpr_skf_storage:lookup_route(RouteID)),
 
-    %% The v2 file is left alone, so a rollback still finds its data.
+    %% Kept until the route's v3 file is written, then deleted: it is frozen at
+    %% upgrade time and must not be read again.
     ?assert(filelib:is_regular(LegacyFile)),
+    ?assertEqual(1, hpr_skf_storage:checkpoint()),
+    ?assert(filelib:is_regular(hpr_skf_storage:dets_filename(RouteID))),
+    ?assertNot(filelib:is_regular(LegacyFile)),
+    ok.
+
+%% Clearing a route (deactivation) deletes its v3 file and keeps the route.
+%% A v2 file left behind would be loaded on the next boot, bringing back every
+%% key the route had at upgrade time.
+test_skf_dets_v2_gone_after_clear() ->
+    Route = test_route_for_skf("4ea6dfd0-3dce-4106-8980-d34007ab689b"),
+    RouteID = hpr_route:id(Route),
+    LegacyFile = test_write_v2_dets(RouteID, [{{crypto:strong_rand_bytes(16), 16#07}, 1}]),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    ?assertEqual(1, hpr_skf_storage:count_route(RouteID)),
+
+    ?assertEqual(1, hpr_skf_storage:clear_route(RouteID)),
+    ?assertNot(filelib:is_regular(LegacyFile)),
+    %% What the next boot would load for this route: nothing.
+    Rebuilt = hpr_skf_storage:make_ets(RouteID),
+    ?assertEqual(0, ets:info(Rebuilt, size)),
+    true = ets:delete(Rebuilt),
+    ok.
+
+%% The same for a deleted route whose id comes back later.
+test_skf_dets_v2_gone_after_delete() ->
+    Route = test_route_for_skf("5ea6dfd0-3dce-4106-8980-d34007ab689b"),
+    RouteID = hpr_route:id(Route),
+    LegacyFile = test_write_v2_dets(RouteID, [{{crypto:strong_rand_bytes(16), 16#08}, 1}]),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+
+    ?assertEqual(ok, hpr_route_storage:delete(Route)),
+    ?assertNot(filelib:is_regular(LegacyFile)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    ?assertEqual(0, hpr_skf_storage:count_route(RouteID)),
     ok.
 
 %% An SKF update applied while its route is being written to disk is written
@@ -647,6 +678,16 @@ test_skf_checkpoint_keeps_update_during_write() ->
     ?assertEqual(1, ets:info(Rebuilt, size)),
     true = ets:delete(Rebuilt),
     ok.
+
+test_write_v2_dets(RouteID, Rows) ->
+    LegacyFile = filename:join([
+        hpr_utils:base_data_dir(), io_lib:format("hpr_skf_~s_v2.dets", [RouteID])
+    ]),
+    ok = filelib:ensure_dir(LegacyFile),
+    {ok, _} = dets:open_file(LegacyFile, [{type, set}]),
+    ok = dets:insert(LegacyFile, Rows),
+    ok = dets:close(LegacyFile),
+    LegacyFile.
 
 %% Checkpoint writes v3, and a table rebuilt from it reads back identically --
 %% i.e. a second boot after the migration does not need the v2 file.
