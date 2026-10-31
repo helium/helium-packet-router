@@ -193,9 +193,7 @@ handle_cast(
             DevAddr0 ->
                 DevAddr0
         end,
-    PacketUp = test_utils:uplink_packet_up(Args#{
-        gateway => PubKeyBin, sig_fun => SigFun, devaddr => DevAddr
-    }),
+    PacketUp = test_utils:uplink_packet_up(packet_args(Args, PubKeyBin, SigFun, DevAddr)),
     EnvUp = hpr_envelope_up:new(PacketUp),
     ok = grpcbox_client:send(Stream, EnvUp),
     Pid ! {?MODULE, self(), {?SEND_PACKET, EnvUp}},
@@ -220,9 +218,7 @@ handle_cast(
             DevAddr0 ->
                 DevAddr0
         end,
-    PacketUp = test_utils:uplink_packet_up(Args#{
-        gateway => Gateway, sig_fun => SigFun, devaddr => DevAddr
-    }),
+    PacketUp = test_utils:uplink_packet_up(packet_args(Args, Gateway, SigFun, DevAddr)),
     EnvUp = hpr_envelope_up:new(PacketUp),
     ok = grpcbox_client:send(Stream, EnvUp),
     Pid ! {?MODULE, self(), {?SEND_PACKET, EnvUp}},
@@ -318,6 +314,13 @@ terminate(_Reason, #state{forward = Pid, pubkey_bin = PubKeyBin, stream = Stream
 %% ------------------------------------------------------------------
 %%% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+%% `claim_gateway' puts another gateway's key in the packet's gateway field,
+%% signed by this gateway as usual: a hotspot spoofing another.
+packet_args(Args, Gateway, SigFun, DevAddr) ->
+    (maps:remove(claim_gateway, Args))#{
+        gateway => maps:get(claim_gateway, Args, Gateway), sig_fun => SigFun, devaddr => DevAddr
+    }.
 
 -spec open_stream(state()) -> state().
 open_stream(#state{forward = Pid, pubkey_bin = PubKeyBin, sig_fun = SigFun} = State) ->

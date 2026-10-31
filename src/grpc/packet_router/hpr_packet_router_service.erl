@@ -326,7 +326,19 @@ handle_packet(PacketUp, Timestamp, StreamState) ->
     %% metadata built, before anything could say no. Two ETS lookups here make a
     %% rejected packet cost nothing but those lookups. hpr_routing is told the
     %% limits already ran, so the budget is consumed once.
-    case hpr_routing:admit(hpr_packet_up:gateway(PacketUp), PHash) of
+    %%
+    %% The budget is the gateway this stream registered as, and a packet
+    %% claiming any other is turned away before it touches one: the packet's
+    %% gateway field is not verified yet, so charging it would let one hotspot
+    %% spend another's limits. hpr_routing's gateway_check rejects the same
+    %% packets; this only does it before the throttles instead of after.
+    Gateway = HandlerState#handler_state.pubkey_bin,
+    Admitted =
+        case hpr_packet_up:gateway(PacketUp) of
+            Gateway -> hpr_routing:admit(Gateway, PHash);
+            _Other -> {error, wrong_gateway}
+        end,
+    case Admitted of
         {error, _Reason} = Error ->
             lager:debug("packet not admitted: ~p", [_Reason]),
             _ = hpr_metrics:observe_packet_up(
@@ -336,7 +348,7 @@ handle_packet(PacketUp, Timestamp, StreamState) ->
         ok ->
             Opts = #{
                 session_key => HandlerState#handler_state.session_key,
-                gateway => HandlerState#handler_state.pubkey_bin,
+                gateway => Gateway,
                 gateway_name => HandlerState#handler_state.gateway_name,
                 phash => PHash,
                 stream_pid => self(),
@@ -526,8 +538,13 @@ route_packet_test() ->
 
     meck:new(hpr_metrics, [passthrough]),
 
+    %% Registered as the gateway the packet names, as a real stream is.
     StreamState = grpcbox_stream:stream_handler_state(
-        #state{}, #handler_state{last_phash = hpr_packet_up:phash(PacketUp)}
+        #state{},
+        #handler_state{
+            last_phash = hpr_packet_up:phash(PacketUp),
+            pubkey_bin = hpr_packet_up:gateway(PacketUp)
+        }
     ),
 
     ?assertEqual({ok, StreamState}, ?MODULE:route(EnvUp, StreamState)),
@@ -554,7 +571,9 @@ route_packet_not_admitted_test() ->
 
     PacketUp = hpr_packet_up:test_new(#{}),
     EnvUp = hpr_envelope_up:new(PacketUp),
-    StreamState = grpcbox_stream:stream_handler_state(#state{}, #handler_state{}),
+    StreamState = grpcbox_stream:stream_handler_state(
+        #state{}, #handler_state{pubkey_bin = hpr_packet_up:gateway(PacketUp)}
+    ),
 
     ?assertMatch({ok, _}, ?MODULE:route(EnvUp, StreamState)),
     timer:sleep(100),
