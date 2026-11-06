@@ -1,15 +1,14 @@
 -module(hpr_skf_storage).
 
 -export([
+    init_ets/0,
     make_ets/1,
     checkpoint/0,
     dets_filename/1,
 
     insert/1,
-    update/4,
     delete/1,
     lookup/2,
-    select/1, select/2,
 
     delete_route/1,
     clear_route/1,
@@ -30,17 +29,57 @@
 -endif.
 
 -define(ETS_SKFS, hpr_route_skfs_ets).
+%% Route ids whose SKF table has changed since it was last written to disk.
+%% checkpoint/0 writes only these, so the periodic checkpoint costs one
+%% dets:from_ets per *changed* route instead of one per route in existence.
+-define(ETS_DIRTY, hpr_skf_dirty_ets).
 %% Version 1: {SessionKey :: binary(), {Devaddr :: binary(), MaxCopies :: non_neg_integer()}}
 %% Version 2: {{SessionKey :: binary(), Devaddr :: binary()}, MaxCopies :: non_neg_integer()}
--define(DETS_FILENAME(ROUTE_ID), io_lib:format("hpr_skf_~s_v2.dets", [ROUTE_ID])).
+%% Version 3: {{Devaddr :: binary(), SessionKey :: binary()}, MaxCopies :: non_neg_integer()}
+%%
+%% v3 exists only to put DevAddr first in the key. Every read is "the session
+%% keys for this DevAddr", and on a `set' the hash covers the whole key term, so
+%% a v2 lookup could not use it and full-scanned the table instead -- measured at
+%% 23ms against a 137k-row route, which was the entire
+%% `find_routes' cost. As an `ordered_set' keyed DevAddr-first, the bound prefix
+%% restricts the traversal to that DevAddr: 0.7us for the same table.
+-define(DETS_FILENAME(ROUTE_ID), io_lib:format("hpr_skf_~s_v3.dets", [ROUTE_ID])).
+-define(LEGACY_DETS_FILENAME(ROUTE_ID), io_lib:format("hpr_skf_~s_v2.dets", [ROUTE_ID])).
 
 -define(SKF_HEIR, hpr_sup).
+
+%% @doc Create the dirty-route table, or empty it if it already exists.
+%%
+%% Idempotent, unlike the strict `?ETS = ets:new(...)' the sibling storage
+%% modules use, because this table has no owning route to hang a teardown off:
+%% eunit suites that call hpr_route_ets:init/0 per test tear down tables by name
+%% and would each need updating, and a second ets:new/2 on a named table raises
+%% badarg. Emptying is the right state either way -- route hydration runs right
+%% after this and marks every route dirty.
+-spec init_ets() -> ok.
+init_ets() ->
+    case ets:info(?ETS_DIRTY, name) of
+        undefined ->
+            ?ETS_DIRTY = ets:new(?ETS_DIRTY, [
+                public,
+                named_table,
+                set,
+                {read_concurrency, true},
+                {write_concurrency, true}
+            ]);
+        _ ->
+            true = ets:delete_all_objects(?ETS_DIRTY)
+    end,
+    ok.
 
 -spec make_ets(hpr_route:id()) -> ets:tab().
 make_ets(RouteID) ->
     Ref = ets:new(?ETS_SKFS, [
         public,
-        set,
+        %% ordered_set, not set: see the version note above. The key is
+        %% {DevAddr, SessionKey} and reads bind only DevAddr, which an
+        %% ordered_set can use as a range prefix and a hashed set cannot.
+        ordered_set,
         {read_concurrency, true},
         {write_concurrency, true},
         {heir, erlang:whereis(?SKF_HEIR), RouteID}
@@ -48,6 +87,12 @@ make_ets(RouteID) ->
 
     lager:info("rehydrating SKF from dets: ~p", [RouteID]),
     ok = rehydrate_from_dets(RouteID, Ref),
+
+    %% A table we just built is not yet known to match its file: rehydration can
+    %% have found a corrupt file (with_open_dets/2 deletes and retries), and a
+    %% route created after boot has no file at all. Marking it dirty makes the
+    %% next checkpoint write it once, which is what used to happen every time.
+    ok = mark_dirty(RouteID),
 
     Ref.
 
@@ -57,27 +102,70 @@ dets_filename(RouteID) ->
     Filename = ?DETS_FILENAME(RouteID),
     filename:join([DataDir, Filename]).
 
--spec checkpoint() -> ok.
-checkpoint() ->
-    lists:foreach(
-        fun(RouteETS) ->
-            Route = hpr_route_ets:route(RouteETS),
-            RouteID = hpr_route:id(Route),
-            DETSFile = ?MODULE:dets_filename(RouteID),
+-spec legacy_dets_filename(Route :: hpr_route:id()) -> list().
+legacy_dets_filename(RouteID) ->
+    DataDir = hpr_utils:base_data_dir(),
+    Filename = ?LEGACY_DETS_FILENAME(RouteID),
+    filename:join([DataDir, Filename]).
 
-            ETS = hpr_route_ets:skf_ets(RouteETS),
-            with_open_dets(DETSFile, fun() -> ok = dets:from_ets(DETSFile, ETS) end)
+%% @doc Persist every route whose SKFs changed since the last checkpoint.
+%%
+%% Returns the number of routes written, for the caller's timing log.
+%%
+%% A route's dirty flag is cleared before its write, not after. SKF updates are
+%% applied by processes the stream worker spawns, so they keep landing while
+%% this runs; one that lands mid-write marks the route again and the next
+%% checkpoint picks it up. Cleared after the write, that mark was wiped with
+%% the update possibly missing from the file -- and the stored resume timestamp
+%% already past it, so the stream would never send it again. A failed write
+%% marks the route again, so it is retried rather than lost.
+-spec checkpoint() -> non_neg_integer().
+checkpoint() ->
+    lists:foldl(
+        fun(RouteID, Written) ->
+            case hpr_route_storage:lookup(RouteID) of
+                {ok, RouteETS} ->
+                    ETS = hpr_route_ets:skf_ets(RouteETS),
+                    %% A dangling reference (dead table) cannot be written and
+                    %% will not become writable, so drop the flag rather than
+                    %% retrying it forever.
+                    case ets:info(ETS, size) of
+                        undefined ->
+                            ok = mark_clean(RouteID),
+                            Written;
+                        _ ->
+                            ok = mark_clean(RouteID),
+                            DETSFile = ?MODULE:dets_filename(RouteID),
+                            try
+                                with_open_dets(DETSFile, fun() ->
+                                    ok = dets:from_ets(DETSFile, ETS)
+                                end)
+                            catch
+                                Class:Reason:Stacktrace ->
+                                    ok = mark_dirty(RouteID),
+                                    erlang:raise(Class, Reason, Stacktrace)
+                            end,
+                            %% The v3 file now holds this route; see
+                            %% rehydrate_from_dets/2 for why v2 must not outlive it.
+                            ok = delete_legacy_dets(RouteID),
+                            Written + 1
+                    end;
+                {error, not_found} ->
+                    %% Route deleted between being marked and now.
+                    ok = mark_clean(RouteID),
+                    Written
+            end
         end,
-        hpr_route_storage:all_route_ets()
-    ),
-    ok.
+        0,
+        dirty_route_ids()
+    ).
 
 -spec with_open_dets(Filename :: list(), Fn :: fun()) -> ok.
 with_open_dets(Filename, Fn) ->
     ok = filelib:ensure_dir(Filename),
     case dets:open_file(Filename, [{type, set}]) of
         {ok, _} ->
-            lager:info("opened dets: ~s~n", [Filename]),
+            lager:debug("opened dets: ~s", [Filename]),
             Fn(),
             dets:close(Filename);
         {error, _Reason} ->
@@ -86,32 +174,62 @@ with_open_dets(Filename, Fn) ->
             with_open_dets(Filename, Fn)
     end.
 
+%% @doc Load a route's SKFs, migrating a v2 file in place if that is all there is.
+%%
+%% The config stream is incremental (it resumes from a stored timestamp), so it
+%% will not re-send SKFs we already acknowledged. A fresh v3 file would therefore
+%% leave every route's SKFs empty until an operator forced a refresh -- so the
+%% first boot on v3 reads the v2 file and flips each key instead.
+%%
+%% The v2 file is deleted as soon as it is superseded: once the route's v3 file
+%% is written, and when the route is cleared or deleted. It is frozen at
+%% upgrade time, so left behind it would be read again whenever the v3 file is
+%% missing -- bringing back every key removed since.
 rehydrate_from_dets(RouteID, EtsRef) ->
     Filename = ?MODULE:dets_filename(RouteID),
+    case filelib:is_regular(Filename) of
+        true ->
+            load_dets(Filename, EtsRef, fun(Entry) -> Entry end);
+        false ->
+            Legacy = legacy_dets_filename(RouteID),
+            case filelib:is_regular(Legacy) of
+                true ->
+                    lager:info("migrating SKF dets v2 to v3: ~p", [RouteID]),
+                    load_dets(Legacy, EtsRef, fun v2_to_v3/1);
+                false ->
+                    %% Neither file exists: create an empty v3 so a live route
+                    %% always has one. That used to fall out of dets:open_file/2
+                    %% creating the file it was asked to read; now that the read
+                    %% is conditional, do it deliberately rather than lose the
+                    %% invariant (hpr_route_stream_worker_SUITE asserts it, and
+                    %% route removal is what deletes the file).
+                    with_open_dets(Filename, fun() -> ok end)
+            end
+    end.
+
+-spec delete_legacy_dets(Route :: hpr_route:id()) -> ok.
+delete_legacy_dets(RouteID) ->
+    _ = file:delete(legacy_dets_filename(RouteID)),
+    ok.
+
+-spec load_dets(Filename :: list(), EtsRef :: ets:table(), Fn :: fun()) -> ok.
+load_dets(Filename, EtsRef, Convert) ->
     with_open_dets(Filename, fun() ->
         [] = dets:traverse(Filename, fun(Entry) ->
-            true = ets:insert(EtsRef, Entry),
+            true = ets:insert(EtsRef, Convert(Entry)),
             continue
         end)
     end).
 
+-spec v2_to_v3({{binary(), non_neg_integer()}, non_neg_integer()}) ->
+    {{non_neg_integer(), binary()}, non_neg_integer()}.
+v2_to_v3({{SessionKey, DevAddr}, MaxCopies}) ->
+    {{DevAddr, SessionKey}, MaxCopies}.
+
 -spec lookup(ETS :: ets:table(), DevAddr :: non_neg_integer()) ->
     [{SessionKey :: binary(), MaxCopies :: non_neg_integer()}].
 lookup(ETS, DevAddr) ->
-    MS = [{{{'$1', DevAddr}, '$2'}, [], [{{'$1', '$2'}}]}],
-    ets:select(ETS, MS).
-
--spec select(Continuation :: ets:continuation()) ->
-    {[{binary(), string(), non_neg_integer()}], ets:continuation()} | '$end_of_table'.
-select(Continuation) ->
-    ets:select(Continuation).
-
--spec select(ETS :: ets:table(), DevAddr :: non_neg_integer() | ets:continuation()) ->
-    {[{SessionKey :: binary(), MaxCopies :: non_neg_integer()}], ets:continuation()}
-    | '$end_of_table'.
-select(ETS, DevAddr) ->
-    MS = [{{{'$1', DevAddr}, '$2'}, [], [{{'$1', '$2'}}]}],
-    ets:select(ETS, MS, 100).
+    ets:select(ETS, devaddr_ms(DevAddr)).
 
 -spec insert(SKF :: hpr_skf:skf()) -> ok.
 insert(SKF) ->
@@ -121,28 +239,13 @@ insert(SKF) ->
         {ok, RouteETS} ->
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
             ok = do_insert_skf(SKFETS, SKF),
+            ok = mark_dirty(RouteID),
             lager:debug(MD, "updated SKF");
         _Other ->
             lager:error(MD, "failed to insert skf table not found ~p", [
                 _Other
             ])
     end,
-    ok.
-
--spec update(
-    DevAddr :: non_neg_integer(),
-    SessionKey :: binary(),
-    RouteID :: hpr_route:id(),
-    MaxCopies :: non_neg_integer()
-) -> ok.
-update(DevAddr, SessionKey, RouteID, MaxCopies) ->
-    SKF = hpr_skf:new(#{
-        route_id => RouteID,
-        devaddr => DevAddr,
-        session_key => hpr_utils:bin_to_hex_string(SessionKey),
-        max_copies => MaxCopies
-    }),
-    ok = ?MODULE:insert(SKF),
     ok.
 
 -spec delete(SKF :: hpr_skf:skf()) -> ok.
@@ -155,7 +258,8 @@ delete(SKF) ->
             MaxCopies = hpr_skf:max_copies(SKF),
 
             SKFETS = hpr_route_ets:skf_ets(RouteETS),
-            true = ets:delete(SKFETS, {hpr_utils:hex_to_bin(SessionKey), DevAddr}),
+            true = ets:delete(SKFETS, {DevAddr, hpr_utils:hex_to_bin(SessionKey)}),
+            ok = mark_dirty(RouteID),
             lager:debug(
                 [
                     {route_id, RouteID},
@@ -181,13 +285,19 @@ delete_all() ->
         end,
         hpr_route_storage:all_route_ets()
     ),
+    %% Every table is gone, so there is nothing left for a checkpoint to write.
+    ok = clear_dirty(),
     ok.
 
 -ifdef(TEST).
 
 -spec test_delete_ets() -> ok.
 test_delete_ets() ->
-    ?MODULE:delete_all().
+    ok = ?MODULE:delete_all(),
+    %% Destroy the named table too: init_ets/0 recreates it per test, and
+    %% ets:new/2 on an existing named table raises badarg.
+    _ = catch ets:delete(?ETS_DIRTY),
+    ok.
 
 -spec test_register_heir() -> true.
 test_register_heir() ->
@@ -226,10 +336,13 @@ delete_route(RouteID) ->
                 end,
             DetsFilename = ?MODULE:dets_filename(RouteID),
             _ = file:delete(DetsFilename),
+            ok = delete_legacy_dets(RouteID),
+            ok = mark_clean(RouteID),
             Size;
         {error, not_found} = Err ->
             DetsFilename = ?MODULE:dets_filename(RouteID),
             Deleted = file:delete(DetsFilename),
+            ok = delete_legacy_dets(RouteID),
             lager:info(
                 [
                     {route_id, RouteID},
@@ -238,6 +351,7 @@ delete_route(RouteID) ->
                 ],
                 "route not found, skf file maybe deleted"
             ),
+            ok = mark_clean(RouteID),
             Err
     end.
 
@@ -261,9 +375,13 @@ clear_route(RouteID) ->
                         S
                 end,
             _ = file:delete(?MODULE:dets_filename(RouteID)),
+            ok = delete_legacy_dets(RouteID),
+            ok = mark_clean(RouteID),
             Size;
         {error, not_found} ->
             _ = file:delete(?MODULE:dets_filename(RouteID)),
+            ok = delete_legacy_dets(RouteID),
+            ok = mark_clean(RouteID),
             0
     end.
 
@@ -313,13 +431,16 @@ replace_route(RouteID, NewSKFs) ->
                 end,
                 CurrentKeys
             ),
+            ok = mark_dirty(RouteID),
             {ok, OldSize};
         Other ->
             {error, Other}
     end.
 
+%% @doc Every SKF on a route, as explicit tuples rather than raw ETS rows, so
+%% callers do not depend on the key layout (it has changed three times).
 -spec lookup_route(RouteID :: hpr_route:id()) ->
-    list({{SessionKey :: binary(), Devaddr :: binary()}, MaxCopies :: non_neg_integer()}).
+    list({DevAddr :: non_neg_integer(), SessionKey :: binary(), MaxCopies :: non_neg_integer()}).
 lookup_route(RouteID) ->
     case hpr_route_storage:lookup(RouteID) of
         {ok, RouteETS} ->
@@ -327,8 +448,13 @@ lookup_route(RouteID) ->
             %% Tolerate a dangling reference: ets:tab2list/1 would raise badarg
             %% on a dead table.
             case ets:info(SKFETS, size) of
-                undefined -> [];
-                _ -> ets:tab2list(SKFETS)
+                undefined ->
+                    [];
+                _ ->
+                    [
+                        {DevAddr, SessionKey, MaxCopies}
+                     || {{DevAddr, SessionKey}, MaxCopies} <- ets:tab2list(SKFETS)
+                    ]
             end;
         {error, not_found} ->
             []
@@ -351,6 +477,53 @@ count_route(RouteID) ->
 %% Internal Functions
 %% -------------------------------------------------------------------
 
+%% @doc Record that a route's SKF table no longer matches its file on disk.
+%%
+%% Tolerates a missing dirty table so a caller is never killed by bookkeeping:
+%% the table is created in init_ets/0, but eunit suites drive individual
+%% functions without it. A lost mark only means a route is written one
+%% checkpoint later than it could have been.
+-spec mark_dirty(hpr_route:id()) -> ok.
+mark_dirty(RouteID) ->
+    try ets:insert(?ETS_DIRTY, {RouteID}) of
+        true -> ok
+    catch
+        error:badarg -> ok
+    end.
+
+-spec mark_clean(hpr_route:id()) -> ok.
+mark_clean(RouteID) ->
+    try ets:delete(?ETS_DIRTY, RouteID) of
+        true -> ok
+    catch
+        error:badarg -> ok
+    end.
+
+-spec clear_dirty() -> ok.
+clear_dirty() ->
+    try ets:delete_all_objects(?ETS_DIRTY) of
+        true -> ok
+    catch
+        error:badarg -> ok
+    end.
+
+-spec dirty_route_ids() -> [hpr_route:id()].
+dirty_route_ids() ->
+    try
+        [RouteID || {RouteID} <- ets:tab2list(?ETS_DIRTY)]
+    catch
+        error:badarg -> []
+    end.
+
+%% @doc Match every SKF for one DevAddr.
+%%
+%% DevAddr is bound and is the first element of the key, which is what lets an
+%% ordered_set restrict the traversal to that DevAddr's range instead of walking
+%% the table.
+-spec devaddr_ms(DevAddr :: non_neg_integer()) -> ets:match_spec().
+devaddr_ms(DevAddr) ->
+    [{{{DevAddr, '$1'}, '$2'}, [], [{{'$1', '$2'}}]}].
+
 -spec do_insert_skf(ets:table(), hpr_skf:skf()) -> ok.
 do_insert_skf(SKFETS, SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
@@ -358,7 +531,7 @@ do_insert_skf(SKFETS, SKF) ->
     MaxCopies = hpr_skf:max_copies(SKF),
     try hpr_utils:hex_to_bin(SessionKey) of
         SessionKeyBin ->
-            true = ets:insert(SKFETS, {{SessionKeyBin, DevAddr}, MaxCopies})
+            true = ets:insert(SKFETS, {{DevAddr, SessionKeyBin}, MaxCopies})
     catch
         _E:_R ->
             lager:warning("failed to insert ~p ~p", [{{SessionKey, DevAddr}, MaxCopies}, _R])
@@ -368,13 +541,13 @@ do_insert_skf(SKFETS, SKF) ->
 %% @doc The ETS key for an SKF, matching the entry inserted by do_insert_skf/2.
 %% Returns `undefined' for a malformed session key (which do_insert_skf/2 skips),
 %% a harmless sentinel that never matches a real key.
--spec new_skf_key(hpr_skf:skf()) -> {binary(), non_neg_integer()} | undefined.
+-spec new_skf_key(hpr_skf:skf()) -> {non_neg_integer(), binary()} | undefined.
 new_skf_key(SKF) ->
     DevAddr = hpr_skf:devaddr(SKF),
     SessionKey = hpr_skf:session_key(SKF),
     try hpr_utils:hex_to_bin(SessionKey) of
         SessionKeyBin ->
-            {SessionKeyBin, DevAddr}
+            {DevAddr, SessionKeyBin}
     catch
         _E:_R ->
             undefined

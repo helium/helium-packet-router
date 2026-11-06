@@ -2,6 +2,7 @@
 
 -behavior(gen_server).
 
+-include("hpr.hrl").
 -include("hpr_metrics.hrl").
 
 %% ------------------------------------------------------------------
@@ -11,6 +12,7 @@
     start_link/1,
     observe_packet_up/4,
     packet_up_per_oui/2,
+    unreported_packet/1,
     packet_down/1,
     observe_packet_report/2,
     observe_liveness_report/2,
@@ -19,6 +21,8 @@
     observe_find_routes/1,
     observe_grpc_connection/2,
     ics_update/2,
+    ics_stream_silence_reset/1,
+    session_spread/1,
     observe_gateway_location/2
 ]).
 
@@ -79,6 +83,16 @@ observe_packet_up({Type, _}, RoutingStatus, NumberOfRoutes, Start) ->
 ) -> ok.
 packet_up_per_oui(Type, OUI) ->
     _ = prometheus_counter:inc(?METRICS_PACKET_UP_PER_OUI_COUNTER, [Type, OUI]),
+    ok.
+
+%% @doc A packet that was delivered but could not be attributed to one route.
+%%
+%% Labelled by the sorted set of route ids it spanned, so the cardinality is
+%% bounded by the number of overlapping configurations rather than by traffic.
+-spec unreported_packet(RouteIDs :: [hpr_route:id()]) -> ok.
+unreported_packet(RouteIDs) ->
+    Label = lists:flatten(lists:join(",", lists:usort(RouteIDs))),
+    _ = prometheus_counter:inc(?METRICS_UNREPORTED_PACKET_COUNTER, [Label]),
     ok.
 
 -spec packet_down(
@@ -180,6 +194,16 @@ ics_update(Type, Action) ->
     _ = prometheus_counter:inc(?METRICS_ICS_UPDATES_COUNTER, [Type, Action]),
     ok.
 
+-spec ics_stream_silence_reset(Reset :: stream | channel) -> ok.
+ics_stream_silence_reset(Reset) ->
+    _ = prometheus_counter:inc(?METRICS_ICS_STREAM_SILENCE_RESET_COUNTER, [Reset]),
+    ok.
+
+-spec session_spread(Outcome :: closed | not_found) -> ok.
+session_spread(Outcome) ->
+    _ = prometheus_counter:inc(?METRICS_SESSION_SPREAD_COUNTER, [Outcome]),
+    ok.
+
 -spec observe_gateway_location(
     Start :: non_neg_integer(),
     Status :: ok | error | not_found
@@ -220,6 +244,7 @@ counts() ->
 init(_Args) ->
     ok = declare_metrics(),
     _ = schedule_next_tick(),
+    _ = schedule_next_slow_tick(),
     lager:info("init"),
     {ok, #state{}}.
 
@@ -229,21 +254,36 @@ handle_call(_Msg, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% Two ticks, split by cost rather than by topic. The fast tick is two cheap
+%% calls. The slow one carries everything whose cost scales with the size of the
+%% node -- and record_queues/0 in particular is most expensive exactly when the
+%% node is already struggling, since it walks every process.
 handle_info(?METRICS_TICK, State) ->
     lager:debug("running metrics"),
     ToRun = [
         fun record_grpc_connections/0,
-        fun record_routes/0,
-        fun record_eui_pairs/0,
-        fun record_ets/0,
-        fun record_queues/0,
-        fun record_devices/0
+        fun record_eui_pairs/0
     ],
     lists:foreach(
         fun(Fun) -> erlang:spawn(Fun) end,
         ToRun
     ),
     _ = schedule_next_tick(),
+    {noreply, State};
+handle_info(?METRICS_SLOW_TICK, State) ->
+    lager:debug("running slow metrics"),
+    ToRun = [
+        fun record_routes/0,
+        fun record_ets/0,
+        fun record_queues/0,
+        fun record_devices/0,
+        fun record_grpc_channels/0
+    ],
+    lists:foreach(
+        fun(Fun) -> erlang:spawn(Fun) end,
+        ToRun
+    ),
+    _ = schedule_next_slow_tick(),
     {noreply, State};
 handle_info(_Msg, State) ->
     {noreply, State}.
@@ -440,7 +480,7 @@ record_queues() ->
         maps:to_list(OldQs)
     ),
     NewQs = maps:without(maps:keys(OldQs), CurrentQs),
-    Config = application:get_env(router, metrics, []),
+    Config = application:get_env(?APP, metrics, []),
     MinLength = proplists:get_value(record_queue_min_length, Config, 2000),
     lists:foreach(
         fun({Name, Length}) ->
@@ -459,6 +499,43 @@ record_queues() ->
 record_devices() ->
     Count = hpr_device_stats:run(),
     _ = prometheus_gauge:set(?METRICS_DEVICE_GAUGE, [], Count),
+    ok.
+
+%% @doc Pool width and deepest mailbox per outbound grpc channel.
+%%
+%% grpcbox sizes a channel's pool to the number of endpoints it was given, so a
+%% channel built from a single endpoint is one HTTP/2 connection -- and every
+%% unary call on it serializes through that connection's gen_server. The conns
+%% gauge shows the width; the mailbox gauge is the leading indicator, since it
+%% climbs before anything times out.
+-spec record_grpc_channels() -> ok.
+record_grpc_channels() ->
+    lists:foreach(
+        fun(Channel) ->
+            Name = erlang:atom_to_list(Channel),
+            Workers =
+                try
+                    [Pid || {_, Pid} <- gproc_pool:active_workers(Channel), is_pid(Pid)]
+                catch
+                    _:_ -> []
+                end,
+            _ = prometheus_gauge:set(
+                ?METRICS_GRPC_CHANNEL_CONNS_GAUGE, [Name], erlang:length(Workers)
+            ),
+            MaxQ = lists:foldl(
+                fun(Pid, Acc) ->
+                    case erlang:process_info(Pid, message_queue_len) of
+                        {message_queue_len, Len} -> erlang:max(Len, Acc);
+                        undefined -> Acc
+                    end
+                end,
+                0,
+                Workers
+            ),
+            _ = prometheus_gauge:set(?METRICS_GRPC_CHANNEL_MAILBOX_GAUGE, [Name], MaxQ)
+        end,
+        [?IOT_CONFIG_CHANNEL, ?LOCATION_CHANNEL, ?DOWNLINK_CHANNEL, ?MULTI_BUY_CHANNEL]
+    ),
     ok.
 
 -spec get_pid_name(pid()) -> list().
@@ -481,3 +558,7 @@ name_to_pid(Name) ->
 -spec schedule_next_tick() -> reference().
 schedule_next_tick() ->
     erlang:send_after(?METRICS_TICK_INTERVAL, self(), ?METRICS_TICK).
+
+-spec schedule_next_slow_tick() -> reference().
+schedule_next_slow_tick() ->
+    erlang:send_after(?METRICS_SLOW_TICK_INTERVAL, self(), ?METRICS_SLOW_TICK).

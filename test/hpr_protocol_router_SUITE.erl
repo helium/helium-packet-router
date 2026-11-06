@@ -11,7 +11,8 @@
     connection_refused_test/1,
     downlink_test/1,
     server_crash_test/1,
-    gateway_disconnect_test/1
+    gateway_disconnect_test/1,
+    late_cleanup_keeps_reconnected_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -32,7 +33,8 @@ all() ->
         connection_refused_test,
         downlink_test,
         server_crash_test,
-        gateway_disconnect_test
+        gateway_disconnect_test,
+        late_cleanup_keeps_reconnected_test
     ].
 
 -define(SERVER_PORT, 8080).
@@ -252,6 +254,28 @@ server_crash_test(_Config) ->
     ),
     ?assertEqual(0, erlang:length(hpr_protocol_router:all_streams())),
 
+    ok.
+
+%% A gateway's stream teardown that runs after the gateway has reconnected
+%% leaves its streams alone: they may be new ones, carrying its uplinks.
+late_cleanup_keeps_reconnected_test(_Config) ->
+    #{public := PubKey} = libp2p_crypto:generate_keys(ed25519),
+    Gateway = libp2p_crypto:pubkey_to_bin(PubKey),
+    Key = {Gateway, <<"127.0.0.1:8082">>},
+    Entry = {Key, {connecting, self()}},
+    Streams = fun() -> ets:lookup(hpr_protocol_router_ets, Key) end,
+    true = ets:insert(hpr_protocol_router_ets, Entry),
+
+    %% Back on this node by the time the teardown runs.
+    true = gproc:add_local_name({hpr_packet_router_service, Gateway}),
+    hpr_protocol_router ! {remove_stream, Gateway},
+    timer:sleep(200),
+    ?assertEqual([Entry], Streams()),
+
+    %% Gone for good: the teardown goes ahead.
+    true = gproc:unregister_name({n, l, {hpr_packet_router_service, Gateway}}),
+    hpr_protocol_router ! {remove_stream, Gateway},
+    ok = test_utils:wait_until(fun() -> Streams() =:= [] end),
     ok.
 
 gateway_disconnect_test(_Config) ->

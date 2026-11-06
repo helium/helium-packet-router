@@ -191,18 +191,23 @@ handle_info(
     {{'DOWN', Gateway}, _Monitor, process, _Pid, _ExitReason},
     #state{waiting_cleanups = WaitingCleanups} = State
 ) ->
-    Name = hpr_utils:gateway_name(Gateway),
+    %% gateway_name/1 is a base58 encode plus an md5 (~13us). Inlined into the
+    %% lager call so the parse transform skips it when debug is off, instead of
+    %% paying it on every disconnect in this single gen_server.
     lager:debug(
-        [{gateway, Name}, {stream, _Pid}],
+        [{gateway, hpr_utils:gateway_name(Gateway)}, {stream, _Pid}],
         "stream went down: ~p waiting ~wms",
         [_ExitReason, ?CLEANUP_TIME]
     ),
     CleanupTimer = erlang:send_after(?CLEANUP_TIME, self(), {remove_stream, Gateway}),
     {noreply, State#state{waiting_cleanups = WaitingCleanups#{Gateway => CleanupTimer}}};
 handle_info({remove_stream, Gateway}, #state{waiting_cleanups = WaitingCleanups} = State) ->
-    Name = hpr_utils:gateway_name(Gateway),
-    lager:debug([{gateway, Name}], "removing streams"),
-    ?MODULE:remove_stream(Gateway),
+    lager:debug([{gateway, hpr_utils:gateway_name(Gateway)}], "removing streams"),
+    %% Spawned: the teardown only touches the shared stream table and closes
+    %% grpc streams, so it needs nothing from this state -- and doing it inline
+    %% puts every disconnect ahead of the register casts of the gateways
+    %% reconnecting behind it.
+    _ = erlang:spawn(fun() -> remove_stream_unless_connected(Gateway) end),
     {noreply, State#state{waiting_cleanups = maps:without([Gateway], WaitingCleanups)}};
 handle_info(_Msg, State) ->
     lager:warning("unknown info ~p", [_Msg]),
@@ -214,6 +219,22 @@ terminate(_Reason, _State = #state{}) ->
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
+
+%% The teardown spawned when a gateway's cleanup timer fires can run late,
+%% after the gateway has reconnected and a routing process has opened a new
+%% stream for it -- and remove_stream/1 closes every stream of the gateway, the
+%% new one included, losing the uplink just sent on it. So it checks whether
+%% the gateway is back when it actually runs, as the periodic ?CLEANUP does.
+-spec remove_stream_unless_connected(Gateway :: libp2p_crypto:pubkey_bin()) -> ok.
+remove_stream_unless_connected(Gateway) ->
+    case hpr_packet_router_service:locate(Gateway) of
+        {ok, _Pid} ->
+            lager:debug(
+                [{gateway, hpr_utils:gateway_name(Gateway)}], "reconnected, keeping streams"
+            );
+        {error, not_found} ->
+            remove_stream(Gateway)
+    end.
 
 -spec schedule_cleanup() -> ok.
 schedule_cleanup() ->

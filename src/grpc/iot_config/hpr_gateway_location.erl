@@ -29,6 +29,13 @@
 -define(NOT_FOUND, not_found).
 -define(REQUESTED, requested).
 
+%% Caps the outbound location lookups in flight. The location channel is a
+%% handful of HTTP/2 connections shared by the whole node, so a cold cache plus
+%% a fleet-wide reconnect would otherwise fire one blocking unary call per
+%% gateway into it at once.
+-define(THROTTLE, hpr_gateway_location_rate_limit).
+-define(DEFAULT_RATE_LIMIT, 100).
+
 -record(location, {
     status :: ok | ?NOT_FOUND | error | ?REQUESTED,
     gateway :: libp2p_crypto:pubkey_bin(),
@@ -58,6 +65,8 @@ init() ->
         _ ->
             lager:info("ets hydrated")
     end,
+    RateLimit = hpr_utils:get_env_int(gateway_location_rate_limit, ?DEFAULT_RATE_LIMIT),
+    ok = throttle:setup(?THROTTLE, RateLimit, per_second),
     {ok, _} = timer:apply_interval(?CLEANUP_INTERVAL, ?MODULE, expire_locations, []),
     ok.
 
@@ -108,14 +117,42 @@ expire_locations() ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
+%% @doc Kick off a lookup without waiting for it.
+%%
+%% Every caller of get/1 either discards the result or already tolerates a
+%% stale value or an error while a lookup is outstanding, so nothing needs this
+%% to be synchronous -- and two callers very much need it not to be. The gateway
+%% register path (hpr_packet_router_service:handle_register/2) runs in the
+%% gateway's own stream process and discards the result outright, so a blocking
+%% unary call there stalls the session handshake behind a grpc timeout; the
+%% per-packet path (hpr_routing) pays it per route.
 -spec update_location(libp2p_crypto:pubkey_bin()) -> ok.
 update_location(PubKeyBin) ->
-    Loc = #location{
-        status = ?REQUESTED,
-        gateway = PubKeyBin,
-        timestamp = erlang:system_time(millisecond)
-    },
-    true = ets:insert(?ETS, Loc),
+    case throttle:check(?THROTTLE, ?THROTTLE) of
+        {limit_exceeded, _, _} ->
+            %% Deliberately no ?REQUESTED marker: a marker we never fulfil
+            %% suppresses every retry for this gateway for ?ERROR_CACHE_TIME,
+            %% so it would route with no location for an hour. Dropping the
+            %% attempt instead means the next packet or reconnect retries.
+            lager:debug("location lookup rate limited"),
+            ok;
+        _ ->
+            Loc = #location{
+                status = ?REQUESTED,
+                gateway = PubKeyBin,
+                timestamp = erlang:system_time(millisecond)
+            },
+            %% Inserted here rather than in the spawned process: the marker is
+            %% what stops concurrent callers for the same gateway from each
+            %% starting their own lookup, so it has to be visible before this
+            %% returns.
+            true = ets:insert(?ETS, Loc),
+            _ = erlang:spawn(fun() -> do_update_location(Loc) end),
+            ok
+    end.
+
+-spec do_update_location(Loc :: #location{}) -> ok.
+do_update_location(#location{gateway = PubKeyBin} = Loc) ->
     Start = erlang:system_time(millisecond),
     case get_location_from_ics(PubKeyBin) of
         {error, ?NOT_FOUND} ->

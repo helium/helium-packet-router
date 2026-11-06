@@ -31,6 +31,9 @@
 
 -spec init() -> ok.
 init() ->
+    %% Before hpr_route_storage:init_ets/0: hydrating routes calls
+    %% hpr_skf_storage:make_ets/1, which marks each route dirty.
+    ok = hpr_skf_storage:init_ets(),
     ok = hpr_route_storage:init_ets(),
     ok = hpr_devaddr_range_storage:init_ets(),
     %% SKF hydration is handled by route hydration
@@ -116,7 +119,13 @@ all_test_() ->
         {"test_skf", ?_test(test_skf())},
         {"test_replace_route_keeps_table", ?_test(test_replace_route_keeps_table())},
         {"test_skf_tolerates_dead_table", ?_test(test_skf_tolerates_dead_table())},
-        {"test_select_skf", ?_test(test_select_skf())},
+        {"test_many_skfs_one_devaddr", ?_test(test_many_skfs_one_devaddr())},
+        {"test_skf_dets_v2_migration", ?_test(test_skf_dets_v2_migration())},
+        {"test_skf_dets_v3_roundtrip", ?_test(test_skf_dets_v3_roundtrip())},
+        {"test_skf_dets_v2_gone_after_clear", ?_test(test_skf_dets_v2_gone_after_clear())},
+        {"test_skf_dets_v2_gone_after_delete", ?_test(test_skf_dets_v2_gone_after_delete())},
+        {"test_skf_checkpoint_keeps_update_during_write",
+            ?_test(test_skf_checkpoint_keeps_update_during_write())},
         {"test_delete_route", ?_test(test_delete_route())},
         {"test_delete_all", ?_test(test_delete_all())}
     ]}.
@@ -391,7 +400,19 @@ test_skf() ->
     SK2 = hpr_utils:hex_to_bin(SessionKey2),
     ?assertMatch([{SK2, 2}], hpr_skf_storage:lookup(SKFETS2, DevAddr2)),
 
-    ?assertEqual(ok, hpr_skf_storage:update(DevAddr1, SK1, RouteID1, 11)),
+    %% Re-inserting the same {DevAddr, SessionKey} overwrites MaxCopies; the
+    %% ordered_set key makes that a plain insert, no read-modify-write.
+    ?assertEqual(
+        ok,
+        hpr_skf_storage:insert(
+            hpr_skf:new(#{
+                route_id => RouteID1,
+                devaddr => DevAddr1,
+                session_key => hpr_utils:bin_to_hex_string(SK1),
+                max_copies => 11
+            })
+        )
+    ),
     ?assertMatch([{SK1, 11}], hpr_skf_storage:lookup(SKFETS1, DevAddr1)),
 
     SessionKey3 = hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
@@ -516,7 +537,12 @@ test_skf_tolerates_dead_table() ->
     ?assertEqual([{SK2, 3}], hpr_skf_storage:lookup(SKFETS2, DevAddr)),
     ok.
 
-test_select_skf() ->
+%% Many session keys on a single DevAddr, which is the shape that matters: the
+%% largest route has 128 DevAddrs carrying ~1,000 keys each -- a small DevAddr block
+%% multiplexed across ~137k devices, which is what SKFs exist for. lookup/2 has
+%% to return the whole set in one call, because hpr_lorawan:match_session_key/2
+%% needs every candidate at once to make the frame-counter search its outer loop.
+test_many_skfs_one_devaddr() ->
     Route = hpr_route:test_new(#{
         id => "11ea6dfd-3dce-4106-8980-d34007ab689b",
         net_id => 0,
@@ -553,12 +579,157 @@ test_select_skf() ->
     [RouteETS] = hpr_devaddr_range_storage:lookup(DevAddr),
     ?assertEqual(Route, ?MODULE:route(RouteETS)),
     SKFETS = ?MODULE:skf_ets(RouteETS),
-    {A, Continuation1} = hpr_skf_storage:select(SKFETS, DevAddr),
-    {B, Continuation2} = hpr_skf_storage:select(Continuation1),
-    '$end_of_table' = hpr_skf_storage:select(Continuation2),
-
-    ?assertEqual(lists:usort(hpr_skf_storage:lookup(SKFETS, DevAddr)), lists:usort(A ++ B)),
+    All = hpr_skf_storage:lookup(SKFETS, DevAddr),
+    ?assertEqual(200, erlang:length(All)),
+    %% All distinct, so nothing was dropped or duplicated by the compound key.
+    ?assertEqual(200, erlang:length(lists:usort([SK || {SK, _} <- All]))),
+    %% And nothing leaks in from a neighbouring DevAddr in the same range.
+    ?assertEqual([], hpr_skf_storage:lookup(SKFETS, DevAddr + 1)),
     ok.
+
+%% A node upgrading to v3 has only v2 files on disk, and the config stream is
+%% incremental -- it will not re-send SKFs it already delivered. So rehydration
+%% has to read the v2 file and flip each key, or every route comes up with no
+%% SKFs and every uplink fails its MIC check until an operator forces a refresh.
+test_skf_dets_v2_migration() ->
+    Route = test_route_for_skf("2ea6dfd0-3dce-4106-8980-d34007ab689b"),
+    RouteID = hpr_route:id(Route),
+    DevAddr = 16#00000005,
+    SessionKey = crypto:strong_rand_bytes(16),
+
+    %% A v2 file, keyed {SessionKey, DevAddr}, written before the route exists.
+    LegacyFile = test_write_v2_dets(RouteID, [{{SessionKey, DevAddr}, 7}]),
+
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    {ok, RouteETS} = hpr_route_storage:lookup(RouteID),
+    SKFETS = ?MODULE:skf_ets(RouteETS),
+
+    %% Readable through the v3 DevAddr-keyed lookup, with MaxCopies preserved.
+    ?assertEqual([{SessionKey, 7}], hpr_skf_storage:lookup(SKFETS, DevAddr)),
+    ?assertEqual([{DevAddr, SessionKey, 7}], hpr_skf_storage:lookup_route(RouteID)),
+
+    %% Kept until the route's v3 file is written, then deleted: it is frozen at
+    %% upgrade time and must not be read again.
+    ?assert(filelib:is_regular(LegacyFile)),
+    ?assertEqual(1, hpr_skf_storage:checkpoint()),
+    ?assert(filelib:is_regular(hpr_skf_storage:dets_filename(RouteID))),
+    ?assertNot(filelib:is_regular(LegacyFile)),
+    ok.
+
+%% Clearing a route (deactivation) deletes its v3 file and keeps the route.
+%% A v2 file left behind would be loaded on the next boot, bringing back every
+%% key the route had at upgrade time.
+test_skf_dets_v2_gone_after_clear() ->
+    Route = test_route_for_skf("4ea6dfd0-3dce-4106-8980-d34007ab689b"),
+    RouteID = hpr_route:id(Route),
+    LegacyFile = test_write_v2_dets(RouteID, [{{crypto:strong_rand_bytes(16), 16#07}, 1}]),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    ?assertEqual(1, hpr_skf_storage:count_route(RouteID)),
+
+    ?assertEqual(1, hpr_skf_storage:clear_route(RouteID)),
+    ?assertNot(filelib:is_regular(LegacyFile)),
+    %% What the next boot would load for this route: nothing.
+    Rebuilt = hpr_skf_storage:make_ets(RouteID),
+    ?assertEqual(0, ets:info(Rebuilt, size)),
+    true = ets:delete(Rebuilt),
+    ok.
+
+%% The same for a deleted route whose id comes back later.
+test_skf_dets_v2_gone_after_delete() ->
+    Route = test_route_for_skf("5ea6dfd0-3dce-4106-8980-d34007ab689b"),
+    RouteID = hpr_route:id(Route),
+    LegacyFile = test_write_v2_dets(RouteID, [{{crypto:strong_rand_bytes(16), 16#08}, 1}]),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+
+    ?assertEqual(ok, hpr_route_storage:delete(Route)),
+    ?assertNot(filelib:is_regular(LegacyFile)),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    ?assertEqual(0, hpr_skf_storage:count_route(RouteID)),
+    ok.
+
+%% An SKF update applied while its route is being written to disk is written
+%% by the next checkpoint. Its dirty mark used to be wiped when the write
+%% finished, leaving it out of the file for good.
+test_skf_checkpoint_keeps_update_during_write() ->
+    Route = test_route_for_skf("6ea6dfd0-3dce-4106-8980-d34007ab689b"),
+    RouteID = hpr_route:id(Route),
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    Late = hpr_skf:new(#{
+        route_id => RouteID,
+        devaddr => 16#09,
+        session_key => hpr_utils:bin_to_hex_string(crypto:strong_rand_bytes(16)),
+        max_copies => 1
+    }),
+
+    meck:new(dets, [unstick, passthrough]),
+    try
+        meck:expect(dets, from_ets, fun(File, ETS) ->
+            %% Lands after the table was read, as a spawned update can.
+            Result = meck:passthrough([File, ETS]),
+            ok = hpr_skf_storage:insert(Late),
+            Result
+        end),
+        ?assertEqual(1, hpr_skf_storage:checkpoint())
+    after
+        meck:unload(dets)
+    end,
+    ?assertEqual(1, hpr_skf_storage:checkpoint()),
+    Rebuilt = hpr_skf_storage:make_ets(RouteID),
+    ?assertEqual(1, ets:info(Rebuilt, size)),
+    true = ets:delete(Rebuilt),
+    ok.
+
+test_write_v2_dets(RouteID, Rows) ->
+    LegacyFile = filename:join([
+        hpr_utils:base_data_dir(), io_lib:format("hpr_skf_~s_v2.dets", [RouteID])
+    ]),
+    ok = filelib:ensure_dir(LegacyFile),
+    {ok, _} = dets:open_file(LegacyFile, [{type, set}]),
+    ok = dets:insert(LegacyFile, Rows),
+    ok = dets:close(LegacyFile),
+    LegacyFile.
+
+%% Checkpoint writes v3, and a table rebuilt from it reads back identically --
+%% i.e. a second boot after the migration does not need the v2 file.
+test_skf_dets_v3_roundtrip() ->
+    Route = test_route_for_skf("3ea6dfd0-3dce-4106-8980-d34007ab689b"),
+    RouteID = hpr_route:id(Route),
+    DevAddr = 16#00000006,
+    SessionKey = crypto:strong_rand_bytes(16),
+
+    ?assertEqual(ok, hpr_route_storage:insert(Route)),
+    ?assertEqual(
+        ok,
+        hpr_skf_storage:insert(
+            hpr_skf:new(#{
+                route_id => RouteID,
+                devaddr => DevAddr,
+                session_key => hpr_utils:bin_to_hex_string(SessionKey),
+                max_copies => 3
+            })
+        )
+    ),
+    ?assert(hpr_skf_storage:checkpoint() >= 1),
+    ?assert(filelib:is_regular(hpr_skf_storage:dets_filename(RouteID))),
+
+    %% Rebuild from the v3 file alone.
+    Rebuilt = hpr_skf_storage:make_ets(RouteID),
+    ?assertEqual([{SessionKey, 3}], hpr_skf_storage:lookup(Rebuilt, DevAddr)),
+    true = ets:delete(Rebuilt),
+    ok.
+
+test_route_for_skf(ID) ->
+    hpr_route:test_new(#{
+        id => ID,
+        net_id => 0,
+        oui => 1,
+        server => #{
+            host => "lns1.testdomain.com",
+            port => 80,
+            protocol => {http_roaming, #{}}
+        },
+        max_copies => 10
+    }).
 
 test_delete_route() ->
     Route1 = hpr_route:test_new(#{

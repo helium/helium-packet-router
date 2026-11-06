@@ -84,10 +84,6 @@ services:
     <<: *ct
     command: make ct SUITE=hpr_gateway_location_SUITE
 
-  ct-grpc-load:
-    <<: *ct
-    command: make ct SUITE=hpr_grpc_load_SUITE
-
   ct-metrics:
     <<: *ct
     command: make ct SUITE=hpr_metrics_SUITE
@@ -107,6 +103,18 @@ services:
   ct-protocol-router:
     <<: *ct
     command: make ct SUITE=hpr_protocol_router_SUITE
+
+  ct-route-load:
+    <<: *ct
+    command: make ct SUITE=hpr_route_load_SUITE
+
+  ct-route-stream-load:
+    <<: *ct
+    command: make ct SUITE=hpr_route_stream_load_SUITE
+
+  ct-gateway-load:
+    <<: *ct
+    command: make ct SUITE=hpr_gateway_load_SUITE
 
   ct-route-stream-worker:
     <<: *ct
@@ -133,12 +141,14 @@ services:
       ct-reporters: {condition: service_completed_successfully}
       ct-cli-config: {condition: service_completed_successfully}
       ct-gateway-location: {condition: service_completed_successfully}
-      ct-grpc-load: {condition: service_completed_successfully}
       ct-metrics: {condition: service_completed_successfully}
       ct-packet-router-service: {condition: service_completed_successfully}
       ct-protocol-gwmp: {condition: service_completed_successfully}
       ct-protocol-http-roaming: {condition: service_completed_successfully}
       ct-protocol-router: {condition: service_completed_successfully}
+      ct-route-load: {condition: service_completed_successfully}
+      ct-route-stream-load: {condition: service_completed_successfully}
+      ct-gateway-load: {condition: service_completed_successfully}
       ct-route-stream-worker: {condition: service_completed_successfully}
       ct-routing: {condition: service_completed_successfully}
       ct-sup: {condition: service_completed_successfully}
