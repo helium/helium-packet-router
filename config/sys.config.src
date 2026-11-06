@@ -129,11 +129,33 @@
         {suppress_supervisor_start_stop, true},
         {log_root, "/var/log/hpr"},
         {crash_log, "crash.log"},
+        %% Overload. By default lager turns synchronous once 20 messages are
+        %% queued on it, and every process that logs then waits for its line to
+        %% be written: a burst of errors stalls packet and stream processes
+        %% across the node. Here it stays asynchronous and sheds a backlog
+        %% instead. info.log drops lines past 1000/s (below), and past 5000
+        %% queued, lager's event manager is killed, discarding its queue, and
+        %% its handlers are reinstalled within ~5s. Lines logged in a flood are
+        %% lost, but no caller waits on lager.
+        %% killer_hwm is only safe because lager never goes synchronous: killed
+        %% while callers wait on it, every one of them would crash.
+        {async_threshold, 1000000},
+        {async_threshold_window, 200000},
+        {killer_hwm, 5000},
+        {killer_reinstall_after, 5000},
         {handlers, [
             {lager_console_backend, [{level, info}]},
             {lager_file_backend, [
                 {file, "info.log"},
                 {level, info},
+                %% Past 1000 lines in a second, drop the rest of that second,
+                %% and once 500 are queued also discard what is queued: a
+                %% moderate flood is shed here before killer_hwm is reached.
+                %% Lager logs how many it dropped. The queue is shared, so the
+                %% discarded lines skip the console too.
+                {high_water_mark, 1000},
+                {flush_queue, true},
+                {flush_threshold, 500},
                 {size, 0},
                 {date, "$D0"},
                 {count, 7},
