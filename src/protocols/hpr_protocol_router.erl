@@ -191,9 +191,11 @@ handle_info(
     {{'DOWN', Gateway}, _Monitor, process, _Pid, _ExitReason},
     #state{waiting_cleanups = WaitingCleanups} = State
 ) ->
-    %% gateway_name/1 is a base58 encode plus an md5 (~13us). Inlined into the
-    %% lager call so the parse transform skips it when debug is off, instead of
-    %% paying it on every disconnect in this single gen_server.
+    %% gateway_name/1 is a base58 encode plus an md5 (~13us). Keep it inline:
+    %% lager's parse transform evaluates a call's metadata and args only after
+    %% the level check passes, so with debug off it is never computed. Bound
+    %% to a variable first, every disconnect in this single gen_server would
+    %% pay for it.
     lager:debug(
         [{gateway, hpr_utils:gateway_name(Gateway)}, {stream, _Pid}],
         "stream went down: ~p waiting ~wms",
