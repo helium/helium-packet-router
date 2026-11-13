@@ -12,7 +12,7 @@
     start_link/1,
     observe_packet_up/4,
     packet_up_per_oui/2,
-    unreported_packet/1,
+    unreported_packet/0,
     packet_down/1,
     observe_packet_report/2,
     observe_liveness_report/2,
@@ -86,13 +86,10 @@ packet_up_per_oui(Type, OUI) ->
     ok.
 
 %% @doc A packet that was delivered but could not be attributed to one route.
-%%
-%% Labelled by the sorted set of route ids it spanned, so the cardinality is
-%% bounded by the number of overlapping configurations rather than by traffic.
--spec unreported_packet(RouteIDs :: [hpr_route:id()]) -> ok.
-unreported_packet(RouteIDs) ->
-    Label = lists:flatten(lists:join(",", lists:usort(RouteIDs))),
-    _ = prometheus_counter:inc(?METRICS_UNREPORTED_PACKET_COUNTER, [Label]),
+%% Unlabelled: hpr_routing's warning for the packet names the routes involved.
+-spec unreported_packet() -> ok.
+unreported_packet() ->
+    _ = prometheus_counter:inc(?METRICS_UNREPORTED_PACKET_COUNTER, []),
     ok.
 
 -spec packet_down(

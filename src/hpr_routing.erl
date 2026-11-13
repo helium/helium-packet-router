@@ -464,12 +464,11 @@ maybe_report_packet({uplink, _}, Routes, Routed, IsFree, PacketUp, ReceivedTime)
         _ ->
             %% The packet was delivered but is never reported, and so never
             %% charged -- report_packet/4 takes a single route and there is no
-            %% one route to attribute it to. Counted so the volume is a graph
-            %% rather than an error line per packet; which route should win when
+            %% one route to attribute it to. Counted so the volume is a graph;
+            %% the warning below names the routes. Which route should win when
             %% devaddr ranges overlap across OUIs is a config question, not one
             %% to decide here.
-            RouteIDs = [hpr_route:id(R) || R <- Routes],
-            ok = hpr_metrics:unreported_packet(RouteIDs),
+            ok = hpr_metrics:unreported_packet(),
             lager:warning("routed packet to non unique OUI/Net ID ~p", [
                 [{hpr_route:id(R), hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]
             ])
