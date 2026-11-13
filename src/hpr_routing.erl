@@ -209,65 +209,60 @@ route_packet(PacketUp, RoutesETS, Timestamp) ->
 -spec find_routes_for_uplink(PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
     {ok, routes()} | {error, invalid_mic}.
 find_routes_for_uplink(PacketUp, DevAddr) ->
-    case hpr_devaddr_range_storage:lookup(DevAddr) of
+    case hpr_devaddr_range_storage:lookup_ids(DevAddr) of
         [] ->
             {ok, []};
-        RoutesETS ->
-            find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, [], [])
+        RouteIDs ->
+            find_routes_for_uplink(PacketUp, DevAddr, RouteIDs, [], [])
     end.
 
+%% Candidates are walked by id (as binaries, see
+%% hpr_devaddr_range_storage:lookup_ids/1), reading only each route's SKF table
+%% and ignore_empty_skf flag (hpr_route_storage:routing_info/1). The full route
+%% is fetched only for the routes kept: a DevAddr range shared by thousands of
+%% routes, most without keys, otherwise copied every one of them into this
+%% process for each uplink.
 -spec find_routes_for_uplink(
     PacketUp :: hpr_packet_up:packet(),
     DevAddr :: non_neg_integer(),
-    CandidateRoutes :: [hpr_route_ets:route()],
-    EmptyRoutes :: [hpr_route_ets:route()],
-    SelectedRoute :: routes()
+    CandidateIDs :: [binary()],
+    EmptyIDs :: [binary()],
+    SelectedIDs :: [{binary(), non_neg_integer()}]
 ) -> {ok, routes()} | {error, invalid_mic}.
 find_routes_for_uplink(_PacketUp, _DevAddr, [], [], []) ->
     {error, invalid_mic};
-find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, []) ->
-    {ok, [{R, 0} || R <- EmptyRoutes]};
-find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, SelectedRoutes) ->
-    {ok, SelectedRoutes ++ [{R, 0} || R <- EmptyRoutes]};
-find_routes_for_uplink(
-    PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, SelectedRoutes
-) ->
-    Route = hpr_route_ets:route(RouteETS),
-    SKFETS = hpr_route_ets:skf_ets(RouteETS),
-    case check_route_skfs(PacketUp, DevAddr, SKFETS) of
-        empty ->
-            EmptyRoutes1 =
-                case hpr_route:ignore_empty_skf(Route) of
-                    true ->
-                        EmptyRoutes;
-                    false ->
-                        _ = hpr_device_stats:update(DevAddr),
-                        [RouteETS | EmptyRoutes]
-                end,
-            find_routes_for_uplink(
-                PacketUp,
-                DevAddr,
-                RoutesETS,
-                EmptyRoutes1,
-                SelectedRoutes
-            );
-        false ->
-            find_routes_for_uplink(
-                PacketUp,
-                DevAddr,
-                RoutesETS,
-                EmptyRoutes,
-                SelectedRoutes
-            );
-        {ok, SessionKey, SKFMaxCopies} ->
-            _ = hpr_device_stats:update(SessionKey),
-            find_routes_for_uplink(
-                PacketUp,
-                DevAddr,
-                RoutesETS,
-                EmptyRoutes,
-                [{RouteETS, SKFMaxCopies} | SelectedRoutes]
-            )
+find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyIDs, SelectedIDs) ->
+    {ok, [
+        {RouteETS, MaxCopies}
+     || {RouteID, MaxCopies} <- SelectedIDs ++ [{ID, 0} || ID <- EmptyIDs],
+        {ok, RouteETS} <- [hpr_route_storage:lookup(erlang:binary_to_list(RouteID))]
+    ]};
+find_routes_for_uplink(PacketUp, DevAddr, [RouteID | RouteIDs], EmptyIDs, SelectedIDs) ->
+    case hpr_route_storage:routing_info(RouteID) of
+        {error, not_found} ->
+            %% Deleted since the range lookup.
+            find_routes_for_uplink(PacketUp, DevAddr, RouteIDs, EmptyIDs, SelectedIDs);
+        {ok, SKFETS, IgnoreEmptySKF} ->
+            case check_route_skfs(PacketUp, DevAddr, SKFETS) of
+                empty when IgnoreEmptySKF ->
+                    find_routes_for_uplink(PacketUp, DevAddr, RouteIDs, EmptyIDs, SelectedIDs);
+                empty ->
+                    _ = hpr_device_stats:update(DevAddr),
+                    find_routes_for_uplink(
+                        PacketUp, DevAddr, RouteIDs, [RouteID | EmptyIDs], SelectedIDs
+                    );
+                false ->
+                    find_routes_for_uplink(PacketUp, DevAddr, RouteIDs, EmptyIDs, SelectedIDs);
+                {ok, SessionKey, SKFMaxCopies} ->
+                    _ = hpr_device_stats:update(SessionKey),
+                    find_routes_for_uplink(
+                        PacketUp,
+                        DevAddr,
+                        RouteIDs,
+                        EmptyIDs,
+                        [{RouteID, SKFMaxCopies} | SelectedIDs]
+                    )
+            end
     end.
 
 -spec check_route_skfs(
@@ -282,7 +277,16 @@ check_route_skfs(PacketUp, DevAddr, SKFETS) ->
     %% a range read, and handing every candidate to match_session_key/2 at once
     %% is what lets its frame-counter search be the outer loop -- inverting the
     %% loops inside a 100-key chunk would save nothing.
-    case hpr_skf_storage:lookup(SKFETS, DevAddr) of
+    %%
+    %% A route with no keys at all is answered from the table size, skipping the
+    %% select and its per-call match-spec compile: such routes can outnumber the
+    %% rest thousands to one on a shared range.
+    SKFs =
+        case ets:info(SKFETS, size) of
+            0 -> [];
+            _ -> hpr_skf_storage:lookup(SKFETS, DevAddr)
+        end,
+    case SKFs of
         [] ->
             empty;
         SKFs ->
@@ -597,7 +601,7 @@ foreach_cleanup(ok) ->
         end,
         ets:tab2list(hpr_routes_ets)
     ),
-    true = ets:delete(hpr_routes_ets),
+    ok = hpr_route_storage:test_delete_ets(),
     ok = hpr_denylist:reset(),
     ok = hpr_denylist:test_delete_ets(),
     true = erlang:unregister(hpr_sup),

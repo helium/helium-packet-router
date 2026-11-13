@@ -126,6 +126,7 @@ all_test_() ->
         {"test_skf_dets_v2_gone_after_delete", ?_test(test_skf_dets_v2_gone_after_delete())},
         {"test_skf_checkpoint_keeps_update_during_write",
             ?_test(test_skf_checkpoint_keeps_update_during_write())},
+        {"test_routing_info_follows_route", ?_test(test_routing_info_follows_route())},
         {"test_delete_route", ?_test(test_delete_route())},
         {"test_delete_all", ?_test(test_delete_all())}
     ]}.
@@ -716,6 +717,39 @@ test_skf_dets_v3_roundtrip() ->
     Rebuilt = hpr_skf_storage:make_ets(RouteID),
     ?assertEqual([{SessionKey, 3}], hpr_skf_storage:lookup(Rebuilt, DevAddr)),
     true = ets:delete(Rebuilt),
+    ok.
+
+%% hpr_route_storage's routing table follows every insert, update and delete of
+%% the route it describes: a stale ignore_empty_skf would wrongly drop or keep
+%% a route for uplinks with no keys.
+test_routing_info_follows_route() ->
+    ID = "7ea6dfd0-3dce-4106-8980-d34007ab689b",
+    Bin = list_to_binary(ID),
+    ?assertEqual({error, not_found}, hpr_route_storage:routing_info(Bin)),
+
+    Route0 = test_route_for_skf(ID),
+    ?assertEqual(ok, hpr_route_storage:insert(Route0)),
+    {ok, RouteETS} = hpr_route_storage:lookup(ID),
+    SKFETS = ?MODULE:skf_ets(RouteETS),
+    ?assertEqual({ok, SKFETS, false}, hpr_route_storage:routing_info(Bin)),
+
+    Route1 = hpr_route:test_new(#{
+        id => ID,
+        net_id => 0,
+        oui => 1,
+        server => #{host => "lns1.testdomain.com", port => 80, protocol => {http_roaming, #{}}},
+        max_copies => 10,
+        ignore_empty_skf => true
+    }),
+    ?assertEqual(ok, hpr_route_storage:insert(Route1)),
+    ?assertEqual({ok, SKFETS, true}, hpr_route_storage:routing_info(Bin)),
+
+    ?assertEqual(ok, hpr_route_storage:delete(Route1)),
+    ?assertEqual({error, not_found}, hpr_route_storage:routing_info(Bin)),
+
+    ?assertEqual(ok, hpr_route_storage:insert(Route0)),
+    ?assertEqual(ok, hpr_route_storage:delete_all()),
+    ?assertEqual({error, not_found}, hpr_route_storage:routing_info(Bin)),
     ok.
 
 test_route_for_skf(ID) ->

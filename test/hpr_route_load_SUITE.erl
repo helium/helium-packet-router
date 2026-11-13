@@ -23,6 +23,7 @@
     devaddr_isolation_test/1,
     high_devaddr_test/1,
     shared_range_test/1,
+    shared_oui_range_test/1,
     full_dataset_test/1,
     concurrent_lookup_test/1,
     checkpoint_rehydrate_test/1,
@@ -45,6 +46,11 @@
 %% A miss tries all eight frame-counter candidates against every key: p99
 %% measured 50ms on route-huge, and about the same over the full dataset.
 -define(P99_CEILING_US, 500000).
+%% The most heap a find_routes call on shared_oui_range_test's range may have
+%% held at any garbage collection. Measured 8MB when every route on the range
+%% was copied into the process -- 9MB a packet on the production node it ran
+%% out of memory -- and 810KB walking them by id.
+-define(SHARED_RANGE_MAX_HEAP_BYTES, 2 * 1024 * 1024).
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -56,6 +62,7 @@ all() ->
         devaddr_isolation_test,
         high_devaddr_test,
         shared_range_test,
+        shared_oui_range_test,
         full_dataset_test,
         concurrent_lookup_test,
         checkpoint_rehydrate_test,
@@ -195,6 +202,72 @@ shared_range_test(_Config) ->
     _ = hpr_routing:handle_packet(Unknown, #{gateway => Gateway2}),
     timer:sleep(500),
     ?assertEqual([GwmpID], Delivered()),
+    ok.
+
+%% One OUI registering the same range on each of its routes, the shape that ran
+%% a production node out of memory: 3,004 routes on 8 DevAddrs, 2,700 of them
+%% without a key and ignoring empty SKFs, 300 with a few keys, and 3 without a
+%% key that take every uplink as an empty route. Each uplink is routed in its
+%% own process, and the most heap that process held at any garbage collection
+%% is checked, so a regression to copying every route on the range into it
+%% fails here.
+shared_oui_range_test(_Config) ->
+    Name = fun(Prefix, N) -> lists:flatten(io_lib:format("~s-~4..0w", [Prefix, N])) end,
+    Shared = fun(Shape) -> Shape#{devaddrs => 8, share => "oui-owner"} end,
+    Shapes =
+        [#{name => "oui-owner", devaddrs => 8, keys_each => 4, ignore_empty_skf => true}] ++
+            [
+                Shared(#{name => Name("oui-empty", N), keys_each => 0, ignore_empty_skf => true})
+             || N <- lists:seq(1, 2700)
+            ] ++
+            [
+                Shared(#{name => Name("oui-keyed", N), keys_each => 2, ignore_empty_skf => true})
+             || N <- lists:seq(1, 300)
+            ] ++
+            [Shared(#{name => Name("oui-catchall", N), keys_each => 0}) || N <- lists:seq(1, 3)],
+    {LoadUs, Dataset} = timer:tc(fun() -> load(Shapes) end),
+    ct:pal("loaded ~w routes on one range in ~wms", [length(Shapes), LoadUs div 1000]),
+
+    Uplinks = [
+        {"owner key", "oui-owner", 2, 1},
+        {"sharer key", Name("oui-keyed", 117), 5, 0},
+        {"no key", "oui-owner", 6, random}
+    ],
+    lists:foreach(
+        fun({Label, Route, DevAddrIdx, KeyIdx}) ->
+            Packet = hpr_test_dataset:uplink(Dataset, Route, DevAddrIdx, KeyIdx),
+            Expected = hpr_test_dataset:expected(Dataset, {Route, DevAddrIdx}, KeyIdx),
+            {Got, PeakBytes} = peak_heap_find_routes(Packet),
+            ct:pal("~s: peak heap ~wKB (ceiling ~wKB)", [
+                Label, PeakBytes div 1024, ?SHARED_RANGE_MAX_HEAP_BYTES div 1024
+            ]),
+            ?assertEqual(Expected, Got),
+            ?assert(PeakBytes < ?SHARED_RANGE_MAX_HEAP_BYTES, {Label, PeakBytes})
+        end,
+        Uplinks
+    ),
+    %% The catch-alls ride along on every uplink, keys or not.
+    {ok, NoKey} = hpr_test_dataset:expected(Dataset, {"oui-owner", 6}, random),
+    ?assertEqual(3, length(NoKey)),
+
+    %% Keys on the range, each held by one of the 300 keyed routes, and keys on
+    %% none of them: every key on the DevAddr is tried before giving up.
+    Matched = [
+        timed(
+            hpr_test_dataset:uplink(Dataset, Name("oui-keyed", 1 + I rem 300), I rem 8, I rem 2),
+            hpr_test_dataset:expected(Dataset, {Name("oui-keyed", 1 + I rem 300), I rem 8}, I rem 2)
+        )
+     || I <- lists:seq(1, 200)
+    ],
+    ok = within("shared oui range, key held", Matched, p99, ?P99_CEILING_US),
+    Unmatched = [
+        timed(
+            hpr_test_dataset:uplink(Dataset, "oui-owner", I rem 8, random),
+            hpr_test_dataset:expected(Dataset, {"oui-owner", I rem 8}, random)
+        )
+     || I <- lists:seq(1, 200)
+    ],
+    ok = within("shared oui range, no key", Unmatched, p99, ?P99_CEILING_US),
     ok.
 
 %% About 5,283 routes and 521k keys: storage holds exactly what was loaded,
@@ -422,6 +495,44 @@ timed(Packet, Expected) ->
     {Us, Got} = timer:tc(hpr_test_dataset, find_routes, [Packet]),
     ?assertEqual(Expected, Got),
     Us.
+
+%% hpr_test_dataset:find_routes/1 in its own process, traced for garbage
+%% collections. Returns the answer and the most heap (young plus old blocks)
+%% the process held at any collection: what it actually cost the node, where
+%% the size it ends on can be far lower and a max_heap_size cap also counts
+%% the copy a collection makes.
+peak_heap_find_routes(Packet) ->
+    Self = self(),
+    Pid = erlang:spawn(fun() ->
+        receive
+            go -> ok
+        end,
+        Got = hpr_test_dataset:find_routes(Packet),
+        {total_heap_size, Words} = erlang:process_info(self(), total_heap_size),
+        Self ! {self(), Got, Words}
+    end),
+    1 = erlang:trace(Pid, true, [garbage_collection]),
+    Pid ! go,
+    {Got, FinalWords} =
+        receive
+            {Pid, G, W} -> {G, W}
+        after 60000 -> ct:fail(find_routes_timeout)
+        end,
+    Ref = erlang:trace_delivered(Pid),
+    receive
+        {trace_delivered, Pid, Ref} -> ok
+    end,
+    {Got, peak_heap(Pid, FinalWords * erlang:system_info(wordsize))}.
+
+peak_heap(Pid, Peak) ->
+    receive
+        {trace, Pid, _Event, Info} when is_list(Info) ->
+            Words =
+                proplists:get_value(heap_block_size, Info, 0) +
+                    proplists:get_value(old_heap_block_size, Info, 0),
+            peak_heap(Pid, max(Peak, Words * erlang:system_info(wordsize)))
+    after 0 -> Peak
+    end.
 
 %% Log a timing distribution next to its ceiling, and fail only past it.
 within(Label, Us, Percentile, CeilingUs) ->
