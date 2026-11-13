@@ -213,91 +213,101 @@ find_routes_for_uplink(PacketUp, DevAddr) ->
         [] ->
             {ok, []};
         RouteIDs ->
-            find_routes_for_uplink(PacketUp, DevAddr, RouteIDs, [], [])
+            {EmptyIDs, Keyed} = partition_routes(DevAddr, RouteIDs, [], []),
+            case match_keyed_routes(PacketUp, Keyed) ++ [{ID, 0} || ID <- EmptyIDs] of
+                [] ->
+                    {error, invalid_mic};
+                Kept ->
+                    {ok, [
+                        {RouteETS, MaxCopies}
+                     || {RouteID, MaxCopies} <- Kept,
+                        {ok, RouteETS} <- [
+                            hpr_route_storage:lookup(erlang:binary_to_list(RouteID))
+                        ]
+                    ]}
+            end
     end.
 
+%% Splits the candidate routes into the ones with no keys on the DevAddr that
+%% still take its uplinks (`ignore_empty_skf' false) and the ones with keys
+%% there, paired with those keys.
+%%
 %% Candidates are walked by id (as binaries, see
 %% hpr_devaddr_range_storage:lookup_ids/1), reading only each route's SKF table
 %% and ignore_empty_skf flag (hpr_route_storage:routing_info/1). The full route
 %% is fetched only for the routes kept: a DevAddr range shared by thousands of
 %% routes, most without keys, otherwise copied every one of them into this
 %% process for each uplink.
--spec find_routes_for_uplink(
-    PacketUp :: hpr_packet_up:packet(),
+-spec partition_routes(
     DevAddr :: non_neg_integer(),
     CandidateIDs :: [binary()],
     EmptyIDs :: [binary()],
-    SelectedIDs :: [{binary(), non_neg_integer()}]
-) -> {ok, routes()} | {error, invalid_mic}.
-find_routes_for_uplink(_PacketUp, _DevAddr, [], [], []) ->
-    {error, invalid_mic};
-find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyIDs, SelectedIDs) ->
-    {ok, [
-        {RouteETS, MaxCopies}
-     || {RouteID, MaxCopies} <- SelectedIDs ++ [{ID, 0} || ID <- EmptyIDs],
-        {ok, RouteETS} <- [hpr_route_storage:lookup(erlang:binary_to_list(RouteID))]
-    ]};
-find_routes_for_uplink(PacketUp, DevAddr, [RouteID | RouteIDs], EmptyIDs, SelectedIDs) ->
+    Keyed :: [{binary(), [{binary(), non_neg_integer()}]}]
+) -> {[binary()], [{binary(), [{binary(), non_neg_integer()}]}]}.
+partition_routes(_DevAddr, [], EmptyIDs, Keyed) ->
+    {EmptyIDs, Keyed};
+partition_routes(DevAddr, [RouteID | RouteIDs], EmptyIDs, Keyed) ->
     case hpr_route_storage:routing_info(RouteID) of
         {error, not_found} ->
             %% Deleted since the range lookup.
-            find_routes_for_uplink(PacketUp, DevAddr, RouteIDs, EmptyIDs, SelectedIDs);
+            partition_routes(DevAddr, RouteIDs, EmptyIDs, Keyed);
         {ok, SKFETS, IgnoreEmptySKF} ->
-            case check_route_skfs(PacketUp, DevAddr, SKFETS) of
-                empty when IgnoreEmptySKF ->
-                    find_routes_for_uplink(PacketUp, DevAddr, RouteIDs, EmptyIDs, SelectedIDs);
-                empty ->
+            case route_skfs(SKFETS, DevAddr) of
+                [] when IgnoreEmptySKF ->
+                    partition_routes(DevAddr, RouteIDs, EmptyIDs, Keyed);
+                [] ->
                     _ = hpr_device_stats:update(DevAddr),
-                    find_routes_for_uplink(
-                        PacketUp, DevAddr, RouteIDs, [RouteID | EmptyIDs], SelectedIDs
-                    );
-                false ->
-                    find_routes_for_uplink(PacketUp, DevAddr, RouteIDs, EmptyIDs, SelectedIDs);
-                {ok, SessionKey, SKFMaxCopies} ->
-                    _ = hpr_device_stats:update(SessionKey),
-                    find_routes_for_uplink(
-                        PacketUp,
-                        DevAddr,
-                        RouteIDs,
-                        EmptyIDs,
-                        [{RouteID, SKFMaxCopies} | SelectedIDs]
-                    )
+                    partition_routes(DevAddr, RouteIDs, [RouteID | EmptyIDs], Keyed);
+                SKFs ->
+                    partition_routes(DevAddr, RouteIDs, EmptyIDs, [{RouteID, SKFs} | Keyed])
             end
     end.
 
--spec check_route_skfs(
-    PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer(), ets:table()
-) ->
-    empty | false | {ok, binary(), non_neg_integer()}.
-check_route_skfs(PacketUp, DevAddr, SKFETS) ->
-    %% The whole candidate set in one call, not chunked. Chunking existed
-    %% because the old table shape could not look up by DevAddr and had to scan
-    %% the table (23ms on a 137k-row route), so a bounded chunk was the only way
-    %% to avoid paying for all of it. Now that DevAddr is the key prefix this is
-    %% a range read, and handing every candidate to match_session_key/2 at once
-    %% is what lets its frame-counter search be the outer loop -- inverting the
-    %% loops inside a 100-key chunk would save nothing.
-    %%
-    %% A route with no keys at all is answered from the table size, skipping the
-    %% select and its per-call match-spec compile: such routes can outnumber the
-    %% rest thousands to one on a shared range.
-    SKFs =
-        case ets:info(SKFETS, size) of
-            0 -> [];
-            _ -> hpr_skf_storage:lookup(SKFETS, DevAddr)
-        end,
-    case SKFs of
-        [] ->
-            empty;
-        SKFs ->
-            Payload = hpr_packet_up:payload(PacketUp),
-            case hpr_lorawan:match_session_key(Payload, [SK || {SK, _} <- SKFs]) of
-                false ->
-                    false;
-                {ok, SessionKey} ->
-                    {SessionKey, MaxCopies} = lists:keyfind(SessionKey, 1, SKFs),
-                    {ok, SessionKey, MaxCopies}
-            end
+%% The routes holding the key that signed the uplink, with that key's max
+%% copies.
+%%
+%% One search over every route's keys, not one per route. match_session_key/2
+%% tries each frame-counter candidate against all the keys it is given before
+%% the next candidate, and stops at the first key that verifies. Searched route
+%% by route, every route ahead of the one holding the key paid for all eight
+%% candidates over its keys, and every route after it was searched too -- on a
+%% range shared by hundreds of keyed routes, a held key cost as much as an
+%% unknown one. A packet whose key is on no route still has every key tried
+%% against every candidate either way.
+%%
+%% A route is kept when it holds the key found. Two different keys verifying
+%% the same MIC (a 32-bit collision) used to select each one's route; now the
+%% first key found decides.
+-spec match_keyed_routes(
+    PacketUp :: hpr_packet_up:packet(),
+    Keyed :: [{binary(), [{binary(), non_neg_integer()}]}]
+) -> [{binary(), non_neg_integer()}].
+match_keyed_routes(_PacketUp, []) ->
+    [];
+match_keyed_routes(PacketUp, Keyed) ->
+    Keys = lists:usort([SK || {_, SKFs} <- Keyed, {SK, _} <- SKFs]),
+    case hpr_lorawan:match_session_key(hpr_packet_up:payload(PacketUp), Keys) of
+        false ->
+            [];
+        {ok, SessionKey} ->
+            _ = hpr_device_stats:update(SessionKey),
+            [
+                {RouteID, MaxCopies}
+             || {RouteID, SKFs} <- Keyed, {SK, MaxCopies} <- SKFs, SK =:= SessionKey
+            ]
+    end.
+
+%% A route's keys on `DevAddr'. Now that DevAddr is the key prefix this is a
+%% range read rather than a scan of the route's table (23ms on a 137k-row
+%% route). A route with no keys at all is answered from the table size,
+%% skipping the select and its per-call match-spec compile: such routes can
+%% outnumber the rest thousands to one on a shared range.
+-spec route_skfs(SKFETS :: ets:table(), DevAddr :: non_neg_integer()) ->
+    [{binary(), non_neg_integer()}].
+route_skfs(SKFETS, DevAddr) ->
+    case ets:info(SKFETS, size) of
+        0 -> [];
+        _ -> hpr_skf_storage:lookup(SKFETS, DevAddr)
     end.
 
 -spec maybe_deliver_no_routes(
