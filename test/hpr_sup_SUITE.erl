@@ -7,7 +7,8 @@
 ]).
 
 -export([
-    packet_router_server_under_hpr_sup_test/1
+    packet_router_server_under_hpr_sup_test/1,
+    metrics_start_before_sysmon_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -23,7 +24,8 @@
 
 all() ->
     [
-        packet_router_server_under_hpr_sup_test
+        packet_router_server_under_hpr_sup_test,
+        metrics_start_before_sysmon_test
     ].
 
 init_per_testcase(TestCase, Config) ->
@@ -54,4 +56,16 @@ packet_router_server_under_hpr_sup_test(_Config) ->
     %% process grpcbox registered for that port, proving hpr_sup owns it.
     ?assertEqual(Pid, erlang:whereis(?PACKET_ROUTER_SERVICES_SUP)),
 
+    ok.
+
+%% hpr_sysmon counts every system monitor event in a metric hpr_metrics
+%% declares when it starts. Started the other way round, an event in between
+%% crashed hpr_sysmon, and two within 5s took hpr_sup down. which_children/1
+%% lists children newest first.
+metrics_start_before_sysmon_test(_Config) ->
+    Ids = [Id || {Id, _, _, _} <- lists:reverse(supervisor:which_children(hpr_sup))],
+    Position = fun(Id) -> length(lists:takewhile(fun(I) -> I =/= Id end, Ids)) end,
+    ?assert(lists:member(hpr_metrics, Ids)),
+    ?assert(lists:member(hpr_sysmon, Ids)),
+    ?assert(Position(hpr_metrics) < Position(hpr_sysmon), Ids),
     ok.

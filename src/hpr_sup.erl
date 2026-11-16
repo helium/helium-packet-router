@@ -99,9 +99,13 @@ init([]) ->
 
     ChildSpecs =
         [
+            %% hpr_metrics first: it declares the metrics, and hpr_sysmon counts
+            %% every system monitor event in one. An event in between would
+            %% crash hpr_sysmon, and a second within 5s would take this
+            %% supervisor down.
+            ?WORKER(hpr_metrics, [#{}]),
             ?WORKER(hpr_sysmon, [#{}]),
             ?WORKER(hpr_routing_cache, [#{}]),
-            ?WORKER(hpr_metrics, [#{}]),
             ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
 
             ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
