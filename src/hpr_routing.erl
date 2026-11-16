@@ -302,12 +302,26 @@ match_keyed_routes(PacketUp, Keyed) ->
 %% route). A route with no keys at all is answered from the table size,
 %% skipping the select and its per-call match-spec compile: such routes can
 %% outnumber the rest thousands to one on a shared range.
+%%
+%% A route whose table is gone (a dangling reference, or a route being deleted
+%% while this packet is routed) has no keys either. Selecting from it would
+%% raise badarg and lose the packet for every route on the DevAddr; the
+%% storage paths tolerate a dead table the same way.
 -spec route_skfs(SKFETS :: ets:table(), DevAddr :: non_neg_integer()) ->
     [{binary(), non_neg_integer()}].
 route_skfs(SKFETS, DevAddr) ->
     case ets:info(SKFETS, size) of
-        0 -> [];
-        _ -> hpr_skf_storage:lookup(SKFETS, DevAddr)
+        undefined ->
+            [];
+        0 ->
+            [];
+        _ ->
+            try
+                hpr_skf_storage:lookup(SKFETS, DevAddr)
+            catch
+                %% Deleted between the size check and the select.
+                error:badarg -> []
+            end
     end.
 
 -spec maybe_deliver_no_routes(
@@ -572,6 +586,7 @@ all_test_() ->
         ?_test(find_routes_for_uplink_multi_route_success()),
         ?_test(find_routes_for_uplink_multi_route_failed()),
         ?_test(find_routes_for_uplink_ignore_empty_skf()),
+        ?_test(find_routes_for_uplink_dead_skf_table()),
         ?_test(maybe_deliver_packet_to_route_locked()),
         ?_test(maybe_deliver_packet_to_route_inactive()),
         ?_test(maybe_deliver_packet_to_route_in_cooldown()),
@@ -809,6 +824,58 @@ find_routes_for_uplink_multi_route_success() ->
         {ok, [{RouteETS2, 0}, {RouteETS1, 0}]}, find_routes_for_uplink(PacketUp, DevAddr1)
     ),
 
+    ok.
+
+%% A route whose SKF table is gone, left dangling or deleted mid-packet, counts
+%% as having no keys instead of crashing the packet for every route on the
+%% DevAddr.
+find_routes_for_uplink_dead_skf_table() ->
+    Route = fun(ID) ->
+        hpr_route:test_new(#{
+            id => ID,
+            net_id => 1,
+            oui => 10,
+            server => #{host => "lsn.lora.com", port => 80, protocol => {gwmp, #{mapping => []}}},
+            max_copies => 10,
+            active => true,
+            locked => false
+        })
+    end,
+    Route1 = Route("route_id_1"),
+    Route2 = Route("route_id_2"),
+    DevAddr = 16#00000001,
+    lists:foreach(
+        fun(R) ->
+            ok = hpr_route_storage:insert(R),
+            ok = hpr_devaddr_range_storage:insert(
+                hpr_devaddr_range:test_new(#{
+                    route_id => hpr_route:id(R), start_addr => 16#00000000, end_addr => 16#00000002
+                })
+            )
+        end,
+        [Route1, Route2]
+    ),
+    SessionKey = crypto:strong_rand_bytes(16),
+    ok = hpr_skf_storage:insert(
+        hpr_skf:new(#{
+            route_id => "route_id_1",
+            devaddr => DevAddr,
+            session_key => hpr_utils:bin_to_hex_string(SessionKey),
+            max_copies => 1
+        })
+    ),
+    {ok, RouteETS1} = hpr_route_storage:lookup("route_id_1"),
+    {ok, RouteETS2} = hpr_route_storage:lookup("route_id_2"),
+    true = ets:delete(hpr_route_ets:skf_ets(RouteETS2)),
+
+    PacketUp = test_utils:uplink_packet_up(#{devaddr => DevAddr, nwk_session_key => SessionKey}),
+    ?assertEqual(
+        {ok, [{RouteETS1, 1}, {RouteETS2, 0}]}, find_routes_for_uplink(PacketUp, DevAddr)
+    ),
+
+    %% Through the storage paths, which tolerate the dead table, so the suite's
+    %% cleanup does not trip over it.
+    ok = hpr_route_storage:delete(Route2),
     ok.
 
 find_routes_for_uplink_multi_route_failed() ->
