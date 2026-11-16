@@ -336,13 +336,18 @@ stream(#{seed := Seed, routes := Routes}, TimestampSecs) ->
 %% Paced on the mailbox length rather than on test_counts/0: that call waits
 %% behind every queued message, and on a small CI runner busy with lookups it
 %% timed out before the worker got to it.
+%%
+%% Sent as the worker's current stream, which it reads once up front: the
+%% worker ignores data from any other stream.
 -spec push([hpr_route_stream_res:res()]) -> ok.
 push(Resps) ->
     Worker = erlang:whereis(hpr_route_stream_worker),
+    ok = test_utils:wait_until(fun() -> hpr_route_stream_worker:test_stream() =/= undefined end),
+    #{stream_id := StreamID} = hpr_route_stream_worker:test_stream(),
     _ = lists:foldl(
         fun(Resp, Sent) ->
             ok = wait_window(Worker, Sent),
-            Worker ! {data, load_test, Resp},
+            Worker ! {data, StreamID, Resp},
             Sent + 1
         end,
         0,

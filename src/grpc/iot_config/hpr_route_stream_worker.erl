@@ -159,6 +159,8 @@
 -define(SERVER, ?MODULE).
 -define(INIT_STREAM, init_stream).
 -define(CHECK_SILENCE, check_silence).
+%% HTTP/2 CANCEL error code (RFC 7540 section 7), for cancel_stream/1.
+-define(H2_CANCEL, 16#8).
 -define(DEFAULT_SILENCE_SECS, 600).
 -ifdef(TEST).
 -define(SILENCE_CHECK_INTERVAL, 200).
@@ -375,9 +377,8 @@ handle_call(reset_channel, _From, #state{} = State) ->
 
     {reply, ok, State#state{stream = undefined, counts = new_counts()}};
 handle_call(reset_stream, _From, #state{stream = Stream} = State) ->
-    %% Attempt to signal to the other side we're going down.
-    Stopped = grpcbox_client:close_send(Stream),
-    lager:info("stream stopped ~w", [Stopped]),
+    ok = cancel_stream(Stream),
+    lager:info("stream stopped"),
 
     self() ! ?INIT_STREAM,
 
@@ -432,7 +433,14 @@ handle_info(
             {noreply, State#state{conn_backoff = Backoff1}}
     end;
 %% GRPC stream callbacks
-handle_info({data, _StreamID, RouteStreamRes}, #state{counts = Counts0} = State) ->
+%%
+%% Only from the current stream. A stream that was replaced can still have
+%% messages in flight, and they must neither be applied a second time nor
+%% count as the new stream being alive.
+handle_info(
+    {data, StreamID, RouteStreamRes},
+    #state{stream = #{stream_id := StreamID}, counts = Counts0} = State
+) ->
     Action = hpr_route_stream_res:action(RouteStreamRes),
     Data = hpr_route_stream_res:data(RouteStreamRes),
     Timestamp = hpr_route_stream_res:timestamp(RouteStreamRes),
@@ -459,10 +467,16 @@ handle_info({data, _StreamID, RouteStreamRes}, #state{counts = Counts0} = State)
         last_data_at = now_ms(),
         silent_resets = 0
     }};
+handle_info({data, _StreamID, _RouteStreamRes}, State) ->
+    lager:debug("ignoring data from a replaced stream"),
+    {noreply, State};
 handle_info({headers, _StreamID, _Headers}, State) ->
     %% noop on headers
     {noreply, State};
-handle_info({trailers, _StreamID, Trailers}, #state{conn_backoff = Backoff0} = State) ->
+handle_info(
+    {trailers, StreamID, Trailers},
+    #state{stream = #{stream_id := StreamID}, conn_backoff = Backoff0} = State
+) ->
     %% IF a stream is closed by the server side, Trailers will be
     %% received before the EOS. Removing the stream from state will
     %% mean none of the other clauses match, and reconnecting will not
@@ -485,6 +499,9 @@ handle_info({trailers, _StreamID, Trailers}, #state{conn_backoff = Backoff0} = S
         _ ->
             {noreply, State}
     end;
+handle_info({trailers, _StreamID, _Trailers}, State) ->
+    %% A replaced stream's: its status says nothing about the current one.
+    {noreply, State};
 handle_info(
     {'DOWN', _Ref, process, Pid, Reason},
     #state{stream = #{stream_pid := Pid}, conn_backoff = Backoff0} = State
@@ -505,6 +522,12 @@ handle_info(
     lager:info("stream went down sleeping ~wms", [Delay]),
     _ = erlang:send_after(Delay, self(), ?INIT_STREAM),
     {noreply, State#state{stream = undefined, conn_backoff = Backoff1}};
+handle_info({eos, _StreamID}, State) ->
+    %% A replaced stream ending, as cancel_stream/1 asked it to.
+    {noreply, State};
+handle_info({'DOWN', _Ref, process, _Pid, _Reason}, State) ->
+    %% A replaced stream's process exiting; the current one's is matched above.
+    {noreply, State};
 handle_info(?CHECK_SILENCE, #state{stream = Stream, last_data_at = LastDataAt} = State) ->
     ok = schedule_silence_check(),
     %% Read on every check so it can be changed on a running node.
@@ -733,9 +756,7 @@ reset_silent_stream(SilentMs, #state{stream = Stream, silent_resets = N} = State
         [SilentMs div 1000, Kind]
     ),
     ok = hpr_metrics:ics_stream_silence_reset(Kind),
-    %% The stream is presumed wedged, so closing it is best effort: a failure
-    %% here must not take the worker down with it.
-    _ = (catch grpcbox_client:close_send(Stream)),
+    ok = cancel_stream(Stream),
     ok =
         case Kind of
             stream -> ok;
@@ -748,6 +769,22 @@ reset_silent_stream(SilentMs, #state{stream = Stream, silent_resets = N} = State
         silent_resets = N + 1,
         last_data_at = now_ms()
     }.
+
+%% @doc End a route stream on both sides.
+%%
+%% grpcbox_client:close_send/1 only half-closes it: on a server-streaming call
+%% the server keeps sending, so a stream "closed" that way stayed open beside
+%% its replacement and every update arrived twice. RST_STREAM with CANCEL ends
+%% it without touching the connection the next stream will use: our side
+%% closes at once, and iot-config (tonic) drops its side on receipt. Anything
+%% already in flight is ignored by stream id in handle_info/2. Best effort: a
+%% stream presumed wedged must not take the worker down with it.
+-spec cancel_stream(undefined | grpcbox_client:stream()) -> ok.
+cancel_stream(#{channel := Conn, stream_id := StreamID}) ->
+    _ = (catch h2_connection:rst_stream(Conn, StreamID, ?H2_CANCEL)),
+    ok;
+cancel_stream(_NoStream) ->
+    ok.
 
 %% @doc What to reset after `SilentResets' consecutive silence resets that
 %% brought nothing back. The stream first, being cheapest; then the channel, in
