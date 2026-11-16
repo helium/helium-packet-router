@@ -50,8 +50,15 @@ stream(Req, StreamState) ->
             {ok, StreamState}
     end.
 
+%% @doc Send a downlink to HPR over its downlink stream.
+%%
+%% Waits for that stream to be open first: HPR connects it when the app
+%% starts, and a test that posts a downlink right away can get here before it
+%% has. Sending to the unregistered name then raised badarg in the caller --
+%% an HTTP handler, which died without answering.
 -spec downlink(Resp :: downlink_pb:http_roaming_downlink_v1_pb()) -> ok.
 downlink(Resp) ->
+    ok = test_utils:wait_until(fun() -> erlang:is_pid(erlang:whereis(?MODULE)) end, 50, 100),
     lager:notice("downlink ~p  @ ~p", [Resp, erlang:whereis(?MODULE)]),
     ?MODULE ! {downlink, Resp},
     ok.

@@ -4,6 +4,7 @@
 
 -export([
     init/0,
+    admit/2,
     handle_packet/2,
     find_routes/2
 ]).
@@ -19,7 +20,13 @@
 -type hpr_routing_response() ::
     ok
     | {error,
-        gateway_limit_exceeded | invalid_packet_type | bad_signature | invalid_mic | gateway_denied}.
+        gateway_limit_exceeded
+        | packet_limit_exceeded
+        | invalid_packet_type
+        | bad_signature
+        | invalid_mic
+        | gateway_denied
+        | wrong_gateway}.
 
 -type route() :: {hpr_route_ets:route(), SKFMaxCopies :: non_neg_integer()}.
 -type routes() :: list(route()).
@@ -42,14 +49,28 @@ handle_packet(PacketUp, Opts) ->
     lager:debug("received packet"),
     SessionKey = maps:get(session_key, Opts, undefined),
     Gateway = maps:get(gateway, Opts, undefined),
-    Checks = [
+    Checks0 = [
         {fun packet_type_check/1, [], invalid_packet_type},
         {fun gateway_check/2, [Gateway], wrong_gateway},
         {fun gateway_denied_check/1, [], gateway_denied},
-        {fun packet_session_check/2, [SessionKey], bad_signature},
-        {fun gateway_throttle_check/1, [], gateway_limit_exceeded},
-        {fun packet_throttle_check/1, [], packet_limit_exceeded}
+        {fun packet_session_check/2, [SessionKey], bad_signature}
     ],
+    %% The rate limits consume budget, so they run exactly once per packet.
+    %% hpr_packet_router_service calls admit/2 before spawning us -- that is the
+    %% point, a throttled packet should not cost a process -- and says so here.
+    %% A caller that does not (any direct caller, and the test suites) still gets
+    %% them, in their original position at the end of the list.
+    Checks =
+        case maps:get(admitted, Opts, false) of
+            true ->
+                Checks0;
+            false ->
+                Checks0 ++
+                    [
+                        {fun gateway_throttle_check/1, [], gateway_limit_exceeded},
+                        {fun packet_throttle_check/1, [], packet_limit_exceeded}
+                    ]
+        end,
     PacketUpType = hpr_packet_up:type(PacketUp),
     case execute_checks(PacketUp, Checks) of
         {error, _Reason} = Error ->
@@ -59,6 +80,36 @@ handle_packet(PacketUp, Opts) ->
         ok ->
             ok = hpr_netid_stats:maybe_report_net_id(PacketUp),
             do_handle_packet(PacketUp, Timestamp)
+    end.
+
+%% @doc Rate-limit decision, cheap enough to make before spawning anything.
+%%
+%% Two ETS lookups against limits the routing process would otherwise apply
+%% after it had already been created, its metadata built and its payload
+%% re-hashed. Takes the gateway and payload hash rather than digging them out of
+%% the packet, because the stream process is holding both already.
+-spec admit(Gateway :: libp2p_crypto:pubkey_bin(), PHash :: binary()) ->
+    ok | {error, gateway_limit_exceeded | packet_limit_exceeded}.
+admit(Gateway, PHash) ->
+    %% Fail open. This runs in the gateway's stream process, so an unexpected
+    %% throttle error here would take down that gateway's whole connection --
+    %% where the same error inside the routing process only ever cost one
+    %% packet. Dropping every packet from a hotspot because the rate limiter is
+    %% broken is strictly worse than not rate limiting it.
+    try
+        case check_gateway_throttle(Gateway) of
+            false ->
+                {error, gateway_limit_exceeded};
+            true ->
+                case check_packet_throttle(Gateway, PHash) of
+                    false -> {error, packet_limit_exceeded};
+                    true -> ok
+                end
+        end
+    catch
+        Class:Reason ->
+            lager:error("admit check failed, admitting anyway: ~p:~p", [Class, Reason]),
+            ok
     end.
 
 -spec find_routes(hpr_packet_up:type(), PacketUp :: hpr_packet_up:packet()) ->
@@ -91,7 +142,12 @@ do_handle_packet(PacketUp, Timestamp) ->
             route_packet(PacketUp, RoutesETS, Timestamp),
             ok;
         {locked, RoutingEntry} ->
-            hpr_routing_cache:queue(RoutingEntry, {PacketUp, Timestamp});
+            %% Queued, the copy establishing routes will route this one too.
+            %% Otherwise the entry moved on since we read it: look again.
+            case hpr_routing_cache:queue(RoutingEntry, {PacketUp, Timestamp}) of
+                ok -> ok;
+                retry -> do_handle_packet(PacketUp, Timestamp)
+            end;
         {error, _Reason} = Error ->
             hpr_metrics:observe_packet_up(PacketUpType, Error, 0, Timestamp),
             Error
@@ -153,104 +209,119 @@ route_packet(PacketUp, RoutesETS, Timestamp) ->
 -spec find_routes_for_uplink(PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer()) ->
     {ok, routes()} | {error, invalid_mic}.
 find_routes_for_uplink(PacketUp, DevAddr) ->
-    case hpr_devaddr_range_storage:lookup(DevAddr) of
+    case hpr_devaddr_range_storage:lookup_ids(DevAddr) of
         [] ->
             {ok, []};
-        RoutesETS ->
-            find_routes_for_uplink(PacketUp, DevAddr, RoutesETS, [], [])
+        RouteIDs ->
+            {EmptyIDs, Keyed} = partition_routes(DevAddr, RouteIDs, [], []),
+            case match_keyed_routes(PacketUp, Keyed) ++ [{ID, 0} || ID <- EmptyIDs] of
+                [] ->
+                    {error, invalid_mic};
+                Kept ->
+                    {ok, [
+                        {RouteETS, MaxCopies}
+                     || {RouteID, MaxCopies} <- Kept,
+                        {ok, RouteETS} <- [
+                            hpr_route_storage:lookup(erlang:binary_to_list(RouteID))
+                        ]
+                    ]}
+            end
     end.
 
--spec find_routes_for_uplink(
-    PacketUp :: hpr_packet_up:packet(),
+%% Splits the candidate routes into the ones with no keys on the DevAddr that
+%% still take its uplinks (`ignore_empty_skf' false) and the ones with keys
+%% there, paired with those keys.
+%%
+%% Candidates are walked by id (as binaries, see
+%% hpr_devaddr_range_storage:lookup_ids/1), reading only each route's SKF table
+%% and ignore_empty_skf flag (hpr_route_storage:routing_info/1). The full route
+%% is fetched only for the routes kept: a DevAddr range shared by thousands of
+%% routes, most without keys, otherwise copied every one of them into this
+%% process for each uplink.
+-spec partition_routes(
     DevAddr :: non_neg_integer(),
-    CandidateRoutes :: [hpr_route_ets:route()],
-    EmptyRoutes :: [hpr_route_ets:route()],
-    SelectedRoute :: routes()
-) -> {ok, routes()} | {error, invalid_mic}.
-find_routes_for_uplink(_PacketUp, _DevAddr, [], [], []) ->
-    {error, invalid_mic};
-find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, []) ->
-    {ok, [{R, 0} || R <- EmptyRoutes]};
-find_routes_for_uplink(_PacketUp, _DevAddr, [], EmptyRoutes, SelectedRoutes) ->
-    {ok, SelectedRoutes ++ [{R, 0} || R <- EmptyRoutes]};
-find_routes_for_uplink(
-    PacketUp, DevAddr, [RouteETS | RoutesETS], EmptyRoutes, SelectedRoutes
-) ->
-    Route = hpr_route_ets:route(RouteETS),
-    SKFETS = hpr_route_ets:skf_ets(RouteETS),
-    case check_route_skfs(PacketUp, DevAddr, SKFETS) of
-        empty ->
-            EmptyRoutes1 =
-                case hpr_route:ignore_empty_skf(Route) of
-                    true ->
-                        EmptyRoutes;
-                    false ->
-                        _ = hpr_device_stats:update(DevAddr),
-                        [RouteETS | EmptyRoutes]
-                end,
-            find_routes_for_uplink(
-                PacketUp,
-                DevAddr,
-                RoutesETS,
-                EmptyRoutes1,
-                SelectedRoutes
-            );
+    CandidateIDs :: [binary()],
+    EmptyIDs :: [binary()],
+    Keyed :: [{binary(), [{binary(), non_neg_integer()}]}]
+) -> {[binary()], [{binary(), [{binary(), non_neg_integer()}]}]}.
+partition_routes(_DevAddr, [], EmptyIDs, Keyed) ->
+    {EmptyIDs, Keyed};
+partition_routes(DevAddr, [RouteID | RouteIDs], EmptyIDs, Keyed) ->
+    case hpr_route_storage:routing_info(RouteID) of
+        {error, not_found} ->
+            %% Deleted since the range lookup.
+            partition_routes(DevAddr, RouteIDs, EmptyIDs, Keyed);
+        {ok, SKFETS, IgnoreEmptySKF} ->
+            case route_skfs(SKFETS, DevAddr) of
+                [] when IgnoreEmptySKF ->
+                    partition_routes(DevAddr, RouteIDs, EmptyIDs, Keyed);
+                [] ->
+                    _ = hpr_device_stats:update(DevAddr),
+                    partition_routes(DevAddr, RouteIDs, [RouteID | EmptyIDs], Keyed);
+                SKFs ->
+                    partition_routes(DevAddr, RouteIDs, EmptyIDs, [{RouteID, SKFs} | Keyed])
+            end
+    end.
+
+%% The routes holding the key that signed the uplink, with that key's max
+%% copies.
+%%
+%% One search over every route's keys, not one per route. match_session_key/2
+%% tries each frame-counter candidate against all the keys it is given before
+%% the next candidate, and stops at the first key that verifies. Searched route
+%% by route, every route ahead of the one holding the key paid for all eight
+%% candidates over its keys, and every route after it was searched too -- on a
+%% range shared by hundreds of keyed routes, a held key cost as much as an
+%% unknown one. A packet whose key is on no route still has every key tried
+%% against every candidate either way.
+%%
+%% A route is kept when it holds the key found. Two different keys verifying
+%% the same MIC (a 32-bit collision) used to select each one's route; now the
+%% first key found decides.
+-spec match_keyed_routes(
+    PacketUp :: hpr_packet_up:packet(),
+    Keyed :: [{binary(), [{binary(), non_neg_integer()}]}]
+) -> [{binary(), non_neg_integer()}].
+match_keyed_routes(_PacketUp, []) ->
+    [];
+match_keyed_routes(PacketUp, Keyed) ->
+    Keys = lists:usort([SK || {_, SKFs} <- Keyed, {SK, _} <- SKFs]),
+    case hpr_lorawan:match_session_key(hpr_packet_up:payload(PacketUp), Keys) of
         false ->
-            find_routes_for_uplink(
-                PacketUp,
-                DevAddr,
-                RoutesETS,
-                EmptyRoutes,
-                SelectedRoutes
-            );
-        {ok, SessionKey, SKFMaxCopies} ->
+            [];
+        {ok, SessionKey} ->
             _ = hpr_device_stats:update(SessionKey),
-            find_routes_for_uplink(
-                PacketUp,
-                DevAddr,
-                RoutesETS,
-                EmptyRoutes,
-                [{RouteETS, SKFMaxCopies} | SelectedRoutes]
-            )
+            [
+                {RouteID, MaxCopies}
+             || {RouteID, SKFs} <- Keyed, {SK, MaxCopies} <- SKFs, SK =:= SessionKey
+            ]
     end.
 
--spec check_route_skfs(
-    PacketUp :: hpr_packet_up:packet(), DevAddr :: non_neg_integer(), ets:table()
-) ->
-    empty | false | {ok, binary(), non_neg_integer()}.
-check_route_skfs(PacketUp, DevAddr, SKFETS) ->
-    case hpr_skf_storage:select(SKFETS, DevAddr) of
-        '$end_of_table' ->
-            empty;
-        Continuation ->
-            Payload = hpr_packet_up:payload(PacketUp),
-            check_route_skfs(Payload, Continuation)
-    end.
-
--spec check_route_skfs(
-    Payload :: binary(),
-    '$end_of_table' | {[{binary(), integer(), non_neg_integer()}], ets:continuation()}
-) -> false | {ok, binary(), non_neg_integer()}.
-check_route_skfs(_Payload, '$end_of_table') ->
-    false;
-check_route_skfs(Payload, {SKFs, Continuation}) ->
-    case check_skfs(Payload, SKFs) of
-        false ->
-            check_route_skfs(Payload, hpr_skf_storage:select(Continuation));
-        {ok, _SK, _MaxCopies} = OK ->
-            OK
-    end.
-
--spec check_skfs(Payload :: binary(), [{binary(), non_neg_integer()}]) ->
-    false | {ok, binary(), non_neg_integer()}.
-check_skfs(_Payload, []) ->
-    false;
-check_skfs(Payload, [{SessionKey, MaxCopies} | SKFs]) ->
-    case hpr_lorawan:key_matches_mic(SessionKey, Payload) of
-        false ->
-            check_skfs(Payload, SKFs);
-        true ->
-            {ok, SessionKey, MaxCopies}
+%% A route's keys on `DevAddr'. Now that DevAddr is the key prefix this is a
+%% range read rather than a scan of the route's table (23ms on a 137k-row
+%% route). A route with no keys at all is answered from the table size,
+%% skipping the select and its per-call match-spec compile: such routes can
+%% outnumber the rest thousands to one on a shared range.
+%%
+%% A route whose table is gone (a dangling reference, or a route being deleted
+%% while this packet is routed) has no keys either. Selecting from it would
+%% raise badarg and lose the packet for every route on the DevAddr; the
+%% storage paths tolerate a dead table the same way.
+-spec route_skfs(SKFETS :: ets:table(), DevAddr :: non_neg_integer()) ->
+    [{binary(), non_neg_integer()}].
+route_skfs(SKFETS, DevAddr) ->
+    case ets:info(SKFETS, size) of
+        undefined ->
+            [];
+        0 ->
+            [];
+        _ ->
+            try
+                hpr_skf_storage:lookup(SKFETS, DevAddr)
+            catch
+                %% Deleted between the size check and the select.
+                error:badarg -> []
+            end
     end.
 
 -spec maybe_deliver_no_routes(
@@ -419,7 +490,14 @@ maybe_report_packet({uplink, _}, Routes, Routed, IsFree, PacketUp, ReceivedTime)
             [Route | _] = Routes,
             ok = hpr_packet_reporter:report_packet(PacketUp, Route, IsFree, ReceivedTime);
         _ ->
-            lager:error("routed packet to non unique OUI/Net ID ~p", [
+            %% The packet was delivered but is never reported, and so never
+            %% charged -- report_packet/4 takes a single route and there is no
+            %% one route to attribute it to. Counted so the volume is a graph;
+            %% the warning below names the routes. Which route should win when
+            %% devaddr ranges overlap across OUIs is a config question, not one
+            %% to decide here.
+            ok = hpr_metrics:unreported_packet(),
+            lager:warning("routed packet to non unique OUI/Net ID ~p", [
                 [{hpr_route:id(R), hpr_route:oui(R), hpr_route:net_id(R)} || R <- Routes]
             ])
     end;
@@ -459,17 +537,23 @@ packet_session_check(PacketUp, SessionKey) ->
 -spec gateway_throttle_check(PacketUp :: hpr_packet_up:packet()) ->
     boolean().
 gateway_throttle_check(PacketUp) ->
-    Gateway = hpr_packet_up:gateway(PacketUp),
+    check_gateway_throttle(hpr_packet_up:gateway(PacketUp)).
+
+-spec packet_throttle_check(PacketUp :: hpr_packet_up:packet()) ->
+    boolean().
+packet_throttle_check(PacketUp) ->
+    check_packet_throttle(hpr_packet_up:gateway(PacketUp), hpr_packet_up:phash(PacketUp)).
+
+-spec check_gateway_throttle(Gateway :: libp2p_crypto:pubkey_bin()) -> boolean().
+check_gateway_throttle(Gateway) ->
     case throttle:check(?GATEWAY_THROTTLE, Gateway) of
         {limit_exceeded, _, _} -> false;
         _ -> true
     end.
 
--spec packet_throttle_check(PacketUp :: hpr_packet_up:packet()) ->
+-spec check_packet_throttle(Gateway :: libp2p_crypto:pubkey_bin(), PHash :: binary()) ->
     boolean().
-packet_throttle_check(PacketUp) ->
-    Gateway = hpr_packet_up:gateway(PacketUp),
-    PHash = hpr_packet_up:phash(PacketUp),
+check_packet_throttle(Gateway, PHash) ->
     case throttle:check(?PACKET_THROTTLE, {Gateway, PHash}) of
         {limit_exceeded, _, _} -> false;
         _ -> true
@@ -502,6 +586,7 @@ all_test_() ->
         ?_test(find_routes_for_uplink_multi_route_success()),
         ?_test(find_routes_for_uplink_multi_route_failed()),
         ?_test(find_routes_for_uplink_ignore_empty_skf()),
+        ?_test(find_routes_for_uplink_dead_skf_table()),
         ?_test(maybe_deliver_packet_to_route_locked()),
         ?_test(maybe_deliver_packet_to_route_inactive()),
         ?_test(maybe_deliver_packet_to_route_in_cooldown()),
@@ -541,7 +626,7 @@ foreach_cleanup(ok) ->
         end,
         ets:tab2list(hpr_routes_ets)
     ),
-    true = ets:delete(hpr_routes_ets),
+    ok = hpr_route_storage:test_delete_ets(),
     ok = hpr_denylist:reset(),
     ok = hpr_denylist:test_delete_ets(),
     true = erlang:unregister(hpr_sup),
@@ -739,6 +824,58 @@ find_routes_for_uplink_multi_route_success() ->
         {ok, [{RouteETS2, 0}, {RouteETS1, 0}]}, find_routes_for_uplink(PacketUp, DevAddr1)
     ),
 
+    ok.
+
+%% A route whose SKF table is gone, left dangling or deleted mid-packet, counts
+%% as having no keys instead of crashing the packet for every route on the
+%% DevAddr.
+find_routes_for_uplink_dead_skf_table() ->
+    Route = fun(ID) ->
+        hpr_route:test_new(#{
+            id => ID,
+            net_id => 1,
+            oui => 10,
+            server => #{host => "lsn.lora.com", port => 80, protocol => {gwmp, #{mapping => []}}},
+            max_copies => 10,
+            active => true,
+            locked => false
+        })
+    end,
+    Route1 = Route("route_id_1"),
+    Route2 = Route("route_id_2"),
+    DevAddr = 16#00000001,
+    lists:foreach(
+        fun(R) ->
+            ok = hpr_route_storage:insert(R),
+            ok = hpr_devaddr_range_storage:insert(
+                hpr_devaddr_range:test_new(#{
+                    route_id => hpr_route:id(R), start_addr => 16#00000000, end_addr => 16#00000002
+                })
+            )
+        end,
+        [Route1, Route2]
+    ),
+    SessionKey = crypto:strong_rand_bytes(16),
+    ok = hpr_skf_storage:insert(
+        hpr_skf:new(#{
+            route_id => "route_id_1",
+            devaddr => DevAddr,
+            session_key => hpr_utils:bin_to_hex_string(SessionKey),
+            max_copies => 1
+        })
+    ),
+    {ok, RouteETS1} = hpr_route_storage:lookup("route_id_1"),
+    {ok, RouteETS2} = hpr_route_storage:lookup("route_id_2"),
+    true = ets:delete(hpr_route_ets:skf_ets(RouteETS2)),
+
+    PacketUp = test_utils:uplink_packet_up(#{devaddr => DevAddr, nwk_session_key => SessionKey}),
+    ?assertEqual(
+        {ok, [{RouteETS1, 1}, {RouteETS2, 0}]}, find_routes_for_uplink(PacketUp, DevAddr)
+    ),
+
+    %% Through the storage paths, which tolerate the dead table, so the suite's
+    %% cleanup does not trip over it.
+    ok = hpr_route_storage:delete(Route2),
     ok.
 
 find_routes_for_uplink_multi_route_failed() ->

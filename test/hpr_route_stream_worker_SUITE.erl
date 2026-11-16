@@ -16,6 +16,8 @@
     refresh_route_with_retry_test/1,
     stream_crash_resume_updates_test/1,
     reset_stream_test/1,
+    stream_silence_reset_test/1,
+    reset_stream_ends_old_stream_test/1,
     reset_channel_test/1,
     app_restart_rehydrate_test/1,
     route_remove_delete_skf_dets_test/1
@@ -39,6 +41,8 @@ all() ->
         stream_crash_resume_updates_test,
         reset_stream_test,
         reset_channel_test,
+        stream_silence_reset_test,
+        reset_stream_ends_old_stream_test,
         app_restart_rehydrate_test,
         route_remove_delete_skf_dets_test
     ].
@@ -228,6 +232,91 @@ reset_stream_test(_Config) ->
     stream_resume_test_runner(
         fun() -> hpr_route_stream_worker:reset_stream() end
     ).
+
+%% A stream that delivers nothing is replaced, without restarting anything else:
+%% first the stream, then -- still silent -- the channel under it.
+stream_silence_reset_test(_Config) ->
+    ok = test_utils:wait_until(fun() -> is_map(hpr_route_stream_worker:test_stream()) end),
+    #{stream_pid := FirstPid} = hpr_route_stream_worker:test_stream(),
+    %% Relative to now: prometheus values outlive a single test case.
+    Stream0 = silence_resets(stream),
+    Channel0 = silence_resets(channel),
+
+    ok = application:set_env(hpr, ics_stream_silence_secs, 1),
+    try
+        %% Silent for a second: the stream is reset and a new one opened.
+        ok = test_utils:wait_until(fun() -> silence_resets(stream) > Stream0 end, 50, 100),
+        ok = test_utils:wait_until(
+            fun() ->
+                case hpr_route_stream_worker:test_stream() of
+                    #{stream_pid := Pid} -> Pid =/= FirstPid;
+                    undefined -> false
+                end
+            end,
+            50,
+            100
+        ),
+        %% Still silent: the next reset restarts the channel.
+        ok = test_utils:wait_until(fun() -> silence_resets(channel) > Channel0 end, 50, 100),
+
+        %% Disabled: whatever stream is open now is left alone.
+        ok = application:set_env(hpr, ics_stream_silence_secs, 0),
+        ok = test_utils:wait_until(fun() -> is_map(hpr_route_stream_worker:test_stream()) end),
+        Settled = {silence_resets(stream), silence_resets(channel)},
+        #{stream_pid := SettledPid} = hpr_route_stream_worker:test_stream(),
+        timer:sleep(1500),
+        ?assertEqual(Settled, {silence_resets(stream), silence_resets(channel)}),
+        ?assertMatch(#{stream_pid := SettledPid}, hpr_route_stream_worker:test_stream())
+    after
+        application:unset_env(hpr, ics_stream_silence_secs)
+    end,
+    ok.
+
+%% Resetting the stream ends the old one, instead of leaving it streaming beside
+%% its replacement, and whatever the old stream still had in flight is not
+%% applied.
+%%
+%% Checked on HPR's side of the old stream: close_send/1 left that process open
+%% and receiving; RST_STREAM closes it. The server's side cannot be checked
+%% here: this mock is a chatterbox server, and chatterbox ignores RST_STREAM it
+%% receives. iot-config (tonic) ends the stream on it.
+reset_stream_ends_old_stream_test(_Config) ->
+    ok = test_utils:wait_until(fun() -> is_map(hpr_route_stream_worker:test_stream()) end),
+    #{stream_id := OldID, stream_pid := OldPid} = hpr_route_stream_worker:test_stream(),
+    ok = test_utils:wait_until(fun() -> is_pid(whereis(hpr_test_ics_route_service)) end),
+    OldServer = whereis(hpr_test_ics_route_service),
+
+    ok = hpr_route_stream_worker:reset_stream(),
+    ok = test_utils:wait_until(fun() ->
+        case hpr_route_stream_worker:test_stream() of
+            #{stream_pid := Pid} -> Pid =/= OldPid;
+            undefined -> false
+        end
+    end),
+    ok = test_utils:wait_until(fun() ->
+        case whereis(hpr_test_ics_route_service) of
+            undefined -> false;
+            Server -> Server =/= OldServer
+        end
+    end),
+
+    ok = test_utils:wait_until(fun() -> not erlang:is_process_alive(OldPid) end, 50, 100),
+
+    %% Data still arriving on the old stream is dropped; the new stream's is not.
+    #{route_id := RouteID, route := Route} = test_data("7d502f32-4d58-4746-965e-0e5"),
+    Add = hpr_route_stream_res:test_new(#{action => add, data => {route, Route}, timestamp => 100}),
+    hpr_route_stream_worker ! {data, OldID, Add},
+    timer:sleep(500),
+    ?assertEqual({error, not_found}, hpr_route_storage:lookup(RouteID)),
+    ok = hpr_test_ics_route_service:stream_resp(Add),
+    ok = test_utils:wait_until(fun() -> {error, not_found} =/= hpr_route_storage:lookup(RouteID) end),
+    ok.
+
+silence_resets(Kind) ->
+    case prometheus_counter:value(?METRICS_ICS_STREAM_SILENCE_RESET_COUNTER, [Kind]) of
+        undefined -> 0;
+        N -> N
+    end.
 
 reset_channel_test(_Config) ->
     stream_resume_test_runner(

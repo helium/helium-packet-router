@@ -99,8 +99,13 @@ init([]) ->
 
     ChildSpecs =
         [
-            ?WORKER(hpr_routing_cache, [#{}]),
+            %% hpr_metrics first: it declares the metrics, and hpr_sysmon counts
+            %% every system monitor event in one. An event in between would
+            %% crash hpr_sysmon, and a second within 5s would take this
+            %% supervisor down.
             ?WORKER(hpr_metrics, [#{}]),
+            ?WORKER(hpr_sysmon, [#{}]),
+            ?WORKER(hpr_routing_cache, [#{}]),
             ?ELLI_WORKER(hpr_metrics_handler, [ElliConfigMetrics]),
 
             ?WORKER(hpr_packet_reporter, [PacketReporterConfig]),
@@ -194,6 +199,15 @@ maybe_start_channel(Config, ChannelName) ->
             lager:error("no port provided for ~s", [ChannelName]);
         #{port := Port} when erlang:is_list(Port) ->
             maybe_start_channel(Config#{port => erlang:list_to_integer(Port)}, ChannelName);
+        %% NOTE: one endpoint means one HTTP/2 connection, and grpcbox
+        %% serializes every unary call on a channel through that connection's
+        %% gen_server (a 5s gen_server:call in h2_connection:new_stream/6). We
+        %% cannot widen it here: grpcbox names each pool worker by its endpoint
+        %% tuple (grpcbox_channel:start_workers/4), so repeating an endpoint
+        %% collides in gproc rather than giving a second connection. Widening
+        %% needs a grpcbox change. hpr_grpc_channel_conns_gauge and
+        %% hpr_grpc_channel_mailbox_gauge report the width and the resulting
+        %% queue depth so the ceiling is visible.
         #{host := Host, port := Port, transport := http} ->
             _ = grpcbox_client:connect(ChannelName, [{http, Host, Port, []}], #{}),
             lager:info("~s started at ~s:~w", [ChannelName, Host, Port]);

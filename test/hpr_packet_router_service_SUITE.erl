@@ -8,7 +8,8 @@
 
 -export([
     session_test/1,
-    session_timeout_test/1
+    session_timeout_test/1,
+    spoofed_gateway_test/1
 ]).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -26,7 +27,8 @@
 all() ->
     [
         session_test,
-        session_timeout_test
+        session_timeout_test,
+        spoofed_gateway_test
     ].
 
 %%--------------------------------------------------------------------
@@ -89,9 +91,17 @@ session_test(_Config) ->
 
     ok = hpr_test_gateway:send_packet(GatewayPid, #{}),
 
+    %% Filtered to handle_packet/2: hpr_packet_router_service also calls
+    %% hpr_routing:admit/2 per packet now (rate limits are applied before a
+    %% packet gets a process), and meck:history/1 records every call to the
+    %% mocked module.
+    HandlePacketHistory = fun() ->
+        [H || {_, {hpr_routing, handle_packet, _}, _} = H <- meck:history(hpr_routing)]
+    end,
+
     ok = test_utils:wait_until(
         fun() ->
-            2 == erlang:length(meck:history(hpr_routing))
+            2 == erlang:length(HandlePacketHistory())
         end
     ),
 
@@ -118,7 +128,7 @@ session_test(_Config) ->
                 }
             ]},
             Verified2}
-    ] = meck:history(hpr_routing),
+    ] = HandlePacketHistory(),
 
     ?assertEqual(undefined, SessionKey1),
     ?assertEqual(Gateway, Gateway1),
@@ -185,6 +195,56 @@ session_timeout_test(_Config) ->
 
     ok = hpr_test_gateway:receive_stream_down(GatewayPid),
 
+    ok.
+
+%% A gateway sending packets that claim another gateway's key is turned away
+%% before the rate limits, so it cannot spend that gateway's budget. Its own
+%% packets are still charged to it.
+spoofed_gateway_test(_Config) ->
+    RouteID = "9d502f32-4d58-4746-965e-8c7dfdcfc626",
+    Route = hpr_route:test_new(#{
+        id => RouteID,
+        net_id => 0,
+        oui => 4020,
+        server => #{host => "127.0.0.1", port => 8082, protocol => {packet_router, #{}}},
+        max_copies => 2
+    }),
+    DevAddrRanges = [
+        hpr_devaddr_range:test_new(#{
+            route_id => RouteID, start_addr => 16#00000000, end_addr => 16#00000010
+        })
+    ],
+    {ok, GatewayPid} = hpr_test_gateway:start(#{
+        forward => self(), route => Route, eui_pairs => [], devaddr_ranges => DevAddrRanges
+    }),
+    {ok, _} = hpr_test_gateway:receive_session_init(GatewayPid, timer:seconds(2)),
+    Gateway = hpr_test_gateway:pubkey_bin(GatewayPid),
+    #{public := VictimKey} = libp2p_crypto:generate_keys(ed25519),
+    Victim = libp2p_crypto:pubkey_to_bin(VictimKey),
+
+    meck:new(hpr_routing, [passthrough]),
+    Calls = fun(F) ->
+        [A || {_, {hpr_routing, F0, A}, _} <- meck:history(hpr_routing), F0 =:= F]
+    end,
+    try
+        %% More than the 25/s gateway limit, all claiming the victim.
+        [
+            ok = hpr_test_gateway:send_packet(GatewayPid, #{claim_gateway => Victim, fcnt => N})
+         || N <- lists:seq(1, 30)
+        ],
+        ok = hpr_test_gateway:send_packet(GatewayPid, #{fcnt => 31}),
+        ok = test_utils:wait_until(fun() -> length(Calls(admit)) =:= 1 end),
+        timer:sleep(200),
+
+        %% Only the gateway's own packet reached the limits, charged to it.
+        ?assertMatch([[Gateway, _]], Calls(admit)),
+        ?assertEqual(1, length(Calls(handle_packet))),
+        %% And the victim's budget is untouched.
+        ?assertEqual(ok, hpr_routing:admit(Victim, <<"phash">>))
+    after
+        meck:unload(hpr_routing)
+    end,
+    ok = gen_server:stop(GatewayPid),
     ok.
 
 %% ===================================================================

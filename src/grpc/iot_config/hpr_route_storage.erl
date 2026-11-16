@@ -8,6 +8,7 @@
     insert/1, insert/2, insert/3,
     delete/1,
     lookup/1,
+    routing_info/1,
     set_backoff/2,
 
     all_routes/0,
@@ -24,6 +25,18 @@
 
 -define(ETS, hpr_routes_ets).
 -define(DETS, hpr_routes_dets).
+%% {RouteID, SKFETS, IgnoreEmptySKF}: what deciding whether an uplink can match
+%% a route needs, kept apart so it can be read without copying the route. Keyed
+%% by the id as a binary, the form hpr_devaddr_range_storage:lookup_ids/1 hands
+%% out, so the hot path never builds the 576-byte char list of an id it skips.
+%%
+%% Routes overlap heavily on some DevAddr ranges -- one OUI registers the same
+%% ranges on thousands of routes, most of them with no session keys at all -- and
+%% an uplink in such a range is checked against every one of them. Reading the
+%% whole route (its config, servers, multi-buy settings) for each made a single
+%% packet copy megabytes; a burst of them exhausted a node's memory. Derived from
+%% ?ETS by insert/3 and delete/1, so it is never persisted.
+-define(ROUTING_ETS, hpr_routes_routing_ets).
 
 -spec init_ets() -> ok.
 init_ets() ->
@@ -32,6 +45,12 @@ init_ets() ->
         named_table,
         set,
         {keypos, hpr_route_ets:ets_keypos()},
+        {read_concurrency, true}
+    ]),
+    ?ROUTING_ETS = ets:new(?ROUTING_ETS, [
+        public,
+        named_table,
+        set,
         {read_concurrency, true}
     ]),
     with_open_dets(fun() ->
@@ -59,6 +78,18 @@ lookup(ID) ->
         [Route] ->
             {ok, Route};
         _Other ->
+            {error, not_found}
+    end.
+
+%% @doc A route's SKF table and ignore_empty_skf flag, without the route.
+%% `ID' is the route id as a binary.
+-spec routing_info(ID :: binary()) ->
+    {ok, SKFETS :: ets:table(), IgnoreEmptySKF :: boolean()} | {error, not_found}.
+routing_info(ID) ->
+    case ets:lookup(?ROUTING_ETS, ID) of
+        [{_, SKFETS, IgnoreEmptySKF}] ->
+            {ok, SKFETS, IgnoreEmptySKF};
+        [] ->
             {error, not_found}
     end.
 
@@ -90,6 +121,10 @@ insert(Route, SKFETS) ->
 insert(Route, SKFETS, Backoff) ->
     RouteETS = hpr_route_ets:new(Route, SKFETS, Backoff),
     true = ets:insert(?ETS, RouteETS),
+    true = ets:insert(
+        ?ROUTING_ETS,
+        {erlang:list_to_binary(hpr_route:id(Route)), SKFETS, hpr_route:ignore_empty_skf(Route)}
+    ),
     Server = hpr_route:server(Route),
     RouteFields = [
         {id, hpr_route:id(Route)},
@@ -113,6 +148,7 @@ delete(Route) ->
     EUIsEntries = hpr_eui_pair_storage:delete_route(RouteID),
     SKFEntries = hpr_skf_storage:delete_route(RouteID),
 
+    true = ets:delete(?ROUTING_ETS, erlang:list_to_binary(RouteID)),
     true = ets:delete(?ETS, RouteID),
     lager:info(
         [{devaddr, DevAddrEntries}, {euis, EUIsEntries}, {skfs, SKFEntries}, {route_id, RouteID}],
@@ -122,6 +158,7 @@ delete(Route) ->
 
 -spec delete_all() -> ok.
 delete_all() ->
+    ets:delete_all_objects(?ROUTING_ETS),
     ets:delete_all_objects(?ETS),
     ok.
 
@@ -134,6 +171,7 @@ set_backoff(RouteID, Backoff) ->
 
 -spec test_delete_ets() -> ok.
 test_delete_ets() ->
+    ets:delete(?ROUTING_ETS),
     ets:delete(?ETS),
     ok.
 

@@ -3,6 +3,7 @@
 -export([
     init_per_testcase/2,
     end_per_testcase/2,
+    restart_hpr/0,
     join_packet_up/1,
     join_payload/1,
     uplink_packet_up/1,
@@ -87,16 +88,7 @@ init_per_testcase(TestCase, Config) ->
 
     application:ensure_all_started(?APP),
 
-    ok = test_utils:wait_until(
-        fun() ->
-            Stream = hpr_route_stream_worker:test_stream(),
-            %% {state, Stream, _Backoff} = sys:get_state(hpr_route_stream_worker),
-            Stream =/= undefined andalso
-                erlang:is_pid(erlang:whereis(hpr_test_ics_route_service))
-        end,
-        20,
-        500
-    ),
+    ok = wait_for_route_stream(),
 
     Config.
 
@@ -106,6 +98,26 @@ end_per_testcase(_TestCase, Config) ->
     application:stop(lager),
     application:stop(grpcbox),
     Config.
+
+%% @doc Stop and start HPR in place, keeping its data dir: what a node restart
+%% looks like to everything HPR stored on disk.
+-spec restart_hpr() -> ok.
+restart_hpr() ->
+    ok = application:stop(?APP),
+    {ok, _} = application:ensure_all_started(?APP),
+    wait_for_route_stream().
+
+wait_for_route_stream() ->
+    test_utils:wait_until(
+        fun() ->
+            Stream = hpr_route_stream_worker:test_stream(),
+            %% {state, Stream, _Backoff} = sys:get_state(hpr_route_stream_worker),
+            Stream =/= undefined andalso
+                erlang:is_pid(erlang:whereis(hpr_test_ics_route_service))
+        end,
+        20,
+        500
+    ).
 
 -spec join_packet_up(
     Opts :: map()

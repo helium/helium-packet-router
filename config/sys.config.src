@@ -53,7 +53,12 @@
             host => "${HPR_DOWNLINK_SERVICE_HOST}",
             port => "${HPR_DOWNLINK_SERVICE_PORT}"
         }},
-        {multi_buy_enabled, ${HPR_MULTI_BUY_ENABLED}},
+        %% Quoted, unlike every other placeholder here, because this one used to
+        %% be bare: an unset HPR_MULTI_BUY_ENABLED produced `{multi_buy_enabled, }`
+        %% and the whole sys.config failed to parse, so HPR would not boot at all
+        %% with a syntax error that named nothing useful. hpr_multi_buy:enabled/0
+        %% coerces the string.
+        {multi_buy_enabled, "${HPR_MULTI_BUY_ENABLED}"},
         {multi_buy_service, #{
             transport => "${HPR_MULTI_BUY_SERVICE_TRANSPORT}",
             host => "${HPR_MULTI_BUY_SERVICE_HOST}",
@@ -85,7 +90,27 @@
         }},
         {routing_cache_timeout_secs, 15},
         {routing_cache_window_secs, 120},
-        {ics_stream_worker_checkpoint_secs, 300}
+        %% Reset the config stream after it delivers nothing for this long; 0
+        %% disables. See hpr_route_stream_worker, "Silent stream".
+        {ics_stream_silence_secs, 600},
+        {ics_stream_worker_checkpoint_secs, 300},
+        %% How long a multi-buy dedup key lives, and how often the expiry sweep
+        %% runs. Deliberately separate: one sweep over a whole TTL's worth of
+        %% rows contends with every in-flight packet.
+        {multi_buy_window_secs, 120},
+        {multi_buy_cleanup_secs, 15},
+        %% Multi-buy grpc deadline. Under the 1s Class A RX1 window, because a
+        %% later answer is unusable and only costs a parked process.
+        {multi_buy_timeout_ms, 500},
+        %% Per-second ceiling on gateway location lookups to iot-config, which
+        %% share one connection. Stops a cold cache plus a reconnect wave firing
+        %% one lookup per gateway at once.
+        {gateway_location_rate_limit, 100},
+        %% erlang:system_monitor thresholds. Nothing reported VM stalls before
+        %% these, which is how a multi-second stall left no trace in the logs.
+        {sysmon_long_gc_ms, 500},
+        {sysmon_long_schedule_ms, 500},
+        {sysmon_logs_per_sec, 10}
     ]},
     %% Used only by reporters that set no aws_endpoint. A reporter pointed at an
     %% S3-compatible endpoint authenticates with its own key/secret above and
@@ -104,11 +129,33 @@
         {suppress_supervisor_start_stop, true},
         {log_root, "/var/log/hpr"},
         {crash_log, "crash.log"},
+        %% Overload. By default lager turns synchronous once 20 messages are
+        %% queued on it, and every process that logs then waits for its line to
+        %% be written: a burst of errors stalls packet and stream processes
+        %% across the node. Here it stays asynchronous and sheds a backlog
+        %% instead. info.log drops lines past 1000/s (below), and past 5000
+        %% queued, lager's event manager is killed, discarding its queue, and
+        %% its handlers are reinstalled within ~5s. Lines logged in a flood are
+        %% lost, but no caller waits on lager.
+        %% killer_hwm is only safe because lager never goes synchronous: killed
+        %% while callers wait on it, every one of them would crash.
+        {async_threshold, 1000000},
+        {async_threshold_window, 200000},
+        {killer_hwm, 5000},
+        {killer_reinstall_after, 5000},
         {handlers, [
             {lager_console_backend, [{level, info}]},
             {lager_file_backend, [
                 {file, "info.log"},
                 {level, info},
+                %% Past 1000 lines in a second, drop the rest of that second,
+                %% and once 500 are queued also discard what is queued: a
+                %% moderate flood is shed here before killer_hwm is reached.
+                %% Lager logs how many it dropped. The queue is shared, so the
+                %% discarded lines skip the console too.
+                {high_water_mark, 1000},
+                {flush_queue, true},
+                {flush_threshold, 500},
                 {size, 0},
                 {date, "$D0"},
                 {count, 7},

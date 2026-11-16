@@ -28,8 +28,12 @@
 ]).
 
 -export([
-    stream_resp/1
+    stream_resp/1,
+    queue_resp/1,
+    clear_queue/0
 ]).
+
+-define(QUEUE, {?MODULE, queue}).
 
 -record(stream_handler_state, {since = 0 :: non_neg_integer()}).
 
@@ -118,9 +122,18 @@ stream(RouteStreamReq, StreamState) ->
         false ->
             {grpc_error, {grpcbox_stream:code_to_status(7), <<"PERMISSION_DENIED">>}};
         true ->
+            %% Queued responses are offered to every new stream, and the `since'
+            %% filter in handle_info/2 decides which go out, the way iot-config
+            %% resumes a stream from its database.
+            ok = lists:foreach(fun(R) -> self() ! {stream_resp, R} end, queued()),
             {ok,
                 grpcbox_stream:stream_handler_state(StreamState, #stream_handler_state{
-                    since = hpr_route_stream_req:since(RouteStreamReq)
+                    %% Seconds on the wire; handle_info/2 compares against a
+                    %% millisecond response timestamp, so normalise here the way
+                    %% iot-config's own comparison does.
+                    since = erlang:convert_time_unit(
+                        hpr_route_stream_req:since(RouteStreamReq), second, millisecond
+                    )
                 })}
     end.
 
@@ -215,3 +228,21 @@ stream_resp(RouteStreamResp) ->
     lager:notice("stream_resp ~p  @ ~p", [RouteStreamResp, erlang:whereis(?MODULE)]),
     ?MODULE ! {stream_resp, RouteStreamResp},
     ok.
+
+%% @doc Keep a response for the next stream instead of sending it now: what
+%% iot-config has stored while HPR was away. Nothing is queued unless a suite
+%% asks, so other suites see the plain send-on-push behaviour.
+-spec queue_resp(hpr_route_stream_res:res() | [hpr_route_stream_res:res()]) -> ok.
+queue_resp(RouteStreamResps) when is_list(RouteStreamResps) ->
+    persistent_term:put(?QUEUE, queued() ++ RouteStreamResps);
+queue_resp(RouteStreamResp) ->
+    queue_resp([RouteStreamResp]).
+
+-spec clear_queue() -> ok.
+clear_queue() ->
+    _ = persistent_term:erase(?QUEUE),
+    ok.
+
+-spec queued() -> [hpr_route_stream_res:res()].
+queued() ->
+    persistent_term:get(?QUEUE, []).

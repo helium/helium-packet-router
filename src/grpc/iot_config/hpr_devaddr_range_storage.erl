@@ -7,6 +7,7 @@
     foldl/2,
     route_ids/0,
     lookup/1,
+    lookup_ids/1,
     insert/1,
     delete/1,
 
@@ -122,23 +123,37 @@ route_ids() ->
     ),
     sets:from_list([stored_to_id(S) || S <- sets:to_list(Stored)]).
 
-%% The bounds check stays here rather than moving into an ets:select match spec:
-%% ets:select builds and compiles a spec per call, which costs more than
-%% filtering the handful of candidates a bucket returns.
 -spec lookup(DevAddr :: non_neg_integer()) -> [hpr_route_ets:route()].
 lookup(DevAddr) ->
-    Candidates =
-        ets:lookup(?INDEX_ETS, DevAddr bsr ?BUCKET_BITS) ++
-            ets:lookup(?WIDE_ETS, ?WIDE_KEY),
-    Stored = lists:usort([
-        RouteId
-     || {_Key, {Start, End, RouteId}} <- Candidates, Start =< DevAddr, DevAddr =< End
-    ]),
     [
         Route
-     || RouteId <- Stored,
-        {ok, Route} <- [hpr_route_storage:lookup(stored_to_id(RouteId))]
+     || Stored <- lookup_ids(DevAddr),
+        {ok, Route} <- [hpr_route_storage:lookup(stored_to_id(Stored))]
     ].
+
+%% @doc Ids of the routes with a range containing `DevAddr', sorted, as the
+%% binaries the index stores (see id_to_stored/1).
+%%
+%% Binaries because a DevAddr can sit in thousands of routes' ranges: as char
+%% lists that many ids alone would be megabytes per uplink.
+%%
+%% The bounds are checked inside ETS, so only matching entries are copied out.
+%% A bucket is not always a handful of candidates: an OUI that registers the
+%% same ranges on each of its routes puts one entry per route per range in the
+%% buckets those ranges cover -- 9,000 in one bucket in production -- and
+%% copying all of them to filter here made every uplink in that range pay for
+%% it. Compiling the match spec costs a few microseconds per call.
+-spec lookup_ids(DevAddr :: non_neg_integer()) -> [binary()].
+lookup_ids(DevAddr) ->
+    lists:usort(
+        ets:select(?INDEX_ETS, containing_ms(DevAddr bsr ?BUCKET_BITS, DevAddr)) ++
+            ets:select(?WIDE_ETS, containing_ms(?WIDE_KEY, DevAddr))
+    ).
+
+-spec containing_ms(Key :: non_neg_integer() | wide, DevAddr :: non_neg_integer()) ->
+    ets:match_spec().
+containing_ms(Key, DevAddr) ->
+    [{{Key, {'$1', '$2', '$3'}}, [{'=<', '$1', DevAddr}, {'=<', DevAddr, '$2'}], ['$3']}].
 
 -spec insert(DevAddrRange :: hpr_devaddr_range:devaddr_range()) -> ok.
 insert(DevAddrRange) ->
@@ -486,6 +501,8 @@ all_test_() ->
         {"lookup_reflects_insert", ?_test(lookup_reflects_insert())},
         {"lookup_across_bucket_boundary", ?_test(lookup_across_bucket_boundary())},
         {"wide_range_overflows", ?_test(wide_range_overflows())},
+        {"lookup_ids_copies_only_containing_ranges",
+            ?_test(lookup_ids_copies_only_containing_ranges())},
         {"lookup_deduplicates_overlapping_ranges",
             ?_test(lookup_deduplicates_overlapping_ranges())},
         {"degenerate_range_never_matches", ?_test(degenerate_range_never_matches())},
@@ -533,7 +550,7 @@ test_range(RouteID, StartAddr, EndAddr) ->
     }).
 
 %% The route ids a lookup resolved to, as strings.
-lookup_ids(DevAddr) ->
+lookup_route_ids(DevAddr) ->
     lists:sort([
         hpr_route:id(hpr_route_ets:route(RouteETS))
      || RouteETS <- ?MODULE:lookup(DevAddr)
@@ -544,10 +561,10 @@ lookup_finds_route() ->
     _ = test_route(RouteID),
     ok = ?MODULE:insert(test_range(RouteID, 16#00000000, 16#00000010)),
 
-    ?assertEqual([RouteID], lookup_ids(16#00000005)),
-    ?assertEqual([RouteID], lookup_ids(16#00000000), "inclusive lower bound"),
-    ?assertEqual([RouteID], lookup_ids(16#00000010), "inclusive upper bound"),
-    ?assertEqual([], lookup_ids(16#00000011), "just past the end"),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000005)),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000000), "inclusive lower bound"),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000010), "inclusive upper bound"),
+    ?assertEqual([], lookup_route_ids(16#00000011), "just past the end"),
     ok.
 
 lookup_reflects_delete() ->
@@ -555,12 +572,12 @@ lookup_reflects_delete() ->
     _ = test_route(RouteID),
     Range = test_range(RouteID, 16#00000000, 16#00000010),
     ok = ?MODULE:insert(Range),
-    ?assertEqual([RouteID], lookup_ids(16#00000005)),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000005)),
 
     ok = ?MODULE:delete(Range),
     %% No stale cache to invalidate any more -- the index is the lookup path, so
     %% this also proves index rows are removed rather than merely shadowed.
-    ?assertEqual([], lookup_ids(16#00000005)),
+    ?assertEqual([], lookup_route_ids(16#00000005)),
     ?assertEqual(0, ?MODULE:test_index_size()),
     ok.
 
@@ -568,10 +585,10 @@ lookup_reflects_insert() ->
     RouteID = "test-route-insert",
     _ = test_route(RouteID),
     %% Miss first: the old cache would have memoised this empty result.
-    ?assertEqual([], lookup_ids(16#00000005)),
+    ?assertEqual([], lookup_route_ids(16#00000005)),
 
     ok = ?MODULE:insert(test_range(RouteID, 16#00000000, 16#00000010)),
-    ?assertEqual([RouteID], lookup_ids(16#00000005)),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000005)),
     ok.
 
 lookup_across_bucket_boundary() ->
@@ -586,11 +603,11 @@ lookup_across_bucket_boundary() ->
     ok = ?MODULE:insert(test_range(RouteID, StartAddr, EndAddr)),
 
     ?assertEqual(2, ?MODULE:test_index_size(), "one row per bucket touched"),
-    ?assertEqual([RouteID], lookup_ids(StartAddr), "found in the low bucket"),
-    ?assertEqual([RouteID], lookup_ids(Boundary), "found at the boundary"),
-    ?assertEqual([RouteID], lookup_ids(EndAddr), "found in the high bucket"),
-    ?assertEqual([], lookup_ids(StartAddr - 1)),
-    ?assertEqual([], lookup_ids(EndAddr + 1)),
+    ?assertEqual([RouteID], lookup_route_ids(StartAddr), "found in the low bucket"),
+    ?assertEqual([RouteID], lookup_route_ids(Boundary), "found at the boundary"),
+    ?assertEqual([RouteID], lookup_route_ids(EndAddr), "found in the high bucket"),
+    ?assertEqual([], lookup_route_ids(StartAddr - 1)),
+    ?assertEqual([], lookup_route_ids(EndAddr + 1)),
     ok.
 
 wide_range_overflows() ->
@@ -606,14 +623,14 @@ wide_range_overflows() ->
 
     ?assertEqual(0, ?MODULE:test_index_size(), "not fanned out"),
     ?assertEqual(1, ?MODULE:test_wide_size()),
-    ?assertEqual([RouteID], lookup_ids(Mid), "still found, via the wide scan"),
-    ?assertEqual([RouteID], lookup_ids(16#00000000)),
-    ?assertEqual([RouteID], lookup_ids(EndAddr)),
-    ?assertEqual([], lookup_ids(EndAddr + 1)),
+    ?assertEqual([RouteID], lookup_route_ids(Mid), "still found, via the wide scan"),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000000)),
+    ?assertEqual([RouteID], lookup_route_ids(EndAddr)),
+    ?assertEqual([], lookup_route_ids(EndAddr + 1)),
 
     ok = ?MODULE:delete(Range),
     ?assertEqual(0, ?MODULE:test_wide_size()),
-    ?assertEqual([], lookup_ids(Mid)),
+    ?assertEqual([], lookup_route_ids(Mid)),
     ok.
 
 lookup_deduplicates_overlapping_ranges() ->
@@ -625,8 +642,38 @@ lookup_deduplicates_overlapping_ranges() ->
     ok = ?MODULE:insert(test_range(RouteID, 16#000000B0, 16#000000D0)),
     ok = ?MODULE:insert(test_range(RouteID, 16#00000090, 16#000000B5)),
 
-    ?assertEqual([RouteID], lookup_ids(16#000000B0)),
+    ?assertEqual([RouteID], lookup_route_ids(16#000000B0)),
     ?assertEqual(1, erlang:length(?MODULE:lookup(16#000000B0))),
+    ok.
+
+%% Many routes share one bucket, as when an OUI registers the same ranges on
+%% each of its routes. Only the routes whose range holds the DevAddr come back,
+%% once each, as the binaries the index stores.
+lookup_ids_copies_only_containing_ranges() ->
+    Covering = [lists:flatten(io_lib:format("covering-~3..0w", [N])) || N <- lists:seq(1, 50)],
+    Beside = [lists:flatten(io_lib:format("beside-~3..0w", [N])) || N <- lists:seq(1, 50)],
+    lists:foreach(
+        fun(ID) ->
+            _ = test_route(ID),
+            ok = ?MODULE:insert(test_range(ID, 16#00000048, 16#0000004F)),
+            ok = ?MODULE:insert(test_range(ID, 16#00000040, 16#0000007F))
+        end,
+        Covering
+    ),
+    lists:foreach(
+        fun(ID) ->
+            _ = test_route(ID),
+            ok = ?MODULE:insert(test_range(ID, 16#00000040, 16#00000047))
+        end,
+        Beside
+    ),
+
+    ?assertEqual([list_to_binary(ID) || ID <- Covering], ?MODULE:lookup_ids(16#0000004A)),
+    ?assertEqual(
+        lists:sort([list_to_binary(ID) || ID <- Covering ++ Beside]),
+        ?MODULE:lookup_ids(16#00000041)
+    ),
+    ?assertEqual([], ?MODULE:lookup_ids(16#00000080)),
     ok.
 
 degenerate_range_never_matches() ->
@@ -638,8 +685,8 @@ degenerate_range_never_matches() ->
 
     ?assertEqual(0, ?MODULE:test_index_size()),
     ?assertEqual(0, ?MODULE:test_wide_size()),
-    ?assertEqual([], lookup_ids(16#00000005)),
-    ?assertEqual([], lookup_ids(16#00000010)),
+    ?assertEqual([], lookup_route_ids(16#00000005)),
+    ?assertEqual([], lookup_route_ids(16#00000010)),
     ok.
 
 delete_route_leaves_no_index_rows() ->
@@ -659,14 +706,14 @@ delete_route_leaves_no_index_rows() ->
     ?assertEqual(0, ?MODULE:test_size()),
     ?assertEqual(0, ?MODULE:test_index_size(), "no orphaned index rows"),
     ?assertEqual(0, ?MODULE:test_wide_size()),
-    ?assertEqual([], lookup_ids(16#00000005)),
+    ?assertEqual([], lookup_route_ids(16#00000005)),
     ok.
 
 replace_route_updates_index() ->
     RouteID = "test-route-replace",
     _ = test_route(RouteID),
     ok = ?MODULE:insert(test_range(RouteID, 16#00000000, 16#00000010)),
-    ?assertEqual([RouteID], lookup_ids(16#00000005)),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000005)),
 
     ?assertEqual(
         1,
@@ -675,8 +722,8 @@ replace_route_updates_index() ->
         ])
     ),
 
-    ?assertEqual([], lookup_ids(16#00000005), "old range gone"),
-    ?assertEqual([RouteID], lookup_ids(16#00000105), "new range live"),
+    ?assertEqual([], lookup_route_ids(16#00000005), "old range gone"),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000105), "new range live"),
     ?assertEqual(1, ?MODULE:test_index_size()),
     ok.
 
@@ -690,8 +737,8 @@ rebuild_index_reconstructs_from_ets() ->
     Before = {?MODULE:test_index_size(), ?MODULE:test_wide_size()},
     ?assertEqual(2, ?MODULE:rebuild_index(), "one pass per range"),
     ?assertEqual(Before, {?MODULE:test_index_size(), ?MODULE:test_wide_size()}),
-    ?assertEqual([RouteID], lookup_ids(16#00000005)),
-    ?assertEqual([RouteID], lookup_ids(16#01000000)),
+    ?assertEqual([RouteID], lookup_route_ids(16#00000005)),
+    ?assertEqual([RouteID], lookup_route_ids(16#01000000)),
     ok.
 
 foldl_yields_string_route_ids() ->

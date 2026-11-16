@@ -4,7 +4,8 @@
     hpr_cli_config,
     hpr_cli_info,
     hpr_cli_trace,
-    hpr_cli_denylist
+    hpr_cli_denylist,
+    hpr_cli_session
 ]).
 
 -export([register_cli/0]).
